@@ -366,6 +366,18 @@ describe("LosslessPdfEngine", () => {
     )).toHaveLength(5);
   });
 
+  it("exports ten Magic Standard cards across two A4 pages", async () => {
+    const cardPath = join(FIXTURES, "synthetic-gradient.jpg");
+    const pdf = await engine.generateFromFiles({
+      imagePaths: Array.from({ length: 10 }, () => cardPath),
+    });
+    const parsed = await parsePdf(pdf);
+
+    expect(parsed.document.getPages()).toHaveLength(2);
+    expect(parsed.images).toHaveLength(10);
+    expect(parsed.content.match(/\s+Do\b/g)).toHaveLength(10);
+  });
+
   it("places the physical scale pattern at exactly 100 × 100 mm", async () => {
     const scalePattern = new Uint8Array(await readFile(join(FIXTURES, "physical-scale-pattern.svg")));
     const scaleCard: CardFormat = {
