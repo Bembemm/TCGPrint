@@ -1,0 +1,9 @@
+node_modules/
+.next/
+out/
+coverage/
+.vitest/
+*.tsbuildinfo
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
