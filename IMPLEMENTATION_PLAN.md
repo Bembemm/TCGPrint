@@ -1902,25 +1902,40 @@ Informativo, não bloqueante.
 
 ---
 
-## 51. Resolução máxima
+## 51. Resolução / DPI de saída
 
 **Não existir limite de resolução no modo padrão.**
-
-Não oferecer como default:
-
-```text
-800 DPI máximo
-600 DPI máximo
-300 DPI máximo
-```
-
-Se futuramente houver um modo opcional de arquivo reduzido, ele deve ficar separado do modo de produção.
 
 Default obrigatório:
 
 ```text
 Máxima / Original / Sem downsampling
 ```
+
+Quando o usuário quiser definir manualmente uma resolução de processamento/rasterização para casos em que ela seja necessária, oferecer:
+
+```text
+Original / Sem limite
+300 DPI
+600 DPI
+800 DPI
+1000 DPI
+1200 DPI
+Custom
+```
+
+Regras:
+
+- `Original / Sem limite` continua sendo o padrão;
+- selecionar 1200 DPI nunca deve fazer upscale destrutivo ou inventar detalhe em uma imagem raster menor;
+- para imagens já acima de 1200 DPI efetivos, o modo `Original / Sem limite` preserva toda a resolução;
+- DPI configurado só deve afetar etapas que realmente precisem rasterizar/processar;
+- JPEG passthrough sem transformação continua usando o stream original;
+- SVG continua vetorial sempre que possível;
+- não reduzir imagens automaticamente apenas para atingir um preset;
+- o usuário pode escolher até 1200 DPI explicitamente quando quiser um pipeline raster de alta resolução.
+
+Se futuramente houver um modo de arquivo reduzido, ele deve ficar separado do modo de produção e nunca ser o default.
 
 ---
 
@@ -1958,24 +1973,7 @@ Informativo, não bloqueante.
 
 ---
 
-## 49. Limite opcional de resolução
 
-Configuração:
-
-```text
-Máxima / Original
-800 DPI máximo
-600 DPI máximo
-300 DPI máximo
-```
-
-Default:
-
-```text
-Máxima / Original
-```
-
----
 
 # PARTE XII — PREVIEW
 
