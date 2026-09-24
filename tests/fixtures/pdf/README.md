@@ -9,6 +9,11 @@ artwork.
   filter so the test can independently recover every source sample.
 - `synthetic-alpha.png` is a 5 × 4 pixel RGBA grid with transparent and partial
   alpha values, also using the PNG None filter.
+- `synthetic-rgb16.png` and `synthetic-rgba16.png` are 2 × 1 pixel PNGs whose
+  adjacent samples differ in their low bytes, exercising full-precision color
+  and alpha streams. `synthetic-rgb16-trns.png` covers a 16-bit transparent
+  color key, and `synthetic-rgb16-adam7.png` covers interlaced sample
+  reconstruction.
 - `simple-vector.svg` contains a card outline and vector paths at the Magic
   Standard aspect ratio.
 - `physical-scale-pattern.svg` contains a 100 × 100 user unit grid for checking

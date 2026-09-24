@@ -29,12 +29,23 @@ The probe used Node.js 22.22.1, `@pdfme/pdf-lib` 6.1.13, and
 - **PNG alpha:** the PDF contained an 8 × 6 RGB image and a matching 8 × 6
   grayscale `/SMask`. Inflating both streams reproduced the original RGB and
   alpha samples exactly.
+- **PNG 16-bit follow-up:** the selected library's built-in PNG embedder uses
+  an 8-bit RGBA decode path and truncates the low byte of 16-bit samples. A
+  native PDF image object was therefore added for PNGs with 16-bit samples:
+  their unfiltered big-endian RGB/gray samples use `/BitsPerComponent 16` and
+  `/FlateDecode`; alpha is split into a same-sized 16-bit grayscale `/SMask`.
+  A `tRNS` color key is represented as a full-precision soft mask as well.
+  Automated fixtures verify distinct low-byte samples, alpha, transparency
+  keys, and Adam7 interlacing.
 - **SVG:** `@pdfme/pdf-lib` exposes `drawSvgPath`, but no API that converts an
   SVG document. The separate `svg4pdf-lib` adapter emitted PDF path operators
   (`m`, `l`, `h`, `f`, `S`) for a synthetic SVG rectangle and path, without
   adding an image XObject for that SVG. Its placement honors physical SVG
   dimensions when the root `width` and `height` are set to the target size.
-  The adapter reports unsupported features through a warning callback.
+  Additional negative probes found two silently ignored inputs: an
+  `feGaussianBlur` filter was omitted without a warning, and `foreignObject`
+  content exported no visible content. The converter warning callback is not a
+  complete unsupported-feature detector.
 - **Geometry:** an A4 MediaBox measured 595.2755905511812 ×
   841.8897637795276 points, equivalent to 210 × 297 mm. Magic Standard's
   63.5 × 88.9 mm placement measured 180 × 252 points. Both were created from
@@ -49,11 +60,13 @@ large-card export performance.
 
 ## Decision
 
-Use `@pdfme/pdf-lib` for PDF document and raster image objects, and use
-`svg4pdf-lib` to translate compatible SVG source into vector PDF operators.
-The engine will copy input bytes into an exact, zero-offset `Uint8Array`
-before handing them to the PDF library; this is a byte-for-byte memory copy,
-not image decoding or processing.
+Use `@pdfme/pdf-lib` for the PDF document and standard 8-bit JPEG/PNG objects.
+Use `svg4pdf-lib` to translate a conservative, validated SVG subset into
+vector PDF operators. Embed 16-bit PNG sample data as native PDF Flate image
+objects because the library's built-in PNG path reduces it to 8 bits. The
+engine copies input bytes into an exact, zero-offset `Uint8Array` before
+handing them to the library; this is a byte-for-byte memory copy, not image
+decoding or processing.
 
 Keep all page, card, margin, and placement geometry in millimeters until the
 PDF page and draw calls are created. Convert to points only at that boundary.
@@ -63,19 +76,29 @@ transformation, independently of its embedded pixel dimensions.
 
 For SVG export, preserve vector output. Require a numeric `viewBox`, set the
 root's physical dimensions on an in-memory copy for the requested card size,
-and treat converter warnings or unsupported SVG input as export errors. Never
-silently rasterize an SVG.
+and reject every element or attribute outside the validated subset before
+conversion. The current subset accepts a root `svg` and basic shape elements
+(`rect`, `path`, `circle`, `ellipse`, `line`, `polyline`, `polygon`) with plain
+numeric geometry, hex RGB (`#RRGGBB`) or `none` paint, and the `stroke-width`
+attribute. Filters, `foreignObject`, text, groups, CSS, gradients, masks,
+transforms, external content, other paint forms, and other unvalidated SVG
+features fail explicitly. Converter warnings also fail export. Never silently
+rasterize an SVG.
 
 ## Consequences and limits
 
 - `@pdfme/pdf-lib` 6.1.13 is MIT licensed. `svg4pdf-lib` 0.1.2 is
   LGPL-3.0-or-later; distribution packaging must preserve the applicable
   notices and comply with that license, or replace the adapter before release.
-- SVG support is limited to features supported by the selected adapter and a
-  valid numeric `viewBox`. Unsupported features fail explicitly. The adapter
-  version and vector-output test must be reviewed when it is upgraded.
-- The original image bytes and SVG source remain unmodified. PNG pixels and
-  alpha are lossless; unprocessed JPEGs retain their original DCT stream.
+- SVG support is intentionally narrower than the full SVG standard so that
+  known adapter omissions and unverified properties fail explicitly. The
+  adapter version, allowlist, and vector-output test must be reviewed when it
+  is upgraded.
+- 8-bit PNG pixels and alpha remain sample-exact through the library's Flate
+  streams. 16-bit gray/RGB color types 0, 2, 4, and 6 preserve full sample
+  precision (including Adam7 reconstruction) through native 16-bit Flate
+  image objects. The 16-bit parser rejects unsupported color/interlace modes
+  explicitly. Unprocessed JPEGs retain their original DCT stream.
 - No thumbnail substitution, downsampling, recompression, page rasterization,
   or file-size optimization is part of Phase 1.
 

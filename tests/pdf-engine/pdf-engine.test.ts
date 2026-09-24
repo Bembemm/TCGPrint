@@ -203,6 +203,76 @@ describe("LosslessPdfEngine", () => {
     assertMatrixContainsSize(parsed.content, MAGIC_CARD_WIDTH_POINTS, MAGIC_CARD_HEIGHT_POINTS);
   });
 
+  it("preserves low-byte precision of 16-bit PNG samples", async () => {
+    const sourcePixels = Buffer.from([
+      0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
+      0x12, 0xff, 0x56, 0xff, 0x9a, 0xff,
+    ]);
+    const png16 = new Uint8Array(await readFile(join(FIXTURES, "synthetic-rgb16.png")));
+    const pdf = await engine.generate({ images: [png16] });
+    const parsed = await parsePdf(pdf);
+    const image = parsed.images.find((candidate) => candidate.dictionary.includes("/DeviceRGB"));
+
+    expect(image).toBeDefined();
+    expect(image).toMatchObject({ width: 2, height: 1 });
+    expect(image!.dictionary).toContain("/BitsPerComponent 16");
+    expect(inflateSync(getPdfStreamBytes(image!))).toEqual(sourcePixels);
+  });
+
+  it("reassembles interlaced 16-bit PNG samples without losing native pixels", async () => {
+    const sourcePixels = Buffer.from([
+      0x10, 0x01, 0x20, 0x02, 0x30, 0x03,
+      0x40, 0x04, 0x50, 0x05, 0x60, 0x06,
+      0x70, 0x07, 0x80, 0x08, 0x90, 0x09,
+      0xa0, 0x0a, 0xb0, 0x0b, 0xc0, 0x0c,
+    ]);
+    const png16 = new Uint8Array(await readFile(join(FIXTURES, "synthetic-rgb16-adam7.png")));
+    const pdf = await engine.generate({ images: [png16] });
+    const parsed = await parsePdf(pdf);
+    const image = parsed.images.find((candidate) => candidate.dictionary.includes("/DeviceRGB"));
+
+    expect(image).toMatchObject({ width: 2, height: 2 });
+    expect(image!.dictionary).toContain("/BitsPerComponent 16");
+    expect(inflateSync(getPdfStreamBytes(image!))).toEqual(sourcePixels);
+  });
+
+  it("preserves 16-bit PNG alpha in a full-precision PDF soft mask", async () => {
+    const sourceColors = Buffer.from([
+      0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
+      0x12, 0xff, 0x56, 0xff, 0x9a, 0xff,
+    ]);
+    const sourceAlpha = Buffer.from([0x00, 0xaa, 0xff, 0x01]);
+    const png16 = new Uint8Array(await readFile(join(FIXTURES, "synthetic-rgba16.png")));
+    const pdf = await engine.generate({ images: [png16] });
+    const parsed = await parsePdf(pdf);
+    const image = parsed.images.find((candidate) => candidate.dictionary.includes("/SMask"));
+
+    expect(image).toBeDefined();
+    expect(image).toMatchObject({ width: 2, height: 1 });
+    expect(image!.dictionary).toContain("/BitsPerComponent 16");
+    expect(inflateSync(getPdfStreamBytes(image!))).toEqual(sourceColors);
+
+    const mask = getAlphaMask(parsed, image!);
+    expect(mask.dictionary).toContain("/BitsPerComponent 16");
+    expect(inflateSync(getPdfStreamBytes(mask))).toEqual(sourceAlpha);
+  });
+
+  it("preserves 16-bit PNG transparent color keys as a PDF soft mask", async () => {
+    const sourceColors = Buffer.from([
+      0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
+      0x12, 0xff, 0x56, 0xff, 0x9a, 0xff,
+    ]);
+    const png16 = new Uint8Array(await readFile(join(FIXTURES, "synthetic-rgb16-trns.png")));
+    const pdf = await engine.generate({ images: [png16] });
+    const parsed = await parsePdf(pdf);
+    const image = parsed.images.find((candidate) => candidate.dictionary.includes("/SMask"));
+
+    expect(image).toMatchObject({ width: 2, height: 1 });
+    expect(inflateSync(getPdfStreamBytes(image!))).toEqual(sourceColors);
+    expect(inflateSync(getPdfStreamBytes(getAlphaMask(parsed, image!))))
+      .toEqual(Buffer.from([0x00, 0x00, 0xff, 0xff]));
+  });
+
   it("preserves PNG alpha in a lossless PDF soft mask", async () => {
     const source = decodeFixturePng(await readFile(join(FIXTURES, "synthetic-alpha.png")));
     const pdf = await engine.generate({
@@ -246,6 +316,18 @@ describe("LosslessPdfEngine", () => {
     expect(svgCardMatrix).toBeDefined();
     expect(pointsToMm(svgCardMatrix![0] * 0.75 * 100)).toBeCloseTo(63.5, 10);
     expect(pointsToMm(svgCardMatrix![3] * 0.75 * 140)).toBeCloseTo(88.9, 10);
+  });
+
+  it("draws supported SVG primitives as vector PDF operators", async () => {
+    const svg = new TextEncoder().encode(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 40 40"><circle cx="5" cy="5" r="4" fill="#123456" /><ellipse cx="15" cy="5" rx="4" ry="3" stroke="#123456" /><line x1="1" y1="10" x2="20" y2="10" stroke="#123456" /><polyline points="1,15 10,20 20,15" fill="none" stroke="#123456" /><polygon points="1,25 10,30 20,25" fill="#123456" /></svg>',
+    );
+    const pdf = await engine.generate({ images: [svg] });
+    const parsed = await parsePdf(pdf);
+
+    expect(parsed.images).toHaveLength(0);
+    expect(getDrawMatrices(parsed.content).length).toBeGreaterThan(0);
+    expect(parsed.content.match(/\s+Do\b/g)).toBeNull();
   });
 
   it("accepts an XML declaration and comments before the SVG root", async () => {
@@ -311,6 +393,20 @@ describe("LosslessPdfEngine", () => {
     );
 
     await expect(engine.generate({ images: [noViewBox] })).rejects.toThrow(/viewBox/i);
+  });
+
+  it.each([
+    ["SVG filters", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><filter id="blur"><feGaussianBlur stdDeviation="1" /></filter></defs><rect width="10" height="10" filter="url(#blur)" /></svg>'],
+    ["an SVG filter property", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" filter="url(#blur)" /></svg>'],
+    ["an unsupported SVG fill rule", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10z" fill-rule="evenodd" /></svg>'],
+    ["duplicate SVG attributes", '<svg xmlns="http://www.w3.org/2000/svg" width="10" width="20" viewBox="0 0 10 10"><rect width="10" height="10" /></svg>'],
+    ["SVG foreignObject content", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><foreignObject width="10" height="10"><div>visible content</div></foreignObject></svg>'],
+    ["SVG text nodes", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">visible text<rect width="10" height="10" /></svg>'],
+    ["nested SVG shapes", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"><path d="M0 0h10v10z" /></rect></svg>'],
+  ])("rejects unsupported %s instead of silently dropping it", async (_label, source) => {
+    const svg = new TextEncoder().encode(source);
+
+    await expect(engine.generate({ images: [svg] })).rejects.toThrow(/unsupported svg/i);
   });
 
   it("keeps each input image's native dimensions even when its physical card is larger", async () => {
