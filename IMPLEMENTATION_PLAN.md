@@ -2047,6 +2047,10 @@ Salvar automaticamente:
 - arte escolhida;
 - faces;
 - backs;
+- backMode por carta;
+- sinalização/estado DFC;
+- overrides manuais de front/back;
+- verso padrão do projeto;
 - tamanho;
 - bleed;
 - overrides;
@@ -2074,29 +2078,411 @@ Suportar:
 
 ---
 
-# PARTE XIV — DUPLEX
+# PARTE XIII-A — BACKS, DFC E SINALIZAÇÃO DE DUPLA FACE
 
-## 55. Modos
+## 55. Back selection por carta
 
-Suportar:
+Cada carta deve permitir configurar explicitamente o verso.
 
-- frente apenas;
-- verso universal;
-- versos individuais;
-- DFC.
+Estados possíveis:
+
+```text
+Back mode
+○ Automático
+○ Verso padrão do projeto
+○ Escolher manualmente
+○ Nenhum
+```
+
+A seleção manual pode usar:
+
+- Scryfall;
+- MPC Autofill;
+- upload próprio;
+- biblioteca local de backs;
+- verso padrão do projeto.
+
+Modelo sugerido:
+
+```ts
+type BackMode =
+  | "auto"
+  | "project-default"
+  | "manual"
+  | "none";
+
+interface CardSideSelection {
+  artworkSource:
+    | "scryfall"
+    | "mpc"
+    | "upload"
+    | "local"
+    | "project-default";
+
+  artworkId?: string;
+  fileId?: string;
+  autoResolved?: boolean;
+}
+
+interface ProjectCard {
+  id: string;
+  identity?: CardIdentity;
+  quantity: number;
+
+  front: CardSideSelection;
+  back?: CardSideSelection;
+
+  isDoubleFaced: boolean;
+  backMode: BackMode;
+
+  widthMm: number;
+  heightMm: number;
+}
+```
 
 ---
 
-## 56. Mirror e page pairing
+## 56. Detecção e sinalização de cartas dupla-face
 
-Implementar cálculo correto do verso baseado em:
+Toda carta identificada como dupla-face deve ser marcada visualmente na interface.
+
+A sinalização precisa aparecer em:
+
+- lista principal de cartas;
+- detalhes da carta;
+- seletor de arte;
+- preview;
+- validação pré-export.
+
+Exemplo de lista:
+
+```text
+1  Sol Ring                         Scryfall
+1  Fable of the Mirror-Breaker  ⇄   Scryfall
+1  Delver of Secrets            ⇄   MPC
+1  Custom Card                      Upload
+```
+
+O símbolo final pode ser definido na implementação, mas deve ser:
+
+- simples;
+- legível;
+- não decorativo;
+- acompanhado de tooltip/texto acessível como "Carta dupla-face".
+
+Não depender somente de cor.
+
+No detalhe:
+
+```text
+Fable of the Mirror-Breaker
+[ Carta dupla-face ]
+
+FRONT
+[ artwork ]
+
+BACK
+[ artwork ]
+```
+
+Se a identidade vier do Scryfall e o layout da carta possuir duas faces, marcar automaticamente `isDoubleFaced = true`.
+
+Para uploads próprios, o resolver pode sugerir DFC quando:
+
+- a identidade resolvida for uma DFC conhecida;
+- houver arquivos pareados front/back;
+- metadata indicar duas faces.
+
+O usuário pode corrigir manualmente quando necessário.
+
+---
+
+## 57. Resolução automática de back para DFC
+
+Ao identificar uma DFC conhecida:
+
+```text
+CardIdentity
+    ↓
+provider metadata
+    ↓
+face A + face B
+    ↓
+front auto-resolved
+back auto-resolved
+```
+
+Regras:
+
+- preencher frente e verso automaticamente quando disponíveis;
+- manter ambas ligadas à mesma identidade lógica;
+- permitir trocar a fonte de cada face de forma independente;
+- permitir front do Scryfall + back do MPC;
+- permitir front do MPC + back de upload;
+- permitir qualquer outra combinação válida.
+
+Exemplo:
+
+```text
+DFC: Delver of Secrets // Insectile Aberration
+
+Front source:
+Scryfall
+
+Back source:
+MPC Autofill
+```
+
+---
+
+## 58. Overrides e proteção contra sobrescrita
+
+Se o usuário selecionar manualmente um verso, marcar a seleção como override.
+
+Depois disso:
+
+- refresh de metadata não pode sobrescrever silenciosamente;
+- troca de provider não pode apagar o verso manual;
+- reabertura do projeto deve preservar a seleção;
+- re-resolução automática deve pedir confirmação se conflitar com override.
+
+Estado sugerido:
+
+```ts
+interface SideResolutionState {
+  mode: "auto" | "manual";
+  lockedByUser: boolean;
+}
+```
+
+---
+
+## 59. Verso padrão do projeto
+
+Configuração global:
+
+```text
+Verso padrão do projeto
+
+○ Nenhum
+○ Biblioteca local
+○ Upload custom
+○ Back padrão selecionado
+```
+
+Regras:
+
+- cartas normais herdam o verso padrão quando `backMode = project-default`;
+- DFCs conhecidas usam a própria face traseira quando `backMode = auto`;
+- qualquer carta pode sobrescrever individualmente;
+- mudar o verso padrão do projeto não altera overrides manuais.
+
+---
+
+## 60. Biblioteca de backs
+
+Criar biblioteca local reutilizável.
+
+Exemplo:
+
+```text
+Back Library
+├─ MTG Back
+├─ ProxyBembem Back
+├─ Black Back
+├─ White Back
+└─ Custom uploads
+```
+
+Cada item deve preservar:
+
+- original;
+- hash;
+- dimensões;
+- formato;
+- nome;
+- metadata opcional.
+
+Sem recompressão destrutiva.
+
+---
+
+## 61. Preview de frente e verso
+
+O preview precisa permitir alternar:
+
+```text
+[ Frente ] [ Verso ]
+```
+
+e, opcionalmente:
+
+```text
+[ Lado a lado ]
+```
+
+Para DFC, deixar evidente:
+
+```text
+Front face ↔ Back face
+```
+
+A visualização do verso deve usar a mesma lógica de layout que o export correspondente.
+
+---
+
+## 62. Modos de exportação
+
+Na tela de export:
+
+```text
+Conteúdo
+
+○ Somente frente
+○ Somente verso
+○ Frente + verso separados
+○ Duplex
+```
+
+### Somente frente
+
+Gera apenas páginas de front.
+
+Exemplo:
+
+```text
+Commander_front.pdf
+```
+
+### Somente verso
+
+Gera somente o layout dos backs.
+
+Exemplo:
+
+```text
+Commander_back.pdf
+```
+
+Esse modo é obrigatório para permitir reimpressão de verso sem refazer as frentes.
+
+### Frente + verso separados
+
+Gera:
+
+```text
+Commander_front.pdf
+Commander_back.pdf
+```
+
+### Duplex
+
+Gera páginas ordenadas/espelhadas conforme o modo de impressão duplex e configuração da impressora.
+
+Pode ser um único PDF intercalado:
+
+```text
+front page 1
+back page 1
+front page 2
+back page 2
+...
+```
+
+A escolha entre PDFs separados e duplex não pode alterar as artes escolhidas.
+
+---
+
+## 63. Cards sem back no export de verso
+
+O comportamento deve ser configurável.
+
+Opções:
+
+```text
+Quando uma carta não possui back:
+
+○ usar verso padrão do projeto
+○ deixar slot em branco
+○ gerar aviso e continuar
+○ bloquear export
+```
+
+Default sugerido para uso local:
+
+```text
+usar verso padrão do projeto, se existir;
+caso contrário, deixar em branco e avisar.
+```
+
+Nunca inventar um back silenciosamente.
+
+---
+
+## 64. Validação pré-export para DFC/backs
+
+Antes de exportar `back`, `front + back` ou `duplex`, mostrar:
+
+```text
+100 cartas
+
+12 cartas dupla-face
+88 cartas simples
+
+Backs:
+12 automáticos de DFC
+80 usando verso padrão
+5 overrides manuais
+3 sem verso
+```
+
+Os itens sem verso devem aparecer como warning clicável.
+
+---
+
+## 65. Testes obrigatórios
+
+Criar testes para:
+
+- carta normal + verso padrão;
+- carta normal + verso manual;
+- DFC Scryfall com auto front/back;
+- DFC com front Scryfall + back MPC;
+- DFC com front upload + back Scryfall;
+- override manual preservado;
+- front-only export;
+- back-only export;
+- front/back separados;
+- duplex;
+- slots sem back;
+- alteração do verso padrão sem afetar overrides;
+- sinalização visual/acessível de DFC.
+
+Critério de conclusão:
+
+> uma carta DFC é detectada e sinalizada, recebe automaticamente suas duas faces quando disponíveis, permite override independente por face e pode ser exportada corretamente em front-only, back-only, separado ou duplex.
+
+---
+
+# PARTE XIV — DUPLEX
+
+## 66. Mirror e page pairing
+
+A seleção de fronts/backs e os modos de exportação estão definidos na PARTE XIII-A.
+
+O módulo Duplex é responsável especificamente pela geometria e ordenação física das páginas traseiras.
+
+Implementar cálculo correto baseado em:
 
 - orientação;
 - long-edge / short-edge;
 - layout;
-- posição do slot.
+- posição do slot;
+- printer profile;
+- template de corte;
+- skips/reserved zones.
 
-Criar testes de correspondência frente/verso.
+Criar testes de correspondência frente/verso com fixtures numeradas.
 
 ---
 
@@ -2753,9 +3139,13 @@ PDF
 
 `* MPC entra no switcher assim que o provider estiver implementado; a arquitetura/UI deve nascer preparada para ele.`
 
-Critério adicional:
+Critérios adicionais:
 
 > Uma imagem própria mapeada para uma carta conhecida deve continuar podendo trocar para outra arte da mesma carta sem excluir/reimportar o item.
+
+> Cartas dupla-face conhecidas devem ser sinalizadas e carregar automaticamente front/back quando disponíveis.
+
+> O editor deve permitir selecionar/alterar o back individualmente.
 
 ---
 
@@ -2801,6 +3191,10 @@ Qualquer mudança nestes itens deve ser explicitamente documentada:
 - identidade da carta e artwork selecionado permanecem separados;
 - uploads mapeados para cartas conhecidas continuam sendo artworks intercambiáveis;
 - seleção de arte deve suportar providers por carta, não apenas por projeto.
+- cartas dupla-face devem ser sinalizadas visualmente e de forma acessível;
+- DFCs conhecidas devem auto-resolver front/back quando os providers fornecerem ambas as faces;
+- exportação deve permitir front-only, back-only, front/back separados e duplex;
+- overrides manuais de back nunca podem ser sobrescritos silenciosamente.
 
 ---
 
