@@ -669,28 +669,68 @@ IMG_8372.png
 
 ---
 
-## 19. Frente e verso
+## 19. Identidade da carta, frente/verso e arte atual
 
-Modelo:
+**Identidade da carta e imagem escolhida são conceitos separados.**
+
+Uma carta pode ser identificada como `Sol Ring` e, sem recriar o item do projeto, usar:
+
+- uma printing do Scryfall;
+- uma arte do MPC Autofill;
+- uma imagem enviada pelo usuário;
+- outra arte local associada à mesma identidade.
+
+Modelo sugerido:
 
 ```ts
+interface CardIdentity {
+  provider: "scryfall" | "manual" | "custom";
+  name: string;
+
+  // Para Magic, preferir IDs estáveis quando disponíveis.
+  scryfallId?: string;
+  oracleId?: string;
+
+  // Usado principalmente quando a identidade foi inferida de um upload.
+  resolutionMethod?:
+    | "exact-id"
+    | "filename"
+    | "metadata"
+    | "ocr"
+    | "fuzzy"
+    | "manual"
+    | "unresolved";
+
+  confidence?: number;
+}
+```
+
+```ts
+type ArtworkSource = "scryfall" | "mpc" | "upload" | "url" | "custom";
+
 interface CardFace {
   id: string;
-  sourceType: "file" | "url" | "scryfall" | "mpc";
+
+  artworkSource: ArtworkSource;
+  selectedArtworkId?: string;
+
   sourceFile?: string;
   sourceUrl?: string;
   sourceHash: string;
+
   originalFormat: string;
   widthPx?: number;
   heightPx?: number;
-  selectedArtworkId?: string;
+
+  // Um upload pode estar ligado a uma carta conhecida.
+  linkedIdentityId?: string;
 }
 ```
 
 ```ts
 interface ProjectCard {
   id: string;
-  name?: string;
+  identity?: CardIdentity;
   quantity: number;
 
   front: CardFace;
@@ -699,16 +739,17 @@ interface ProjectCard {
   widthMm: number;
   heightMm: number;
 
-  source:
-    | "scryfall"
-    | "mpc"
-    | "upload"
-    | "url"
-    | "custom";
-
   metadata?: Record<string, unknown>;
 }
 ```
+
+Regras:
+
+- trocar a arte **não** troca a identidade da carta;
+- corrigir a identidade **não** deve apagar a imagem enviada;
+- uma carta customizada pode continuar sem identidade externa;
+- uma imagem própria de uma carta conhecida deve poder ser vinculada a essa identidade;
+- frente e verso podem ter fontes de arte diferentes quando necessário.
 
 ---
 
@@ -806,6 +847,397 @@ Objetivo:
 - selecionar uma arte exatamente como no Scryfall.
 
 Essa integração não deve bloquear o funcionamento do produto.
+
+---
+
+# PARTE VI-A — CARD IDENTITY & ARTWORK SOURCES
+
+## 24. Regra central: identidade != arte
+
+O sistema deve tratar cada item do projeto como uma **identidade de carta** com uma **arte selecionada**.
+
+Exemplo:
+
+```text
+Identidade:
+Sol Ring
+
+Arte atual:
+Upload próprio
+
+Alternativas disponíveis:
+Scryfall
+MPC Autofill
+Outros uploads ligados a Sol Ring
+```
+
+Isso é requisito estrutural, não apenas de UI.
+
+O usuário deve conseguir trocar livremente a arte sem remover/reimportar a carta.
+
+---
+
+## 25. Artwork Source Switcher por carta
+
+Na tela de detalhes de cada carta, disponibilizar:
+
+```text
+SOL RING
+
+Identidade
+Sol Ring                         [Alterar]
+
+Fonte de arte
+[ Todas ] [ Scryfall ] [ MPC Autofill ] [ Meus uploads ]
+
+Arte atual
+meu-sol-ring.png
+
+Resultados
+[arte] [arte] [arte] [arte] ...
+```
+
+Requisitos:
+
+- fonte escolhida é individual por carta;
+- não existe obrigação de usar uma única fonte para todo o projeto;
+- a aba `Todas` agrega resultados dos providers disponíveis;
+- cada resultado deve indicar claramente a origem;
+- trocar de provider não deve perder a seleção atual até o usuário confirmar outra arte;
+- o usuário pode voltar a uma arte anteriormente usada;
+- favoritos/recentes podem ser adicionados futuramente sem alterar o modelo.
+
+Exemplo válido de um único projeto:
+
+```text
+Sol Ring        → MPC Autofill
+Rhystic Study   → Scryfall
+Command Tower   → upload próprio
+Treasure Token  → upload próprio
+```
+
+---
+
+## 26. Artwork Catalog Aggregator
+
+Criar uma camada acima dos providers:
+
+```text
+CardIdentity
+     │
+     ▼
+ArtworkCatalog
+     │
+     ├─ ScryfallArtworkProvider
+     ├─ MpcArtworkProvider
+     └─ LocalArtworkProvider
+     │
+     ▼
+ArtworkCandidate[]
+```
+
+Interface sugerida:
+
+```ts
+interface ArtworkCandidate {
+  id: string;
+  source: ArtworkSource;
+
+  identityId?: string;
+
+  previewUri: string;
+  originalUri?: string;
+  localOriginalPath?: string;
+
+  widthPx?: number;
+  heightPx?: number;
+  effectiveDpi?: number;
+
+  setCode?: string;
+  collectorNumber?: string;
+  language?: string;
+
+  metadata?: Record<string, unknown>;
+}
+
+interface ArtworkProvider {
+  searchArtwork(identity: CardIdentity): Promise<ArtworkCandidate[]>;
+  getOriginal(candidateId: string): Promise<ImageSource>;
+}
+```
+
+A UI não deve conhecer detalhes específicos da API de cada fonte.
+
+---
+
+## 27. Upload Card Resolver
+
+Todo upload de imagem de carta deve tentar descobrir **qual carta aquela imagem representa**, sem obrigar o usuário a aceitar a sugestão.
+
+Objetivo:
+
+```text
+upload meu-sol-ring-custom.png
+          ↓
+resolver identidade
+          ↓
+Sol Ring
+          ↓
+imagem entra como artwork local de Sol Ring
+          ↓
+usuário ainda pode trocar para Scryfall ou MPC
+```
+
+O upload não pode se tornar um "beco sem saída".
+
+---
+
+## 28. Pipeline de resolução de identidade de upload
+
+Executar em ordem de custo/confiança.
+
+### 1. IDs/metadados explícitos
+
+Se o arquivo ou importador fornecer:
+
+- Scryfall ID;
+- oracle ID;
+- set + collector number;
+- nome explícito;
+- metadata de projeto;
+
+usar isso antes de qualquer inferência.
+
+### 2. Nome do arquivo
+
+Normalizar nomes como:
+
+```text
+Sol Ring.png
+Sol_Ring_custom.png
+01 - Sol Ring - alt art.jpg
+Sol Ring [MPC].png
+```
+
+Remover padrões conhecidos:
+
+- extensão;
+- quantidade;
+- `front/back`;
+- `custom`;
+- `proxy`;
+- `alt art`;
+- set/collector quando separáveis;
+- prefixos numéricos.
+
+Comparar com índice local/Scryfall.
+
+### 3. OCR local
+
+Quando filename/metadata não forem suficientes, tentar ler a região provável do nome da carta.
+
+Prioridade inicial do OCR:
+
+1. nome;
+2. linha de tipo como sinal secundário;
+3. collector/set apenas se ajudar na desambiguação.
+
+OCR nunca deve alterar a imagem original.
+
+### 4. Fuzzy matching
+
+Exemplo:
+
+```text
+OCR: "SoI Ring"
+        ↓
+candidatos
+        ↓
+Sol Ring
+```
+
+Usar distância textual + sinais auxiliares.
+
+### 5. Confirmação humana
+
+Nunca transformar um resultado incerto em identidade definitiva silenciosamente.
+
+Exemplo:
+
+```text
+Imagem: IMG_0231.png
+
+Possíveis correspondências:
+● Sol Ring                    92%
+○ Sol Talisman                61%
+○ Soul-Guide Lantern          43%
+
+[Confirmar] [Escolher outra] [Manter como custom]
+```
+
+---
+
+## 29. Confidence e estados de resolução
+
+Estados sugeridos:
+
+```ts
+type IdentityResolutionStatus =
+  | "resolved"
+  | "suggested"
+  | "ambiguous"
+  | "unresolved"
+  | "custom";
+```
+
+Regras sugeridas:
+
+- match exato por ID → `resolved`;
+- nome exato confiável → `resolved`;
+- OCR/fuzzy → normalmente `suggested`;
+- múltiplos candidatos próximos → `ambiguous`;
+- nenhum candidato → `unresolved`;
+- usuário escolheu manter sem vínculo → `custom`.
+
+Os thresholds devem ser configurados e testados; não hardcodear uma porcentagem arbitrária como verdade universal.
+
+---
+
+## 30. UX de upload
+
+Após upload de imagem:
+
+```text
+meu-sol-ring-custom.png
+
+Carta sugerida
+Sol Ring
+
+Método
+Nome do arquivo
+
+[ Usar como arte de Sol Ring ]
+[ Escolher outra carta ]
+[ Manter como carta personalizada ]
+```
+
+Se o usuário confirmar `Sol Ring`:
+
+```text
+Identity = Sol Ring
+Current artwork = meu-sol-ring-custom.png
+Artwork source = upload
+```
+
+Imediatamente o Artwork Source Switcher deve permitir:
+
+```text
+[ Scryfall ] [ MPC Autofill ] [ Meus uploads ] [ Todas ]
+```
+
+---
+
+## 31. Uploads reutilizáveis
+
+Um upload ligado a uma identidade deve entrar na biblioteca local de artworks.
+
+Exemplo:
+
+```text
+LocalArtworkLibrary
+└─ Sol Ring
+   ├─ meu-sol-ring-custom.png
+   ├─ sol-ring-full-art.svg
+   └─ sol-ring-foil-scan.tiff
+```
+
+Assim um artwork enviado em um projeto pode ser reutilizado em outro sem upload novamente.
+
+Guardar:
+
+- hash;
+- caminho do original;
+- identidade vinculada;
+- data/import source;
+- formato;
+- dimensões;
+- metadata.
+
+Nunca duplicar fisicamente o mesmo arquivo quando o hash já existir.
+
+---
+
+## 32. Correção de identidade
+
+O usuário deve conseguir clicar em:
+
+```text
+Identidade: Sol Ring [Alterar]
+```
+
+e mudar para outra carta.
+
+Ao fazer isso:
+
+- preservar o upload;
+- remover apenas o vínculo anterior;
+- oferecer vincular a imagem à nova identidade;
+- atualizar candidatos de Scryfall/MPC;
+- não destruir overrides de impressão sem necessidade.
+
+---
+
+## 33. DFC e faces
+
+Uploads de cartas dupla-face precisam permitir:
+
+```text
+Identity: carta DFC conhecida
+
+Front
+→ upload próprio
+
+Back
+→ Scryfall
+```
+
+ou:
+
+```text
+Front
+→ MPC
+
+Back
+→ MPC
+```
+
+Cada face tem artwork independente, mas ambas pertencem à mesma identidade lógica quando apropriado.
+
+---
+
+## 34. Testes obrigatórios do resolver
+
+Criar fixtures para:
+
+- filename exato;
+- filename com `custom`;
+- filename com quantidade;
+- filename com `front/back`;
+- OCR perfeito;
+- OCR com erro pequeno;
+- dois nomes ambíguos;
+- carta inventada;
+- token;
+- DFC;
+- imagem sem texto;
+- SVG customizado.
+
+Critérios:
+
+- nunca sobrescrever identidade confirmada sem ação do usuário;
+- nunca descartar upload por falha de reconhecimento;
+- candidato incorreto deve poder ser corrigido;
+- após mapear, Scryfall/MPC/uploads devem aparecer como fontes intercambiáveis.
 
 ---
 
@@ -2064,22 +2496,38 @@ Uma carta customizada e uma decklist podem entrar sem qualquer dependência do S
 
 ---
 
-## Fase 5 — Scryfall
+## Fase 5 — Card Identity + Scryfall + Artwork Switching
 
 Implementar:
 
-- search;
+- `CardIdentity` separado da arte;
+- Upload Card Resolver;
+- filename resolver;
+- OCR/fuzzy matching básico;
+- confirmação/correção manual;
+- Scryfall search;
 - autocomplete;
 - card resolver;
 - printings;
-- artwork picker;
+- Scryfall artwork provider;
+- Local artwork provider;
+- Artwork Catalog Aggregator;
+- Artwork Source Switcher;
 - cache;
 - DFC;
 - tokens básicos.
 
 ### Critério de conclusão
 
-Decklist de Magic pode ser importada, resolvida e ter artes trocadas visualmente.
+Deve ser possível:
+
+1. importar uma carta por decklist;
+2. importar uma carta por imagem própria;
+3. mapear o upload para uma identidade;
+4. preservar a imagem enviada como artwork local;
+5. trocar a arte da mesma carta entre Scryfall e upload local sem recriar a carta.
+
+A interface do switcher já deve estar preparada para o provider MPC.
 
 ---
 
@@ -2198,16 +2646,35 @@ Implementar:
 
 ---
 
-## Fase 14 — MPC
+## Fase 14 — MPC Artwork Provider
 
 Primeiro:
 
 - MPC Autofill XML;
-- local assets.
+- preservação dos artwork IDs/slots escolhidos;
+- local assets provenientes de XML/pacotes.
 
-Depois:
+Depois, quando a integração disponível for tecnicamente estável:
 
-- artwork browser/provider, se integração for estável.
+- `MpcArtworkProvider`;
+- pesquisa por identidade da carta;
+- thumbnails;
+- download do original;
+- filtros de DPI/source/tags quando disponíveis;
+- integração completa ao `ArtworkCatalog`.
+
+### Critério de conclusão
+
+Para uma carta identificada, o usuário pode alternar na mesma tela entre:
+
+```text
+Scryfall
+MPC Autofill
+Meus uploads
+Todas
+```
+
+sem alterar a identidade da carta e sem reimportá-la.
 
 ---
 
@@ -2260,21 +2727,35 @@ Esse MVP prova o motor de fabricação.
 
 ---
 
-## MVP 2 — Magic Workflow
+## MVP 2 — Magic Workflow + Artwork Identity
 
 Adicionar:
 
 ```text
-Decklist
-  ↓
-Scryfall
-  ↓
-Seleção visual de printing
-  ↓
+Decklist OU upload próprio
+          ↓
+Resolver identidade da carta
+          ↓
+CardIdentity
+          ↓
+┌─────────┼─────────────┐
+│         │             │
+Scryfall  Upload local  MPC*
+│         │             │
+└─────────┼─────────────┘
+          ↓
+Escolher arte por carta
+          ↓
 Projeto
-  ↓
+          ↓
 PDF
 ```
+
+`* MPC entra no switcher assim que o provider estiver implementado; a arquitetura/UI deve nascer preparada para ele.`
+
+Critério adicional:
+
+> Uma imagem própria mapeada para uma carta conhecida deve continuar podendo trocar para outra arte da mesma carta sem excluir/reimportar o item.
 
 ---
 
@@ -2317,6 +2798,9 @@ Qualquer mudança nestes itens deve ser explicitamente documentada:
 - arquivos originais são imutáveis;
 - .studio3 é tratado como arquivo associado/opaco;
 - Importer e Provider permanecem separados.
+- identidade da carta e artwork selecionado permanecem separados;
+- uploads mapeados para cartas conhecidas continuam sendo artworks intercambiáveis;
+- seleção de arte deve suportar providers por carta, não apenas por projeto.
 
 ---
 
@@ -2455,12 +2939,21 @@ O núcleo físico é a fundação de todo o restante.
           ProjectCard[]
                 │
                 ▼
-          Card Providers
+        Card Identity Resolver
+                │
+                ▼
+           CardIdentity
+                │
+                ▼
+          Artwork Catalog
         ┌───────┼────────┐
         │       │        │
     Scryfall    MPC     Local
         │       │        │
         └───────┼────────┘
+                ▼
+       Selected Artwork
+                │
                 ▼
            Image Engine
                 │
