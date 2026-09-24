@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { PDFDocument, PDFName, PDFRawStream } from "@pdfme/pdf-lib";
 import { describe, expect, it } from "vitest";
 import { MAGIC_STANDARD_CARD, type CardFormat } from "../../core/geometry";
-import { pointsToMm } from "../../core/units";
+import { mmToPoints, pointsToMm } from "../../core/units";
+import { BleedEngine } from "../../image-engine/bleed";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 
 const FIXTURES = join(process.cwd(), "tests", "fixtures", "pdf");
@@ -168,6 +169,93 @@ describe("LosslessPdfEngine", () => {
     assertMatrixContainsSize(parsed.content, MAGIC_CARD_WIDTH_POINTS, MAGIC_CARD_HEIGHT_POINTS);
     expect(pointsToMm(MAGIC_CARD_WIDTH_POINTS)).toBe(63.5);
     expect(pointsToMm(MAGIC_CARD_HEIGHT_POINTS)).toBeCloseTo(88.9, 12);
+  });
+
+  it("adds bleed outside the nominal trim and overlays the untouched JPEG trim", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
+    const pdf = await engine.generate({ images: [original], bleedResults: [bleed] });
+    const parsed = await parsePdf(pdf);
+    const jpeg = parsed.images.find((image) => image.dictionary.includes("/DCTDecode"));
+    const derivative = parsed.images.find((image) => image.dictionary.includes("/FlateDecode"));
+    const matrices = getDrawMatrices(parsed.content);
+    const trim = matrices.find(([a, , , d]) => Math.abs(a - 180) < 1e-8 && Math.abs(d - 252) < 1e-8);
+    const bleedPoints = mmToPoints(0.625);
+    const expanded = matrices.find(([a, , , d]) =>
+      Math.abs(a - mmToPoints(63.5 + 2 * 0.625)) < 1e-8
+        && Math.abs(d - mmToPoints(88.9 + 2 * 0.625)) < 1e-8,
+    );
+    const positionedMatrices = matrices.filter(([a, b, c, d, e, f]) =>
+      Math.abs(a - 1) < 1e-10
+        && Math.abs(b) < 1e-10
+        && Math.abs(c) < 1e-10
+        && Math.abs(d - 1) < 1e-10
+        && (Math.abs(e) > 1e-10 || Math.abs(f) > 1e-10),
+    );
+
+    expect(jpeg).toMatchObject({ width: 8, height: 6 });
+    expect(createHash("sha256").update(getPdfStreamBytes(jpeg!)).digest("hex"))
+      .toBe(createHash("sha256").update(original).digest("hex"));
+    expect(derivative).toMatchObject({ width: 10, height: 8 });
+    expect(trim).toBeDefined();
+    expect(expanded).toBeDefined();
+    expect(positionedMatrices).toHaveLength(2);
+    expect(pointsToMm(trim![0])).toBe(63.5);
+    expect(pointsToMm(trim![3])).toBeCloseTo(88.9, 12);
+    expect(positionedMatrices[1][4] - positionedMatrices[0][4]).toBeCloseTo(bleedPoints, 8);
+    expect(positionedMatrices[1][5] - positionedMatrices[0][5]).toBeCloseTo(bleedPoints, 8);
+    expect(expanded![0] - trim![0]).toBeCloseTo(2 * bleedPoints, 8);
+    expect(expanded![3] - trim![3]).toBeCloseTo(2 * bleedPoints, 8);
+  });
+
+  it("rejects a bleed derivative that belongs to another image", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const otherImage = new Uint8Array(await readFile(join(FIXTURES, "synthetic-rgb.png")));
+    const bleed = await new BleedEngine().generate({ imageBytes: otherImage, bleedMm: 0.625 });
+
+    await expect(engine.generate({ images: [original], bleedResults: [bleed] }))
+      .rejects.toThrow(/original image hash/i);
+  });
+
+  it("requires one bleed result per input image when PDF bleed results are supplied", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
+
+    await expect(engine.generate({ images: [original], bleedResults: [bleed, bleed] }))
+      .rejects.toThrow(/one result per image/i);
+  });
+
+  it("rejects a bleed derivative made for a different physical trim size", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const bleed = await new BleedEngine().generate({
+      imageBytes: original,
+      bleedMm: 0.625,
+      trimSizeMm: { widthMm: 64, heightMm: 90 },
+    });
+
+    await expect(engine.generate({ images: [original], bleedResults: [bleed] }))
+      .rejects.toThrow(/trim size does not match/i);
+  });
+
+  it("rejects bleed on touching multi-card PDF grids until they reserve inter-card gaps", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
+
+    await expect(engine.generate({
+      images: [original, original],
+      bleedResults: [bleed, bleed],
+    })).rejects.toThrow(/one card because the Phase 1 grid has no gaps/i);
+  });
+
+  it("rejects bleed that would be clipped by page bounds", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
+
+    await expect(engine.generate({
+      images: [original],
+      bleedResults: [bleed],
+      paperFormat: { name: "Trim-sized sheet", widthMm: 63.5, heightMm: 88.9 },
+    })).rejects.toThrow(/extend beyond the PDF page bounds/i);
   });
 
   it("embeds an untouched JPEG DCT stream and accepts a non-zero-offset byte view", async () => {

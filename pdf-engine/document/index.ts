@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { inflateSync } from "node:zlib";
 import {
@@ -9,6 +10,7 @@ import {
   pushGraphicsState,
 } from "@pdfme/pdf-lib";
 import { drawSvg } from "svg4pdf-lib";
+import type { BleedResult } from "../../image-engine/bleed";
 import {
   MAGIC_STANDARD_CARD,
   PAPER_FORMATS,
@@ -20,6 +22,8 @@ import { mmToPoints } from "../../core/units";
 export interface LosslessPdfRequest {
   /** Image bytes read from local files. Repeated entries produce repeated cards. */
   readonly images: readonly Uint8Array[];
+  /** Precomputed derivatives; the PDF engine places them without generating bleed. */
+  readonly bleedResults?: readonly (BleedResult | undefined)[];
   readonly paperFormat?: PaperFormat;
   readonly cardFormat?: CardFormat;
 }
@@ -544,6 +548,40 @@ function detectFormat(bytes: Uint8Array): SupportedImageFormat {
   throw new PdfExportError("Unsupported image format. Use JPEG, PNG, or SVG files.");
 }
 
+async function drawRasterImage(
+  pdf: PDFDocument,
+  page: ReturnType<PDFDocument["addPage"]>,
+  bytes: Uint8Array,
+  resourceId: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Promise<void> {
+  const exactBytes = copyBytes(bytes);
+  const format = detectFormat(exactBytes);
+
+  if (format === "jpeg") {
+    const image = await pdf.embedJpg(exactBytes);
+    page.drawImage(image, { x, y, width, height });
+    return;
+  }
+
+  if (format === "png") {
+    const png16 = parsePng16(exactBytes);
+    if (png16) {
+      drawPng16(pdf, page, png16, resourceId, x, y, width, height);
+      return;
+    }
+
+    const image = await pdf.embedPng(exactBytes);
+    page.drawImage(image, { x, y, width, height });
+    return;
+  }
+
+  throw new PdfExportError("Bleed derivatives must be lossless raster PNG images.");
+}
+
 function readSvgRootTag(svg: string): { readonly rootTag: string; readonly start: number; readonly end: number } {
   const match = /<svg\b(?:[^>"']|"[^"]*"|'[^']*')*>/i.exec(svg);
   if (!match || match.index === undefined) {
@@ -620,6 +658,16 @@ function calculatePageGrid(paper: PaperFormat, card: CardFormat): PageGrid {
 
 export class LosslessPdfEngine {
   async generate(request: LosslessPdfRequest): Promise<Uint8Array> {
+    if (request.bleedResults && request.bleedResults.length !== request.images.length) {
+      throw new PdfExportError("PDF bleed results must contain one result per image.");
+    }
+    if (
+      request.images.length > 1
+      && request.bleedResults?.some((result) => result?.status === "derived")
+    ) {
+      throw new PdfExportError("Bleed PDF placement currently requires one card because the Phase 1 grid has no gaps between trim boxes.");
+    }
+
     const paper = request.paperFormat ?? PAPER_FORMATS.A4;
     const card = request.cardFormat ?? MAGIC_STANDARD_CARD;
     const grid = calculatePageGrid(paper, card);
@@ -648,6 +696,47 @@ export class LosslessPdfEngine {
         const xPoints = mmToPoints(xMm);
         const yPoints = mmToPoints(paper.heightMm - topMm - card.heightMm);
         const exactBytes = copyBytes(imageBytes);
+
+        const bleed = request.bleedResults?.[imageIndex];
+        if (bleed?.status === "derived") {
+          if (!Number.isFinite(bleed.bleedMm) || bleed.bleedMm <= 0 || bleed.bleedMm > 3) {
+            throw new PdfExportError("PDF bleed amount must be greater than 0 mm and at most 3 mm.");
+          }
+
+          const originalSha256 = createHash("sha256").update(exactBytes).digest("hex");
+          if (originalSha256 !== bleed.originalSha256) {
+            throw new PdfExportError("The bleed derivative original image hash does not match the PDF input image.");
+          }
+          if (bleed.trimSizeMm.widthMm !== card.widthMm || bleed.trimSizeMm.heightMm !== card.heightMm) {
+            throw new PdfExportError("The bleed derivative trim size does not match the PDF card format.");
+          }
+          if (bleed.preview.mimeType !== "image/png" || !bleed.preview.trimRectPx) {
+            throw new PdfExportError("PDF bleed derivatives must expose a lossless PNG preview and trim rectangle.");
+          }
+          const epsilonMm = 1e-9;
+          if (
+            xMm - bleed.bleedMm < -epsilonMm
+            || topMm - bleed.bleedMm < -epsilonMm
+            || xMm + card.widthMm + bleed.bleedMm > paper.widthMm + epsilonMm
+            || topMm + card.heightMm + bleed.bleedMm > paper.heightMm + epsilonMm
+          ) {
+            throw new PdfExportError("The requested bleed would extend beyond the PDF page bounds.");
+          }
+
+          const bleedPoints = mmToPoints(bleed.bleedMm);
+          const expandedWidthPoints = widthPoints + 2 * bleedPoints;
+          const expandedHeightPoints = heightPoints + 2 * bleedPoints;
+          await drawRasterImage(
+            pdf,
+            page,
+            bleed.preview.bytes,
+            request.images.length + imageIndex,
+            xPoints - bleedPoints,
+            yPoints - bleedPoints,
+            expandedWidthPoints,
+            expandedHeightPoints,
+          );
+        }
 
         if (format === "jpeg") {
           const image = await pdf.embedJpg(exactBytes);
