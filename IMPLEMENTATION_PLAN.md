@@ -121,7 +121,7 @@ Sugestão de stack:
 | Estado de UI | Zustand |
 | Banco local | SQLite |
 | Imagens | Sharp / libvips |
-| PDF | pdf-lib + engine próprio |
+| PDF | @pdfme/pdf-lib + LosslessPdfEngine próprio |
 | Preview | Canvas |
 | Processamento paralelo | Node Worker Threads |
 | Arquivos | filesystem local |
@@ -1214,57 +1214,281 @@ Criar reserved/no-card zones no layout.
 
 # PARTE XI — PDF ENGINE
 
-## 44. Não rasterizar a folha inteira
+## 44. LosslessPdfEngine — requisito obrigatório
+
+O PDF final é parte crítica do produto. O objetivo **não é economizar espaço em disco**. O objetivo é preservar toda a informação disponível na fonte.
+
+A implementação não deve usar uma biblioteca de PDF como caixa-preta para decidir resize, recompressão ou otimização das cartas.
+
+Usar `@pdfme/pdf-lib` (fork mantido de pdf-lib) como base para a estrutura do PDF e implementar uma camada própria chamada, por exemplo, `LosslessPdfEngine`, responsável pela incorporação das imagens.
+
+Regras obrigatórias:
+
+- nunca reduzir resolução automaticamente;
+- nunca downsamplear;
+- nunca recomprimir JPEG para outro JPEG;
+- nunca converter imagem de alta resolução para uma resolução fixa;
+- nunca rasterizar a folha inteira;
+- nunca gerar o PDF final a partir dos thumbnails;
+- preservar SVG como vetor sempre que tecnicamente possível;
+- qualquer processamento necessário deve ser lossless;
+- tamanho de arquivo grande é aceitável;
+- fidelidade é mais importante que tamanho do PDF.
 
 Não gerar:
 
 ```text
 Canvas gigante
 → Screenshot
+→ JPEG/PNG da folha
 → PDF
 ```
 
-Montar o PDF diretamente.
-
-Estrutura:
+Montar o PDF diretamente:
 
 ```text
 PDF Page
-├─ imagens das cartas
-├─ vetores
-├─ crop/cut guides
-├─ registration marks
+├─ image XObjects das cartas
+├─ SVG/vetores quando aplicável
+├─ cut guides vetoriais
+├─ registration marks vetoriais
 └─ labels opcionais
 ```
 
 ---
 
-## 45. Preservação da imagem
+## 45. Política por formato de imagem
 
-Quando a imagem não precisar ser processada, evitar resize e recompressão.
+### JPEG
 
-Quando precisar de bleed:
+Quando a carta JPEG não precisar de transformação:
 
 ```text
-original
-→ processamento lossless
-→ versão derivada
-→ PDF
+JPEG original bytes
+      ↓
+PDF Image XObject / DCTDecode
 ```
 
-Nunca substituir o original.
+O stream JPEG original deve ser incorporado diretamente ao PDF.
+
+**Não decodificar e reencodar o JPEG.**
+
+Isso preserva exatamente o conteúdo JPEG que foi baixado/importado, sem nova perda geracional.
+
+O tamanho físico impresso é definido somente pela transformation matrix do PDF; alterar a dimensão física desenhada na página **não implica redimensionar os pixels da imagem**.
+
+### PNG
+
+PDF não incorpora o container PNG da mesma forma que JPEG/DCT.
+
+Para PNG:
+
+- manter a resolução nativa completa;
+- não resamplear;
+- decodificar os pixels;
+- armazenar RGB/Gray/Alpha usando compressão Flate lossless;
+- preservar alpha quando existir;
+- não transformar em JPEG.
+
+O arquivo PNG dentro do PDF pode não ter o mesmo número de bytes do arquivo .png original, mas os pixels devem permanecer lossless e na resolução original.
+
+### SVG
+
+SVG deve permanecer vetorial sempre que seus recursos forem suportados pelo pipeline.
+
+Não rasterizar SVG por conveniência.
+
+Se um SVG utilizar recurso incompatível e realmente precisar ser rasterizado:
+
+- preservar o arquivo SVG original;
+- gerar derivado somente para export;
+- usar resolução definida a partir da necessidade física, sem limite artificial de DPI;
+- informar essa rasterização no diagnóstico/export summary.
+
+### WebP / TIFF e outros formatos não nativos do PDF
+
+Nunca converter para JPEG por padrão.
+
+Pipeline:
+
+```text
+source
+→ decode em resolução original
+→ representação lossless RGB/Gray/Alpha
+→ Flate no PDF
+```
+
+Se houver suporte direto lossless ao formato no futuro, preferir o caminho direto.
 
 ---
 
-## 46. SVG
+## 46. Imagens que precisam de bleed/processamento
 
-Preservar o SVG original.
+Quando não houver bleed ou transformação, usar o caminho mais direto possível descrito acima.
 
-Criar preview raster leve para UI.
+Quando houver `Subtle Edge Stretch`, é inevitável criar uma imagem derivada maior porque novos pixels precisam existir fora da área original.
 
-No export, preservar vetores sempre que a biblioteca/fluxo suportar corretamente.
+Regra:
 
-Se uma operação exigir rasterização, rasterizar apenas a versão processada em resolução suficiente.
+```text
+original
+      ↓
+decode uma única vez
+      ↓
+canvas maior
+      ↓
+copiar trim original sem resampling
+      ↓
+gerar somente os pixels externos de bleed
+      ↓
+armazenar derivado lossless
+      ↓
+PDF
+```
+
+Para JPEG de origem:
+
+- não salvar o derivado novamente como JPEG;
+- gerar o derivado em formato/pixel stream lossless;
+- a região da carta deve corresponder exatamente aos pixels JPEG decodificados originalmente;
+- somente a região externa do bleed é nova.
+
+Portanto:
+
+```text
+SEM BLEED:
+JPEG original → stream JPEG original no PDF
+
+COM BLEED:
+JPEG original → decode → composição lossless → PDF lossless
+```
+
+Não existe modo de criar novos pixels de bleed e simultaneamente manter o arquivo JPEG original inteiro como o único bitmap renderizado; por isso o caminho com bleed deve priorizar ausência de perda, não tamanho.
+
+---
+
+## 47. Proibição de otimizações destrutivas
+
+Não implementar no export final:
+
+- quality=80/90/95;
+- resize automático;
+- thumbnail substitution;
+- JPEG recompression;
+- WebP lossy intermediário;
+- limite automático de 300/600/800 DPI;
+- "optimize images";
+- "reduce PDF size";
+- qualquer conversão destrutiva silenciosa.
+
+Se um dia for criado um modo de PDF reduzido, deve ser uma opção separada e explicitamente ativada pelo usuário.
+
+O modo padrão e principal é:
+
+```text
+MAXIMUM / SOURCE QUALITY
+```
+
+---
+
+## 48. Verificação de preservação
+
+Criar testes específicos do `LosslessPdfEngine`.
+
+### JPEG passthrough
+
+Extrair o stream DCT do PDF de teste e validar:
+
+```text
+SHA256(JPEG original)
+==
+SHA256(DCT stream incorporado)
+```
+
+quando não houver processamento.
+
+### PNG
+
+Renderizar/extrair pixels e validar:
+
+```text
+dimensions original == dimensions embedded
+pixel data original == pixel data embedded
+```
+
+Nenhum resampling.
+
+### Bleed
+
+Validar:
+
+```text
+trim pixels before
+==
+trim pixels after bleed
+```
+
+### SVG
+
+Verificar que o PDF contém operadores/paths vetoriais e que não foi substituído por bitmap quando o SVG for compatível.
+
+---
+
+## 49. DPI efetivo
+
+Exibir DPI real baseado em:
+
+- pixel dimensions;
+- tamanho físico de impressão.
+
+Exemplo:
+
+```text
+745 × 1040 px
+63.5 × 88.9 mm
+≈ 298 DPI
+```
+
+Não alterar o arquivo para atingir um DPI escolhido.
+
+DPI é um diagnóstico da relação entre pixels existentes e tamanho físico, não uma meta de resampling.
+
+---
+
+## 50. Indicador de qualidade
+
+Sugestão:
+
+```text
+600+ DPI   Excelente
+300+ DPI   Boa
+200–299    Aviso
+<200       Baixa
+```
+
+Informativo, não bloqueante.
+
+---
+
+## 51. Resolução máxima
+
+**Não existir limite de resolução no modo padrão.**
+
+Não oferecer como default:
+
+```text
+800 DPI máximo
+600 DPI máximo
+300 DPI máximo
+```
+
+Se futuramente houver um modo opcional de arquivo reduzido, ele deve ficar separado do modo de produção.
+
+Default obrigatório:
+
+```text
+Máxima / Original / Sem downsampling
+```
 
 ---
 
@@ -2088,6 +2312,8 @@ Qualquer mudança nestes itens deve ser explicitamente documentada:
 - bleed 0–3 mm;
 - Subtle Edge Stretch como modo principal;
 - PDF não deve ser screenshot de canvas;
+- export padrão é lossless/source-quality, sem downsampling ou recompressão destrutiva;
+- JPEG sem processamento deve ser incorporado por passthrough do stream original;
 - arquivos originais são imutáveis;
 - .studio3 é tratado como arquivo associado/opaco;
 - Importer e Provider permanecem separados.
@@ -2170,7 +2396,9 @@ Adicionar bleed não remove nem amplia conteúdo da área útil.
 
 ### C. Qualidade
 
-O PDF final não usa thumbnails e não introduz recompressão destrutiva desnecessária.
+O PDF final não usa thumbnails, não faz downsampling e não introduz recompressão destrutiva.
+
+Para JPEG sem processamento, o stream JPEG incorporado deve ser byte-identical ao original. Para PNG e outros rasters lossless, os pixels e dimensões devem ser preservados integralmente.
 
 ### D. Reprodutibilidade
 
