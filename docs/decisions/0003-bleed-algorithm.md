@@ -36,8 +36,9 @@ bleed width, and source strip; only the corner rule changes:
 
 Use the reflected corner patch for all four corners. TOP, BOTTOM, LEFT, and
 RIGHT are generated independently from their own source strips. In each corner,
-the X and Y distances select a pixel from the nearest local source patch. This
-matches the adjoining side samples at both boundaries and only writes outside
+the X and Y distances use the same strip-to-bleed mapping as their adjoining
+sides to select a pixel from the nearest local source patch. This makes both
+corner boundaries sample-identical to their side strips and only writes outside
 the trim rectangle.
 
 Use the same corner strategy for 8-bit and 16-bit raster images. Keep its name
@@ -64,6 +65,8 @@ through unchanged.
   never JPEG.
 - SVG remains vector and untouched at zero bleed. Non-zero SVG bleed reports an
   explicit unsupported-operation error instead of silently rasterizing.
+- The current PDF integration draws one bleed-bearing card only and checks page
+  bounds; multi-card placement waits for a layout with gaps between trim boxes.
 
 ## References
 
