@@ -3848,6 +3848,369 @@ PDF + template correspondente produzem corte consistentemente alinhado após con
 
 ---
 
+# PARTE XXIV — DECISÕES DE IMPLEMENTAÇÃO AINDA ABERTAS
+
+Estas decisões **fazem parte do plano oficial**. Elas não estão indefinidas por falta de planejamento; estão deliberadamente abertas porque precisam de benchmark, protótipo ou teste físico antes de serem fechadas.
+
+Agentes não devem escolher silenciosamente uma opção e tornar isso permanente sem registrar o motivo.
+
+---
+
+## 78. OCR para identificação de uploads
+
+Objetivo:
+
+- tentar reconhecer o nome de uma carta enviada pelo usuário;
+- funcionar localmente sempre que possível;
+- não alterar a imagem original;
+- ter custo de CPU aceitável;
+- suportar processamento em background;
+- funcionar bem com nomes pequenos, molduras diferentes e scans imperfeitos.
+
+A implementação deve ser avaliada por benchmark com fixtures reais.
+
+Critérios:
+
+- precisão no nome da carta;
+- velocidade por imagem;
+- consumo de memória;
+- suporte local/offline;
+- tamanho das dependências/modelos;
+- facilidade de empacotamento;
+- comportamento em Windows.
+
+Pipeline desejado:
+
+```text
+filename/metadata
+      ↓
+match exato
+      ↓
+OCR somente se necessário
+      ↓
+fuzzy match
+      ↓
+confirmação do usuário
+```
+
+OCR não deve ser executado desnecessariamente quando nome/metadata já resolverem a carta.
+
+### Spike obrigatório
+
+Antes de fixar a biblioteca:
+
+1. testar pelo menos duas opções viáveis;
+2. usar conjunto de imagens reais de cartas;
+3. medir precisão e tempo;
+4. registrar resultados;
+5. escolher a opção mais adequada.
+
+---
+
+## 79. Integração online com MPC Autofill
+
+MPC não deve ser requisito para o funcionamento básico do TCGPrint.
+
+A integração deve ser dividida em níveis:
+
+### Nível 1 — obrigatório
+
+- importar MPC Autofill XML;
+- preservar IDs;
+- preservar ordem;
+- preservar front/back;
+- preservar artwork escolhido;
+- usar assets locais quando fornecidos.
+
+### Nível 2 — desejado
+
+`MpcArtworkProvider` integrado ao Artwork Catalog.
+
+Objetivo:
+
+```text
+CardIdentity
+   ↓
+MPC artwork search
+   ↓
+thumbnails
+   ↓
+selecionar
+   ↓
+baixar original
+```
+
+### Critérios para habilitar integração online
+
+Somente implementar como provider de primeira classe se houver forma tecnicamente estável de:
+
+- pesquisar por carta;
+- identificar artwork;
+- obter preview;
+- obter original;
+- respeitar estrutura/IDs;
+- lidar com indisponibilidade sem quebrar o app.
+
+Se depender de scraping extremamente frágil, manter como integração opcional/experimental.
+
+Falha do MPC nunca pode bloquear:
+
+- Scryfall;
+- uploads;
+- projetos;
+- PDF;
+- export.
+
+---
+
+## 80. Algoritmo final dos cantos do bleed
+
+O conceito está fechado:
+
+> o trim original nunca deve ser ampliado ou recortado para criar bleed.
+
+A implementação exata dos cantos deve ser decidida através de comparação visual.
+
+Candidatos a testar:
+
+- stretch radial;
+- combinação de edge stretch horizontal/vertical;
+- corner patch derivado da região local;
+- mirror corner;
+- interpolação/blend entre duas bordas.
+
+Fixtures obrigatórias:
+
+- canto preto;
+- canto branco;
+- frame antigo;
+- borderless;
+- full-art;
+- texto próximo da borda;
+- gradiente;
+- textura;
+- canto com elemento de alto contraste.
+
+Critérios:
+
+- nenhuma alteração no trim;
+- baixa visibilidade da extensão;
+- ausência de costura;
+- ausência de artefato no canto;
+- bom resultado em bleed pequeno, especialmente em torno de 0.625 mm;
+- desempenho aceitável.
+
+O modo final deve ser escolhido com testes lado a lado e armazenado como algoritmo versionado para reprodutibilidade.
+
+---
+
+## 81. Defaults e limites de campos
+
+Valores padrão devem ser tratados como configuração de produto, não espalhados pelo código.
+
+Criar um módulo único, por exemplo:
+
+```text
+core/defaults/
+```
+
+ou equivalente.
+
+Defaults que precisam existir explicitamente:
+
+- formato de carta;
+- bleed;
+- page size;
+- orientação;
+- gaps;
+- layout mode;
+- DPI mode;
+- cut guide settings;
+- registration settings;
+- back policy;
+- calibration step;
+- preview quality;
+- export mode.
+
+Regras:
+
+- defaults devem poder ser alterados sem modificar o engine;
+- projetos existentes preservam os valores usados;
+- atualizar default global não deve alterar projeto antigo;
+- limites de UI não podem introduzir perda silenciosa;
+- campos físicos devem aceitar entrada decimal precisa.
+
+Exemplo:
+
+```text
+DPI default:
+Original / Sem limite
+
+Calibration default step:
+0.100 mm
+Disponíveis:
+1 / 0.1 / 0.01 / 0.001 mm
+```
+
+---
+
+## 82. Web local vs aplicativo desktop
+
+A arquitetura deve manter o core independente da camada de empacotamento.
+
+Primeira meta:
+
+```text
+Aplicação local funcional
+```
+
+O desenvolvimento pode iniciar como aplicação web local.
+
+Depois comparar empacotamento desktop.
+
+Critérios para decidir:
+
+- acesso seguro e conveniente a arquivos/pastas;
+- drag & drop;
+- file picker;
+- abrir .studio3;
+- acesso a filesystem;
+- SQLite;
+- performance;
+- Worker Threads;
+- auto-update;
+- tamanho do bundle;
+- experiência no Windows;
+- complexidade de manutenção.
+
+O core não deve depender diretamente de APIs específicas do browser ou de um runtime desktop.
+
+Criar abstrações para:
+
+- filesystem;
+- dialogs;
+- open external file;
+- persistent data directory.
+
+Assim a UI pode migrar para um shell desktop sem reescrever engines.
+
+---
+
+## 83. Color management / ICC
+
+Color management avançado não é requisito para o primeiro PDF funcional, mas deve estar previsto na arquitetura.
+
+Regra inicial:
+
+- não aplicar "melhorias" automáticas;
+- não alterar saturação;
+- não alterar contraste;
+- não alterar gamma silenciosamente;
+- preservar profiles/metadata relevantes quando possível;
+- não converter espaço de cor sem necessidade.
+
+Fase posterior deve avaliar:
+
+- ICC input profile;
+- printer/paper ICC profile;
+- soft proof;
+- conversão RGB/CMYK quando realmente necessária;
+- rendering intent;
+- embedding de output intent no PDF;
+- preservação de perfis em imagens originais.
+
+Critério:
+
+> color management nunca pode ser aplicado silenciosamente de forma que altere a aparência da arte sem o usuário saber.
+
+A UI futura pode oferecer:
+
+```text
+Color Management
+
+○ Preservar original
+○ Usar perfil da impressora/papel
+○ Avançado
+```
+
+Default inicial:
+
+```text
+Preservar original
+```
+
+---
+
+## 84. Spikes técnicos obrigatórios
+
+Antes de consolidar decisões que dependem de comportamento externo ou qualidade visual, criar pequenos spikes isolados.
+
+Spikes previstos:
+
+### OCR Spike
+Comparar bibliotecas/modelos com cartas reais.
+
+### MPC Spike
+Validar busca/download/IDs e estabilidade da integração.
+
+### Bleed Corner Spike
+Gerar matriz visual com múltiplos algoritmos.
+
+### PDF Fidelity Spike
+Confirmar JPEG passthrough, PNG lossless e SVG vetorial.
+
+### Desktop Packaging Spike
+Comparar manutenção/performance/acesso ao filesystem.
+
+### ICC Spike
+Testar preservação e transformação de profiles sem comprometer o pipeline lossless.
+
+Cada spike deve gerar:
+
+- código descartável ou isolado;
+- resultados;
+- benchmark;
+- conclusão documentada.
+
+Não misturar spike experimental diretamente no engine de produção sem decisão registrada.
+
+---
+
+## 85. Registro de decisões técnicas
+
+Criar diretório:
+
+```text
+docs/decisions/
+```
+
+Usar ADRs simples para decisões relevantes.
+
+Exemplos:
+
+```text
+0001-pdf-engine.md
+0002-ocr-engine.md
+0003-mpc-provider.md
+0004-bleed-corner-algorithm.md
+0005-desktop-packaging.md
+0006-color-management.md
+```
+
+Cada decisão deve registrar:
+
+- contexto;
+- alternativas;
+- testes;
+- decisão;
+- consequências;
+- data;
+- versão relevante.
+
+Isso evita que futuros agentes "redescubram" ou revertam decisões sem saber por quê.
+
+---
+
 # PARTE XXIV — PRIMEIRA TAREFA RECOMENDADA
 
 O primeiro agente deve começar por:
