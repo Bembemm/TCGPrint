@@ -1419,24 +1419,28 @@ Não exigir identidade de bytes do arquivo inteiro; exigir identidade de pixels 
 
 # PARTE VIII — LAYOUT ENGINE
 
-## 32. Layout automático
+## 32. Modos de layout
 
-Entrada:
+O engine deve suportar três modos:
 
-```ts
-interface LayoutRequest {
-  paper;
-  margins;
-  cardFormat;
-  bleedMm;
-  horizontalGapMm;
-  verticalGapMm;
-  reservedZones;
-  templateGeometry?;
-}
+```text
+○ Automático
+○ Manual
+○ Baseado em template
 ```
 
-Calcular linhas/colunas pelo espaço disponível.
+### Automático
+
+Calcular automaticamente linhas/colunas pelo espaço disponível considerando:
+
+- tamanho da folha;
+- margens;
+- formato da carta;
+- bleed;
+- gaps;
+- registration marks;
+- reserved zones;
+- template ativo.
 
 Não hardcode:
 
@@ -1444,11 +1448,116 @@ Não hardcode:
 A4 = 3 × 3
 ```
 
-O engine deve funcionar para qualquer tamanho.
+### Manual
+
+O usuário define explicitamente:
+
+- número de colunas;
+- número de linhas;
+- orientação da página;
+- orientação das cartas.
+
+Exemplos válidos:
+
+```text
+4 × 2 em folha horizontal
+2 × 4 em folha vertical
+3 × 3
+5 × 2
+1 × 8
+```
+
+Isso é requisito importante para plotter/Silhouette e fluxos de corte específicos.
+
+### Baseado em template
+
+Quando houver template de corte, a geometria do template pode definir os slots e posições exatas.
 
 ---
 
-## 33. Espaçamento
+## 33. LayoutRequest
+
+Modelo sugerido:
+
+```ts
+type LayoutMode = "auto" | "manual" | "template";
+
+interface LayoutRequest {
+  mode: LayoutMode;
+
+  paper;
+  margins;
+  cardFormat;
+
+  bleedMm: number;
+  horizontalGapMm: number;
+  verticalGapMm: number;
+
+  pageOrientation: "portrait" | "landscape";
+  cardOrientation: "portrait" | "landscape";
+
+  manualColumns?: number;
+  manualRows?: number;
+
+  reservedZones;
+  templateGeometry?;
+}
+```
+
+---
+
+## 34. Validação do layout manual
+
+Mesmo no modo manual, o sistema deve validar se a grade escolhida cabe fisicamente.
+
+Validar:
+
+- largura total;
+- altura total;
+- margens;
+- bleed;
+- gaps;
+- registration marks;
+- reserved zones;
+- limites do template.
+
+Se não couber, mostrar o motivo e impedir export incorreto.
+
+Exemplo:
+
+```text
+Layout 4 × 3 não cabe em A4 horizontal.
+
+Excesso horizontal: 2.41 mm
+Excesso vertical: 0.00 mm
+```
+
+Não corrigir silenciosamente reduzindo cartas, DPI ou escala física.
+
+---
+
+## 35. Orientações independentes
+
+Separar:
+
+- orientação da página;
+- orientação das cartas;
+- orientação das registration marks;
+- orientação/flip do duplex.
+
+Exemplo válido:
+
+```text
+Página: Landscape
+Grid: 4 × 2
+Cartas: Portrait
+Registration: Landscape
+Duplex flip: Long edge
+```
+
+---
+
+## 36. Espaçamento
 
 Configurar independentemente:
 
@@ -1459,7 +1568,7 @@ Permitir valores decimais em mm.
 
 ---
 
-## 34. Slots desativados
+## 37. Slots desativados
 
 Permitir skip de posições.
 
@@ -2484,40 +2593,470 @@ Criar testes de correspondência frente/verso com fixtures numeradas.
 
 ---
 
-# PARTE XV — CALIBRAÇÃO DE IMPRESSORA
+# PARTE XV — CALIBRAÇÃO DE IMPRESSORA E REGISTRO FRENTE/VERSO
 
-## 57. Printer profiles
+## 57. Objetivo
 
-Modelo:
+Impressão duplex pode apresentar desalinhamento entre frente e verso mesmo quando o PDF está geometricamente correto.
+
+O programa deve tratar isso como **registro de impressão**, separado do layout das cartas.
+
+Problemas a corrigir:
+
+- deslocamento horizontal;
+- deslocamento vertical;
+- rotação;
+- diferença de escala horizontal;
+- diferença de escala vertical;
+- pequeno skew/shear quando necessário.
+
+A calibração nunca deve alterar o tamanho nominal da carta no projeto. Ela é uma transformação aplicada à página/lado no momento do export.
+
+---
+
+## 58. Precisão dos ajustes
+
+Todos os offsets lineares devem aceitar entrada manual com precisão mínima de:
+
+```text
+0.001 mm
+```
+
+Exemplos:
+
+```text
++0.001 mm
+-0.037 mm
++0.125 mm
+-0.683 mm
++1.247 mm
+```
+
+Não limitar o usuário a passos de 1 mm ou 0.1 mm.
+
+A interface deve oferecer nudges:
+
+```text
+Micro   ±0.001 mm
+Fine    ±0.010 mm
+Normal  ±0.100 mm
+Coarse  ±1.000 mm
+```
+
+O campo continua aceitando valor digitado livremente.
+
+**Importante:** aceitar 0.001 mm não significa que a impressora possua repetibilidade mecânica de 1 micrômetro. A granularidade fina serve para não introduzir uma limitação artificial no software e para permitir encontrar o melhor ajuste médio possível.
+
+---
+
+## 59. Representação interna de alta precisão
+
+Para evitar acúmulo de erro por arredondamento em ajustes muito pequenos, preferir armazenar offsets de calibração como inteiro em micrômetros ou Decimal.
+
+Exemplo:
+
+```text
+1 µm = 0.001 mm
+
+-683 µm = -0.683 mm
+```
+
+A UI continua mostrando milímetros.
+
+A geometria física geral do projeto continua sendo expressa em mm; esta representação de micrômetros é específica para valores finos de calibração.
+
+---
+
+## 60. Ajustes independentes por lado
+
+Permitir configurar frente e verso separadamente.
+
+Modelo sugerido:
 
 ```ts
-interface PrinterProfile {
-  id: string;
-  name: string;
-
-  offsetXmm: number;
-  offsetYmm: number;
+interface SideCalibration {
+  offsetXUm: number;
+  offsetYUm: number;
 
   rotationDeg: number;
 
   scaleX: number;
   scaleY: number;
+
+  skewXDeg?: number;
+  skewYDeg?: number;
 }
+
+interface PrinterProfile {
+  id: string;
+  name: string;
+
+  front: SideCalibration;
+  back: SideCalibration;
+
+  paperSize: string;
+  pageOrientation: "portrait" | "landscape";
+
+  duplexMode:
+    | "manual-long-edge"
+    | "manual-short-edge"
+    | "automatic-long-edge"
+    | "automatic-short-edge"
+    | "single-sided";
+
+  mediaType?: string;
+  printQualityProfile?: string;
+  feedSource?: string;
+
+  notes?: string;
+}
+```
+
+Default:
+
+```text
+Front = identidade / sem correção
+Back  = correção relativa à frente
+```
+
+Mas a arquitetura permite corrigir ambos quando necessário.
+
+---
+
+## 61. Offset X/Y
+
+Controles básicos:
+
+```text
+BACK OFFSET
+
+X: -0.683 mm
+Y: +0.247 mm
+```
+
+Convenção visual deve ser inequívoca:
+
+```text
++X → direita
+-X → esquerda
+
++Y → cima
+-Y → baixo
+```
+
+Mostrar essa convenção na própria UI.
+
+A transformação deve respeitar a orientação física da página traseira após o flip escolhido.
+
+---
+
+## 62. Rotação
+
+Um simples X/Y não resolve quando um canto está alinhado e o outro não.
+
+Permitir:
+
+```text
+Rotation
++0.000°
+```
+
+Entrada manual de alta precisão.
+
+Sugestão de step:
+
+```text
+0.001°
+```
+
+A rotação deve ser aplicada em torno do centro físico da página ou de uma âncora explicitamente definida.
+
+Não rotacionar individualmente cada carta para corrigir registro de folha.
+
+---
+
+## 63. Escala X/Y
+
+Se o topo estiver alinhado mas houver erro crescente em direção ao fim da página, pode existir diferença de escala/alimentação.
+
+Permitir:
+
+```text
+Scale X: 1.000000
+Scale Y: 1.000000
+```
+
+ou UI equivalente:
+
+```text
+Scale X correction: +0.0000 %
+Scale Y correction: +0.0000 %
+```
+
+X e Y devem ser independentes.
+
+Nunca confundir esta calibração com resize das imagens ou redução do tamanho nominal das cartas.
+
+A escala é aplicada à geometria da página de impressão para corrigir registro físico.
+
+---
+
+## 64. Skew / shear avançado
+
+Modo avançado opcional.
+
+Usar somente quando medições indicarem que translation + rotation + scale não conseguem alinhar todos os pontos.
+
+Permitir correção de skew/shear pequena.
+
+Não expor isso no modo básico.
+
+---
+
+## 65. Perfil específico por condições de impressão
+
+O mesmo offset pode mudar conforme:
+
+- impressora;
+- tamanho do papel;
+- orientação;
+- tipo/espessura do papel;
+- bandeja/feed source;
+- qualidade/modo do driver;
+- long-edge vs short-edge;
+- forma como a folha é recolocada em duplex manual.
+
+Portanto não ter apenas um "offset global".
+
+Exemplos de profiles:
+
+```text
+Epson L1250 — A4 Photo Paper — Landscape — Manual Long Edge
+Epson L1250 — A4 Matte — Portrait — Manual Long Edge
+Epson L1250 — Letter — Portrait — Manual Short Edge
+```
+
+O projeto referencia o profile utilizado.
+
+---
+
+## 66. Calibration sheet
+
+Gerar folha específica para medir registro.
+
+Incluir:
+
+- cruz central;
+- alvos nos quatro cantos;
+- réguas X/Y;
+- grids;
+- identificadores front/back;
+- marcas de rotação;
+- escalas para detectar crescimento de erro;
+- instrução de flip/reinserção.
+
+A frente e o verso devem usar marcas complementares que possam ser comparadas contra luz.
+
+---
+
+## 67. Calibration Wizard
+
+Fluxo recomendado:
+
+```text
+1. Escolher impressora/profile
+2. Escolher papel e orientação
+3. Escolher long-edge / short-edge
+4. Gerar Calibration PDF
+5. Imprimir frente
+6. Recolocar folha exatamente como indicado
+7. Imprimir verso
+8. Medir pontos
+9. Informar desvios
+10. Calcular transformação
+11. Gerar Verification PDF
+12. Repetir ajuste fino se necessário
+13. Salvar profile
 ```
 
 ---
 
-## 58. Calibration sheet
+## 68. Modos de calibração
 
-Gerar PDF de calibração com:
+### Simple
 
-- cruzes;
-- régua;
-- marcas numeradas;
-- frente;
-- verso.
+Usuário informa somente:
 
-Permitir registrar o resultado e aplicar ao perfil.
+```text
+X
+Y
+Rotation
+```
+
+Adequado para a maioria dos casos.
+
+### Advanced
+
+Usar medições de:
+
+- centro;
+- top-left;
+- top-right;
+- bottom-left;
+- bottom-right.
+
+Com esses pontos, o sistema estima:
+
+- X/Y;
+- rotação;
+- scale X;
+- scale Y;
+- skew quando necessário.
+
+Não obrigar o usuário a calcular manualmente os parâmetros.
+
+---
+
+## 69. Ajuste visual interativo
+
+A tela de calibração deve permitir overlay:
+
+```text
+Front
++
+Back com opacidade
+```
+
+e controles:
+
+```text
+X       [-] -0.683 mm [+]
+Y       [-] +0.247 mm [+]
+Rotate  [-] +0.031°   [+]
+Scale X     1.000120
+Scale Y     0.999870
+```
+
+Adicionar seletor de step:
+
+```text
+[1 mm] [0.1 mm] [0.01 mm] [0.001 mm]
+```
+
+Isso permite ajuste rápido grosso e depois refinamento fino.
+
+---
+
+## 70. Aplicação no PDF
+
+A calibração deve ser aplicada através de transformação geométrica do conteúdo da página.
+
+Não:
+
+- reamostrar as imagens;
+- reduzir DPI;
+- recomprimir;
+- alterar originals.
+
+Para translation/rotation/scale no PDF, usar transformation matrix do conteúdo sempre que possível.
+
+Assim uma JPEG em passthrough continua com seus pixels originais e apenas sua posição física muda.
+
+---
+
+## 71. Ordem das transformações
+
+Definir e testar explicitamente a ordem.
+
+Sugestão:
+
+```text
+Layout nominal
+      ↓
+Duplex mirror/flip
+      ↓
+Scale calibration
+      ↓
+Skew calibration
+      ↓
+Rotation calibration
+      ↓
+X/Y translation
+      ↓
+PDF page
+```
+
+Não espalhar correções em vários módulos.
+
+Um único `PrintCalibrationTransform` deve produzir a transformação final.
+
+---
+
+## 72. Tolerância e repetibilidade
+
+A UI deve distinguir:
+
+```text
+Configured correction
+vs
+Observed repeatability
+```
+
+Exemplo:
+
+```text
+Correction:
+X -0.683 mm
+Y +0.247 mm
+
+Últimos testes:
+variação X ≈ 0.10 mm
+variação Y ≈ 0.18 mm
+```
+
+Se a impressora variar mecanicamente de folha para folha, não tentar "corrigir" isso aumentando artificialmente a precisão matemática.
+
+Permitir armazenar várias medições e mostrar média/min/max futuramente.
+
+---
+
+## 73. Presets e duplicação de profile
+
+Permitir:
+
+- criar;
+- duplicar;
+- renomear;
+- exportar/importar;
+- selecionar por projeto.
+
+Nunca alterar retroativamente um projeto antigo sem confirmação se o profile tiver sido recalibrado.
+
+Guardar versão/hash ou snapshot dos valores usados no export.
+
+---
+
+## 74. Testes obrigatórios de calibração
+
+Testar:
+
+- +X / -X;
+- +Y / -Y;
+- 0.001 mm;
+- valores fracionários arbitrários;
+- rotação positiva/negativa;
+- scale X/Y;
+- long-edge;
+- short-edge;
+- portrait;
+- landscape;
+- front-only;
+- back-only;
+- duplex;
+- combinação com template de corte;
+- combinação com registration marks.
+
+Também validar que aplicar apenas translation/rotation/scale por matriz PDF não altera os pixels/streams das imagens quando não houver outro processamento.
 
 ---
 
@@ -3018,15 +3557,26 @@ Implementar:
 
 ---
 
-## Fase 13 — Calibration
+## Fase 13 — Precision Print Calibration
 
 Implementar:
 
-- printer profiles;
-- offset X/Y;
+- printer profiles por papel/orientação/duplex mode;
+- offset X/Y independente de front/back;
+- input com precisão de 0.001 mm;
+- nudges 1 / 0.1 / 0.01 / 0.001 mm;
 - rotation;
-- scale;
-- calibration sheet.
+- scale X/Y;
+- skew avançado opcional;
+- calibration sheet;
+- calibration wizard;
+- overlay front/back;
+- verification sheet;
+- snapshot/versionamento do profile usado.
+
+### Critério de conclusão
+
+Um desalinhamento duplex consistente deve poder ser compensado sem editar imagens, sem reduzir DPI e sem alterar o layout nominal das cartas.
 
 ---
 
@@ -3193,6 +3743,9 @@ Qualquer mudança nestes itens deve ser explicitamente documentada:
 - DFCs conhecidas devem auto-resolver front/back quando os providers fornecerem ambas as faces;
 - exportação deve permitir front-only, back-only, front/back separados e duplex;
 - overrides manuais de back nunca podem ser sobrescritos silenciosamente.
+- calibração de impressão deve aceitar offsets até 0.001 mm sem quantização artificial;
+- calibração deve ser aplicada por transformação de página, preservando os pixels/streams originais quando possível;
+- layout manual deve permitir linhas/colunas e orientação escolhidas pelo usuário.
 
 ---
 
