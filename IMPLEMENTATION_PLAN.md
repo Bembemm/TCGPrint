@@ -5,6 +5,7 @@
 > **Status:** planejamento inicial consolidado  
 > **Escopo inicial:** Magic: The Gathering, execução local, foco em impressão de alta qualidade e corte preciso  
 > **Arquitetura:** preparada para outros TCGs posteriormente
+> **Auditoria do plano:** consistência estrutural revisada antes da implementação
 
 ---
 
@@ -92,6 +93,20 @@ Observações:
 - Silhouette Card Maker é referência para templates, registration marks, offsets/calibração e fluxo de corte.
 - Proxxied é referência para experiência de seleção visual de artes, projetos e fluxo de geração.
 - MPC Autofill é referência para seleção de artes e preservação de escolhas de imagem em XML.
+
+---
+
+## Fonte de verdade do projeto
+
+Este documento é a especificação principal de implementação enquanto não houver ADR posterior que altere explicitamente uma decisão.
+
+Em caso de conflito:
+
+1. ADR aprovado mais recente vence;
+2. depois, a seção mais específica deste documento;
+3. depois, a regra mais conservadora para qualidade, dimensão física e preservação de dados.
+
+Não manter duas regras contraditórias ativas no código.
 
 ---
 
@@ -1243,7 +1258,7 @@ Critérios:
 
 # PARTE VII — IMAGE ENGINE
 
-## 24. Regra de ouro
+## 35. Regra de ouro
 
 **O arquivo original nunca é modificado.**
 
@@ -1260,7 +1275,7 @@ Qualquer transformação cria uma nova versão derivada.
 
 ---
 
-## 25. Bleed
+## 36. Bleed
 
 Bleed configurável:
 
@@ -1278,7 +1293,7 @@ Quando um template importado tiver metadata/recomendação própria, o projeto p
 
 ---
 
-## 26. Subtle Edge Stretch
+## 37. Subtle Edge Stretch
 
 Modo padrão de bleed.
 
@@ -1322,7 +1337,7 @@ Visualmente:
 
 ---
 
-## 27. Faixa de origem
+## 38. Faixa de origem
 
 O Edge Stretch deve usar uma faixa pequena da borda para que o esticamento seja discreto caso o corte passe ligeiramente da área original.
 
@@ -1343,7 +1358,7 @@ Os valores finais devem ser definidos por testes visuais.
 
 ---
 
-## 28. Cantos
+## 39. Cantos
 
 Tratar separadamente:
 
@@ -1361,7 +1376,7 @@ Implementar estratégia própria para quatro cantos.
 
 ---
 
-## 29. Outros modos de bleed
+## 40. Outros modos de bleed
 
 Suportar posteriormente:
 
@@ -1373,7 +1388,7 @@ Suportar posteriormente:
 
 ---
 
-## 30. Bleed e imagens já preparadas
+## 41. Bleed e imagens já preparadas
 
 Não tentar decidir tudo por uma heurística invisível.
 
@@ -1390,7 +1405,7 @@ Providers podem fornecer defaults, mas o usuário pode sobrescrever.
 
 ---
 
-## 31. Teste obrigatório de integridade
+## 42. Teste obrigatório de integridade
 
 Criar teste automatizado:
 
@@ -1419,7 +1434,7 @@ Não exigir identidade de bytes do arquivo inteiro; exigir identidade de pixels 
 
 # PARTE VIII — LAYOUT ENGINE
 
-## 32. Modos de layout
+## 43. Modos de layout
 
 O engine deve suportar três modos:
 
@@ -1475,7 +1490,7 @@ Quando houver template de corte, a geometria do template pode definir os slots e
 
 ---
 
-## 33. LayoutRequest
+## 44. LayoutRequest
 
 Modelo sugerido:
 
@@ -1506,7 +1521,7 @@ interface LayoutRequest {
 
 ---
 
-## 34. Validação do layout manual
+## 45. Validação do layout manual
 
 Mesmo no modo manual, o sistema deve validar se a grade escolhida cabe fisicamente.
 
@@ -1536,7 +1551,7 @@ Não corrigir silenciosamente reduzindo cartas, DPI ou escala física.
 
 ---
 
-## 35. Orientações independentes
+## 46. Orientações independentes
 
 Separar:
 
@@ -1557,7 +1572,7 @@ Duplex flip: Long edge
 
 ---
 
-## 36. Espaçamento
+## 47. Espaçamento
 
 Configurar independentemente:
 
@@ -1568,7 +1583,7 @@ Permitir valores decimais em mm.
 
 ---
 
-## 37. Slots desativados
+## 48. Slots desativados
 
 Permitir skip de posições.
 
@@ -1586,7 +1601,7 @@ Exemplo:
 
 # PARTE IX — CUT GUIDE ENGINE
 
-## 35. Tipos de guia
+## 49. Tipos de guia
 
 Implementar:
 
@@ -1611,7 +1626,7 @@ Tudo deve ser definido em unidades físicas.
 
 ---
 
-## 36. Guias vetoriais
+## 50. Guias vetoriais
 
 As linhas de corte no PDF devem ser vetoriais.
 
@@ -1619,7 +1634,7 @@ Espessura em mm/points, não pixels.
 
 ---
 
-## 37. Guilhotina
+## 51. Guilhotina
 
 Modo de linhas contínuas ao longo da folha para facilitar:
 
@@ -1631,7 +1646,7 @@ Modo de linhas contínuas ao longo da folha para facilitar:
 
 # PARTE X — SILHOUETTE E TEMPLATES
 
-## 38. Template Library
+## 52. Template Library
 
 Criar biblioteca local de templates.
 
@@ -1658,7 +1673,7 @@ Campos:
 
 ---
 
-## 39. .studio3
+## 53. .studio3
 
 Tratar .studio3 como arquivo oficial/opaco associado ao template.
 
@@ -1676,7 +1691,7 @@ Se necessário, permitir "Abrir/mostrar arquivo para usar no Silhouette Studio".
 
 ---
 
-## 40. DXF e SVG
+## 54. DXF e SVG
 
 Quando houver DXF/SVG correspondente, usar como geometria legível.
 
@@ -1692,7 +1707,7 @@ Quando não houver, permitir configuração manual da geometria do template e sa
 
 ---
 
-## 41. Template Package
+## 55. Template Package
 
 Representação sugerida:
 
@@ -1721,7 +1736,7 @@ A metadata não deve alterar o .studio3 original.
 
 ---
 
-## 42. Versionamento de template
+## 56. Versionamento de template
 
 Projeto deve armazenar:
 
@@ -1735,7 +1750,7 @@ Isso é necessário para reimpressões reproduzíveis.
 
 ---
 
-## 43. Registration marks
+## 57. Registration marks
 
 Suportar:
 
@@ -1755,7 +1770,7 @@ Criar reserved/no-card zones no layout.
 
 # PARTE XI — PDF ENGINE
 
-## 44. LosslessPdfEngine — requisito obrigatório
+## 58. LosslessPdfEngine — requisito obrigatório
 
 O PDF final é parte crítica do produto. O objetivo **não é economizar espaço em disco**. O objetivo é preservar toda a informação disponível na fonte.
 
@@ -1798,7 +1813,7 @@ PDF Page
 
 ---
 
-## 45. Política por formato de imagem
+## 59. Política por formato de imagem
 
 ### JPEG
 
@@ -1863,7 +1878,7 @@ Se houver suporte direto lossless ao formato no futuro, preferir o caminho diret
 
 ---
 
-## 46. Imagens que precisam de bleed/processamento
+## 60. Imagens que precisam de bleed/processamento
 
 Quando não houver bleed ou transformação, usar o caminho mais direto possível descrito acima.
 
@@ -1908,7 +1923,7 @@ Não existe modo de criar novos pixels de bleed e simultaneamente manter o arqui
 
 ---
 
-## 47. Proibição de otimizações destrutivas
+## 61. Proibição de otimizações destrutivas
 
 Não implementar no export final:
 
@@ -1932,7 +1947,7 @@ MAXIMUM / SOURCE QUALITY
 
 ---
 
-## 48. Verificação de preservação
+## 62. Verificação de preservação
 
 Criar testes específicos do `LosslessPdfEngine`.
 
@@ -1975,7 +1990,7 @@ Verificar que o PDF contém operadores/paths vetoriais e que não foi substituí
 
 ---
 
-## 49. DPI efetivo
+## 63. DPI efetivo
 
 Exibir DPI real baseado em:
 
@@ -1996,7 +2011,7 @@ DPI é um diagnóstico da relação entre pixels existentes e tamanho físico, n
 
 ---
 
-## 50. Indicador de qualidade
+## 64. Indicador de qualidade
 
 Sugestão:
 
@@ -2011,7 +2026,7 @@ Informativo, não bloqueante.
 
 ---
 
-## 51. Resolução / DPI de saída
+## 65. Resolução / DPI de saída
 
 **Não existir limite de resolução no modo padrão.**
 
@@ -2048,45 +2063,9 @@ Se futuramente houver um modo de arquivo reduzido, ele deve ficar separado do mo
 
 ---
 
-## 47. DPI efetivo
-
-Exibir DPI real baseado em:
-
-- pixel dimensions;
-- tamanho físico de impressão.
-
-Exemplo:
-
-```text
-745 × 1040 px
-63.5 × 88.9 mm
-≈ 298 DPI
-```
-
-Não vender a ideia de "PDF 1200 DPI" se a origem tem ~300 DPI.
-
----
-
-## 48. Indicador de qualidade
-
-Sugestão:
-
-```text
-600+ DPI   Excelente
-300+ DPI   Boa
-200–299    Aviso
-<200       Baixa
-```
-
-Informativo, não bloqueante.
-
----
-
-
-
 # PARTE XII — PREVIEW
 
-## 50. Preview separado do export
+## 66. Preview separado do export
 
 Preview deve usar thumbnails/cache.
 
@@ -2115,7 +2094,7 @@ O preview nunca deve ser a fonte do PDF final.
 
 ---
 
-## 51. Galerias virtualizadas
+## 67. Galerias virtualizadas
 
 Galerias de printings e listas grandes devem renderizar apenas itens visíveis + buffer.
 
@@ -2125,7 +2104,7 @@ Isso é importante para cartas com muitas printings e projetos com centenas de c
 
 # PARTE XIII — PROJETOS
 
-## 52. Persistência
+## 68. Persistência
 
 SQLite.
 
@@ -2144,7 +2123,7 @@ Tabelas sugeridas:
 
 ---
 
-## 53. Autosave
+## 69. Autosave
 
 Salvar automaticamente:
 
@@ -2170,7 +2149,7 @@ Salvar automaticamente:
 
 ---
 
-## 54. Undo / Redo
+## 70. Undo / Redo
 
 Suportar:
 
@@ -2187,7 +2166,7 @@ Suportar:
 
 # PARTE XIII-A — BACKS, DFC E SINALIZAÇÃO DE DUPLA FACE
 
-## 55. Back selection por carta
+## 71. Back selection por carta
 
 Cada carta deve permitir configurar explicitamente o verso.
 
@@ -2249,7 +2228,7 @@ interface ProjectCard {
 
 ---
 
-## 56. Detecção e sinalização de cartas dupla-face
+## 72. Detecção e sinalização de cartas dupla-face
 
 Toda carta identificada como dupla-face deve ser marcada visualmente na interface.
 
@@ -2304,7 +2283,7 @@ O usuário pode corrigir manualmente quando necessário.
 
 ---
 
-## 57. Resolução automática de back para DFC
+## 73. Resolução automática de back para DFC
 
 Ao identificar uma DFC conhecida:
 
@@ -2342,7 +2321,7 @@ MPC Autofill
 
 ---
 
-## 58. Overrides e proteção contra sobrescrita
+## 74. Overrides e proteção contra sobrescrita
 
 Se o usuário selecionar manualmente um verso, marcar a seleção como override.
 
@@ -2364,7 +2343,7 @@ interface SideResolutionState {
 
 ---
 
-## 59. Verso padrão do projeto
+## 75. Verso padrão do projeto
 
 Configuração global:
 
@@ -2386,7 +2365,7 @@ Regras:
 
 ---
 
-## 60. Biblioteca de backs
+## 76. Biblioteca de backs
 
 Criar biblioteca local reutilizável.
 
@@ -2414,7 +2393,7 @@ Sem recompressão destrutiva.
 
 ---
 
-## 61. Preview de frente e verso
+## 77. Preview de frente e verso
 
 O preview precisa permitir alternar:
 
@@ -2438,7 +2417,7 @@ A visualização do verso deve usar a mesma lógica de layout que o export corre
 
 ---
 
-## 62. Modos de exportação
+## 78. Modos de exportação
 
 Na tela de export:
 
@@ -2500,7 +2479,7 @@ A escolha entre PDFs separados e duplex não pode alterar as artes escolhidas.
 
 ---
 
-## 63. Cards sem back no export de verso
+## 79. Cards sem back no export de verso
 
 O comportamento deve ser configurável.
 
@@ -2526,7 +2505,7 @@ Nunca inventar um back silenciosamente.
 
 ---
 
-## 64. Validação pré-export para DFC/backs
+## 80. Validação pré-export para DFC/backs
 
 Antes de exportar `back`, `front + back` ou `duplex`, mostrar:
 
@@ -2547,7 +2526,7 @@ Os itens sem verso devem aparecer como warning clicável.
 
 ---
 
-## 65. Testes obrigatórios
+## 81. Testes obrigatórios
 
 Criar testes para:
 
@@ -2573,7 +2552,7 @@ Critério de conclusão:
 
 # PARTE XIV — DUPLEX
 
-## 66. Mirror e page pairing
+## 82. Mirror e page pairing
 
 A seleção de fronts/backs e os modos de exportação estão definidos na PARTE XIII-A.
 
@@ -2595,7 +2574,7 @@ Criar testes de correspondência frente/verso com fixtures numeradas.
 
 # PARTE XV — CALIBRAÇÃO DE IMPRESSORA E REGISTRO FRENTE/VERSO
 
-## 57. Objetivo
+## 83. Objetivo
 
 Impressão duplex pode apresentar desalinhamento entre frente e verso mesmo quando o PDF está geometricamente correto.
 
@@ -2614,7 +2593,7 @@ A calibração nunca deve alterar o tamanho nominal da carta no projeto. Ela é 
 
 ---
 
-## 58. Precisão dos ajustes
+## 84. Precisão dos ajustes
 
 Todos os offsets lineares devem aceitar entrada manual com precisão mínima de:
 
@@ -2649,7 +2628,7 @@ O campo continua aceitando valor digitado livremente.
 
 ---
 
-## 59. Representação interna de alta precisão
+## 85. Representação interna de alta precisão
 
 Para evitar acúmulo de erro por arredondamento em ajustes muito pequenos, preferir armazenar offsets de calibração como inteiro em micrômetros ou Decimal.
 
@@ -2667,7 +2646,7 @@ A geometria física geral do projeto continua sendo expressa em mm; esta represe
 
 ---
 
-## 60. Ajustes independentes por lado
+## 86. Ajustes independentes por lado
 
 Permitir configurar frente e verso separadamente.
 
@@ -2723,7 +2702,7 @@ Mas a arquitetura permite corrigir ambos quando necessário.
 
 ---
 
-## 61. Offset X/Y
+## 87. Offset X/Y
 
 Controles básicos:
 
@@ -2750,7 +2729,7 @@ A transformação deve respeitar a orientação física da página traseira apó
 
 ---
 
-## 62. Rotação
+## 88. Rotação
 
 Um simples X/Y não resolve quando um canto está alinhado e o outro não.
 
@@ -2775,7 +2754,7 @@ Não rotacionar individualmente cada carta para corrigir registro de folha.
 
 ---
 
-## 63. Escala X/Y
+## 89. Escala X/Y
 
 Se o topo estiver alinhado mas houver erro crescente em direção ao fim da página, pode existir diferença de escala/alimentação.
 
@@ -2801,7 +2780,7 @@ A escala é aplicada à geometria da página de impressão para corrigir registr
 
 ---
 
-## 64. Skew / shear avançado
+## 90. Skew / shear avançado
 
 Modo avançado opcional.
 
@@ -2813,7 +2792,7 @@ Não expor isso no modo básico.
 
 ---
 
-## 65. Perfil específico por condições de impressão
+## 91. Perfil específico por condições de impressão
 
 O mesmo offset pode mudar conforme:
 
@@ -2840,7 +2819,7 @@ O projeto referencia o profile utilizado.
 
 ---
 
-## 66. Calibration sheet
+## 92. Calibration sheet
 
 Gerar folha específica para medir registro.
 
@@ -2859,7 +2838,7 @@ A frente e o verso devem usar marcas complementares que possam ser comparadas co
 
 ---
 
-## 67. Calibration Wizard
+## 93. Calibration Wizard
 
 Fluxo recomendado:
 
@@ -2881,7 +2860,7 @@ Fluxo recomendado:
 
 ---
 
-## 68. Modos de calibração
+## 94. Modos de calibração
 
 ### Simple
 
@@ -2917,7 +2896,7 @@ Não obrigar o usuário a calcular manualmente os parâmetros.
 
 ---
 
-## 69. Ajuste visual interativo
+## 95. Ajuste visual interativo
 
 A tela de calibração deve permitir overlay:
 
@@ -2947,7 +2926,7 @@ Isso permite ajuste rápido grosso e depois refinamento fino.
 
 ---
 
-## 70. Aplicação no PDF
+## 96. Aplicação no PDF
 
 A calibração deve ser aplicada através de transformação geométrica do conteúdo da página.
 
@@ -2964,7 +2943,7 @@ Assim uma JPEG em passthrough continua com seus pixels originais e apenas sua po
 
 ---
 
-## 71. Ordem das transformações
+## 97. Ordem das transformações
 
 Definir e testar explicitamente a ordem.
 
@@ -2992,7 +2971,7 @@ Um único `PrintCalibrationTransform` deve produzir a transformação final.
 
 ---
 
-## 72. Tolerância e repetibilidade
+## 98. Tolerância e repetibilidade
 
 A UI deve distinguir:
 
@@ -3020,7 +2999,7 @@ Permitir armazenar várias medições e mostrar média/min/max futuramente.
 
 ---
 
-## 73. Presets e duplicação de profile
+## 99. Presets e duplicação de profile
 
 Permitir:
 
@@ -3036,7 +3015,7 @@ Guardar versão/hash ou snapshot dos valores usados no export.
 
 ---
 
-## 74. Testes obrigatórios de calibração
+## 100. Testes obrigatórios de calibração
 
 Testar:
 
@@ -3062,7 +3041,7 @@ Também validar que aplicar apenas translation/rotation/scale por matriz PDF nã
 
 # PARTE XVI — PERFORMANCE
 
-## 59. Cache por hash
+## 101. Cache por hash
 
 Exemplo de chave:
 
@@ -3080,7 +3059,7 @@ Se a mesma derivação já existe, reutilizar.
 
 ---
 
-## 60. Worker Threads
+## 102. Worker Threads
 
 Usar processamento concorrente controlado para:
 
@@ -3095,7 +3074,7 @@ Pool baseado em CPU/memória.
 
 ---
 
-## 61. Escalas de teste
+## 103. Escalas de teste
 
 Testar:
 
@@ -3116,7 +3095,7 @@ Medir:
 
 # PARTE XVII — UX
 
-## 62. Editor principal
+## 104. Editor principal
 
 Estrutura conceitual:
 
@@ -3137,7 +3116,7 @@ Estrutura conceitual:
 
 ---
 
-## 63. Básico vs avançado
+## 105. Básico vs avançado
 
 Modo básico:
 
@@ -3164,7 +3143,7 @@ Evitar uma UI com dezenas de controles abertos ao mesmo tempo.
 
 # PARTE XVIII — EXPORTAÇÃO
 
-## 64. Formatos
+## 106. Formatos
 
 Exportar:
 
@@ -3178,7 +3157,7 @@ Quando um template .studio3 estiver associado, manter o arquivo disponível junt
 
 ---
 
-## 65. Verificação pré-export
+## 107. Verificação pré-export
 
 Mostrar resumo:
 
@@ -3202,7 +3181,7 @@ Warnings devem ser claros.
 
 ---
 
-## 66. Aviso de impressão
+## 108. Aviso de impressão
 
 Sempre informar:
 
@@ -3214,7 +3193,7 @@ Essa mensagem deve fazer parte da UI e/ou export summary.
 
 # PARTE XIX — TESTES
 
-## 67. Teste físico de escala
+## 109. Teste físico de escala
 
 Criar arquivo de teste com:
 
@@ -3234,7 +3213,7 @@ Qualquer divergência do driver deve ser documentada.
 
 ---
 
-## 68. Fixtures de imagem
+## 110. Fixtures de imagem
 
 Criar fixtures:
 
@@ -3254,7 +3233,7 @@ Criar fixtures:
 
 ---
 
-## 69. Testes de bleed
+## 111. Testes de bleed
 
 Cobrir:
 
@@ -3272,7 +3251,7 @@ Validar que o trim não muda.
 
 ---
 
-## 70. Testes de geometry
+## 112. Testes de geometry
 
 Cobrir:
 
@@ -3288,7 +3267,7 @@ Cobrir:
 
 ---
 
-## 71. Testes de PDF
+## 113. Testes de PDF
 
 Validar programaticamente:
 
@@ -3302,7 +3281,7 @@ Validar programaticamente:
 
 ---
 
-## 72. Testes de duplex
+## 114. Testes de duplex
 
 Validar frente e verso com fixtures numeradas.
 
@@ -3721,7 +3700,7 @@ corte físico validado
 
 # PARTE XXII — REGRAS PARA AGENTES
 
-## 73. Não alterar decisões críticas silenciosamente
+## 115. Não alterar decisões críticas silenciosamente
 
 Qualquer mudança nestes itens deve ser explicitamente documentada:
 
@@ -3749,7 +3728,7 @@ Qualquer mudança nestes itens deve ser explicitamente documentada:
 
 ---
 
-## 74. Cada fase deve entregar testes
+## 116. Cada fase deve entregar testes
 
 Não considerar uma fase concluída apenas porque a UI "parece funcionar".
 
@@ -3767,7 +3746,7 @@ Especialmente:
 
 ---
 
-## 75. Evitar escopo desnecessário
+## 117. Evitar escopo desnecessário
 
 Não implementar sem necessidade:
 
@@ -3784,7 +3763,7 @@ Priorizar fabricação.
 
 ---
 
-## 76. Não sacrificar qualidade por preview
+## 118. Não sacrificar qualidade por preview
 
 Pode-se usar thumbnails e versões reduzidas na UI.
 
@@ -3797,7 +3776,7 @@ Nunca gerar o PDF final a partir do thumbnail.
 
 ---
 
-## 77. Commits e PRs
+## 119. Commits e PRs
 
 Sugestão para agentes:
 
@@ -3856,7 +3835,7 @@ Agentes não devem escolher silenciosamente uma opção e tornar isso permanente
 
 ---
 
-## 78. OCR para identificação de uploads
+## 120. OCR para identificação de uploads
 
 Objetivo:
 
@@ -3907,7 +3886,7 @@ Antes de fixar a biblioteca:
 
 ---
 
-## 79. Integração online com MPC Autofill
+## 121. Integração online com MPC Autofill
 
 MPC não deve ser requisito para o funcionamento básico do TCGPrint.
 
@@ -3963,7 +3942,7 @@ Falha do MPC nunca pode bloquear:
 
 ---
 
-## 80. Algoritmo final dos cantos do bleed
+## 122. Algoritmo final dos cantos do bleed
 
 O conceito está fechado:
 
@@ -4004,7 +3983,7 @@ O modo final deve ser escolhido com testes lado a lado e armazenado como algorit
 
 ---
 
-## 81. Defaults e limites de campos
+## 123. Defaults e limites de campos
 
 Valores padrão devem ser tratados como configuração de produto, não espalhados pelo código.
 
@@ -4054,7 +4033,7 @@ Disponíveis:
 
 ---
 
-## 82. Web local vs aplicativo desktop
+## 124. Web local vs aplicativo desktop
 
 A arquitetura deve manter o core independente da camada de empacotamento.
 
@@ -4096,7 +4075,7 @@ Assim a UI pode migrar para um shell desktop sem reescrever engines.
 
 ---
 
-## 83. Color management / ICC
+## 125. Color management / ICC
 
 Color management avançado não é requisito para o primeiro PDF funcional, mas deve estar previsto na arquitetura.
 
@@ -4141,7 +4120,7 @@ Preservar original
 
 ---
 
-## 84. Spikes técnicos obrigatórios
+## 126. Spikes técnicos obrigatórios
 
 Antes de consolidar decisões que dependem de comportamento externo ou qualidade visual, criar pequenos spikes isolados.
 
@@ -4176,7 +4155,7 @@ Não misturar spike experimental diretamente no engine de produção sem decisã
 
 ---
 
-## 85. Registro de decisões técnicas
+## 127. Registro de decisões técnicas
 
 Criar diretório:
 
@@ -4212,7 +4191,7 @@ Isso evita que futuros agentes "redescubram" ou revertam decisões sem saber por
 ---
 
 
-# PARTE XXIV — PRE-IMPLEMENTATION HARDENING
+# PARTE XXV — PRE-IMPLEMENTATION HARDENING
 
 Esta seção fecha pontos que costumam causar retrabalho quando só são percebidos depois que o projeto já cresceu.
 
@@ -4220,7 +4199,7 @@ Nenhum agente deve começar uma implementação grande sem respeitar estas regra
 
 ---
 
-## 86. Versionamento do formato de projeto
+## 128. Versionamento do formato de projeto
 
 Todo projeto salvo deve possuir versão explícita de schema.
 
@@ -4254,7 +4233,7 @@ Regras:
 
 ---
 
-## 87. Autosave seguro e recuperação de crash
+## 129. Autosave seguro e recuperação de crash
 
 Autosave não pode corromper o projeto se o programa fechar no meio da gravação.
 
@@ -4290,7 +4269,7 @@ Foi encontrada uma recuperação mais recente.
 
 ---
 
-## 88. Histórico e snapshots de projeto
+## 130. Histórico e snapshots de projeto
 
 Além de Undo/Redo em memória, permitir snapshots persistentes em pontos importantes.
 
@@ -4308,7 +4287,7 @@ Pode ser retenção simples das últimas N versões.
 
 ---
 
-## 89. Deduplicação de assets
+## 131. Deduplicação de assets
 
 Assets originais devem ser content-addressed por hash.
 
@@ -4335,7 +4314,7 @@ Separar:
 
 ---
 
-## 90. Garbage collection de cache
+## 132. Garbage collection de cache
 
 Cache processado pode crescer muito.
 
@@ -4358,7 +4337,7 @@ Cache pode usar:
 
 ---
 
-## 91. Reprodutibilidade de export
+## 133. Reprodutibilidade de export
 
 Todo export importante deve poder registrar um manifest.
 
@@ -4391,7 +4370,7 @@ O manifest pode ser salvo no projeto e opcionalmente exportado como JSON ao lado
 
 ---
 
-## 92. Import report
+## 134. Import report
 
 Toda importação grande deve gerar um resumo antes de alterar o projeto.
 
@@ -4418,7 +4397,7 @@ Nunca esconder falhas individuais em importações de dezenas/centenas de cartas
 
 ---
 
-## 93. Error model
+## 135. Error model
 
 Criar erros tipados por domínio.
 
@@ -4448,7 +4427,7 @@ Não usar um único tratamento genérico para todos os erros.
 
 ---
 
-## 94. Logging e diagnóstico
+## 136. Logging e diagnóstico
 
 Criar logging local estruturado.
 
@@ -4477,7 +4456,7 @@ Adicionar relatório de diagnóstico exportável para facilitar debug por agente
 
 ---
 
-## 95. Performance budgets
+## 137. Performance budgets
 
 Não esperar o programa ficar lento para então pensar em performance.
 
@@ -4497,7 +4476,7 @@ Benchmarks reais devem substituir números arbitrários conforme o projeto evolu
 
 ---
 
-## 96. Cancelamento de operações pesadas
+## 138. Cancelamento de operações pesadas
 
 Import, download, OCR, bleed batch e PDF export devem suportar cancelamento quando tecnicamente seguro.
 
@@ -4520,7 +4499,7 @@ Cancelar não pode:
 
 ---
 
-## 97. Progress reporting
+## 139. Progress reporting
 
 Operações longas devem mostrar progresso útil.
 
@@ -4537,7 +4516,7 @@ Não mostrar spinner infinito quando houver quantidade conhecida.
 
 ---
 
-## 98. Dependency policy
+## 140. Dependency policy
 
 Antes de adicionar dependência grande, verificar:
 
@@ -4555,7 +4534,7 @@ Fixar versões de dependências críticas e atualizar deliberadamente.
 
 ---
 
-## 99. Licenças e uso de código de referência
+## 141. Licenças e uso de código de referência
 
 Referências externas não significam autorização para copiar código indiscriminadamente.
 
@@ -4571,7 +4550,7 @@ Criar THIRD_PARTY_NOTICES.md quando houver dependências/assets que exijam atrib
 
 ---
 
-## 100. Fixtures próprias para testes
+## 142. Fixtures próprias para testes
 
 Testes automatizados não devem depender obrigatoriamente de artwork comercial real no repositório.
 
@@ -4589,7 +4568,7 @@ Isso reduz tamanho do repositório e dependência em conteúdo de terceiros.
 
 ---
 
-## 101. Provider contract e degradação
+## 143. Provider contract e degradação
 
 Cada provider deve ter contrato explícito de disponibilidade.
 
@@ -4620,7 +4599,7 @@ O projeto deve ser offline-friendly sempre que os assets necessários já estive
 
 ---
 
-## 102. Cache provenance
+## 144. Cache provenance
 
 Todo asset baixado deve guardar origem.
 
@@ -4645,7 +4624,7 @@ Isso ajuda em:
 
 ---
 
-## 103. Validação de arquivos importados
+## 145. Validação de arquivos importados
 
 Mesmo sendo aplicação local, arquivos podem estar corrompidos ou malformados.
 
@@ -4666,7 +4645,7 @@ Falha em um arquivo não deve derrubar importação inteira quando for possível
 
 ---
 
-## 104. Normalização sem destruição
+## 146. Normalização sem destruição
 
 Metadata pode ser normalizada.
 
@@ -4687,7 +4666,7 @@ Nunca "corrigir" arquivo original no lugar.
 
 ---
 
-## 105. Backup / export de projeto
+## 147. Backup / export de projeto
 
 Além de salvar no banco local, permitir futuramente exportar um projeto portátil.
 
@@ -4716,7 +4695,7 @@ O formato precisa possuir schema version.
 
 ---
 
-## 106. Import de projeto portátil
+## 148. Import de projeto portátil
 
 Ao importar:
 
@@ -4728,7 +4707,7 @@ Ao importar:
 
 ---
 
-## 107. Keyboard-first sem sacrificar touch
+## 149. Keyboard-first sem sacrificar touch
 
 Mesmo com UI simples, operações repetitivas devem aceitar teclado.
 
@@ -4747,7 +4726,7 @@ Mas toda ação deve continuar possível por mouse/touch.
 
 ---
 
-## 108. Acessibilidade funcional
+## 150. Acessibilidade funcional
 
 Mesmo sendo ferramenta pessoal:
 
@@ -4763,7 +4742,7 @@ Isso melhora a própria qualidade da UI.
 
 ---
 
-## 109. Design system mínimo
+## 151. Design system mínimo
 
 Não criar um design system complexo.
 
@@ -4795,7 +4774,7 @@ A aparência deve lembrar ferramenta técnica moderna, não landing page/SaaS.
 
 ---
 
-## 110. Test matrix oficial
+## 152. Test matrix oficial
 
 Antes de considerar release utilizável, cobrir uma matriz mínima.
 
@@ -4865,7 +4844,7 @@ Antes de considerar release utilizável, cobrir uma matriz mínima.
 
 ---
 
-## 111. Release gates
+## 153. Release gates
 
 Nenhuma versão deve ser considerada pronta só porque "abre e exporta".
 
@@ -4886,7 +4865,7 @@ Release utilizável exige:
 
 ---
 
-## 112. Regra final para agentes
+## 154. Regra final para agentes
 
 Se um agente encontrar ambiguidade que possa afetar:
 
@@ -4907,7 +4886,7 @@ ele deve:
 
 ---
 
-# PARTE XXIV — PRIMEIRA TAREFA RECOMENDADA
+# PARTE XXVI — PRIMEIRA TAREFA RECOMENDADA
 
 O primeiro agente deve começar por:
 
