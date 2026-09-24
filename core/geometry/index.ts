@@ -1,15 +1,31 @@
 export interface PhysicalFormat {
-  readonly id: string;
   readonly name: string;
   readonly widthMm: number;
   readonly heightMm: number;
 }
 
 export interface CardFormat extends PhysicalFormat {
+  readonly id: string;
   readonly cornerRadiusMm?: number;
 }
 
 export interface PaperFormat extends PhysicalFormat {}
+
+export type PageOrientation = "portrait" | "landscape";
+
+export interface PageMarginsMm {
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly left: number;
+}
+
+/** Page settings keep output orientation separate from the paper's dimensions. */
+export interface PageConfiguration {
+  readonly paper: PaperFormat;
+  readonly orientation: PageOrientation;
+  readonly marginsMm: PageMarginsMm;
+}
 
 export const MAGIC_STANDARD_CARD: CardFormat = Object.freeze({
   id: "magic-standard",
@@ -32,14 +48,40 @@ function assertPositiveDimension(value: number, label: string): void {
   }
 }
 
+function assertNonNegativeMargin(value: number, side: keyof PageMarginsMm): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new RangeError(`Page margin ${side} must be a finite number greater than or equal to zero.`);
+  }
+}
+
+/** Custom paper dimensions intentionally have no catalog ID. */
 export function createCustomPaperFormat(widthMm: number, heightMm: number): PaperFormat {
   assertPositiveDimension(widthMm, "Paper width");
   assertPositiveDimension(heightMm, "Paper height");
 
   return Object.freeze({
-    id: "custom",
     name: "Custom",
     widthMm,
     heightMm,
+  });
+}
+
+export function createPageConfiguration(
+  paper: PaperFormat,
+  orientation: PageOrientation,
+  marginsMm: PageMarginsMm,
+): PageConfiguration {
+  if (orientation !== "portrait" && orientation !== "landscape") {
+    throw new RangeError(`Unsupported page orientation: ${String(orientation)}.`);
+  }
+
+  for (const side of ["top", "right", "bottom", "left"] as const) {
+    assertNonNegativeMargin(marginsMm[side], side);
+  }
+
+  return Object.freeze({
+    paper,
+    orientation,
+    marginsMm: Object.freeze({ ...marginsMm }),
   });
 }
