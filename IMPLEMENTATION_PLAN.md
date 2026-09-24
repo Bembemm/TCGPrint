@@ -4211,6 +4211,702 @@ Isso evita que futuros agentes "redescubram" ou revertam decisões sem saber por
 
 ---
 
+
+# PARTE XXIV — PRE-IMPLEMENTATION HARDENING
+
+Esta seção fecha pontos que costumam causar retrabalho quando só são percebidos depois que o projeto já cresceu.
+
+Nenhum agente deve começar uma implementação grande sem respeitar estas regras.
+
+---
+
+## 86. Versionamento do formato de projeto
+
+Todo projeto salvo deve possuir versão explícita de schema.
+
+Exemplo:
+
+~~~json
+{
+  "projectSchemaVersion": 1
+}
+~~~
+
+Nunca assumir que o formato salvo hoje será o formato definitivo.
+
+Criar desde o início:
+
+~~~text
+Project v1
+   ↓
+migration
+   ↓
+Project v2
+~~~
+
+Regras:
+
+- migrations devem ser determinísticas;
+- projeto antigo deve abrir em versão nova;
+- nunca migrar destrutivamente sem backup/snapshot;
+- versões futuras devem poder identificar projeto incompatível;
+- engines devem evitar depender diretamente do shape cru do banco.
+
+---
+
+## 87. Autosave seguro e recuperação de crash
+
+Autosave não pode corromper o projeto se o programa fechar no meio da gravação.
+
+Usar escrita transacional/atômica.
+
+Estratégia:
+
+~~~text
+estado atual
+   ↓
+salvar snapshot/transaction
+   ↓
+confirmar sucesso
+   ↓
+marcar nova versão como válida
+~~~
+
+Manter:
+
+- último estado válido;
+- timestamp do autosave;
+- dirty state;
+- recovery state.
+
+Ao iniciar após crash:
+
+~~~text
+Foi encontrada uma recuperação mais recente.
+
+[Restaurar]
+[Usar último save]
+~~~
+
+---
+
+## 88. Histórico e snapshots de projeto
+
+Além de Undo/Redo em memória, permitir snapshots persistentes em pontos importantes.
+
+Exemplos:
+
+- antes de migration;
+- antes de trocar template;
+- antes de re-resolver uma lista inteira;
+- antes de aplicar mudança global de back;
+- antes de atualização grande do projeto.
+
+Não precisa ser um sistema de Git interno.
+
+Pode ser retenção simples das últimas N versões.
+
+---
+
+## 89. Deduplicação de assets
+
+Assets originais devem ser content-addressed por hash.
+
+Exemplo:
+
+~~~text
+SHA256(file)
+      ↓
+originals/<hash>
+~~~
+
+Se a mesma imagem for importada em 20 projetos:
+
+- armazenar uma única cópia física;
+- projetos referenciam o asset;
+- nunca deletar asset ainda referenciado.
+
+Separar:
+
+- original asset;
+- thumbnail;
+- processed derivative;
+- metadata.
+
+---
+
+## 90. Garbage collection de cache
+
+Cache processado pode crescer muito.
+
+Criar política explícita para:
+
+- thumbnails;
+- bleed derivatives;
+- previews;
+- downloads temporários;
+- exports temporários.
+
+Nunca apagar originals automaticamente sem confirmar que não há referências.
+
+Cache pode usar:
+
+- LRU;
+- limite configurável;
+- limpeza manual;
+- "limpar derivados e reconstruir depois".
+
+---
+
+## 91. Reprodutibilidade de export
+
+Todo export importante deve poder registrar um manifest.
+
+Exemplo:
+
+~~~json
+{
+  "projectId": "...",
+  "projectSchemaVersion": 3,
+  "exportedAt": "...",
+  "paper": "A4",
+  "layout": "4x2",
+  "bleedMm": 0.625,
+  "templateHash": "...",
+  "printerProfileSnapshot": {},
+  "cards": [
+    {
+      "identity": "Sol Ring",
+      "artworkHash": "..."
+    }
+  ]
+}
+~~~
+
+Objetivo:
+
+> conseguir explicar exatamente como um PDF antigo foi produzido.
+
+O manifest pode ser salvo no projeto e opcionalmente exportado como JSON ao lado do PDF.
+
+---
+
+## 92. Import report
+
+Toda importação grande deve gerar um resumo antes de alterar o projeto.
+
+Exemplo:
+
+~~~text
+Importação
+
+100 entradas
+96 resolvidas
+2 ambíguas
+1 não encontrada
+1 custom
+
+85 Scryfall
+8 uploads
+3 MPC
+
+[Revisar problemas]
+[Importar]
+~~~
+
+Nunca esconder falhas individuais em importações de dezenas/centenas de cartas.
+
+---
+
+## 93. Error model
+
+Criar erros tipados por domínio.
+
+Exemplos:
+
+~~~text
+ImportError
+ProviderError
+ImageDecodeError
+PdfExportError
+TemplateError
+CalibrationError
+FilesystemError
+MigrationError
+~~~
+
+Erros técnicos podem ir para logs.
+
+UI deve mostrar mensagem útil, por exemplo:
+
+~~~text
+Não foi possível baixar esta arte do MPC.
+A carta e o restante do projeto foram preservados.
+~~~
+
+Não usar um único tratamento genérico para todos os erros.
+
+---
+
+## 94. Logging e diagnóstico
+
+Criar logging local estruturado.
+
+Níveis:
+
+- error;
+- warn;
+- info;
+- debug.
+
+Registrar quando relevante:
+
+- importer utilizado;
+- provider;
+- cache hit/miss;
+- processamento de imagem;
+- tempo de export;
+- memória aproximada;
+- falha de asset;
+- migrations;
+- calibração/profile aplicado.
+
+Nunca gravar bytes completos de cartas nos logs.
+
+Adicionar relatório de diagnóstico exportável para facilitar debug por agentes no futuro.
+
+---
+
+## 95. Performance budgets
+
+Não esperar o programa ficar lento para então pensar em performance.
+
+Criar metas iniciais mensuráveis, ajustáveis após benchmark.
+
+Targets de desenvolvimento:
+
+- abrir projeto de 100 cartas sem travar a UI;
+- scroll da lista permanecer fluido;
+- seleção de artwork não carregar originais completos;
+- operações pesadas não bloquear thread da UI;
+- projeto de 500 cartas continuar manipulável;
+- processamento deve mostrar progresso/cancelamento quando durar perceptivelmente;
+- export pode ser pesado, mas não deve causar consumo de memória ilimitado.
+
+Benchmarks reais devem substituir números arbitrários conforme o projeto evoluir.
+
+---
+
+## 96. Cancelamento de operações pesadas
+
+Import, download, OCR, bleed batch e PDF export devem suportar cancelamento quando tecnicamente seguro.
+
+Estados:
+
+~~~text
+Queued
+Running
+Cancelling
+Cancelled
+Completed
+Failed
+~~~
+
+Cancelar não pode:
+
+- corromper projeto;
+- apagar originals;
+- deixar banco em estado parcial.
+
+---
+
+## 97. Progress reporting
+
+Operações longas devem mostrar progresso útil.
+
+Exemplos:
+
+~~~text
+Resolvendo cartas: 38 / 100
+Baixando artes: 17 / 64
+Gerando bleed: 41 / 100
+Exportando páginas: 8 / 12
+~~~
+
+Não mostrar spinner infinito quando houver quantidade conhecida.
+
+---
+
+## 98. Dependency policy
+
+Antes de adicionar dependência grande, verificar:
+
+- manutenção ativa;
+- licença;
+- tamanho;
+- compatibilidade Windows;
+- compatibilidade Node/runtime escolhido;
+- impacto em bundle;
+- necessidade real.
+
+Evitar adicionar biblioteca pesada para operação trivial.
+
+Fixar versões de dependências críticas e atualizar deliberadamente.
+
+---
+
+## 99. Licenças e uso de código de referência
+
+Referências externas não significam autorização para copiar código indiscriminadamente.
+
+Regras:
+
+- verificar licença antes de reutilizar código;
+- registrar origem de trechos derivados;
+- evitar copiar código GPL para o core sem decisão consciente sobre implicações;
+- preferir reimplementar comportamento/matemática quando apropriado;
+- não incorporar assets de terceiros no repositório sem autorização/licença compatível.
+
+Criar THIRD_PARTY_NOTICES.md quando houver dependências/assets que exijam atribuição.
+
+---
+
+## 100. Fixtures próprias para testes
+
+Testes automatizados não devem depender obrigatoriamente de artwork comercial real no repositório.
+
+Criar fixtures próprias:
+
+- grids;
+- gradientes;
+- texto;
+- padrões geométricos;
+- mock cards.
+
+Para testes manuais locais, o usuário pode usar assets reais fora do repo.
+
+Isso reduz tamanho do repositório e dependência em conteúdo de terceiros.
+
+---
+
+## 101. Provider contract e degradação
+
+Cada provider deve ter contrato explícito de disponibilidade.
+
+Exemplo conceitual:
+
+~~~ts
+interface ProviderHealth {
+  available: boolean;
+  degraded: boolean;
+  message?: string;
+}
+~~~
+
+Se MPC estiver fora:
+
+~~~text
+MPC indisponível
+Scryfall e uploads continuam funcionando
+~~~
+
+Se Scryfall estiver fora:
+
+- projetos existentes continuam abrindo;
+- imagens locais/cache continuam funcionando;
+- PDF continua exportando com assets já disponíveis.
+
+O projeto deve ser offline-friendly sempre que os assets necessários já estiverem locais.
+
+---
+
+## 102. Cache provenance
+
+Todo asset baixado deve guardar origem.
+
+Exemplo:
+
+~~~text
+provider
+providerAssetId
+sourceUrl
+downloadedAt
+contentHash
+originalFilename
+~~~
+
+Isso ajuda em:
+
+- deduplicação;
+- reprodução;
+- debug;
+- atualização futura;
+- identificação de assets quebrados.
+
+---
+
+## 103. Validação de arquivos importados
+
+Mesmo sendo aplicação local, arquivos podem estar corrompidos ou malformados.
+
+Validar:
+
+- MIME real quando possível;
+- extensão;
+- tamanho;
+- dimensões;
+- decode;
+- XML/JSON válido;
+- ZIP traversal;
+- ZIP bomb/quantidade absurda;
+- SVG malformado;
+- DXF malformado.
+
+Falha em um arquivo não deve derrubar importação inteira quando for possível isolar o item.
+
+---
+
+## 104. Normalização sem destruição
+
+Metadata pode ser normalizada.
+
+Original não.
+
+Exemplo:
+
+~~~text
+Sol_Ring_CUSTOM.png
+      ↓
+normalized label:
+Sol Ring
+~~~
+
+Os bytes do arquivo original permanecem intactos.
+
+Nunca "corrigir" arquivo original no lugar.
+
+---
+
+## 105. Backup / export de projeto
+
+Além de salvar no banco local, permitir futuramente exportar um projeto portátil.
+
+Formato sugerido:
+
+~~~text
+.tcgprint
+~~~
+
+ou ZIP versionado contendo:
+
+~~~text
+project.json
+manifest.json
+assets/
+templates/
+profiles/
+~~~
+
+Modos possíveis:
+
+- lightweight: referencia cache local;
+- portable: inclui assets necessários.
+
+O formato precisa possuir schema version.
+
+---
+
+## 106. Import de projeto portátil
+
+Ao importar:
+
+- validar versão;
+- validar hashes;
+- deduplicar assets;
+- migrar schema quando suportado;
+- não sobrescrever projeto existente silenciosamente.
+
+---
+
+## 107. Keyboard-first sem sacrificar touch
+
+Mesmo com UI simples, operações repetitivas devem aceitar teclado.
+
+Exemplos:
+
+- Ctrl/Cmd+Z;
+- Ctrl/Cmd+Y;
+- Delete;
+- setas;
+- Enter;
+- busca;
+- próxima/anterior carta;
+- atalhos para front/back futuramente.
+
+Mas toda ação deve continuar possível por mouse/touch.
+
+---
+
+## 108. Acessibilidade funcional
+
+Mesmo sendo ferramenta pessoal:
+
+- não depender somente de cor;
+- labels reais em inputs;
+- foco visível;
+- tooltip não pode ser única fonte de informação essencial;
+- DFC precisa de texto acessível além do ícone;
+- warnings precisam ser legíveis;
+- navegação básica por teclado.
+
+Isso melhora a própria qualidade da UI.
+
+---
+
+## 109. Design system mínimo
+
+Não criar um design system complexo.
+
+Definir apenas tokens básicos:
+
+- spacing;
+- font sizes;
+- border;
+- background;
+- text;
+- accent;
+- warning;
+- error;
+- success.
+
+Regras:
+
+- sem glassmorphism;
+- sem blur;
+- sem gradientes decorativos;
+- poucas sombras;
+- animações apenas quando úteis;
+- UI densa;
+- informação em linha quando possível;
+- painéis redimensionáveis;
+- listas virtualizadas.
+
+A aparência deve lembrar ferramenta técnica moderna, não landing page/SaaS.
+
+---
+
+## 110. Test matrix oficial
+
+Antes de considerar release utilizável, cobrir uma matriz mínima.
+
+### Sistema
+
+- Windows principal;
+- navegador/runtime suportado;
+- filesystem local.
+
+### Formatos
+
+- JPEG;
+- PNG;
+- WebP;
+- TIFF;
+- SVG;
+- TXT;
+- CSV;
+- JSON;
+- XML;
+- ZIP;
+- DXF;
+- .studio3 como arquivo opaco.
+
+### Cartas
+
+- normal;
+- DFC;
+- token;
+- custom;
+- upload reconhecido;
+- upload não reconhecido.
+
+### Layout
+
+- auto;
+- manual;
+- template;
+- portrait;
+- landscape;
+- 3×3;
+- 4×2;
+- custom.
+
+### Export
+
+- front;
+- back;
+- separados;
+- duplex.
+
+### Qualidade
+
+- passthrough;
+- bleed;
+- 300 DPI;
+- 600 DPI;
+- 1200 DPI;
+- original sem limite.
+
+### Calibration
+
+- X/Y;
+- rotation;
+- scale;
+- input de 0.001 mm.
+
+---
+
+## 111. Release gates
+
+Nenhuma versão deve ser considerada pronta só porque "abre e exporta".
+
+Release utilizável exige:
+
+- testes automáticos críticos passando;
+- escala física verificada;
+- PDF fidelity verificada;
+- bleed verificado;
+- projeto salva/reabre corretamente;
+- crash recovery básico;
+- import report;
+- erros isolados;
+- DFC/front/back funcionando;
+- layout manual funcionando;
+- export reproduzível;
+- sem regressão conhecida que altere tamanho físico ou qualidade.
+
+---
+
+## 112. Regra final para agentes
+
+Se um agente encontrar ambiguidade que possa afetar:
+
+- qualidade;
+- dimensão física;
+- formato de projeto;
+- compatibilidade de templates;
+- perda de dados;
+- reprodutibilidade;
+
+ele deve:
+
+1. não inventar comportamento silencioso;
+2. criar/atualizar ADR;
+3. implementar teste/spike;
+4. registrar decisão;
+5. só então consolidar no core.
+
+---
+
 # PARTE XXIV — PRIMEIRA TAREFA RECOMENDADA
 
 O primeiro agente deve começar por:
