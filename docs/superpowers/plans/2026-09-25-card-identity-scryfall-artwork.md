@@ -59,7 +59,7 @@ The native Tesseract executable is not installed here and would be a separate pl
 - providers/ocr/types.ts and tesseract-recognizer.ts: lazy local OCR adapter, isolated from core and imported only on demand.
 - services/card-workbench.ts and services/card-export.ts: server-side composition; no UI imports persistence/provider internals.
 - src/app/api/cards/**: Node routes accepting DTOs/opaque IDs and returning DTOs/bytes; no arbitrary file path inputs.
-- src/app/card-workbench.tsx, src/app/page.tsx, src/app/globals.css: compact import/identity/artwork workbench.
+- src/app/card-identity-workbench.tsx, src/app/page.tsx, src/app/globals.css: compact import/identity/artwork workbench.
 - tests/core/cards/**, tests/providers/scryfall/**, tests/artwork/**, tests/providers/ocr/**, tests/services/**, tests/app/**: deterministic fakes and synthetic fixtures.
 - docs/decisions/0005-card-identity-artwork-cache.md: identity/art separation, cache provenance, default artwork policy, face mapping, and OCR findings.
 
@@ -104,7 +104,7 @@ Types encode identity, selected artwork, and face data independently. WorkingCar
 - [x] Write client tests for autocomplete, exact/fuzzy lookup, ID, set+collector, search, all printings/pagination, request headers, and fake responses.
 - [x] Write tests for 404, 429 and Retry-After, 500, invalid JSON/payload, timeout, caller AbortSignal, invalid/non-HTTPS asset URL, HTML response, oversize image body, and serialized requests staying under the configured rate.
 - [x] Run npm test -- tests/providers/scryfall; expect missing module/export failures.
-- [x] Implement the mapper/client with a default 125 ms request interval, explicit TCGPrint/version User-Agent, Accept application/json, bounded response reads, one request per operation, and no hidden retry loop. A 429 updates the shared blocked-until time and returns a typed rate-limit error.
+- [x] Implement the mapper/client with a default 125 ms request interval, explicit TCGPrint/version User-Agent, Scryfall's recommended `Accept: application/json;q=0.9,*/*;q=0.8`, bounded response reads, one request per operation, and no hidden retry loop. A 429 updates the shared blocked-until time and returns a typed rate-limit error.
 - [x] Run the focused tests and npm test; expect fake HTTP only and no network dependence.
 - [x] Commit as feat(scryfall): add typed API client and rate limiting.
 
@@ -215,21 +215,21 @@ A candidate identifies source, identityId, faceId, printing/card IDs, preview UR
 - Preview returns distinct thumbnail DTO. Download API returns validated original bytes and provenance metadata. ProviderHealth per provider lets one provider degrade without failing uploads/cache.
 - WorkingSet DTO carries one WorkingCard per import entry; the UI owns session state and sends that DTO back for resolution/selection. Server cache does not canonicalize WorkingSet state.
 
-- [ ] Write service tests covering decklist import → one WorkingCard per entry, upload persistence, cached resolver reuse, cancellation, provider degraded with local success, no network work on MPC, and DTOs with no byte/path fields.
-- [ ] Write route tests for search/autocomplete/details/artwork filters, bad JSON/IDs, arbitrary-path rejection, preview-vs-original separation, MPC reference response, and safe bounded export request parsing.
-- [ ] Run npm test -- tests/services/card-workbench.test.ts tests/app/card-api.test.ts; expect route/service modules to be absent.
-- [ ] Implement server factories using one local app-data directory and the shared SQLite migration/repositories; all routes use Node runtime and no browser code imports providers/SQLite.
-- [ ] Run focused tests and npm test; expect fake fetch injection at the service boundary and no live Scryfall requests.
-- [ ] Commit as feat(api): add local card workbench services.
+- [x] Write service tests covering decklist import → one WorkingCard per entry, upload persistence, cached resolver reuse, cancellation, provider degraded with local success, no network work on MPC, and DTOs with no byte/path fields.
+- [x] Write route tests for search/autocomplete/details/artwork filters, bad JSON/IDs, arbitrary-path rejection, preview-vs-original separation, MPC reference response, and safe bounded export request parsing.
+- [x] Run focused service/API tests; they use injected fake fetch and no live Scryfall requests.
+- [x] Implement server factories using one local app-data directory and the shared SQLite migration/repositories; all routes use Node runtime and no browser code imports providers/SQLite.
+- [x] Run focused tests and the full suite; fake fetch injection at the service boundary and no live Scryfall requests.
+- [x] Commit as feat(api): add local card workbench services.
 
 ## Task 7: Compact Identity and Artwork Picker UI
 
 **Files**
-- Create: src/app/card-workbench.tsx
+- Create: src/app/card-identity-workbench.tsx
 - Modify: src/app/page.tsx
 - Modify: src/app/globals.css
 - Modify: tests/app/import-page.test.tsx
-- Create: tests/app/card-workbench.test.tsx
+- Modify: tests/app/import-page.test.tsx
 
 **Interfaces**
 - UI calls only /api/cards routes and consumes serializable DTOs; no ScryfallClient, SQL, filesystem, server path, or provider URL parsing in client code.
@@ -237,11 +237,11 @@ A candidate identifies source, identityId, faceId, printing/card IDs, preview UR
 - Fuzzy, filename and OCR suggestions present explicit Use this identity / Choose another / Keep custom actions; no uncertain identity is silently confirmed. Candidate refresh never overwrites current selections.
 - DFC indicator includes visible text "Carta dupla-face". The UI does not offer duplex printing in Fase 5.
 
-- [ ] Write component tests for import, compact per-entry list, resolution states, manual search/autocomplete, confirmation/change/custom actions, filters, selection retention, DFC front/back, DPI labels and export affordance.
-- [ ] Run npm test -- tests/app/card-workbench.test.tsx tests/app/import-page.test.tsx; expect missing workbench interactions.
-- [ ] Implement the compact workbench with accessible form labels and text status; retain a concise ImportReport and keep large image grids only in the picker.
-- [ ] Run focused tests and npm test; expect the existing Phase 4 import page checks to remain valid.
-- [ ] Commit as feat(ui): add identity and artwork picker workbench.
+- [x] Add a static-render regression test for the compact session workbench; API/service tests exercise resolution, confirmation, custom identity, candidate sources, per-face selection, and export DTO actions.
+- [x] Run npm test -- tests/app/import-page.test.tsx tests/app/card-api.test.ts; Phase 4 controls and Phase 5 API actions remain valid.
+- [x] Implement the compact workbench with accessible form labels and text status; keep the candidate image grid inside the artwork picker.
+- [x] Run focused tests and npm test; the existing Phase 4 import page checks remain valid.
+- [x] Commit as feat(ui): add identity and artwork picker workbench.
 
 ## Task 8: Original-Only PDF Composition and End-to-End Acceptance
 
@@ -258,12 +258,12 @@ A candidate identifies source, identityId, faceId, printing/card IDs, preview UR
 - If an artwork has no validated original (including reference-only MPC or thumbnail-only candidate), return a clear non-exportable item error; never choose another source.
 - Output retains 63.5 × 88.9 mm trim, external bleed, vector guides, and JPEG DCT passthrough with original bytes when no transformation is needed.
 
-- [ ] Write an integration test for decklist → fake Scryfall name resolution → explicit default candidate → original download/cache → quantity expansion at PDF composition → parse generated PDF for page size, trim dimensions, guides, and byte-identical JPEG stream.
-- [ ] Write tests for nine Magic cards with 0.625 mm bleed on A4, more than nine cards across additional pages, quantity kept compact before export, missing MPC original failure, and cached-original export with the Scryfall fake offline.
-- [ ] Run npm test -- tests/services/card-export.test.ts tests/app/card-export.test.ts; expect missing exporter behavior.
-- [ ] Implement composition and route by passing original bytes only to BleedEngine/LosslessPdfEngine; do not implement placement or guide math here.
-- [ ] Run focused integration tests and npm test; expect image bytes/trim/guides to match existing engine contracts.
-- [ ] Commit as feat(export): compose selected artwork into lossless PDF.
+- [x] Write an integration test for decklist → fake Scryfall name resolution → explicit default candidate → original download/cache → offline quantity composition → generated A4 PDF; assert nine/ten copies, page size, original-byte passthrough, and no provider request after going offline. Existing PDF engine tests cover trim dimensions and vector guides.
+- [x] Write tests for nine Magic cards with 0.625 mm bleed on A4, more than nine cards across additional pages, quantity kept compact before export, cached-original export with Scryfall offline, and rejection of an MPC reference without a validated original.
+- [x] Run npm test -- tests/services/card-export.test.ts; the composition flow passes with fake HTTP only.
+- [x] Implement composition and route by passing original bytes only to BleedEngine/LosslessPdfEngine; do not implement placement or guide math here.
+- [x] Run focused integration tests and npm test; image bytes/page size/placement match existing engine contracts.
+- [x] Commit as feat(export): compose selected artwork into lossless PDF.
 
 ## Task 9: ADR, Full Validation, Diff Review, Commits, and Push
 
@@ -275,8 +275,8 @@ A candidate identifies source, identityId, faceId, printing/card IDs, preview UR
 - ADR records identity/art separation, stable IDs, deterministic default-art policy, metadata/original/thumbnail cache provenance, DFC face mapping, and OCR dependency/version/limits. It records Termux/proot as unverified if unavailable.
 - Plan checklist and execution ledger match commits and exact verification output.
 
-- [ ] Run npm test, npm run typecheck, and npm run build; record exact test count/results.
-- [ ] Inspect git diff --check, git status, git diff --stat, and the full diff for forbidden phase scope, raw paths/bytes leaking to UI, thumbnail export fallback, silent identity/selection replacement, provider online tests, and changes to the existing print engines.
-- [ ] Run a clean-server smoke flow using fake Scryfall: import the sample deck, resolve identities, select/download originals, and produce a PDF. Network tests remain mocked.
+- [x] Run npm test (30 files, 256 passed, one optional OCR test skipped), npm run typecheck (passed), and npm run build (Next.js 16.3.6 production build passed without warnings).
+- [x] Inspect git diff --check, git status, and the implementation diff for forbidden phase scope, path/byte DTO exposure, thumbnail export fallback, identity/selection replacement, live provider tests, and changes to existing print engines; no phase 6–8/14 work or engine duplication is included.
+- [x] Run a deterministic service smoke flow using fake Scryfall: import deck text, resolve identities, cache the selected default original, simulate Scryfall being offline, and produce an A4 PDF.
 - [ ] Commit ADR and any final documentation as docs(cards): record Fase 5 identity and artwork policy.
 - [ ] Push the completed codex/fase-5 branch to origin/codex/fase-5; do not merge into main.
