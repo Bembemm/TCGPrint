@@ -56,8 +56,24 @@ export class ArtworkOriginalStore {
   }
 
   async addOriginal(bytes: Uint8Array, provenance: ArtworkProvenance): Promise<ArtworkOriginal> {
-    const image = await validateImageBytes(bytes, this.maximumBytes);
     const contentHash = sha256(bytes);
+    const existingRecord = this.repository.getOriginal(contentHash);
+    if (existingRecord) {
+      const existingPath = originalPathForHash(this.originalsDirectory, existingRecord.contentHash, existingRecord.extension);
+      if (await verifyExisting(existingPath, contentHash)) {
+        const record = this.repository.addOriginal({
+          artworkId: existingRecord.artworkId,
+          contentHash: existingRecord.contentHash,
+          format: existingRecord.format,
+          extension: existingRecord.extension,
+          byteLength: existingRecord.byteLength,
+          widthPx: existingRecord.widthPx,
+          heightPx: existingRecord.heightPx,
+        }, provenance);
+        return { ...record, bytes: new Uint8Array(bytes) };
+      }
+    }
+    const image = await validateImageBytes(bytes, this.maximumBytes);
     const artworkId = contentHash;
     const path = originalPathForHash(this.originalsDirectory, contentHash, image.extension);
     if (!await verifyExisting(path, contentHash)) await writeCreateOnly(path, bytes, contentHash);

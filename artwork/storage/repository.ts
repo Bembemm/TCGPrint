@@ -80,6 +80,17 @@ export class ArtworkRepository {
     return mapRecord(row, provenance);
   }
 
+  findOriginalByProviderSource(provider: string, providerAssetId: string, sourceUrl: string): ArtworkOriginalRecord | undefined {
+    const row = this.database.prepare(`
+      SELECT o.* FROM artwork_originals o
+      INNER JOIN artwork_provenance p ON p.artwork_id = o.artwork_id
+      WHERE p.provider = ? AND p.provider_asset_id = ? AND p.source_url = ?
+      ORDER BY p.created_at, p.provenance_id
+      LIMIT 1
+    `).get(provider, providerAssetId, sourceUrl) as StoredOriginalRow | undefined;
+    return row ? this.getOriginal(row.artwork_id) : undefined;
+  }
+
   addOriginal(record: Omit<ArtworkOriginalRecord, "provenance" | "createdAt">, provenance: ArtworkProvenance): ArtworkOriginalRecord {
     const createdAt = new Date().toISOString();
     const key = provenanceKey(record.artworkId, provenance);

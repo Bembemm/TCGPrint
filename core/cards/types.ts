@@ -31,10 +31,12 @@ export interface ArtworkCandidate {
   readonly source: ArtworkSource;
   readonly identityId: string | null;
   readonly faceId: string;
+  readonly faceName?: string;
   readonly previewUri?: string;
   readonly originalUri?: string;
   readonly localOriginalPath?: string;
   readonly providerAssetId?: string;
+  readonly selectedArtworkId?: string;
   readonly scryfallId?: string;
   readonly oracleId?: string;
   readonly widthPx?: number;

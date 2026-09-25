@@ -150,13 +150,13 @@ Types encode identity, selected artwork, and face data independently. WorkingCar
 
 A candidate identifies source, identityId, faceId, printing/card IDs, preview URI, original URI, original-vs-thumbnail availability, dimensions, effective DPI, set/collector/language/release date, and provenance. Internal filesystem paths stay private. Scryfall original selection uses png then large URI only; normal/small are preview-only. Downloading original caches exact validated response bytes. Local upload candidate IDs derive from content hash; identity associations are separate links. MPC candidates preserve Fase 4 providerAssetId/selectedArtworkId and expose availability reference-only without inventing URI or bytes. Existing WorkingCard selections are not mutated while loading candidates. If an entry already selects upload or MPC, it retains that choice. A source filter narrows candidates without rewriting session state.
 
-- [ ] Write tests asserting all/scryfall/upload/mpc filters and providers remain isolated on individual failure.
-- [ ] Write tests for original URI preference, preview-only URIs, explicit download/cache, effective DPI, identity/artwork independence, source switching, local linking without byte mutation, and refresh retaining current selection.
-- [ ] Write tests that MPC slots/providerAssetId/selectedArtworkId survive with no original bytes and no network call.
-- [ ] Run npm test -- tests/artwork/catalog.test.ts tests/artwork/providers.test.ts; expect absent exports.
-- [ ] Implement the catalog and three providers; include only related token metadata supplied in the normalized response and do not recursively fetch related cards.
-- [ ] Run focused tests and npm test; expect thumbnail lookup never to become export bytes.
-- [ ] Commit as feat(artwork): add catalog and local/scryfall providers.
+- [x] Write tests asserting all/scryfall/upload/mpc filters and providers remain isolated on individual failure.
+- [x] Write tests for original URI preference, preview-only URIs, explicit download/cache, effective DPI, identity/artwork independence, source switching, local linking without byte mutation, and refresh retaining current selection.
+- [x] Write tests that MPC slots/providerAssetId/selectedArtworkId survive with no original bytes and no network call.
+- [x] Run npm test -- tests/artwork/catalog.test.ts tests/artwork/providers.test.ts; expect absent exports.
+- [x] Implement the catalog and three providers; include only related token metadata supplied in the normalized response and do not recursively fetch related cards.
+- [x] Run focused tests and npm test; expect thumbnail lookup never to become export bytes.
+- [x] Commit as feat(artwork): add catalog and local/scryfall providers.
 
 ## Task 5: Identity Resolution, Filename/Fuzzy Policy, and Lazy Local OCR
 
