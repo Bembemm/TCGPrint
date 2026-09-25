@@ -278,5 +278,5 @@ A candidate identifies source, identityId, faceId, printing/card IDs, preview UR
 - [x] Run npm test (30 files, 256 passed, one optional OCR test skipped), npm run typecheck (passed), and npm run build (Next.js 16.3.6 production build passed without warnings).
 - [x] Inspect git diff --check, git status, and the implementation diff for forbidden phase scope, path/byte DTO exposure, thumbnail export fallback, identity/selection replacement, live provider tests, and changes to existing print engines; no phase 6–8/14 work or engine duplication is included.
 - [x] Run a deterministic service smoke flow using fake Scryfall: import deck text, resolve identities, cache the selected default original, simulate Scryfall being offline, and produce an A4 PDF.
-- [ ] Commit ADR and any final documentation as docs(cards): record Fase 5 identity and artwork policy.
-- [ ] Push the completed codex/fase-5 branch to origin/codex/fase-5; do not merge into main.
+- [x] Commit ADR and final documentation as docs(cards): record Fase 5 identity and artwork policy (`4e1cac5`).
+- [x] Push the completed codex/fase-5 branch to origin/codex/fase-5; do not merge into main.
