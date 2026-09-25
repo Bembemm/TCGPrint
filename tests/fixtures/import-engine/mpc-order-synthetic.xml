@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<order>
+  <details>
+    <quantity>1</quantity>
+    <bracket>standard</bracket>
+    <stock>synthetic-only</stock>
+  </details>
+  <fronts>
+    <card>
+      <id>synthetic-front-art-a</id>
+      <slots>2, 1</slots>
+      <quantity>9</quantity>
+      <name>Example Front</name>
+      <query>synthetic:front-a</query>
+    </card>
+    <card>
+      <id>synthetic-front-art-a</id>
+      <slot>3</slot>
+      <name>Repeated Example Front</name>
+    </card>
+    <card>
+      <slots>4</slots>
+      <name>Optional ID Example</name>
+    </card>
+  </fronts>
+  <backs>
+    <card>
+      <id>synthetic-back-art-a</id>
+      <slots>1,2</slots>
+      <name>Example Back</name>
+      <query>synthetic:back-a</query>
+    </card>
+    <card>
+      <id>synthetic-back-art-b</id>
+      <slot>3</slot>
+      <name>Repeated Example Back</name>
+    </card>
+    <card>
+      <id>synthetic-back-art-c</id>
+      <slots>4</slots>
+    </card>
+  </backs>
+  <cardback>synthetic-cardback-artwork</cardback>
+</order>
