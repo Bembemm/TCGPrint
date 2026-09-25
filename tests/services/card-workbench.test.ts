@@ -4,8 +4,11 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCardWorkbench, type CardWorkbenchOptions, type WorkingSetImportResult } from "../../services/card-workbench";
-import { handleCardImport, handleResolve, parseWorkingCards } from "../../services/card-api";
+import { handleArtworkList, handleCardImport, handleResolve, parseWorkingCards } from "../../services/card-api";
 import { TesseractOcrRecognizer } from "../../providers/ocr/tesseract-recognizer";
+import type { ScryfallClient } from "../../providers/scryfall/client";
+import type { ScryfallCard } from "../../providers/scryfall/types";
+import { formatResolutionSummary } from "../../core/cards/resolution-summary";
 
 const roots: string[] = [];
 const workbenches: Array<{ close(): Promise<void> }> = [];
@@ -27,13 +30,49 @@ const basicLand = {
 };
 const delverCard = JSON.parse(await readFile(new URL("../fixtures/scryfall/dmf-card.json", import.meta.url), "utf8")) as Record<string, unknown>;
 
-async function setup(fetchImpl?: typeof fetch, recognizer?: CardWorkbenchOptions["recognizer"]) {
+async function setup(fetchImpl?: typeof fetch, recognizer?: CardWorkbenchOptions["recognizer"], scryfallClient?: ScryfallClient) {
   const root = await mkdtemp(join(tmpdir(), "tcgprint-workbench-"));
   roots.push(root);
-  const workbench = await createCardWorkbench({ dataDirectory: root, fetchImpl, minIntervalMs: 0, ...(recognizer ? { recognizer } : {}) });
+  const workbench = await createCardWorkbench({ dataDirectory: root, fetchImpl, minIntervalMs: 0, ...(recognizer ? { recognizer } : {}), ...(scryfallClient ? { scryfallClient } : {}) });
   workbenches.push(workbench);
   return { root, workbench };
 }
+
+function resolvedCard(name: string, id: string, oracleId: string, setCode: string, collectorNumber: string): ScryfallCard {
+  const imageRoot = `https://cards.scryfall.io/${id}`;
+  return {
+    id, oracleId, name, layout: "normal", setCode, collectorNumber, lang: "en", releasedAt: "2024-01-01",
+    digital: false, promo: false, fullArt: false, borderColor: "black", imageStatus: "highres_scan",
+    imageUris: { small: `${imageRoot}-small.jpg`, png: `${imageRoot}.png` }, faces: [], relatedCards: [], metadata: {},
+  };
+}
+
+function fakeScryfallClient(cards: readonly ScryfallCard[], printingsPerIdentity = 1) {
+  const notFound = () => Object.assign(new Error("not found"), { kind: "not-found" });
+  const lookupByName = vi.fn(async (name: string) => cards.find((card) => card.name.toLocaleLowerCase("en") === name.toLocaleLowerCase("en")) ?? Promise.reject(notFound()));
+  const lookupById = vi.fn(async (id: string) => cards.find((card) => card.id === id) ?? Promise.reject(notFound()));
+  const lookupBySetCollector = vi.fn(async (setCode: string, number: string) => cards.find((card) => card.setCode === setCode && card.collectorNumber === number) ?? Promise.reject(notFound()));
+  const listPrintings = vi.fn(async (oracleId: string) => {
+    const card = cards.find((item) => item.oracleId === oracleId);
+    if (!card) return [];
+    return Array.from({ length: printingsPerIdentity }, (_, index) => index === 0 ? card : {
+      ...card,
+      id: `${String(index).padStart(8, "0")}-9999-4999-8999-999999999999`,
+      collectorNumber: String(index + 1),
+    });
+  });
+  const searchCards = vi.fn(async () => [...cards]);
+  const downloadAsset = vi.fn(async () => ({ bytes: new Uint8Array(), contentType: "image/png", sourceUrl: "https://cards.scryfall.io/test.png", kind: "thumbnail" as const }));
+  const client = { lookupByName, lookupById, lookupBySetCollector, listPrintings, searchCards, downloadAsset, autocomplete: vi.fn(async () => []), getRateLimitState: vi.fn() } as unknown as ScryfallClient;
+  return { client, lookupByName, lookupById, lookupBySetCollector, listPrintings, searchCards, downloadAsset };
+}
+
+const resolvedDeckPrintings = [
+  resolvedCard("Sol Ring", "10101010-1010-4101-8101-101010101010", "20202020-2020-4202-8202-202020202020", "cmm", "396"),
+  resolvedCard("Lightning Bolt", "30303030-3030-4303-8303-303030303030", "40404040-4040-4404-8404-404040404040", "2xm", "117"),
+  resolvedCard("Counterspell", "50505050-5050-4505-8505-505050505050", "60606060-6060-4606-8606-606060606060", "dmr", "055"),
+  resolvedCard("Island", "70707070-7070-4707-8707-707070707070", "80808080-8080-4808-8808-808080808080", "m21", "265"),
+];
 
 function scryfallFetch() {
   const calls: string[] = [];
@@ -157,6 +196,61 @@ describe("card workbench services", () => {
     expect(fake.fetchMock).toHaveBeenCalledTimes(callCount);
   });
 
+  it("resolves four deck entries without listing printings or expanding quantities", async () => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings, 300);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring\n1 Lightning Bolt\n1 Counterspell\n6 Island" });
+    const result = await workbench.resolveWorkingCards(imported.workingCards);
+
+    expect(result.workingCards).toHaveLength(4);
+    expect(result.workingCards.map((card) => card.quantity)).toEqual([1, 1, 1, 6]);
+    expect(result.workingCards.map((card) => card.identity?.name)).toEqual(["Sol Ring", "Lightning Bolt", "Counterspell", "Island"]);
+    expect(result.workingCards.map((card) => card.selectedArtworkByFace.front?.candidateId)).toEqual(resolvedDeckPrintings.map((card) => `scryfall:${card.id}:front`));
+    expect(fake.lookupByName).toHaveBeenCalledTimes(4);
+    expect(fake.listPrintings).not.toHaveBeenCalled();
+    expect(fake.downloadAsset).not.toHaveBeenCalled();
+  });
+
+  it("lists printing alternatives only when the Artwork Picker endpoint is opened", async () => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
+    const resolved = await workbench.resolveWorkingCards(imported.workingCards);
+    const identity = resolved.workingCards[0].identity!;
+
+    expect(resolved.workingCards[0].selectedArtworkByFace.front).toMatchObject({ candidateId: `scryfall:${resolvedDeckPrintings[0].id}:front`, source: "scryfall" });
+    expect(fake.listPrintings).not.toHaveBeenCalled();
+    const response = await handleArtworkList(new Request(`http://localhost/api/cards/${encodeURIComponent(identity.id)}/artworks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ faceId: "front", source: "scryfall" }),
+    }), identity.id, workbench);
+    const body = await response.json() as { candidates: Array<{ candidateId?: string; id: string }> };
+
+    expect(response.status).toBe(200);
+    expect(fake.listPrintings).toHaveBeenCalledOnce();
+    expect(body.candidates.map((candidate) => candidate.id)).toContain(`scryfall:${resolvedDeckPrintings[0].id}:front`);
+  });
+
+  it("preserves preselected upload and MPC artwork while resolving identity", async () => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
+    const upload = await workbench.importForWorkingSet({ files: [{ filename: "local.png", bytes }] });
+    const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring\n1 Lightning Bolt" });
+    const uploadSelection = upload.workingCards[0].selectedArtworkByFace.front!;
+    const mpcSelection = { candidateId: `mpc:${"b".repeat(64)}`, source: "mpc" as const, identityId: null, faceId: "front" as const, selectedArtworkId: "mpc-front-7" };
+    const cards = imported.workingCards.map((card, index) => ({
+      ...card,
+      selectedArtworkByFace: { front: index === 0 ? uploadSelection : mpcSelection },
+    }));
+    const result = await workbench.resolveWorkingCards(cards);
+
+    expect(result.workingCards[0].selectedArtworkByFace.front).toEqual({ ...uploadSelection, identityId: result.workingCards[0].identity?.id });
+    expect(result.workingCards[1].selectedArtworkByFace.front).toEqual(mpcSelection);
+    expect(fake.listPrintings).not.toHaveBeenCalled();
+  });
+
   it("keeps upload usage working with Scryfall degraded and does not call Scryfall for MPC references", async () => {
     const failingFetch = vi.fn(async () => new Response("offline", { status: 503 })) as typeof fetch;
     const { workbench } = await setup(failingFetch);
@@ -170,6 +264,20 @@ describe("card workbench services", () => {
     expect(mpc.workingCards[0].selectedArtworkByFace.front).toMatchObject({ source: "mpc", selectedArtworkId: "art-front-9" });
     expect(mpc.workingCards[0].mpcReferences[0].selectedArtworkId).toBe("art-front-9");
     expect(failingFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports unresolved cards and provider degradation instead of a false full-success message", async () => {
+    const offlineFetch = vi.fn(async () => new Response("offline", { status: 503 })) as typeof fetch;
+    const { workbench } = await setup(offlineFetch);
+    const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
+    const resolved = await workbench.resolveWorkingCards(imported.workingCards);
+    const status = formatResolutionSummary(resolved.workingCards, resolved.providerHealth);
+
+    expect(resolved.workingCards[0]).toMatchObject({ identity: null, identityResolution: { status: "unresolved" } });
+    expect(resolved.providerHealth.scryfall).toMatchObject({ degraded: true });
+    expect(status).toContain("1 não resolvida");
+    expect(status).toContain("Scryfall degradado");
+    expect(status).not.toContain("Resolução concluída");
   });
 
   it("preserves the shared MPC cardback through Universal Import, WorkingCard, and API DTO round-trip", async () => {
@@ -230,8 +338,10 @@ describe("card workbench services", () => {
   });
 
   it("maps a resolved DFC to two faces while preserving a local front and selecting Scryfall for the back", async () => {
+    const requestPaths: string[] = [];
     const fakeFetch = vi.fn(async (input: URL | RequestInfo) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
+      requestPaths.push(url.pathname);
       if (url.pathname === "/cards/named") return Response.json(delverCard);
       if (url.pathname === "/cards/search") return Response.json({ data: [delverCard], has_more: false });
       return new Response("offline", { status: 503 });
@@ -256,6 +366,7 @@ describe("card workbench services", () => {
     expect(result.identity?.id).toBe(`scryfall:oracle:${delverCard.oracle_id}`);
     expect(result.selectedArtworkByFace.front).toMatchObject({ candidateId: localId, source: "upload", identityId: result.identity?.id });
     expect(result.selectedArtworkByFace.back).toMatchObject({ source: "scryfall", faceId: "back", candidateId: `scryfall:${delverCard.id}:back` });
+    expect(requestPaths).toEqual(["/cards/named"]);
     expect(await workbench.getArtworkOriginal(localId)).toMatchObject({ bytes });
   });
 });

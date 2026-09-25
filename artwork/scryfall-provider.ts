@@ -89,36 +89,40 @@ export class ScryfallArtworkProvider implements ArtworkProvider {
         return candidates.filter((candidate) => !options.faceId || candidate.faceId === options.faceId);
       }
     }
+    return cards.flatMap((card) => this.candidatesFromPrinting(identity, card, options.faceId));
+  }
+
+  /** Builds lazy artwork metadata from one already-resolved printing; it performs no API or asset requests. */
+  candidatesFromPrinting(identity: CardIdentity, card: ScryfallCard, faceId?: CardFaceSide): readonly ArtworkCandidate[] {
     const candidates: ArtworkCandidate[] = [];
-    for (const card of cards) {
-      for (const face of artworkFaces(card)) {
-        if (options.faceId && options.faceId !== face.side) continue;
-        const selectedOriginalUri = originalUri(face.uris);
-        const selectedPreviewUri = previewUri(face.uris);
-        let candidate: ArtworkCandidate = {
-          id: candidateId(card.id, face.side),
-          source: "scryfall",
-          identityId: identity.id,
-          faceId: face.side,
-          ...(face.name ? { faceName: face.name } : {}),
-          ...(selectedPreviewUri ? { previewUri: selectedPreviewUri } : {}),
-          ...(selectedOriginalUri ? { originalUri: selectedOriginalUri } : {}),
-          providerAssetId: card.id,
-          scryfallId: card.id,
-          selectedArtworkId: card.id,
-          ...(card.oracleId ? { oracleId: card.oracleId } : {}),
-          ...(card.setCode ? { setCode: card.setCode } : {}),
-          ...(card.collectorNumber ? { collectorNumber: card.collectorNumber } : {}),
-          ...(card.lang ? { language: card.lang } : {}),
-          ...(card.releasedAt ? { releasedAt: card.releasedAt } : {}),
-          originalAvailable: Boolean(selectedOriginalUri),
-          metadata: { layout: card.layout, digital: Boolean(card.digital), promo: Boolean(card.promo), fullArt: Boolean(card.fullArt), imageStatus: card.imageStatus, borderColor: card.borderColor, selectedArtworkId: card.id },
-        };
-        const stored = this.repository.findOriginalByScryfallId(card.id);
-        if (stored) candidate = this.enrichWithStoredOriginal(candidate, stored);
-        this.metadata.putMetadata(`scryfall:candidate:${candidate.id}`, candidate, Date.now() + CANDIDATE_TTL_MS);
-        candidates.push(candidate);
-      }
+    for (const face of artworkFaces(card)) {
+      if (faceId && faceId !== face.side) continue;
+      const selectedOriginalUri = originalUri(face.uris);
+      const selectedPreviewUri = previewUri(face.uris);
+      if (!selectedOriginalUri && !selectedPreviewUri) continue;
+      let candidate: ArtworkCandidate = {
+        id: candidateId(card.id, face.side),
+        source: "scryfall",
+        identityId: identity.id,
+        faceId: face.side,
+        ...(face.name ? { faceName: face.name } : {}),
+        ...(selectedPreviewUri ? { previewUri: selectedPreviewUri } : {}),
+        ...(selectedOriginalUri ? { originalUri: selectedOriginalUri } : {}),
+        providerAssetId: card.id,
+        scryfallId: card.id,
+        selectedArtworkId: card.id,
+        ...(card.oracleId ? { oracleId: card.oracleId } : {}),
+        ...(card.setCode ? { setCode: card.setCode } : {}),
+        ...(card.collectorNumber ? { collectorNumber: card.collectorNumber } : {}),
+        ...(card.lang ? { language: card.lang } : {}),
+        ...(card.releasedAt ? { releasedAt: card.releasedAt } : {}),
+        originalAvailable: Boolean(selectedOriginalUri),
+        metadata: { layout: card.layout, digital: Boolean(card.digital), promo: Boolean(card.promo), fullArt: Boolean(card.fullArt), imageStatus: card.imageStatus, borderColor: card.borderColor, selectedArtworkId: card.id },
+      };
+      const stored = this.repository.findOriginalByScryfallId(card.id);
+      if (stored) candidate = this.enrichWithStoredOriginal(candidate, stored);
+      this.metadata.putMetadata(`scryfall:candidate:${candidate.id}`, candidate, Date.now() + CANDIDATE_TTL_MS);
+      candidates.push(candidate);
     }
     return candidates;
   }

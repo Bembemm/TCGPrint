@@ -14,6 +14,11 @@ export interface IdentityResolveOptions {
   readonly recognizer?: OcrRecognizer;
 }
 
+export interface IdentityResolverResult {
+  readonly workingCard: WorkingCard;
+  readonly printing?: ScryfallCard;
+}
+
 function toIdentity(card: ScryfallCard, method: IdentityResolutionMethod, confidence: number): CardIdentity {
   const id = card.oracleId ? `scryfall:oracle:${card.oracleId}` : `scryfall:card:${card.id}`;
   return {
@@ -94,14 +99,18 @@ export class IdentityResolver {
   }
 
   async resolve(workingCard: WorkingCard, options: IdentityResolveOptions = {}): Promise<WorkingCard> {
-    if (workingCard.identityResolution.confirmed) return workingCard;
+    return (await this.resolveWithPrinting(workingCard, options)).workingCard;
+  }
+
+  async resolveWithPrinting(workingCard: WorkingCard, options: IdentityResolveOptions = {}): Promise<IdentityResolverResult> {
+    if (workingCard.identityResolution.confirmed) return { workingCard };
     const requestOptions: ScryfallRequestOptions = { signal: options.signal };
     const hints = workingCard.identityHints;
 
     if (hints.scryfallId) {
       try {
         const card = await this.client.lookupById(hints.scryfallId, requestOptions);
-        return result(workingCard, toIdentity(card, "scryfall-id", 1), "resolved", "scryfall-id", 1);
+        return { workingCard: result(workingCard, toIdentity(card, "scryfall-id", 1), "resolved", "scryfall-id", 1), printing: card };
       } catch (error) {
         if (!isNotFound(error)) throw error;
       }
@@ -110,7 +119,7 @@ export class IdentityResolver {
     if (hints.setCode && hints.collectorNumber) {
       try {
         const card = await this.client.lookupBySetCollector(hints.setCode, hints.collectorNumber, hints.language, requestOptions);
-        return result(workingCard, toIdentity(card, "set-collector", 1), "resolved", "set-collector", 1);
+        return { workingCard: result(workingCard, toIdentity(card, "set-collector", 1), "resolved", "set-collector", 1), printing: card };
       } catch (error) {
         if (!isNotFound(error)) throw error;
       }
@@ -119,7 +128,7 @@ export class IdentityResolver {
     if (hints.name) {
       try {
         const card = await this.client.lookupByName(hints.name, "exact", requestOptions);
-        return result(workingCard, toIdentity(card, "name", 1), "resolved", "name", 1);
+        return { workingCard: result(workingCard, toIdentity(card, "name", 1), "resolved", "name", 1), printing: card };
       } catch (error) {
         if (!isNotFound(error)) throw error;
       }
@@ -129,7 +138,7 @@ export class IdentityResolver {
     if (filenameQuery) {
       try {
         const card = await this.client.lookupByName(filenameQuery, "exact", requestOptions);
-        return result(workingCard, toIdentity(card, "filename", 0.99), "resolved", "filename", 0.99);
+        return { workingCard: result(workingCard, toIdentity(card, "filename", 0.99), "resolved", "filename", 0.99), printing: card };
       } catch (error) {
         if (!isNotFound(error)) throw error;
       }
@@ -146,27 +155,49 @@ export class IdentityResolver {
     }
     const query = ocrQuery ?? filenameQuery ?? hints.name;
     if (!query || query.length < IDENTITY_RESOLUTION_POLICY.minimumQueryLength) {
-      return result(workingCard, null, workingCard.identityResolution.status === "custom" ? "custom" : "unresolved", undefined);
+      return { workingCard: result(workingCard, null, workingCard.identityResolution.status === "custom" ? "custom" : "unresolved", undefined) };
     }
 
     let cards: readonly ScryfallCard[];
     try {
       cards = await this.client.searchCards(`name:"${query.replaceAll('"', "\\\"")}"`, requestOptions);
     } catch (error) {
-      if (isNotFound(error)) return result(workingCard, null, "unresolved", undefined);
+      if (isNotFound(error)) return { workingCard: result(workingCard, null, "unresolved", undefined) };
       throw error;
     }
     const unique = [...new Map(cards.map((item) => [item.oracleId ?? item.id, item])).values()];
     const matching = fuzzyMatchName(query, unique, IDENTITY_RESOLUTION_POLICY);
     const method: IdentityResolutionMethod = ocrQuery ? "ocr" : filenameQuery ? "fuzzy" : "fuzzy";
     const resolutions = matching.candidates.map(({ candidate, score }) => candidateResolution(candidate, score, matching.reason));
-    if (matching.status === "unresolved" || !matching.candidate) return result(workingCard, null, "unresolved", method);
+    if (matching.status === "unresolved" || !matching.candidate) return { workingCard: result(workingCard, null, "unresolved", method) };
     if (matching.status === "resolved" && !ocrQuery) {
       const exactMethod: IdentityResolutionMethod = filenameQuery ? "filename" : "name";
-      return result(workingCard, toIdentity(matching.candidate, exactMethod, 1), "resolved", exactMethod, 1);
+      return { workingCard: result(workingCard, toIdentity(matching.candidate, exactMethod, 1), "resolved", exactMethod, 1), printing: matching.candidate };
     }
-    return result(workingCard, null, matching.status === "ambiguous" ? "ambiguous" : "suggested", method, matching.score, resolutions);
+    return { workingCard: result(workingCard, null, matching.status === "ambiguous" ? "ambiguous" : "suggested", method, matching.score, resolutions) };
   }
+}
+
+/** Assigns the printing that resolved this identity without querying the artwork catalog. */
+export function selectResolvedPrintingArtwork(workingCard: WorkingCard, candidates: readonly ArtworkCandidate[]): WorkingCard {
+  if (!workingCard.identity || !candidates.length) return workingCard;
+  const selectedArtworkByFace = { ...workingCard.selectedArtworkByFace };
+  let changed = false;
+  const printingId = candidates[0].scryfallId ?? candidates[0].providerAssetId;
+
+  for (const side of ["front", "back"] as const) {
+    if (selectedArtworkByFace[side] || !workingCard.faces.some((face) => face.side === side)) continue;
+    const candidate = candidates.find((item) => item.source === "scryfall"
+      && item.identityId === workingCard.identity?.id
+      && item.faceId === side
+      && item.originalAvailable
+      && (item.scryfallId ?? item.providerAssetId) === printingId);
+    if (candidate) {
+      selectedArtworkByFace[side] = selected(candidate);
+      changed = true;
+    }
+  }
+  return changed ? { ...workingCard, selectedArtworkByFace } : workingCard;
 }
 
 export function confirmIdentity(workingCard: WorkingCard, candidate: CardIdentity): WorkingCard {

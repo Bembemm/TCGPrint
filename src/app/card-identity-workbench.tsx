@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import type { ImportKind } from "../../import-engine/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard } from "../../core/cards/types";
+import { formatResolutionSummary } from "../../core/cards/resolution-summary";
 
 type ArtworkFilter = "all" | "scryfall" | "mpc" | "upload";
 type CandidateDto = Omit<ArtworkCandidate, "originalUri" | "localOriginalPath" | "previewUri"> & {
@@ -170,7 +171,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       const response = await fetch("/api/cards/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resolve", cards: workingCards }) });
       const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth: typeof providerHealth }>(response);
       setWorkingCards(result.workingCards); setProviderHealth(result.providerHealth);
-      setStatus("Resolução concluída. Revise sugestões e ambiguidades antes de confirmar.");
+      setStatus(formatResolutionSummary(result.workingCards, result.providerHealth));
     } catch (error) { setProblem(error instanceof Error ? error.message : "A resolução falhou."); setStatus(""); }
     finally { setBusy(false); }
   }
