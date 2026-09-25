@@ -100,13 +100,13 @@ Types encode identity, selected artwork, and face data independently. WorkingCar
 - Methods: autocomplete(query, { signal? }), lookupById(scryfallId, { signal? }), lookupBySetCollector(setCode, collectorNumber, language?, { signal? }), lookupByName(name, "exact" | "fuzzy", { signal? }), searchCards(query, { signal? }), listPrintings(oracleId, { signal? }), downloadAsset(uri, { kind: "thumbnail" | "original", signal? }).
 - Produces normalized ScryfallCard, ScryfallFace, ScryfallRelatedCard, ScryfallImageUris, and ScryfallPrintingPage only; no raw API payload is exposed.
 
-- [ ] Write mapper tests for normal root image_uris, root image_uris plus card_faces, DFC card_faces-only image_uris, multiface ordering, related tokens, and required/optional field validation.
-- [ ] Write client tests for autocomplete, exact/fuzzy lookup, ID, set+collector, search, all printings/pagination, request headers, and fake responses.
-- [ ] Write tests for 404, 429 and Retry-After, 500, invalid JSON/payload, timeout, caller AbortSignal, invalid/non-HTTPS asset URL, HTML response, oversize image body, and serialized requests staying under the configured rate.
-- [ ] Run npm test -- tests/providers/scryfall; expect missing module/export failures.
-- [ ] Implement the mapper/client with a default 125 ms request interval, explicit TCGPrint/version User-Agent, Accept application/json, bounded response reads, one request per operation, and no hidden retry loop. A 429 updates the shared blocked-until time and returns a typed rate-limit error.
-- [ ] Run the focused tests and npm test; expect fake HTTP only and no network dependence.
-- [ ] Commit as feat(scryfall): add typed API client and rate limiting.
+- [x] Write mapper tests for normal root image_uris, root image_uris plus card_faces, DFC card_faces-only image_uris, multiface ordering, related tokens, and required/optional field validation.
+- [x] Write client tests for autocomplete, exact/fuzzy lookup, ID, set+collector, search, all printings/pagination, request headers, and fake responses.
+- [x] Write tests for 404, 429 and Retry-After, 500, invalid JSON/payload, timeout, caller AbortSignal, invalid/non-HTTPS asset URL, HTML response, oversize image body, and serialized requests staying under the configured rate.
+- [x] Run npm test -- tests/providers/scryfall; expect missing module/export failures.
+- [x] Implement the mapper/client with a default 125 ms request interval, explicit TCGPrint/version User-Agent, Accept application/json, bounded response reads, one request per operation, and no hidden retry loop. A 429 updates the shared blocked-until time and returns a typed rate-limit error.
+- [x] Run the focused tests and npm test; expect fake HTTP only and no network dependence.
+- [x] Commit as feat(scryfall): add typed API client and rate limiting.
 
 ## Task 3: Deterministic SQLite Cache and Content-Addressed Asset Store
 

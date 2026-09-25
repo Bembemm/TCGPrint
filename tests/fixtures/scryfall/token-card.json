@@ -1,0 +1,5 @@
+{
+  "id": "12121212-1212-4121-8121-121212121212", "name": "Powerstone", "layout": "token", "set": "tbro", "collector_number": "1", "lang": "en",
+  "digital": false, "promo": false, "full_art": false, "border_color": "black", "image_status": "highres_scan",
+  "image_uris": { "large": "https://cards.scryfall.io/large/token/powerstone.jpg", "png": "https://cards.scryfall.io/png/token/powerstone.png" }
+}

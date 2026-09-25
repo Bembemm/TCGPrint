@@ -1,0 +1,11 @@
+{
+  "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "oracle_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  "name": "Delver of Secrets // Insectile Aberration", "layout": "transform", "set": "isd", "collector_number": "51", "lang": "en",
+  "released_at": "2011-09-30", "digital": false, "promo": false, "full_art": false, "border_color": "black", "image_status": "highres_scan",
+  "image_uris": { "normal": "https://cards.scryfall.io/normal/front/d/d/dddd.jpg" },
+  "card_faces": [
+    { "name": "Delver of Secrets", "type_line": "Creature — Human Wizard", "image_uris": { "normal": "https://cards.scryfall.io/normal/front/d/d/delver.jpg", "png": "https://cards.scryfall.io/png/front/d/d/delver.png" } },
+    { "name": "Insectile Aberration", "type_line": "Creature — Human Insect", "image_uris": { "normal": "https://cards.scryfall.io/normal/back/d/d/insect.jpg", "png": "https://cards.scryfall.io/png/back/d/d/insect.png" } }
+  ],
+  "all_parts": [{ "id": "ffffffff-ffff-4fff-8fff-ffffffffffff", "component": "token", "name": "Insect", "type_line": "Token Creature — Insect" }]
+}

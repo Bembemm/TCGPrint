@@ -1,0 +1,18 @@
+{
+  "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "oracle_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "name": "Sol Ring",
+  "layout": "normal",
+  "set": "cmm",
+  "collector_number": "396",
+  "lang": "en",
+  "released_at": "2023-08-04",
+  "digital": false,
+  "promo": false,
+  "full_art": false,
+  "border_color": "black",
+  "image_status": "highres_scan",
+  "image_uris": { "small": "https://cards.scryfall.io/small/front/a/a/aaaa.jpg", "normal": "https://cards.scryfall.io/normal/front/a/a/aaaa.jpg", "large": "https://cards.scryfall.io/large/front/a/a/aaaa.jpg", "png": "https://cards.scryfall.io/png/front/a/a/aaaa.png", "art_crop": "https://cards.scryfall.io/art_crop/front/a/a/aaaa.jpg" },
+  "related_uris": { "gatherer": "https://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=1", "edhrec": "https://edhrec.com/cards/sol-ring" },
+  "all_parts": [{ "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "component": "token", "name": "Powerstone", "type_line": "Token Artifact" }]
+}
