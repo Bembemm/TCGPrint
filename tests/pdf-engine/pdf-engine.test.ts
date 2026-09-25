@@ -288,7 +288,7 @@ describe("LosslessPdfEngine", () => {
     expect(expanded![3] - trim![3]).toBeCloseTo(2 * bleedPoints, 8);
   });
 
-  it("clips partial-alpha PNG bleed to four exterior regions and draws its trim once", async () => {
+  it("draws bleed, one partial-alpha PNG trim, then vector guides", async () => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-alpha.png")));
     const originalPixels = decodeFixturePng(Buffer.from(original));
     const alphaSamples = Array.from({ length: originalPixels.pixels.length / 4 }, (_, index) =>
@@ -298,7 +298,14 @@ describe("LosslessPdfEngine", () => {
 
     const bleedMm = 0.625;
     const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm });
-    const pdf = await engine.generate({ images: [original], bleedResults: [bleed] });
+    const pdf = await engine.generate({
+      images: [original],
+      bleedResults: [bleed],
+      cutGuides: {
+        mode: "full",
+        style: { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" },
+      },
+    });
     const parsed = await parsePdf(pdf);
     const draws = getImageDrawsWithClips(parsed.content);
     const trimWidth = mmToPoints(63.5);
@@ -317,6 +324,8 @@ describe("LosslessPdfEngine", () => {
     expect(draws).toHaveLength(5);
     expect(draws.slice(0, 4).every((draw) => draw.clip !== undefined)).toBe(true);
     expect(draws[4].clip).toBeUndefined();
+    expect(getVectorSegments(parsed.content)).toHaveLength(4);
+    expect(parsed.content.lastIndexOf("\nS")).toBeGreaterThan(parsed.content.lastIndexOf(" Do"));
     for (const [index, expected] of expectedClips.entries()) {
       const actual = draws[index].clip!;
       expect(actual.x).toBeCloseTo(expected.x, 5);
@@ -537,6 +546,35 @@ describe("LosslessPdfEngine", () => {
       expect(actualPositions.has(`${xMm.toFixed(7)},${yMm.toFixed(7)}`)).toBe(true);
       expect(actualPositions.has(`${(xMm - 0.625).toFixed(7)},${(yMm - 0.625).toFixed(7)}`)).toBe(true);
     }
+  });
+
+  it("packs a mixed 0 mm and 3 mm bleed run on one Letter page with vector guides", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 3 });
+    const pdf = await engine.generate({
+      images: Array.from({ length: 9 }, () => original),
+      bleedResults: [bleed, ...Array.from({ length: 8 }, () => undefined)],
+      paperFormat: { name: "Letter", widthMm: 215.9, heightMm: 279.4 },
+      cutGuides: {
+        mode: "guillotine",
+        style: { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" },
+      },
+    });
+    const parsed = await parsePdf(pdf);
+
+    expect(parsed.document.getPages()).toHaveLength(1);
+    expect(parsed.images).toHaveLength(10);
+    const guides = getVectorSegments(parsed.content);
+    expect(guides).toHaveLength(10);
+    const uniqueVerticalCoordinates = [...new Set(guides
+      .filter(([x1, , x2]) => Math.abs(x1 - x2) < 1e-10)
+      .map(([x1]) => Number(pointsToMm(x1).toFixed(8))))];
+    const uniqueHorizontalCoordinates = [...new Set(guides
+      .filter(([, y1, , y2]) => Math.abs(y1 - y2) < 1e-10)
+      .map(([, y1]) => Number(pointsToMm(y1).toFixed(8))))]
+      .sort((a, b) => a - b);
+    expect(uniqueVerticalCoordinates).toEqual([12.7, 76.2, 79.2, 142.7, 206.2]);
+    expect(uniqueHorizontalCoordinates).toEqual([3.35, 92.25, 181.15, 184.15, 273.05]);
   });
 
   it("fails clearly when the physical trim plus bleed cannot fit on the selected paper", async () => {

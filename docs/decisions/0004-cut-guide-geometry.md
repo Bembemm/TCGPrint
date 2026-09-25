@@ -37,6 +37,14 @@ The minimum regular grid uses one slot per card with a footprint of
 `2 × bleed`, so their external derivatives meet at most at their edges. The
 complete slot grid is centered in the printable page area; it fails if it
 cannot fit and never scales the card. The trim stays at its nominal dimensions.
+When bleed amounts vary, each grid column and row reserves the largest bleed
+of the cards assigned to it; adjacent trims then have at least the sum of their
+individual external bleed clearances. The PDF engine chooses the largest
+row-major prefix that fits on each page.
+
+Outside portions of corner, side, and cross marks are checked against every
+other trim, including half the configured stroke width. A request that would
+draw over another card's trim fails with a geometry error.
 
 Only the PDF adapter converts geometry and stroke widths from millimeters to
 points. It draws bleed first, the original trim image once, and vector guides
@@ -53,6 +61,8 @@ last.
   expands or offsets a cut relative to its trim.
 - Guillotine line deduplication uses a small millimeter tolerance to absorb
   floating-point arithmetic at shared boundaries.
+- Mark lengths that would cover neighboring trim artwork are rejected instead
+  of being shortened or clipped silently.
 
 ## References
 

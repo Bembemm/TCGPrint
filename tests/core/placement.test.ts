@@ -30,6 +30,43 @@ describe("bleed-aware physical grid placement", () => {
     }
   });
 
+  it("fits mixed 0 mm and 3 mm bleed on one Letter page without overlapping derivatives", () => {
+    const bleedByCardMm = [3, ...Array.from({ length: 8 }, () => 0)];
+    const layout = calculateGridPlacement({
+      paper: { name: "Letter", widthMm: 215.9, heightMm: 279.4 },
+      card: MAGIC_STANDARD_CARD,
+      count: 9,
+      bleedMm: 0,
+      bleedByCardMm,
+    });
+
+    expect(layout).toMatchObject({ columns: 3, rows: 3 });
+    expect(layout.slots).toHaveLength(9);
+    for (let index = 0; index < layout.slots.length; index += 1) {
+      const slot = layout.slots[index];
+      const bleed = bleedByCardMm[index];
+      expect(slot.trim.xMm - bleed).toBeGreaterThanOrEqual(-1e-9);
+      expect(slot.trim.yMm - bleed).toBeGreaterThanOrEqual(-1e-9);
+      expect(slot.trim.xMm + slot.trim.widthMm + bleed).toBeLessThanOrEqual(215.9 + 1e-9);
+      expect(slot.trim.yMm + slot.trim.heightMm + bleed).toBeLessThanOrEqual(279.4 + 1e-9);
+      expect(slot.trim.widthMm).toBe(63.5);
+      expect(slot.trim.heightMm).toBe(88.9);
+
+      const right = layout.slots.find((candidate) => candidate.row === slot.row && candidate.column === slot.column + 1);
+      if (right) {
+        const rightIndex = layout.slots.indexOf(right);
+        expect(slot.trim.xMm + slot.trim.widthMm + bleed + bleedByCardMm[rightIndex])
+          .toBeLessThanOrEqual(right.trim.xMm + 1e-9);
+      }
+      const below = layout.slots.find((candidate) => candidate.column === slot.column && candidate.row === slot.row + 1);
+      if (below) {
+        const belowIndex = layout.slots.indexOf(below);
+        expect(slot.trim.yMm + slot.trim.heightMm + bleed + bleedByCardMm[belowIndex])
+          .toBeLessThanOrEqual(below.trim.yMm + 1e-9);
+      }
+    }
+  });
+
   it("centers the complete grid and does not move a single trim when symmetric bleed changes", () => {
     const placements = [0, 0.625, 1, 2, 3].map((bleedMm) => calculateGridPlacement({
       paper: PAPER_FORMATS.A4,

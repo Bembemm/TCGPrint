@@ -754,25 +754,77 @@ export class LosslessPdfEngine {
 
     const paper = request.paperFormat ?? PAPER_FORMATS.A4;
     const card = request.cardFormat ?? MAGIC_STANDARD_CARD;
-    const bleedMm = request.bleedResults?.reduce((maximum, result) =>
-      result?.status === "derived" ? Math.max(maximum, result.bleedMm) : maximum,
-    0) ?? 0;
-    const maximumGrid = calculateGridPlacement({ paper, card, count: 0, bleedMm });
+    const bleedByImageMm = request.images.map((_image, index) => {
+      const bleed = request.bleedResults?.[index];
+      if (bleed?.status !== "derived") return 0;
+      if (!Number.isFinite(bleed.bleedMm) || bleed.bleedMm <= 0 || bleed.bleedMm > 3) {
+        throw new PdfExportError("PDF bleed amount must be greater than 0 mm and at most 3 mm.");
+      }
+      return bleed.bleedMm;
+    });
+    const zeroBleedGrid = calculateGridPlacement({ paper, card, count: 0, bleedMm: 0 });
+    const pagePlacements: Array<{
+      readonly startCardIndex: number;
+      readonly endCardIndex: number;
+      readonly placement: ReturnType<typeof calculateGridPlacement>;
+    }> = [];
+    if (request.images.length === 0) {
+      pagePlacements.push({
+        startCardIndex: 0,
+        endCardIndex: 0,
+        placement: calculateGridPlacement({ paper, card, count: 0, bleedMm: 0 }),
+      });
+    } else {
+      let startCardIndex = 0;
+      while (startCardIndex < request.images.length) {
+        const remaining = request.images.length - startCardIndex;
+        const maximumCandidate = Math.min(remaining, zeroBleedGrid.capacity);
+        let selectedPlacement: ReturnType<typeof calculateGridPlacement> | undefined;
+        let selectedCount = 0;
+
+        for (let candidateCount = maximumCandidate; candidateCount > 0; candidateCount -= 1) {
+          try {
+            selectedPlacement = calculateGridPlacement({
+              paper,
+              card,
+              count: candidateCount,
+              bleedMm: 0,
+              bleedByCardMm: bleedByImageMm.slice(startCardIndex, startCardIndex + candidateCount),
+            });
+            selectedCount = candidateCount;
+            break;
+          } catch (error) {
+            if (!(error instanceof RangeError) || !/card slots do not fit|no physical card slot fits/i.test(error.message)) {
+              throw error;
+            }
+          }
+        }
+
+        if (!selectedPlacement) {
+          calculateGridPlacement({
+            paper,
+            card,
+            count: 1,
+            bleedMm: 0,
+            bleedByCardMm: [bleedByImageMm[startCardIndex]],
+          });
+          throw new PdfExportError("No physical card slot fits on the selected paper.");
+        }
+        pagePlacements.push({
+          startCardIndex,
+          endCardIndex: startCardIndex + selectedCount,
+          placement: selectedPlacement,
+        });
+        startCardIndex += selectedCount;
+      }
+    }
+
     const pdf = await PDFDocument.create();
-    const pageCount = Math.max(1, Math.ceil(request.images.length / maximumGrid.capacity));
     const widthPoints = mmToPoints(card.widthMm);
     const heightPoints = mmToPoints(card.heightMm);
 
-    for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+    for (const { startCardIndex, endCardIndex, placement: pagePlacement } of pagePlacements) {
       const page = pdf.addPage([mmToPoints(paper.widthMm), mmToPoints(paper.heightMm)]);
-      const startCardIndex = pageIndex * maximumGrid.capacity;
-      const endCardIndex = Math.min(startCardIndex + maximumGrid.capacity, request.images.length);
-      const pagePlacement = calculateGridPlacement({
-        paper,
-        card,
-        count: endCardIndex - startCardIndex,
-        bleedMm,
-      });
 
       for (let imageIndex = startCardIndex; imageIndex < endCardIndex; imageIndex += 1) {
         const imageBytes = request.images[imageIndex];

@@ -269,6 +269,36 @@ function deduplicateSegments(segments: readonly CutGuideSegmentMm[]): CutGuideSe
   });
 }
 
+function segmentIntersectsTrimInterior(
+  segment: CutGuideSegmentMm,
+  trim: TrimRectangleMm,
+  strokeRadiusMm: number,
+): boolean {
+  const trimRight = trim.xMm + trim.widthMm;
+  const trimBottom = trim.yMm + trim.heightMm;
+  const segmentLeft = Math.min(segment.x1Mm, segment.x2Mm) - strokeRadiusMm;
+  const segmentRight = Math.max(segment.x1Mm, segment.x2Mm) + strokeRadiusMm;
+  const segmentTop = Math.min(segment.y1Mm, segment.y2Mm) - strokeRadiusMm;
+  const segmentBottom = Math.max(segment.y1Mm, segment.y2Mm) + strokeRadiusMm;
+
+  return Math.min(segmentRight, trimRight) - Math.max(segmentLeft, trim.xMm) > GEOMETRY_TOLERANCE_MM
+    && Math.min(segmentBottom, trimBottom) - Math.max(segmentTop, trim.yMm) > GEOMETRY_TOLERANCE_MM;
+}
+
+function assertSegmentsClearOfNeighborTrims(
+  segments: readonly CutGuideSegmentMm[],
+  sourceTrimIndex: number,
+  trims: readonly TrimRectangleMm[],
+  strokeWidthMm: number,
+): void {
+  for (let neighborIndex = 0; neighborIndex < trims.length; neighborIndex += 1) {
+    if (neighborIndex === sourceTrimIndex) continue;
+    if (segments.some((segment) => segmentIntersectsTrimInterior(segment, trims[neighborIndex], strokeWidthMm / 2))) {
+      throw new RangeError(`Cut guide geometry for trim ${sourceTrimIndex + 1} intersects trim ${neighborIndex + 1}.`);
+    }
+  }
+}
+
 export class CutGuideEngine {
   generate(request: CutGuideRequest): CutGuideGeometry {
     const { style, trims } = validateRequest(request);
@@ -278,13 +308,28 @@ export class CutGuideEngine {
       case "none":
         break;
       case "corners":
-        for (const trim of trims) generateCornerSegments(trim, request.config, segments);
+        for (let index = 0; index < trims.length; index += 1) {
+          const trimSegments: CutGuideSegmentMm[] = [];
+          generateCornerSegments(trims[index], request.config, trimSegments);
+          assertSegmentsClearOfNeighborTrims(trimSegments, index, trims, style.strokeWidthMm);
+          segments.push(...trimSegments);
+        }
         break;
       case "sides":
-        for (const trim of trims) generateSideSegments(trim, request.config, segments);
+        for (let index = 0; index < trims.length; index += 1) {
+          const trimSegments: CutGuideSegmentMm[] = [];
+          generateSideSegments(trims[index], request.config, trimSegments);
+          assertSegmentsClearOfNeighborTrims(trimSegments, index, trims, style.strokeWidthMm);
+          segments.push(...trimSegments);
+        }
         break;
       case "cross":
-        for (const trim of trims) generateCrossSegments(trim, request.config.armLengthMm, segments);
+        for (let index = 0; index < trims.length; index += 1) {
+          const trimSegments: CutGuideSegmentMm[] = [];
+          generateCrossSegments(trims[index], request.config.armLengthMm, trimSegments);
+          assertSegmentsClearOfNeighborTrims(trimSegments, index, trims, style.strokeWidthMm);
+          segments.push(...trimSegments);
+        }
         break;
       case "full":
         for (const trim of trims) generateFullSegments(trim, segments);

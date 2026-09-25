@@ -68,6 +68,21 @@ describe("CutGuideEngine physical geometry", () => {
     expect(segments).toContainEqual({ x1Mm: 7.5, y1Mm: 64.45, x2Mm: 9.5, y2Mm: 64.45 });
   });
 
+  it("rejects an outside side mark that reaches a neighboring trim", () => {
+    const neighboringTrims: readonly TrimRectangleMm[] = [
+      { xMm: 8.5, yMm: 13.9, widthMm: 63.5, heightMm: 88.9 },
+      { xMm: 73.25, yMm: 13.9, widthMm: 63.5, heightMm: 88.9 },
+    ];
+
+    expect(() => createGuides({
+      mode: "sides",
+      style: STYLE,
+      externalLengthMm: 2,
+      internalLengthMm: 0.5,
+      offsetMm: 0.5,
+    }, neighboringTrims)).toThrow(/intersects trim/i);
+  });
+
   it("cross centers a pair of vector arms on each trim vertex", () => {
     const { segments } = createGuides({ mode: "cross", style: STYLE, armLengthMm: 1.25 });
 
