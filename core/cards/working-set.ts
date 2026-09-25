@@ -108,6 +108,22 @@ function mpcReferences(entry: ImportedEntry): readonly WorkingCardMpcReference[]
   return refs;
 }
 
+function sharedMpcCardback(entry: ImportedEntry): WorkingCard["sharedMpcCardback"] {
+  const asset = entry.cardbackAsset;
+  if (!asset) return undefined;
+  return {
+    importedAssetId: asset.id,
+    ...(asset.providerAssetId ? { providerAssetId: asset.providerAssetId } : {}),
+    ...(asset.selectedArtworkId ? { selectedArtworkId: asset.selectedArtworkId } : {}),
+    originalFormat: asset.originalFormat,
+    availableLocally: asset.originalBytes !== undefined,
+    provenance: {
+      sourceId: asset.sourceId,
+      ...(asset.sourceFilename ? { sourceFilename: asset.sourceFilename } : {}),
+    },
+  };
+}
+
 export function createWorkingSet(result: ImportResult, options: CreateWorkingSetOptions = {}): WorkingCard[] {
   return result.entries
     .map((entry, index) => ({ entry, index }))
@@ -146,7 +162,20 @@ export function createWorkingSet(result: ImportResult, options: CreateWorkingSet
         selectedArtworkByFace: getSelectedByFace(entry),
         localArtworkIds: [...new Set(allImportedAssets(entry).filter((asset) => asset.originalBytes).map((asset) => asset.id))],
         mpcReferences: mpcReferences(entry),
-        faceAssociations: (entry.faceAssociations ?? []).map((association) => ({ ...association })),
+        ...(entry.cardbackAsset ? { sharedMpcCardback: sharedMpcCardback(entry) } : {}),
+        faceAssociations: [
+          ...(entry.faceAssociations ?? []).map((association) => ({ ...association })),
+          ...result.report.pairings
+            .filter((pairing) => pairing.frontAssetId === entry.asset?.id)
+            .map((pairing) => ({
+              slot: "folder-pair",
+              frontAssetId: pairing.frontAssetId,
+              backAssetId: pairing.backAssetId,
+              confidence: pairing.confidence,
+              reason: pairing.reason,
+              accepted: pairing.accepted,
+            })),
+        ],
         ...(entry.metadata ? { metadata: entry.metadata } : {}),
       } satisfies WorkingCard;
     });

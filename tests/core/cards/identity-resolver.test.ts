@@ -110,4 +110,48 @@ describe("identity resolver", () => {
     const setCollector = { ...identified, identityHints: { setCode: "abc", collectorNumber: "1" } };
     expect(selectDefaultArtwork(setCollector, candidates).selectedArtworkByFace.front?.candidateId).toBe("old");
   });
+
+  it("chooses a single complete printing for automatic DFC faces instead of mixing an incomplete newest printing", () => {
+    const identified = {
+      ...card({ name: "Delver of Secrets // Insectile Aberration" }),
+      faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }],
+      identity: { id: "scryfall:oracle:delver", provider: "scryfall", name: "Delver of Secrets // Insectile Aberration", oracleId: "delver", resolutionMethod: "name" as const, confidence: 1, metadata: { layout: "transform" } },
+      identityResolution: { status: "resolved" as const, method: "name" as const, candidates: [], confirmed: false },
+    };
+    const printing = (scryfallId: string, faceId: "front" | "back", releasedAt: string, originalAvailable = true) => ({
+      id: `scryfall:${scryfallId}:${faceId}`,
+      source: "scryfall" as const,
+      identityId: identified.identity.id,
+      faceId,
+      scryfallId,
+      providerAssetId: scryfallId,
+      originalAvailable,
+      language: "en",
+      releasedAt,
+      metadata: { digital: false, imageStatus: "highres_scan" },
+    });
+    const candidates = [
+      printing("new-print", "front", "2025-01-01"),
+      printing("new-print", "back", "2025-01-01", false),
+      printing("old-print", "front", "2023-01-01"),
+      printing("old-print", "back", "2023-01-01"),
+    ];
+
+    const selected = selectDefaultArtwork(identified, candidates).selectedArtworkByFace;
+
+    expect(selected.front?.providerAssetId).toBe("old-print");
+    expect(selected.back?.providerAssetId).toBe("old-print");
+    expect(selected.front?.candidateId).toBe("scryfall:old-print:front");
+    expect(selected.back?.candidateId).toBe("scryfall:old-print:back");
+
+    const uploadSelection = { candidateId: "upload:local-front", source: "upload" as const, identityId: identified.identity.id, faceId: "front" as const };
+    const mixed = selectDefaultArtwork({ ...identified, selectedArtworkByFace: { front: uploadSelection } }, candidates).selectedArtworkByFace;
+    expect(mixed.front).toEqual(uploadSelection);
+    expect(mixed.back).toMatchObject({ source: "scryfall", providerAssetId: "old-print", candidateId: "scryfall:old-print:back" });
+
+    const explicitFront = { candidateId: "scryfall:old-print:front", source: "scryfall" as const, identityId: identified.identity.id, faceId: "front" as const, providerAssetId: "old-print", selectionPolicy: "user-selected" };
+    const explicit = selectDefaultArtwork({ ...identified, selectedArtworkByFace: { front: explicitFront } }, candidates).selectedArtworkByFace;
+    expect(explicit.front).toEqual(explicitFront);
+    expect(explicit.back?.providerAssetId).toBe("old-print");
+  });
 });

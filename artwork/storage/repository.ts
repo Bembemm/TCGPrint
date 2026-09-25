@@ -158,6 +158,17 @@ export class ArtworkRepository {
     return rows.map((row) => this.getOriginal(row.artwork_id)!).filter(Boolean);
   }
 
+  listUploadsForIdentityFace(identityId: string, faceId: "front" | "back"): readonly ArtworkOriginalRecord[] {
+    const rows = this.database.prepare(`
+      SELECT DISTINCT o.* FROM artwork_originals o
+      INNER JOIN artwork_provenance p ON p.artwork_id = o.artwork_id
+      INNER JOIN artwork_identity_links l ON l.artwork_id = o.artwork_id
+      WHERE p.provider = 'upload' AND l.identity_id = ? AND l.face_id = ?
+      ORDER BY o.created_at, o.artwork_id
+    `).all(identityId, faceId) as StoredOriginalRow[];
+    return rows.map((row) => this.getOriginal(row.artwork_id)!).filter(Boolean);
+  }
+
   linkIdentityArtwork(identityId: string, artworkId: string, faceId: "front" | "back"): void {
     this.database.prepare("INSERT INTO artwork_identity_links(identity_id, artwork_id, face_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING")
       .run(identityId, artworkId, faceId, new Date().toISOString());

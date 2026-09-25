@@ -64,7 +64,6 @@ function candidateResolution(card: ScryfallCard, score: number, reason: string):
 
 function sortedDefaultCandidates(candidates: readonly ArtworkCandidate[]): readonly ArtworkCandidate[] {
   return candidates.filter((candidate) => candidate.source === "scryfall"
-    && candidate.originalAvailable
     && candidate.language === "en"
     && candidate.metadata?.digital !== true
     && candidate.metadata?.imageStatus === "highres_scan")
@@ -192,20 +191,78 @@ export function selectDefaultArtwork(workingCard: WorkingCard, candidates: reado
   const eligible = sortedDefaultCandidates(candidates).filter((candidate) => candidate.identityId === workingCard.identity?.id);
   const selectedArtworkByFace = { ...workingCard.selectedArtworkByFace };
   let changed = false;
+
+  if (workingCard.identityHints.scryfallId) {
+    for (const side of ["front", "back"] as const) {
+      if (selectedArtworkByFace[side] || !workingCard.faces.some((face) => face.side === side)) continue;
+      const printing = candidates.find((candidate) => candidate.source === "scryfall"
+        && candidate.identityId === workingCard.identity?.id
+        && candidate.faceId === side
+        && candidate.originalAvailable
+        && (candidate.scryfallId === workingCard.identityHints.scryfallId || candidate.providerAssetId === workingCard.identityHints.scryfallId));
+      if (printing) { selectedArtworkByFace[side] = selected(printing); changed = true; }
+    }
+    return changed ? { ...workingCard, selectedArtworkByFace } : workingCard;
+  }
+
+  if (workingCard.identityHints.setCode && workingCard.identityHints.collectorNumber) {
+    for (const side of ["front", "back"] as const) {
+      if (selectedArtworkByFace[side] || !workingCard.faces.some((face) => face.side === side)) continue;
+      const printing = candidates.find((candidate) => candidate.source === "scryfall"
+        && candidate.identityId === workingCard.identity?.id
+        && candidate.faceId === side
+        && candidate.originalAvailable
+        && candidate.setCode?.toLowerCase() === workingCard.identityHints.setCode?.toLowerCase()
+        && candidate.collectorNumber === workingCard.identityHints.collectorNumber);
+      if (printing) { selectedArtworkByFace[side] = selected(printing); changed = true; }
+    }
+    return changed ? { ...workingCard, selectedArtworkByFace } : workingCard;
+  }
+
+  if (workingCard.faces.some((face) => face.side === "front") && workingCard.faces.some((face) => face.side === "back")) {
+    if (workingCard.identityResolution.method !== "name") return workingCard;
+    const missingSides = (["front", "back"] as const).filter((side) => !selectedArtworkByFace[side]);
+    if (!missingSides.length) return workingCard;
+    const selectedScryfall = Object.values(selectedArtworkByFace).find((selection) => selection?.source === "scryfall");
+    const selectedPrintingId = selectedScryfall?.providerAssetId ?? selectedScryfall?.candidateId.match(/^scryfall:([^:]+):/)?.[1];
+    if (selectedPrintingId) {
+      for (const side of missingSides) {
+        const candidate = eligible.find((item) => item.faceId === side && item.originalAvailable
+          && (item.scryfallId ?? item.providerAssetId) === selectedPrintingId);
+        if (candidate) { selectedArtworkByFace[side] = selected(candidate); changed = true; }
+      }
+      return changed ? { ...workingCard, selectedArtworkByFace } : workingCard;
+    }
+
+    if (missingSides.length === 2) {
+      const printings = new Map<string, ArtworkCandidate[]>();
+      for (const candidate of eligible) {
+        const id = candidate.scryfallId ?? candidate.providerAssetId ?? candidate.id;
+        const printing = printings.get(id) ?? [];
+        printing.push(candidate);
+        printings.set(id, printing);
+      }
+      const ordered = [...printings.values()];
+      const chosen = ordered.find((printing) => (["front", "back"] as const).every((side) => printing.some((candidate) => candidate.faceId === side && candidate.originalAvailable)))
+        ?? ordered.find((printing) => printing.some((candidate) => candidate.originalAvailable));
+      if (!chosen) return workingCard;
+      for (const side of ["front", "back"] as const) {
+        const candidate = chosen.find((item) => item.faceId === side && item.originalAvailable);
+        if (candidate) { selectedArtworkByFace[side] = selected(candidate); changed = true; }
+      }
+      return changed ? { ...workingCard, selectedArtworkByFace } : workingCard;
+    }
+
+    const side = missingSides[0];
+    const candidate = eligible.find((item) => item.faceId === side && item.originalAvailable);
+    if (candidate) { selectedArtworkByFace[side] = selected(candidate); changed = true; }
+    return changed ? { ...workingCard, selectedArtworkByFace } : workingCard;
+  }
+
   for (const side of ["front", "back"] as const satisfies readonly CardFaceSide[]) {
     if (selectedArtworkByFace[side] || !workingCard.faces.some((face) => face.side === side)) continue;
-    if (workingCard.identityHints.scryfallId) {
-      const printing = candidates.find((candidate) => candidate.source === "scryfall" && candidate.faceId === side && (candidate.scryfallId === workingCard.identityHints.scryfallId || candidate.providerAssetId === workingCard.identityHints.scryfallId));
-      if (printing) { selectedArtworkByFace[side] = selected(printing); changed = true; }
-      continue;
-    }
-    if (workingCard.identityHints.setCode && workingCard.identityHints.collectorNumber) {
-      const printing = candidates.find((candidate) => candidate.source === "scryfall" && candidate.faceId === side && candidate.setCode?.toLowerCase() === workingCard.identityHints.setCode?.toLowerCase() && candidate.collectorNumber === workingCard.identityHints.collectorNumber);
-      if (printing) { selectedArtworkByFace[side] = selected(printing); changed = true; }
-      continue;
-    }
     if (workingCard.identityResolution.method !== "name") continue;
-    const defaultCandidate = eligible.find((candidate) => candidate.faceId === side);
+    const defaultCandidate = eligible.find((candidate) => candidate.faceId === side && candidate.originalAvailable);
     if (defaultCandidate) { selectedArtworkByFace[side] = selected(defaultCandidate); changed = true; }
   }
   return changed ? { ...workingCard, selectedArtworkByFace } : workingCard;

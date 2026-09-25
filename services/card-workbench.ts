@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ImportFailureError, importFiles } from "../import-engine";
 import type { ImportReport, ImportResult, ImportedAsset, ImportedEntry, UniversalImportRequest } from "../import-engine/types";
+import { sanitizeRelativeImportPath } from "../import-engine/source-path";
 import { ArtworkCatalog } from "../artwork/catalog";
 import { calculateEffectiveDpi, artworkResolutionQuality } from "../artwork/effective-dpi";
 import { LocalArtworkProvider } from "../artwork/local-provider";
@@ -60,7 +61,10 @@ export interface CardWorkbenchOptions {
   readonly minIntervalMs?: number;
   readonly timeoutMs?: number;
   readonly maxUploadBytes?: number;
-  readonly recognizer?: { recognizeName(bytes: Uint8Array, options?: { signal?: AbortSignal }): Promise<string | undefined> };
+  readonly recognizer?: {
+    recognizeName(bytes: Uint8Array, options?: { signal?: AbortSignal }): Promise<string | undefined>;
+    dispose?(): Promise<void>;
+  };
 }
 
 export interface CardWorkbench {
@@ -77,7 +81,7 @@ export interface CardWorkbench {
   getArtworkOriginal(candidateId: string, signal?: AbortSignal): ReturnType<ArtworkCatalog["getOriginal"]>;
   selectArtwork(card: WorkingCard, faceId: CardFaceSide, candidate: ArtworkCandidate): WorkingCard;
   getProviderHealth(): Readonly<Record<string, ProviderHealth>>;
-  close(): void;
+  close(): Promise<void>;
 }
 
 function fileBaseName(value?: string): string | undefined {
@@ -236,6 +240,7 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
   const resolver = new IdentityResolver(client);
   const recognizer = options.recognizer ?? new TesseractOcrRecognizer({ cachePath: paths.rootDirectory });
   const resolutionCache = new Map<string, { identity: CardIdentity | null; resolution: WorkingCard["identityResolution"] }>();
+  let closePromise: Promise<void> | undefined;
 
   return {
     async importForWorkingSet(request, callOptions = {}) {
@@ -248,7 +253,16 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
         }
       }
       const sanitizedRequest: UniversalImportRequest = {
-        ...(request.files ? { files: request.files.map((file) => ({ filename: fileBaseName(file.filename) ?? "upload", bytes: file.bytes })) } : {}),
+        ...(request.files ? { files: request.files.map((file) => {
+          let sourcePath: string | undefined;
+          try { sourcePath = sanitizeRelativeImportPath(file.sourcePath); }
+          catch { throw new ImportFailureError("Imported file path must be a safe relative path of at most 1024 characters.", "INVALID_SOURCE_PATH"); }
+          return {
+            filename: fileBaseName(file.filename) ?? "upload",
+            bytes: file.bytes,
+            ...(sourcePath ? { sourcePath, kind: "folder-file" as const } : {}),
+          };
+        }) } : {}),
         ...(request.text !== undefined ? { text: request.text } : {}),
         ...(request.textFilename ? { textFilename: fileBaseName(request.textFilename) ?? "decklist.txt" } : {}),
         ...(request.selections ? { selections: request.selections } : {}),
@@ -393,15 +407,22 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     keepWorkingCardCustom(card) { return keepCustom(card); },
 
     async listArtworkCandidates(identityId, faceId, source, callOptions = {}) {
-      const identity = getIdentity(metadata, identityId) ?? {
-        id: identityId,
-        provider: "local",
-        name: "Local artwork library",
-        resolutionMethod: "custom" as const,
-        confidence: 0,
-      };
+      const cachedIdentity = getIdentity(metadata, identityId);
+      const oracleId = /^scryfall:oracle:(.+)$/.exec(identityId)?.[1];
+      const scryfallId = /^scryfall:card:(.+)$/.exec(identityId)?.[1];
+      const identity: CardIdentity = cachedIdentity ?? (identityId === "custom:artwork-picker"
+        ? { id: identityId, provider: "local", name: "Local artwork library", resolutionMethod: "custom", confidence: 0 }
+        : {
+          id: identityId,
+          provider: "scryfall",
+          name: identityId,
+          ...(oracleId ? { oracleId } : {}),
+          ...(scryfallId ? { scryfallId } : {}),
+          resolutionMethod: "manual",
+          confidence: 1,
+        });
       if (identity.provider === "local" && source === "scryfall") return [];
-      if (identity.provider === "local" && source === "all") {
+      if (identity.id === "custom:artwork-picker" && source === "all") {
         const [uploads, references] = await Promise.all([
           catalog.search(identity, { source: "upload", faceId, signal: callOptions.signal }),
           catalog.search(identity, { source: "mpc", faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), signal: callOptions.signal }),
@@ -434,7 +455,13 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
       return updateSelectedArtwork(card, faceId, selection);
     },
     getProviderHealth() { return catalog.getProviderHealth(); },
-    close() { database.close(); },
+    close() {
+      closePromise ??= (async () => {
+        try { await recognizer.dispose?.(); }
+        finally { database.close(); }
+      })();
+      return closePromise;
+    },
   };
 }
 
@@ -445,9 +472,11 @@ export function getCardWorkbench(): Promise<CardWorkbench> {
   return defaultWorkbench;
 }
 
-export function resetCardWorkbenchForTests(): void {
-  void defaultWorkbench?.then((workbench) => workbench.close());
+export async function resetCardWorkbenchForTests(): Promise<void> {
+  const pending = defaultWorkbench;
   defaultWorkbench = undefined;
+  const workbench = await pending;
+  await workbench?.close();
 }
 
 export function artworkQualityFromCandidate(candidate: ArtworkCandidate): ReturnType<typeof artworkResolutionQuality> {

@@ -50,6 +50,31 @@ describe("session Working Set", () => {
     expect(createWorkingSet(result(entries), { idFactory: (entry) => `working-${entry.id}` })[1].id).toBe(cards[1].id);
   });
 
+  it("carries the import engine's folder front/back pairing into its WorkingCard", () => {
+    const front: ImportedEntry = { id: "front-entry", kind: "custom-card", order: 0, quantity: 1, sourceId: "front", asset: { id: "front-asset", sourceId: "front", originalFormat: "png" } };
+    const back: ImportedEntry = { id: "back-entry", kind: "custom-card", order: 1, quantity: 1, sourceId: "back", asset: { id: "back-asset", sourceId: "back", originalFormat: "png" } };
+    const imported = result([front, back]);
+    const pairedResult: ImportResult = {
+      ...imported,
+      report: {
+        ...imported.report,
+        pairings: [{ frontAssetId: "front-asset", backAssetId: "back-asset", confidence: 0.99, reason: "same folder and matching front/back suffix", accepted: false }],
+      },
+    };
+
+    const cards = createWorkingSet(pairedResult, { idFactory: (entry) => `working-${entry.id}` });
+
+    expect(cards[0].faceAssociations).toEqual([{
+      slot: "folder-pair",
+      frontAssetId: "front-asset",
+      backAssetId: "back-asset",
+      confidence: 0.99,
+      reason: "same folder and matching front/back suffix",
+      accepted: false,
+    }]);
+    expect(cards[1].faceAssociations).toEqual([]);
+  });
+
   it("keeps MPC front/back refs without pretending missing files are downloaded and supports independent DFC selections", () => {
     const mpcEntry: ImportedEntry = {
       id: "mpc-1", kind: "mpc-order-card", order: 0, quantity: 2, sourceId: "order.xml", slots: ["A1", "A2"],

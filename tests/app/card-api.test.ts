@@ -8,6 +8,7 @@ import {
   handleAutocomplete,
   handleCardSearch,
   handleCardExport,
+  handleCardImport,
   handleIdentityDetails,
   handleResolve,
   parseWorkingCards,
@@ -171,4 +172,34 @@ describe("card APIs", () => {
     expect(exportResponse.status).toBe(413);
     expect(await exportResponse.json()).toMatchObject({ code: "EXPORT_TOO_LARGE" });
   });
+
+  it("accepts sanitized relative folder paths as import metadata parallel to uploaded files", async () => {
+    let captured: { files?: readonly { filename: string; sourcePath?: string; kind?: string }[] } | undefined;
+    const workbench = testWorkbench({
+      importForWorkingSet: vi.fn(async (request: { files?: readonly { filename: string; sourcePath?: string; kind?: string }[] }) => {
+        captured = request;
+        return { workingCards: [], report: {}, providerHealth: {} };
+      }),
+    });
+    const form = new FormData();
+    form.append("files", new File([new Uint8Array([1, 2, 3])], "Card-Front.png"));
+    form.set("filePaths", JSON.stringify(["Deck\\Card-Front.png"]));
+
+    const response = await handleCardImport(new Request("http://localhost/api/cards/import", { method: "POST", body: form }), workbench);
+
+    expect(response.status).toBe(200);
+    expect(captured?.files).toMatchObject([{ filename: "Card-Front.png", sourcePath: "Deck/Card-Front.png", kind: "folder-file" }]);
+  });
+
+  it.each(["/etc/passwd", "../outside.png", "Deck/../outside.png", "C:\\Users\\secret.png", "Deck/\u0000bad.png", `Deck/${"x".repeat(1024)}.png`])(
+    "rejects unsafe folder path metadata %s",
+    async (filePath) => {
+      const workbench = testWorkbench();
+      const form = new FormData();
+      form.append("files", new File([new Uint8Array([1])], "card.png"));
+      form.set("filePaths", JSON.stringify([filePath]));
+      const response = await handleCardImport(new Request("http://localhost/api/cards/import", { method: "POST", body: form }), workbench);
+      expect(response.status).toBe(400);
+    },
+  );
 });

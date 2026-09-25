@@ -91,6 +91,19 @@ export interface WorkingCardMpcReference {
   readonly availableLocally: boolean;
 }
 
+/** Shared MPC order cardback reference; it is independent from the card's DFC back face. */
+export interface WorkingCardSharedMpcCardback {
+  readonly importedAssetId: string;
+  readonly providerAssetId?: string;
+  readonly selectedArtworkId?: string;
+  readonly originalFormat: string;
+  readonly availableLocally: boolean;
+  readonly provenance: {
+    readonly sourceId: string;
+    readonly sourceFilename?: string;
+  };
+}
+
 /** One imported entry. Copies stay represented by quantity until PDF composition. */
 export interface WorkingCard {
   readonly id: string;
@@ -111,10 +124,14 @@ export interface WorkingCard {
   readonly selectedArtworkByFace: Readonly<Partial<Record<CardFaceSide, SelectedArtwork>>>;
   readonly localArtworkIds: readonly string[];
   readonly mpcReferences: readonly WorkingCardMpcReference[];
+  readonly sharedMpcCardback?: WorkingCardSharedMpcCardback;
   readonly faceAssociations: readonly {
     readonly slot: string;
     readonly frontAssetId?: string;
     readonly backAssetId?: string;
+    readonly confidence?: number;
+    readonly reason?: string;
+    readonly accepted?: boolean;
   }[];
   readonly metadata?: Readonly<Record<string, unknown>>;
 }

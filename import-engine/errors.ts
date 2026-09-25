@@ -18,7 +18,8 @@ export type ImportFailureCode =
   | "ZIP_SIZE_LIMIT"
   | "ZIP_RATIO_LIMIT"
   | "ZIP_DEPTH_LIMIT"
-  | "MAPPING_INVALID";
+  | "MAPPING_INVALID"
+  | "INVALID_SOURCE_PATH";
 
 export class ImportFailureError extends Error {
   constructor(

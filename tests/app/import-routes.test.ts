@@ -60,6 +60,22 @@ describe("minimal import workbench API", () => {
     expect(JSON.parse(serialized).entries[0]).toMatchObject({ kind: "custom-card", asset: { originalFormat: "svg", widthPx: 100, heightPx: 140 } });
   });
 
+  it("rejects unsafe or non-parallel folder paths in import preview", async () => {
+    const form = new FormData();
+    const fileBuffer = new ArrayBuffer(svgBytes.byteLength);
+    new Uint8Array(fileBuffer).set(svgBytes);
+    form.append("files", new File([fileBuffer], "Card-Front.svg"));
+    form.set("filePaths", JSON.stringify(["Deck/../outside.svg"]));
+    const unsafe = await previewPost(new Request("http://localhost/api/import/preview", { method: "POST", body: form }));
+    expect(unsafe.status).toBe(400);
+    expect(await unsafe.json()).toMatchObject({ code: "INVALID_SOURCE_PATH" });
+
+    form.set("filePaths", JSON.stringify([]));
+    const mismatched = await previewPost(new Request("http://localhost/api/import/preview", { method: "POST", body: form }));
+    expect(mismatched.status).toBe(400);
+    expect(await mismatched.json()).toMatchObject({ code: "INVALID_SOURCE_PATH" });
+  });
+
   it("exports local PNG, JPEG and SVG through existing engines at A4 and Magic Standard trim", async () => {
     for (const [filename, bytes] of [
       ["sample.png", new Uint8Array(await readFile(join(fixturePath, "synthetic-rgb.png")))],

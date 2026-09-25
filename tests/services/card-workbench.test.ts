@@ -3,12 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCardWorkbench } from "../../services/card-workbench";
+import { createCardWorkbench, type CardWorkbenchOptions, type WorkingSetImportResult } from "../../services/card-workbench";
+import { handleCardImport, handleResolve, parseWorkingCards } from "../../services/card-api";
+import { TesseractOcrRecognizer } from "../../providers/ocr/tesseract-recognizer";
 
 const roots: string[] = [];
-const workbenches: Array<{ close(): void }> = [];
+const workbenches: Array<{ close(): Promise<void> }> = [];
 afterEach(async () => {
-  for (const workbench of workbenches.splice(0)) workbench.close();
+  for (const workbench of workbenches.splice(0)) await workbench.close();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -25,10 +27,10 @@ const basicLand = {
 };
 const delverCard = JSON.parse(await readFile(new URL("../fixtures/scryfall/dmf-card.json", import.meta.url), "utf8")) as Record<string, unknown>;
 
-async function setup(fetchImpl?: typeof fetch) {
+async function setup(fetchImpl?: typeof fetch, recognizer?: CardWorkbenchOptions["recognizer"]) {
   const root = await mkdtemp(join(tmpdir(), "tcgprint-workbench-"));
   roots.push(root);
-  const workbench = await createCardWorkbench({ dataDirectory: root, fetchImpl, minIntervalMs: 0 });
+  const workbench = await createCardWorkbench({ dataDirectory: root, fetchImpl, minIntervalMs: 0, ...(recognizer ? { recognizer } : {}) });
   workbenches.push(workbench);
   return { root, workbench };
 }
@@ -100,6 +102,47 @@ describe("card workbench services", () => {
     expect(await workbench.getArtworkPreview(localIds[0])).toMatchObject({ candidateId: localIds[0], source: "upload" });
   });
 
+  it("keeps the custom upload library explicit and never falls back to it for an external identity", async () => {
+    const { workbench } = await setup();
+    const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
+    const imported = await workbench.importForWorkingSet({ files: [{ filename: "unlinked.png", bytes }] });
+
+    const knownIdentity = await workbench.listArtworkCandidates("scryfall:oracle:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "front", "upload");
+    const customLibrary = await workbench.listArtworkCandidates("custom:artwork-picker", "front", "upload");
+
+    expect(knownIdentity).toEqual([]);
+    expect(customLibrary.map(({ id }) => id)).toEqual(imported.workingCards[0].localArtworkIds);
+  });
+
+  it("retains relative folder paths so front/back pairing reaches the Working Set", async () => {
+    const { workbench } = await setup();
+    const frontBytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
+    const backBytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#753" } }).png().toBuffer());
+
+    const frontBuffer = new ArrayBuffer(frontBytes.byteLength);
+    new Uint8Array(frontBuffer).set(frontBytes);
+    const backBuffer = new ArrayBuffer(backBytes.byteLength);
+    new Uint8Array(backBuffer).set(backBytes);
+    const form = new FormData();
+    form.append("files", new File([frontBuffer], "Card-Front.png"));
+    form.append("files", new File([backBuffer], "Card-Back.png"));
+    form.set("filePaths", JSON.stringify(["Deck/Card-Front.png", "Deck/Card-Back.png"]));
+    const response = await handleCardImport(new Request("http://localhost/api/cards/import", { method: "POST", body: form }), workbench);
+    expect(response.status).toBe(200);
+    const imported = await response.json() as WorkingSetImportResult;
+
+    expect(imported.report.pairings).toHaveLength(1);
+    expect(imported.report.pairings[0]).toMatchObject({ accepted: false, reason: expect.stringContaining("same directory") });
+    expect(imported.workingCards[0].faceAssociations).toEqual([{
+      slot: "folder-pair",
+      frontAssetId: imported.workingCards[0].localArtworkIds[0],
+      backAssetId: imported.workingCards[1].localArtworkIds[0],
+      confidence: 0.99,
+      reason: "Basenames share the same directory and an explicit front/back suffix.",
+      accepted: false,
+    }]);
+  });
+
   it("resolves a name through cached metadata and assigns a deterministic default without expanding quantity", async () => {
     const fake = scryfallFetch();
     const { workbench } = await setup(fake.fetchImpl);
@@ -129,12 +172,61 @@ describe("card workbench services", () => {
     expect(failingFetch).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves the shared MPC cardback through Universal Import, WorkingCard, and API DTO round-trip", async () => {
+    const { workbench } = await setup();
+    const xml = new Uint8Array(await readFile(new URL("../fixtures/import-engine/mpc-order-synthetic.xml", import.meta.url)));
+    const imported = await workbench.importForWorkingSet({ files: [{ filename: "mpc-order-synthetic.xml", bytes: xml }] });
+    const card = imported.workingCards[0];
+
+    expect(card.sharedMpcCardback).toMatchObject({
+      providerAssetId: "synthetic-cardback-artwork",
+      selectedArtworkId: "synthetic-cardback-artwork",
+      originalFormat: "mpc-cardback-reference",
+      provenance: { sourceFilename: "mpc-order-synthetic.xml" },
+      availableLocally: false,
+    });
+    expect(card.sharedMpcCardback?.importedAssetId).toEqual(expect.any(String));
+    expect(card.faces.map((face) => face.side)).toEqual(["front", "back"]);
+
+    const dtoRoundTrip = parseWorkingCards(JSON.parse(JSON.stringify([card])))[0];
+    const response = await handleResolve(new Request("http://localhost/api/cards/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "custom", cards: [dtoRoundTrip] }),
+    }), workbench);
+    const body = await response.json() as { workingCards: typeof imported.workingCards };
+
+    expect(response.status).toBe(200);
+    expect(body.workingCards[0].sharedMpcCardback).toEqual(card.sharedMpcCardback);
+    expect(body.workingCards[0].selectedArtworkByFace.back?.selectedArtworkId).toBe("synthetic-back-art-a");
+  });
+
   it("honors caller cancellation before starting resolution", async () => {
     const { workbench } = await setup();
     const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
     const controller = new AbortController();
     controller.abort();
     await expect(workbench.resolveWorkingCards(imported.workingCards, { signal: controller.signal })).rejects.toMatchObject({ kind: "aborted" });
+  });
+
+  it("disposes the lazily created OCR worker when the workbench closes", async () => {
+    const worker = {
+      recognize: vi.fn(async () => ({ data: { text: "Unknown Card Name" } })),
+      terminate: vi.fn(async () => undefined),
+    };
+    const workerFactory = vi.fn(async () => worker);
+    const recognizer = new TesseractOcrRecognizer({ cachePath: "/tmp/tcgprint-workbench-ocr-test", workerFactory });
+    const offline = vi.fn(async () => new Response("not found", { status: 404 })) as typeof fetch;
+    const { workbench } = await setup(offline, recognizer);
+    const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
+    const imported = await workbench.importForWorkingSet({ files: [{ filename: "mystery-card.png", bytes }] });
+    await workbench.resolveWorkingCards(imported.workingCards);
+
+    expect(workerFactory).toHaveBeenCalledOnce();
+    expect(worker.terminate).not.toHaveBeenCalled();
+    workbenches.splice(workbenches.indexOf(workbench), 1);
+    await workbench.close();
+    expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
   it("maps a resolved DFC to two faces while preserving a local front and selecting Scryfall for the back", async () => {

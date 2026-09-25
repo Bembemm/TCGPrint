@@ -3,6 +3,8 @@ import { CardExportServiceError, exportWorkingCards } from "./card-export";
 import type { ArtworkCatalogSource } from "../artwork/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
 import type { UniversalImportRequest } from "../import-engine/types";
+import { sanitizeRelativeImportPath } from "../import-engine/source-path";
+import { ImportFailureError } from "../import-engine/errors";
 import { ScryfallError } from "../providers/scryfall/errors";
 import { ArtworkStorageError } from "../artwork/storage/types";
 
@@ -169,6 +171,19 @@ export function parseWorkingCards(value: unknown): WorkingCard[] {
         availableLocally: ref.availableLocally === true,
       }];
     }) : [];
+    const cardback = record(input.sharedMpcCardback);
+    const cardbackProvenance = record(cardback?.provenance);
+    const sharedMpcCardback: WorkingCard["sharedMpcCardback"] = cardback ? {
+      importedAssetId: requiredString(cardback.importedAssetId, "shared MPC cardback importedAssetId", 180),
+      ...(optionalString(cardback.providerAssetId, "shared MPC cardback providerAssetId", 200) ? { providerAssetId: cardback.providerAssetId as string } : {}),
+      ...(optionalString(cardback.selectedArtworkId, "shared MPC cardback selectedArtworkId", 200) ? { selectedArtworkId: cardback.selectedArtworkId as string } : {}),
+      originalFormat: requiredString(cardback.originalFormat, "shared MPC cardback originalFormat", 80),
+      availableLocally: cardback.availableLocally === true,
+      provenance: {
+        sourceId: requiredString(cardbackProvenance?.sourceId, "shared MPC cardback provenance sourceId", 180),
+        ...(optionalString(cardbackProvenance?.sourceFilename, "shared MPC cardback provenance sourceFilename", 240) ? { sourceFilename: cardbackProvenance!.sourceFilename as string } : {}),
+      },
+    } : undefined;
     const associations = Array.isArray(input.faceAssociations) ? input.faceAssociations.slice(0, 200).flatMap((item) => {
       const association = record(item);
       if (!association) return [];
@@ -176,6 +191,9 @@ export function parseWorkingCards(value: unknown): WorkingCard[] {
         slot: requiredString(association.slot, "face association slot", 80),
         ...(optionalString(association.frontAssetId, "frontAssetId", 180) ? { frontAssetId: association.frontAssetId as string } : {}),
         ...(optionalString(association.backAssetId, "backAssetId", 180) ? { backAssetId: association.backAssetId as string } : {}),
+        ...(Number.isFinite(Number(association.confidence)) && Number(association.confidence) >= 0 && Number(association.confidence) <= 1 ? { confidence: Number(association.confidence) } : {}),
+        ...(optionalString(association.reason, "face association reason", 300) ? { reason: association.reason as string } : {}),
+        ...(typeof association.accepted === "boolean" ? { accepted: association.accepted } : {}),
       }];
     }) : [];
     return {
@@ -202,6 +220,7 @@ export function parseWorkingCards(value: unknown): WorkingCard[] {
       selectedArtworkByFace,
       localArtworkIds,
       mpcReferences,
+      ...(sharedMpcCardback ? { sharedMpcCardback } : {}),
       faceAssociations: associations,
     };
   });
@@ -223,6 +242,7 @@ async function parseJsonRequest(request: Request, maximumBytes = 1_000_000): Pro
 
 function respondError(error: unknown): Response {
   if (error instanceof ApiRequestError) return Response.json({ code: error.code, message: error.message }, { status: error.status });
+  if (error instanceof ImportFailureError && error.code === "INVALID_SOURCE_PATH") return Response.json({ code: error.code, message: error.message }, { status: 400 });
   if (error instanceof CardExportServiceError) {
     const status = error.code === "INVALID_BLEED" ? 400 : error.code === "ARTWORK_REQUIRED" ? 422 : error.code === "UNSUPPORTED_FORMAT" ? 415 : error.code === "ARTWORK_ORIGINAL_UNAVAILABLE" ? 422 : error.code === "EXPORT_TOO_LARGE" ? 413 : 500;
     return Response.json({ code: error.code, message: error.message }, { status });
@@ -286,7 +306,7 @@ export async function handleCardImport(request: Request, workbench: CardWorkbenc
     const declared = Number(request.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > 110 * 1024 * 1024) throw new ApiRequestError(413, "REQUEST_TOO_LARGE", "Import request exceeds the server size limit.");
     const form = await request.formData();
-    if ([...form.keys()].some((key) => FORBIDDEN_PROPERTIES.has(key) || ["sourcePath", "path"].includes(key))) throw new ApiRequestError(400, "PRIVATE_FIELD_REJECTED", "Filesystem paths and internal byte fields are not accepted by card import.");
+    if ([...form.keys()].some((key) => (FORBIDDEN_PROPERTIES.has(key) && key !== "filePaths") || ["sourcePath", "path"].includes(key))) throw new ApiRequestError(400, "PRIVATE_FIELD_REJECTED", "Filesystem paths and internal byte fields are not accepted by card import.");
     const files = form.getAll("files").filter((item): item is File => item instanceof File);
     if (files.length > 200) throw new ApiRequestError(413, "TOO_MANY_FILES", "At most 200 uploaded files may be imported at once.");
     let total = 0;
@@ -294,10 +314,26 @@ export async function handleCardImport(request: Request, workbench: CardWorkbenc
       total += file.size;
       if (file.size > 30 * 1024 * 1024 || total > 100 * 1024 * 1024) throw new ApiRequestError(413, "UPLOAD_TOO_LARGE", "Imported files exceed the upload limit.");
     }
-    const fileInputs = await Promise.all(files.map(async (file) => ({
-      filename: file.name.split(/[\\/]/).pop() || "upload",
-      bytes: new Uint8Array(await file.arrayBuffer()),
-    })));
+    const filePathsField = form.get("filePaths");
+    let filePaths: unknown[] = Array.from({ length: files.length }, () => undefined);
+    if (filePathsField !== null) {
+      if (typeof filePathsField !== "string" || filePathsField.length > 200_000) throw new ApiRequestError(400, "INVALID_FILE_PATHS", "filePaths must be a small JSON array of relative paths.");
+      let parsedPaths: unknown;
+      try { parsedPaths = JSON.parse(filePathsField); } catch { throw new ApiRequestError(400, "INVALID_FILE_PATHS", "filePaths must contain valid JSON."); }
+      if (!Array.isArray(parsedPaths) || parsedPaths.length !== files.length) throw new ApiRequestError(400, "INVALID_FILE_PATHS", "filePaths must contain one path for each uploaded file.");
+      filePaths = parsedPaths.map((path) => {
+        try { return sanitizeRelativeImportPath(path); }
+        catch { throw new ApiRequestError(400, "INVALID_FILE_PATHS", "Each file path must be a safe relative path of at most 1024 characters."); }
+      });
+    }
+    const fileInputs = await Promise.all(files.map(async (file, index) => {
+      const sourcePath = filePaths[index] as string | undefined;
+      return {
+        filename: file.name.split(/[\\/]/).pop() || "upload",
+        bytes: new Uint8Array(await file.arrayBuffer()),
+        ...(sourcePath ? { sourcePath, kind: "folder-file" as const } : {}),
+      };
+    }));
     const text = form.get("text");
     const formJson = (key: string): unknown => {
       const field = form.get(key);

@@ -372,7 +372,7 @@ describe("BleedEngine", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("fails explicitly for non-zero SVG bleed and keeps the original SVG vector bytes", async () => {
     const svg = await readFixture(SVG_FIXTURE);

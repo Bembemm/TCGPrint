@@ -63,7 +63,9 @@ export class LocalArtworkProvider implements ArtworkProvider {
 
   async searchArtwork(identity: CardIdentity, options: ArtworkSearchOptions = {}): Promise<readonly ArtworkCandidate[]> {
     const side = options.faceId ?? "front";
-    const records = this.originals.listUploads();
+    const records = identity.id === "custom:artwork-picker"
+      ? this.originals.listUploads()
+      : this.repository.listUploadsForIdentityFace(identity.id, side);
     return records.map((record) => {
       const filename = record.provenance.find((item) => item.provider === "upload")?.originalFilename;
       return makeCandidate(uploadId(record.artworkId), identity.id, side, record, filename);

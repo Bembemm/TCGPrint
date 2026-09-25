@@ -11,9 +11,9 @@ import { exportWorkingCards } from "../../services/card-export";
 import { PAPER_FORMATS } from "../../core/geometry";
 
 const roots: string[] = [];
-const workbenches: Array<{ close(): void }> = [];
+const workbenches: Array<{ close(): Promise<void> }> = [];
 afterEach(async () => {
-  for (const workbench of workbenches.splice(0)) workbench.close();
+  for (const workbench of workbenches.splice(0)) await workbench.close();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 

@@ -148,6 +148,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     try {
       const form = new FormData();
       files.forEach((file) => form.append("files", file, file.name));
+      form.set("filePaths", JSON.stringify(files.map((file) => file.webkitRelativePath || "")));
       if (text.trim()) form.set("text", text);
       form.set("selections", JSON.stringify(choices));
       const response = await fetch("/api/cards/import", { method: "POST", body: form });

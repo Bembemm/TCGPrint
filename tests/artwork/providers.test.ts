@@ -34,6 +34,7 @@ async function png(width = 1500, height = 2100) {
 }
 
 const identity: CardIdentity = { id: "scryfall:oracle-sol-ring", provider: "scryfall", name: "Sol Ring", oracleId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", resolutionMethod: "name", confidence: 1 };
+const lightningBoltIdentity: CardIdentity = { id: "scryfall:oracle-lightning-bolt", provider: "scryfall", name: "Lightning Bolt", oracleId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", resolutionMethod: "name", confidence: 1 };
 const solRing: ScryfallCard = {
   id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", oracleId: identity.oracleId, name: "Sol Ring", layout: "normal", setCode: "cmm", collectorNumber: "396", lang: "en", releasedAt: "2023-08-04", digital: false, promo: false, fullArt: false, borderColor: "black", imageStatus: "highres_scan",
   imageUris: { small: "https://cards.scryfall.io/small/front/a/a/one.jpg", normal: "https://cards.scryfall.io/normal/front/a/a/one.jpg", large: "https://cards.scryfall.io/large/front/a/a/one.jpg", png: "https://cards.scryfall.io/png/front/a/a/one.png" }, faces: [], relatedCards: [], metadata: {},
@@ -113,6 +114,36 @@ describe("artwork providers", () => {
     expect(await provider.getOriginal(uploaded.id)).toMatchObject({ bytes });
     expect(await provider.getPreview(uploaded.id)).toMatchObject({ source: "upload", widthPx: 300, heightPx: 420 });
     expect(storage.originals.listUploads()).toHaveLength(1);
+    storage.database.close();
+  });
+
+  it("returns only uploads linked to the requested known identity and face", async () => {
+    const storage = await setup();
+    const provider = new LocalArtworkProvider(storage.originals, storage.thumbnails, storage.repository);
+    const solRingUpload = await provider.registerUpload(await png(300, 420), { originalFilename: "Sol Ring.png" });
+    const lightningBoltUpload = await provider.registerUpload(await sharp({ create: { width: 300, height: 420, channels: 3, background: "#d20" } }).png().toBuffer(), { originalFilename: "Lightning Bolt.png" });
+    provider.linkUpload(identity.id, solRingUpload.id, "front");
+    provider.linkUpload(lightningBoltIdentity.id, lightningBoltUpload.id, "front");
+
+    const solRingCatalog = await provider.searchArtwork(identity, { faceId: "front" });
+    const lightningBoltCatalog = await provider.searchArtwork(lightningBoltIdentity, { faceId: "front" });
+
+    expect(solRingCatalog.map(({ id }) => id)).toEqual([solRingUpload.id]);
+    expect(lightningBoltCatalog.map(({ id }) => id)).toEqual([lightningBoltUpload.id]);
+    expect(await provider.searchArtwork(identity, { faceId: "back" })).toEqual([]);
+    storage.database.close();
+  });
+
+  it("uses the general library only for the explicit artwork-picker context", async () => {
+    const storage = await setup();
+    const provider = new LocalArtworkProvider(storage.originals, storage.thumbnails, storage.repository);
+    const knownLocalIdentity: CardIdentity = { id: "local:known-custom-card", provider: "local", name: "Known custom card", resolutionMethod: "custom", confidence: 1 };
+    const firstUpload = await provider.registerUpload(await png(300, 420), { originalFilename: "first.png" });
+    const secondUpload = await provider.registerUpload(await sharp({ create: { width: 300, height: 420, channels: 3, background: "#d20" } }).png().toBuffer(), { originalFilename: "second.png" });
+    provider.linkUpload(knownLocalIdentity.id, firstUpload.id, "front");
+
+    expect((await provider.searchArtwork(knownLocalIdentity, { faceId: "front" })).map(({ id }) => id)).toEqual([firstUpload.id]);
+    expect((await provider.searchArtwork({ ...knownLocalIdentity, id: "custom:artwork-picker" }, { faceId: "front" })).map(({ id }) => id)).toEqual([firstUpload.id, secondUpload.id]);
     storage.database.close();
   });
 
