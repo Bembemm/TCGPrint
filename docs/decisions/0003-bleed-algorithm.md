@@ -63,6 +63,11 @@ through unchanged.
 - Raster output remains PNG and lossless after decoding, including alpha and
   16-bit PNG samples. JPEG is decoded only for non-zero bleed; its derivative is
   never JPEG.
+- PDF composition draws the derived raster through four clips wholly outside the
+  physical trim: the side clips include corners, while top and bottom stop at
+  the horizontal trim edges. It then draws the original trim once, so derived
+  alpha is never composited beneath the trim and pixel rounding cannot change
+  the nominal physical size.
 - SVG remains vector and untouched at zero bleed. Non-zero SVG bleed reports an
   explicit unsupported-operation error instead of silently rasterizing.
 - The current PDF integration draws one bleed-bearing card only and checks page

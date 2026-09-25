@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { inflateSync } from "node:zlib";
 import { join } from "node:path";
-import { PDFDocument, PDFName, PDFRawStream } from "@pdfme/pdf-lib";
+import { PDFDict, PDFDocument, PDFName, PDFRawStream } from "@pdfme/pdf-lib";
 import { describe, expect, it } from "vitest";
 import { MAGIC_STANDARD_CARD, type CardFormat } from "../../core/geometry";
 import { mmToPoints, pointsToMm } from "../../core/units";
@@ -33,6 +33,18 @@ interface ParsedPdf {
   readonly document: PDFDocument;
   readonly images: readonly PdfImageObject[];
   readonly content: string;
+}
+
+interface PdfClipRectangle {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+interface PdfImageDraw {
+  readonly resourceName: string;
+  readonly clip?: PdfClipRectangle;
 }
 
 function decodeFixturePng(bytes: Buffer): DecodedFixturePng {
@@ -109,6 +121,51 @@ function getDrawMatrices(content: string): number[][] {
     .filter((line) => line.trim().endsWith(" cm"))
     .map((line) => line.trim().replace(/\s+cm$/, "").split(/\s+/).map(Number))
     .filter((matrix) => matrix.length === 6 && matrix.every(Number.isFinite));
+}
+
+function getImageDrawsWithClips(content: string): PdfImageDraw[] {
+  const tokens = content.match(/\/[\w.-]+|[+-]?(?:\d+\.?\d*|\.\d+)(?:[Ee][+-]?\d+)?|[A-Za-z*]+/g) ?? [];
+  const graphicsStack: (PdfClipRectangle | undefined)[] = [];
+  const draws: PdfImageDraw[] = [];
+  let activeClip: PdfClipRectangle | undefined;
+  let pendingRectangle: PdfClipRectangle | undefined;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "q") {
+      graphicsStack.push(activeClip);
+    } else if (token === "Q") {
+      activeClip = graphicsStack.pop();
+    } else if (token === "re") {
+      const operands = tokens.slice(index - 4, index).map(Number);
+      if (operands.length === 4 && operands.every(Number.isFinite)) {
+        pendingRectangle = {
+          x: operands[0],
+          y: operands[1],
+          width: operands[2],
+          height: operands[3],
+        };
+      }
+    } else if (token === "W" || token === "W*") {
+      activeClip = pendingRectangle;
+      pendingRectangle = undefined;
+    } else if (token === "n") {
+      pendingRectangle = undefined;
+    } else if (token === "Do") {
+      const resourceName = tokens[index - 1]?.replace(/^\//, "");
+      if (resourceName) draws.push({ resourceName, clip: activeClip });
+    }
+  }
+
+  return draws;
+}
+
+function getImageResourceReference(pdf: ParsedPdf, resourceName: string): string {
+  const pageResources = pdf.document.getPages()[0].node.Resources();
+  const xObjects = pageResources?.lookup(PDFName.of("XObject"), PDFDict);
+  const reference = xObjects?.get(PDFName.of(resourceName));
+  if (!reference) throw new Error(`PDF image resource /${resourceName} is missing.`);
+  return reference.toString();
 }
 
 function assertMatrixContainsSize(content: string, widthPoints: number, heightPoints: number): void {
@@ -199,13 +256,112 @@ describe("LosslessPdfEngine", () => {
     expect(derivative).toMatchObject({ width: 10, height: 8 });
     expect(trim).toBeDefined();
     expect(expanded).toBeDefined();
-    expect(positionedMatrices).toHaveLength(2);
+    expect(positionedMatrices).toHaveLength(5);
     expect(pointsToMm(trim![0])).toBe(63.5);
     expect(pointsToMm(trim![3])).toBeCloseTo(88.9, 12);
-    expect(positionedMatrices[1][4] - positionedMatrices[0][4]).toBeCloseTo(bleedPoints, 8);
-    expect(positionedMatrices[1][5] - positionedMatrices[0][5]).toBeCloseTo(bleedPoints, 8);
+    for (const matrix of positionedMatrices.slice(1, 4)) {
+      expect(matrix[4]).toBeCloseTo(positionedMatrices[0][4], 8);
+      expect(matrix[5]).toBeCloseTo(positionedMatrices[0][5], 8);
+    }
+    expect(positionedMatrices[4][4] - positionedMatrices[0][4]).toBeCloseTo(bleedPoints, 8);
+    expect(positionedMatrices[4][5] - positionedMatrices[0][5]).toBeCloseTo(bleedPoints, 8);
     expect(expanded![0] - trim![0]).toBeCloseTo(2 * bleedPoints, 8);
     expect(expanded![3] - trim![3]).toBeCloseTo(2 * bleedPoints, 8);
+  });
+
+  it("clips partial-alpha PNG bleed to four exterior regions and draws its trim once", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-alpha.png")));
+    const originalPixels = decodeFixturePng(Buffer.from(original));
+    const alphaSamples = Array.from({ length: originalPixels.pixels.length / 4 }, (_, index) =>
+      originalPixels.pixels[index * 4 + 3],
+    );
+    expect(alphaSamples.some((alpha) => alpha > 0 && alpha < 255)).toBe(true);
+
+    const bleedMm = 0.625;
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm });
+    const pdf = await engine.generate({ images: [original], bleedResults: [bleed] });
+    const parsed = await parsePdf(pdf);
+    const draws = getImageDrawsWithClips(parsed.content);
+    const trimWidth = mmToPoints(63.5);
+    const trimHeight = mmToPoints(88.9);
+    const trimX = mmToPoints((210 - 3 * 63.5) / 2);
+    const trimTop = (297 - 3 * 88.9) / 2;
+    const trimY = mmToPoints(297 - trimTop - 88.9);
+    const bleedPoints = mmToPoints(bleedMm);
+    const expectedClips: readonly PdfClipRectangle[] = [
+      { x: trimX - bleedPoints, y: trimY - bleedPoints, width: bleedPoints, height: trimHeight + 2 * bleedPoints },
+      { x: trimX + trimWidth, y: trimY - bleedPoints, width: bleedPoints, height: trimHeight + 2 * bleedPoints },
+      { x: trimX, y: trimY + trimHeight, width: trimWidth, height: bleedPoints },
+      { x: trimX, y: trimY - bleedPoints, width: trimWidth, height: bleedPoints },
+    ];
+
+    expect(draws).toHaveLength(5);
+    expect(draws.slice(0, 4).every((draw) => draw.clip !== undefined)).toBe(true);
+    expect(draws[4].clip).toBeUndefined();
+    for (const [index, expected] of expectedClips.entries()) {
+      const actual = draws[index].clip!;
+      expect(actual.x).toBeCloseTo(expected.x, 5);
+      expect(actual.y).toBeCloseTo(expected.y, 5);
+      expect(actual.width).toBeCloseTo(expected.width, 5);
+      expect(actual.height).toBeCloseTo(expected.height, 5);
+      expect(pointsToMm(actual.x)).toBeCloseTo(pointsToMm(expected.x), 5);
+      expect(pointsToMm(actual.y)).toBeCloseTo(pointsToMm(expected.y), 5);
+      expect(pointsToMm(actual.width)).toBeCloseTo(pointsToMm(expected.width), 5);
+      expect(pointsToMm(actual.height)).toBeCloseTo(pointsToMm(expected.height), 5);
+
+      const overlapWidth = Math.max(0, Math.min(actual.x + actual.width, trimX + trimWidth) - Math.max(actual.x, trimX));
+      const overlapHeight = Math.max(0, Math.min(actual.y + actual.height, trimY + trimHeight) - Math.max(actual.y, trimY));
+      expect(overlapWidth * overlapHeight).toBe(0);
+    }
+
+    const bleedReferences = draws.slice(0, 4)
+      .map((draw) => getImageResourceReference(parsed, draw.resourceName));
+    const originalReference = getImageResourceReference(parsed, draws[4].resourceName);
+    expect(new Set(bleedReferences).size).toBe(1);
+    expect(bleedReferences[0]).not.toBe(originalReference);
+    expect(parsed.images.filter((image) => image.width === 7 && image.height === 6)).toHaveLength(2);
+    expect(parsed.images.filter((image) => image.width === 5 && image.height === 4)).toHaveLength(2);
+
+    const trimMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d]) =>
+      Math.abs(a - trimWidth) < 1e-8
+        && Math.abs(b) < 1e-8
+        && Math.abs(c) < 1e-8
+        && Math.abs(d - trimHeight) < 1e-8,
+    );
+    expect(trimMatrices).toHaveLength(1);
+    expect(pointsToMm(trimMatrices[0][0])).toBe(63.5);
+    expect(pointsToMm(trimMatrices[0][3])).toBeCloseTo(88.9, 12);
+  });
+
+  it("reuses clipped 16-bit PNG bleed while preserving exact source samples", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-rgb16.png")));
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
+    const pdf = await engine.generate({ images: [original], bleedResults: [bleed] });
+    const parsed = await parsePdf(pdf);
+    const draws = getImageDrawsWithClips(parsed.content);
+    const bleedReferences = draws.slice(0, 4)
+      .map((draw) => getImageResourceReference(parsed, draw.resourceName));
+    const originalReference = getImageResourceReference(parsed, draws[4].resourceName);
+    const originalImage = parsed.images.find((image) => image.width === 2 && image.height === 1)!;
+    const bleedImage = parsed.images.find((image) => image.width === 4 && image.height === 3)!;
+    const originalPixels = Buffer.from([
+      0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
+      0x12, 0xff, 0x56, 0xff, 0x9a, 0xff,
+    ]);
+    const bleedPixels = inflateSync(getPdfStreamBytes(bleedImage));
+    const trimPixels = Buffer.concat([
+      bleedPixels.subarray((1 * 4 + 1) * 6, (1 * 4 + 3) * 6),
+    ]);
+
+    expect(draws).toHaveLength(5);
+    expect(draws.slice(0, 4).every((draw) => draw.clip !== undefined)).toBe(true);
+    expect(draws[4].clip).toBeUndefined();
+    expect(new Set(bleedReferences).size).toBe(1);
+    expect(bleedReferences[0]).not.toBe(originalReference);
+    expect(originalImage.dictionary).toContain("/BitsPerComponent 16");
+    expect(bleedImage.dictionary).toContain("/BitsPerComponent 16");
+    expect(inflateSync(getPdfStreamBytes(originalImage))).toEqual(originalPixels);
+    expect(trimPixels).toEqual(originalPixels);
   });
 
   it("rejects a bleed derivative that belongs to another image", async () => {

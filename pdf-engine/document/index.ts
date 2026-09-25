@@ -2,12 +2,15 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { inflateSync } from "node:zlib";
 import {
+  clip,
   concatTransformationMatrix,
   drawObject,
+  endPath,
   PDFDocument,
   PDFName,
   popGraphicsState,
   pushGraphicsState,
+  rectangle,
 } from "@pdfme/pdf-lib";
 import { drawSvg } from "svg4pdf-lib";
 import type { BleedResult } from "../../image-engine/bleed";
@@ -42,6 +45,13 @@ interface Png16Image {
   readonly colorType: 0 | 2 | 4 | 6;
   readonly samples: Uint8Array;
   readonly alpha?: Uint8Array;
+}
+
+interface PdfClipRectangle {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
 }
 
 interface SvgTag {
@@ -452,6 +462,7 @@ function drawPng16(
   y: number,
   width: number,
   height: number,
+  clipRegions?: readonly PdfClipRectangle[],
 ): void {
   const colorSpace = image.colorType === 0 || image.colorType === 4 ? "DeviceGray" : "DeviceRGB";
   const softMask = image.alpha
@@ -476,12 +487,27 @@ function drawPng16(
   const resourceName = PDFName.of(`Png16_${resourceId}`);
 
   page.node.setXObject(resourceName, imageRef);
-  page.pushOperators(
-    pushGraphicsState(),
-    concatTransformationMatrix(width, 0, 0, height, x, y),
-    drawObject(resourceName),
-    popGraphicsState(),
-  );
+  if (!clipRegions) {
+    page.pushOperators(
+      pushGraphicsState(),
+      concatTransformationMatrix(width, 0, 0, height, x, y),
+      drawObject(resourceName),
+      popGraphicsState(),
+    );
+    return;
+  }
+
+  for (const region of clipRegions) {
+    page.pushOperators(
+      pushGraphicsState(),
+      rectangle(region.x, region.y, region.width, region.height),
+      clip(),
+      endPath(),
+      concatTransformationMatrix(width, 0, 0, height, x, y),
+      drawObject(resourceName),
+      popGraphicsState(),
+    );
+  }
 }
 
 function stripSvgPreamble(svg: string): string {
@@ -548,7 +574,7 @@ function detectFormat(bytes: Uint8Array): SupportedImageFormat {
   throw new PdfExportError("Unsupported image format. Use JPEG, PNG, or SVG files.");
 }
 
-async function drawRasterImage(
+async function drawClippedBleedRaster(
   pdf: PDFDocument,
   page: ReturnType<PDFDocument["addPage"]>,
   bytes: Uint8Array,
@@ -557,29 +583,67 @@ async function drawRasterImage(
   y: number,
   width: number,
   height: number,
+  clipRegions: readonly PdfClipRectangle[],
 ): Promise<void> {
   const exactBytes = copyBytes(bytes);
   const format = detectFormat(exactBytes);
 
-  if (format === "jpeg") {
-    const image = await pdf.embedJpg(exactBytes);
-    page.drawImage(image, { x, y, width, height });
+  if (format !== "png") {
+    throw new PdfExportError("Bleed derivatives must be lossless raster PNG images.");
+  }
+
+  const png16 = parsePng16(exactBytes);
+  if (png16) {
+    drawPng16(pdf, page, png16, resourceId, x, y, width, height, clipRegions);
     return;
   }
 
-  if (format === "png") {
-    const png16 = parsePng16(exactBytes);
-    if (png16) {
-      drawPng16(pdf, page, png16, resourceId, x, y, width, height);
-      return;
-    }
-
-    const image = await pdf.embedPng(exactBytes);
+  const image = await pdf.embedPng(exactBytes);
+  for (const region of clipRegions) {
+    page.pushOperators(
+      pushGraphicsState(),
+      rectangle(region.x, region.y, region.width, region.height),
+      clip(),
+      endPath(),
+    );
     page.drawImage(image, { x, y, width, height });
-    return;
+    page.pushOperators(popGraphicsState());
   }
+}
 
-  throw new PdfExportError("Bleed derivatives must be lossless raster PNG images.");
+function makeBleedClipRegions(
+  trimX: number,
+  trimY: number,
+  trimWidth: number,
+  trimHeight: number,
+  bleedPoints: number,
+): readonly PdfClipRectangle[] {
+  return [
+    {
+      x: trimX - bleedPoints,
+      y: trimY - bleedPoints,
+      width: bleedPoints,
+      height: trimHeight + 2 * bleedPoints,
+    },
+    {
+      x: trimX + trimWidth,
+      y: trimY - bleedPoints,
+      width: bleedPoints,
+      height: trimHeight + 2 * bleedPoints,
+    },
+    {
+      x: trimX,
+      y: trimY + trimHeight,
+      width: trimWidth,
+      height: bleedPoints,
+    },
+    {
+      x: trimX,
+      y: trimY - bleedPoints,
+      width: trimWidth,
+      height: bleedPoints,
+    },
+  ];
 }
 
 function readSvgRootTag(svg: string): { readonly rootTag: string; readonly start: number; readonly end: number } {
@@ -726,7 +790,7 @@ export class LosslessPdfEngine {
           const bleedPoints = mmToPoints(bleed.bleedMm);
           const expandedWidthPoints = widthPoints + 2 * bleedPoints;
           const expandedHeightPoints = heightPoints + 2 * bleedPoints;
-          await drawRasterImage(
+          await drawClippedBleedRaster(
             pdf,
             page,
             bleed.preview.bytes,
@@ -735,6 +799,13 @@ export class LosslessPdfEngine {
             yPoints - bleedPoints,
             expandedWidthPoints,
             expandedHeightPoints,
+            makeBleedClipRegions(
+              xPoints,
+              yPoints,
+              widthPoints,
+              heightPoints,
+              bleedPoints,
+            ),
           );
         }
 
