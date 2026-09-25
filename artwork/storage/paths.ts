@@ -34,11 +34,11 @@ export function validateArtworkExtension(extension: string): string {
 export function originalPathForHash(originalsDirectory: string, hash: string, extension: string): string {
   const safeHash = validateContentHash(hash);
   const safeExtension = validateArtworkExtension(extension);
-  return join(originalsDirectory, safeHash.slice(0, 2), `${safeHash}.${safeExtension}`);
+  return join(/*turbopackIgnore: true*/ originalsDirectory, safeHash.slice(0, 2), `${safeHash}.${safeExtension}`);
 }
 
 export function thumbnailPathForHash(thumbnailsDirectory: string, hash: string, extension: string): string {
   const safeHash = validateContentHash(hash);
   const safeExtension = validateArtworkExtension(extension);
-  return join(thumbnailsDirectory, safeHash.slice(0, 2), `${safeHash}.${safeExtension}`);
+  return join(/*turbopackIgnore: true*/ thumbnailsDirectory, safeHash.slice(0, 2), `${safeHash}.${safeExtension}`);
 }

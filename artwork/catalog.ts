@@ -19,9 +19,10 @@ export class ArtworkCatalog {
     const results = await Promise.all(selectedProviders.map(async (provider) => {
       try {
         const candidates = await provider.searchArtwork(identity, options);
-        this.health.set(provider.source, { available: true, degraded: false });
+        this.health.set(provider.source, provider.getHealth?.() ?? { available: true, degraded: false });
         return candidates;
       } catch (error) {
+        if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError") || (error && typeof error === "object" && (error as { kind?: unknown }).kind === "aborted")) throw error;
         this.health.set(provider.source, { available: false, degraded: true, message: error instanceof Error ? error.message : "Artwork provider failed." });
         return [];
       }
@@ -33,20 +34,28 @@ export class ArtworkCatalog {
     return Object.fromEntries(this.health.entries());
   }
 
+  markProviderDegraded(source: "scryfall" | "upload" | "mpc", error: unknown): void {
+    this.health.set(source, {
+      available: false,
+      degraded: true,
+      message: error instanceof Error ? error.message.slice(0, 300) : "Artwork provider failed.",
+    });
+  }
+
   async getCandidate(candidateId: string): Promise<ArtworkCandidate | undefined> {
     const provider = this.providerFor(candidateId);
     return provider?.getCandidate(candidateId);
   }
 
-  async getPreview(candidateId: string) {
+  async getPreview(candidateId: string, signal?: AbortSignal) {
     const provider = this.providerFor(candidateId);
-    return provider?.getPreview(candidateId);
+    return provider?.getPreview(candidateId, signal);
   }
 
-  async getOriginal(candidateId: string) {
+  async getOriginal(candidateId: string, signal?: AbortSignal) {
     const provider = this.providerFor(candidateId);
     if (!provider) throw new ArtworkStorageError("ARTWORK_MISSING", "No artwork provider recognizes this candidate ID.");
-    return provider.getOriginal(candidateId);
+    return provider.getOriginal(candidateId, signal);
   }
 
   private providerFor(candidateId: string): ArtworkProvider | undefined {

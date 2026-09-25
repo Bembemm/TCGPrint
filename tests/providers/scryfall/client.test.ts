@@ -15,6 +15,12 @@ function fakeClient(fetchImpl: typeof fetch, extra: ConstructorParameters<typeof
 }
 
 describe("ScryfallClient", () => {
+  it("allows only the official HTTPS API host and an identifiable TCGPrint User-Agent", () => {
+    expect(() => new ScryfallClient({ baseUrl: "http://api.scryfall.com" })).toThrow(ScryfallError);
+    expect(() => new ScryfallClient({ baseUrl: "https://example.com" })).toThrow(ScryfallError);
+    expect(() => new ScryfallClient({ userAgent: "OtherClient/1.0" })).toThrow(ScryfallError);
+  });
+
   it("uses explicit headers and supports autocomplete, exact/fuzzy name, ID, set+collector, search, and paginated printings", async () => {
     const second = "https://api.scryfall.com/cards/search?page=2";
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
@@ -43,7 +49,7 @@ describe("ScryfallClient", () => {
       const init = call[1] as RequestInit;
       const headers = new Headers(init.headers);
       expect(headers.get("user-agent")).toMatch(/TCGPrint\//);
-      expect(headers.get("accept")).toBe("application/json");
+      expect(headers.get("accept")).toBe("application/json;q=0.9,*/*;q=0.8");
     }
     const urls = fetchImpl.mock.calls.map(([url]) => new URL(String(url)));
     expect(urls.some((url) => url.pathname.endsWith("/named") && url.searchParams.has("exact"))).toBe(true);

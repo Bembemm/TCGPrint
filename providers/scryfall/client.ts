@@ -5,6 +5,7 @@ import type { ScryfallCard, ScryfallDownloadedAsset, ScryfallLookupMode, Scryfal
 
 const API_BASE_URL = "https://api.scryfall.com";
 const DEFAULT_USER_AGENT = "TCGPrint/0.1.0 (https://github.com/tcgprint; card-workbench)";
+const API_ACCEPT = "application/json;q=0.9,*/*;q=0.8";
 const JSON_RESPONSE_LIMIT = 8 * 1024 * 1024;
 
 function officialScryfallHost(hostname: string): boolean {
@@ -99,7 +100,11 @@ export class ScryfallClient {
     try { this.baseUrl = new URL(options.baseUrl ?? API_BASE_URL); } catch (error) {
       throw new ScryfallError("unsafe-url", "Scryfall API base URL is invalid.", { cause: error });
     }
+    if (this.baseUrl.protocol !== "https:" || this.baseUrl.hostname !== "api.scryfall.com" || this.baseUrl.username || this.baseUrl.password || (this.baseUrl.port && this.baseUrl.port !== "443") || (this.baseUrl.pathname !== "/" && this.baseUrl.pathname !== "") || this.baseUrl.search || this.baseUrl.hash) {
+      throw new ScryfallError("unsafe-url", "Scryfall API requests must use the official HTTPS API host.");
+    }
     this.userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
+    if (!this.userAgent.startsWith("TCGPrint/")) throw new ScryfallError("unsafe-url", "Scryfall requests require an identifiable TCGPrint User-Agent.");
     this.timeoutMs = Math.max(1, options.timeoutMs ?? 15_000);
     this.maxAssetBytes = Math.max(1, options.maxAssetBytes ?? 30 * 1024 * 1024);
     this.jsonLimit = JSON_RESPONSE_LIMIT;
@@ -200,7 +205,7 @@ export class ScryfallClient {
   }
 
   private async getJson(url: URL, signal?: AbortSignal): Promise<unknown> {
-    const { bytes } = await this.request(url, "application/json", signal, this.jsonLimit);
+    const { bytes } = await this.request(url, API_ACCEPT, signal, this.jsonLimit);
     let parsed: unknown;
     try { parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch (error) {
       throw new ScryfallError("invalid-json", "Scryfall returned invalid JSON.", { cause: error });

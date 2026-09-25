@@ -27,7 +27,15 @@ function toIdentity(card: ScryfallCard, method: IdentityResolutionMethod, confid
     ...(card.lang ? { lang: card.lang } : {}),
     resolutionMethod: method,
     confidence,
-    metadata: { layout: card.layout, digital: Boolean(card.digital), promo: Boolean(card.promo), fullArt: Boolean(card.fullArt), imageStatus: card.imageStatus, relatedCards: card.relatedCards },
+    metadata: {
+      layout: card.layout,
+      digital: Boolean(card.digital),
+      promo: Boolean(card.promo),
+      fullArt: Boolean(card.fullArt),
+      imageStatus: card.imageStatus,
+      faces: card.faces.map((face) => ({ name: face.name })),
+      relatedCards: card.relatedCards,
+    },
   };
 }
 

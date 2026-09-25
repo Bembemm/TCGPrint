@@ -26,6 +26,7 @@ export interface ArtworkSearchOptions {
 
 export interface ArtworkProvider {
   readonly source: "scryfall" | "upload" | "mpc";
+  getHealth?(): ProviderHealth;
   searchArtwork(identity: CardIdentity, options?: ArtworkSearchOptions): Promise<readonly ArtworkCandidate[]>;
   getPreview(candidateId: string, signal?: AbortSignal): Promise<ArtworkPreview | undefined>;
   getOriginal(candidateId: string, signal?: AbortSignal): Promise<ArtworkOriginal>;

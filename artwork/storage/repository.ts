@@ -91,6 +91,27 @@ export class ArtworkRepository {
     return row ? this.getOriginal(row.artwork_id) : undefined;
   }
 
+  findOriginalByScryfallId(scryfallId: string): ArtworkOriginalRecord | undefined {
+    const row = this.database.prepare(`
+      SELECT o.* FROM artwork_originals o
+      INNER JOIN artwork_provenance p ON p.artwork_id = o.artwork_id
+      WHERE p.provider = 'scryfall' AND p.scryfall_id = ?
+      ORDER BY p.created_at, p.provenance_id
+      LIMIT 1
+    `).get(scryfallId) as StoredOriginalRow | undefined;
+    return row ? this.getOriginal(row.artwork_id) : undefined;
+  }
+
+  listOriginalsByOracleId(oracleId: string): readonly ArtworkOriginalRecord[] {
+    const rows = this.database.prepare(`
+      SELECT DISTINCT o.* FROM artwork_originals o
+      INNER JOIN artwork_provenance p ON p.artwork_id = o.artwork_id
+      WHERE p.provider = 'scryfall' AND p.oracle_id = ?
+      ORDER BY o.created_at, o.artwork_id
+    `).all(oracleId) as StoredOriginalRow[];
+    return rows.map((row) => this.getOriginal(row.artwork_id)!).filter(Boolean);
+  }
+
   addOriginal(record: Omit<ArtworkOriginalRecord, "provenance" | "createdAt">, provenance: ArtworkProvenance): ArtworkOriginalRecord {
     const createdAt = new Date().toISOString();
     const key = provenanceKey(record.artworkId, provenance);

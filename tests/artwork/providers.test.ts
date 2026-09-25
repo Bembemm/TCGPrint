@@ -124,4 +124,31 @@ describe("artwork providers", () => {
     expect(artworkResolutionQuality(199)).toBe("low");
     expect(artworkResolutionQuality(undefined)).toBe("unknown");
   });
+
+  it("serves cached Scryfall originals and thumbnails after metadata TTL expiry while offline", async () => {
+    const storage = await setup();
+    const bytes = await png(1500, 2100);
+    const online = fakeScryfall([solRing], bytes, await png(240, 336));
+    const first = new ScryfallArtworkProvider(online.client, storage.originals, storage.thumbnails, storage.metadata, storage.repository);
+    const [candidate] = await first.searchArtwork(identity);
+    await first.getOriginal(candidate.id);
+    await first.getPreview(candidate.id);
+    storage.metadata.putMetadata(`scryfall:printings:${identity.oracleId}`, [], Date.now() - 1);
+    storage.metadata.putMetadata(`scryfall:candidate:${candidate.id}`, {}, Date.now() - 1);
+
+    const offlineClient = {
+      listPrintings: vi.fn(async () => { throw new Error("offline"); }),
+      lookupById: vi.fn(async () => { throw new Error("offline"); }),
+      lookupByName: vi.fn(async () => { throw new Error("offline"); }),
+      downloadAsset: vi.fn(async () => { throw new Error("offline"); }),
+    } as unknown as ScryfallClient;
+    const offline = new ScryfallArtworkProvider(offlineClient, storage.originals, storage.thumbnails, storage.metadata, storage.repository);
+    const cached = await offline.searchArtwork(identity);
+    expect(cached).toMatchObject([{ id: candidate.id, originalAvailable: true, widthPx: 1500, heightPx: 2100, effectiveDpi: 600 }]);
+    expect(offline.getHealth()).toMatchObject({ available: true, degraded: true });
+    expect(await offline.getOriginal(candidate.id)).toMatchObject({ bytes });
+    expect(await offline.getPreview(candidate.id)).toMatchObject({ widthPx: 240, heightPx: 336 });
+    expect(offlineClient.downloadAsset).not.toHaveBeenCalled();
+    storage.database.close();
+  }, 15_000);
 });

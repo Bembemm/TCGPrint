@@ -5,6 +5,7 @@ import { ArtworkStorageError } from "./storage/types";
 import type { ArtworkOriginalStore } from "./storage/original-store";
 import type { ArtworkRepository } from "./storage/repository";
 import type { ArtworkThumbnailStore } from "./storage/thumbnail-store";
+import type { ArtworkOriginalRecord } from "./storage/types";
 import { calculateEffectiveDpi } from "./effective-dpi";
 import type { ArtworkPreview, ArtworkProvider, ArtworkSearchOptions } from "./types";
 
@@ -18,7 +19,7 @@ function hashFromId(id: string): string {
   return hash;
 }
 
-function makeCandidate(id: string, identityId: string | null, side: CardFaceSide, original: Awaited<ReturnType<ArtworkOriginalStore["getOriginal"]>>, filename?: string): ArtworkCandidate {
+function makeCandidate(id: string, identityId: string | null, side: CardFaceSide, original: ArtworkOriginalRecord, filename?: string): ArtworkCandidate {
   return {
     id,
     source: "upload",
@@ -63,24 +64,19 @@ export class LocalArtworkProvider implements ArtworkProvider {
   async searchArtwork(identity: CardIdentity, options: ArtworkSearchOptions = {}): Promise<readonly ArtworkCandidate[]> {
     const side = options.faceId ?? "front";
     const records = this.originals.listUploads();
-    return Promise.all(records.map(async (record) => {
-      const original = await this.originals.getOriginal(record.artworkId);
-      const filename = original.provenance.find((item) => item.provider === "upload")?.originalFilename;
-      return makeCandidate(uploadId(record.artworkId), identity.id, side, original, filename);
-    }));
+    return records.map((record) => {
+      const filename = record.provenance.find((item) => item.provider === "upload")?.originalFilename;
+      return makeCandidate(uploadId(record.artworkId), identity.id, side, record, filename);
+    });
   }
 
   async getCandidate(id: string): Promise<ArtworkCandidate | undefined> {
     let hash: string;
     try { hash = hashFromId(id); } catch { return undefined; }
-    try {
-      const original = await this.originals.getOriginal(hash);
-      const filename = original.provenance.find((item) => item.provider === "upload")?.originalFilename;
-      return makeCandidate(id, null, "front", original, filename);
-    } catch (error) {
-      if (error instanceof ArtworkStorageError && error.code === "ARTWORK_MISSING") return undefined;
-      throw error;
-    }
+    const original = this.repository.getOriginal(hash);
+    if (!original) return undefined;
+    const filename = original.provenance.find((item) => item.provider === "upload")?.originalFilename;
+    return makeCandidate(id, null, "front", original, filename);
   }
 
   async getOriginal(id: string) {
