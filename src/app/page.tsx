@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, DragEvent, InputHTMLAttributes } from "react";
 import type { ImportKind, ImportPreview } from "../../import-engine/types";
+import CardIdentityWorkbench from "./card-identity-workbench";
 
 function sourceId(index: number, filename: string): string {
   return `input:${index}:${encodeURIComponent(filename)}`;
@@ -141,11 +142,11 @@ export default function HomePage() {
     <main className="workbench">
       <header className="page-header">
         <div>
-          <p className="eyebrow">TCGPrint · fase 4</p>
-          <h1>Universal Import Engine</h1>
-          <p className="subhead">Inspecione arquivos e listas antes de resolver identidade ou salvar um projeto.</p>
+          <p className="eyebrow">TCGPrint · fase 5</p>
+          <h1>Card Identity + Artwork</h1>
+          <p className="subhead">Universal Import → CardIdentity → catálogo de artes → PDF físico A4.</p>
         </div>
-        <div className="local-badge">Local · sem busca externa</div>
+        <div className="local-badge">Working Set da sessão · Scryfall online</div>
       </header>
 
       <section className="panel input-panel" aria-labelledby="inputs-heading">
@@ -231,6 +232,8 @@ export default function HomePage() {
         </div>
         {problem && <p className="error-message" role="alert">{problem}</p>}
       </section>
+
+      <CardIdentityWorkbench files={files} text={text} choices={choices} />
 
       {preview && (
         <section className="panel report-panel" aria-labelledby="report-heading">
