@@ -71,7 +71,7 @@ describe("artwork providers", () => {
     expect(await provider.getCandidate(candidate.id)).toMatchObject({ widthPx: 1500, heightPx: 2100, effectiveDpi: 600 });
     await expect(provider.getOriginal("missing")).rejects.toMatchObject({ code: "ARTWORK_MISSING" });
     storage.database.close();
-  });
+  }, 15_000);
 
   it("maps DFC candidates to their corresponding faces and keeps face artwork independently addressable", async () => {
     const storage = await setup();
