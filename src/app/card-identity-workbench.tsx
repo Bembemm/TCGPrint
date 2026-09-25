@@ -5,6 +5,7 @@ import Image from "next/image";
 import type { ImportKind } from "../../import-engine/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard } from "../../core/cards/types";
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
+import { postArtworkSelection } from "./artwork-selection-request";
 
 type ArtworkFilter = "all" | "scryfall" | "mpc" | "upload";
 type CandidateDto = Omit<ArtworkCandidate, "originalUri" | "localOriginalPath" | "previewUri"> & {
@@ -220,10 +221,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         const prepared = await jsonResponse<{ candidate: CandidateDto }>(prepareResponse);
         setArtworkCandidates((current) => current.map((item) => item.id === candidate.id ? prepared.candidate : item));
       }
-      const response = await fetch("/api/cards/resolve", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "select", card: activeCard, face, candidateId: candidate.id }),
-      });
+      const response = await postArtworkSelection(activeCard, face, candidate.id);
       const result = await jsonResponse<{ workingCards: WorkingCard[] }>(response);
       replaceCard(activeCard.id, result.workingCards[0]);
       setStatus(candidate.originalAvailable ? "Artwork selecionado; original validado e armazenado no cache." : "Referência MPC selecionada; nenhum original local está disponível.");

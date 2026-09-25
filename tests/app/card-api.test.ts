@@ -16,6 +16,7 @@ import {
 import type { ArtworkCandidate, CardIdentity, WorkingCard } from "../../core/cards/types";
 import type { ArtworkOriginal } from "../../artwork/storage/types";
 import { selectArtwork as selectWorkingCardArtwork } from "../../core/cards/working-set";
+import { postArtworkSelection } from "../../src/app/artwork-selection-request";
 
 const candidateId = `upload:${"a".repeat(64)}`;
 const identity: CardIdentity = { id: "scryfall:oracle:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", provider: "scryfall", name: "Sol Ring", oracleId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", resolutionMethod: "manual", confidence: 1 };
@@ -136,17 +137,47 @@ describe("card APIs", () => {
     expect(workbench.getArtworkOriginal).toHaveBeenCalledTimes(2);
   });
 
-  it("switches artwork through an explicit action without changing the WorkingCard or CardIdentity IDs", async () => {
-    const scryfall: ArtworkCandidate = { ...candidate, id: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", source: "scryfall", originalUri: undefined, localOriginalPath: undefined, previewUri: "https://cards.scryfall.io/small/front.png" };
+  it("selects a front candidate from the Artwork Picker through /api/cards/resolve", async () => {
+    const frontCandidate: ArtworkCandidate = { ...candidate, id: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", source: "scryfall", originalUri: undefined, localOriginalPath: undefined, previewUri: "https://cards.scryfall.io/small/front.png" };
     const workbench = testWorkbench({
-      getArtworkCandidate: vi.fn(async () => scryfall),
+      getArtworkCandidate: vi.fn(async () => frontCandidate),
       selectArtwork: (workingCard: WorkingCard, faceId: "front" | "back", item: ArtworkCandidate) => selectWorkingCardArtwork(workingCard, faceId, { candidateId: item.id, source: item.source, identityId: workingCard.identity?.id ?? null, faceId }),
     });
-    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", { action: "select", card, faceId: "front", candidateId: scryfall.id }), workbench);
+    const pickerFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("/api/cards/resolve");
+      return handleResolve(new Request(new URL(String(input), "http://localhost"), init), workbench);
+    });
+
+    const response = await postArtworkSelection(card, "front", frontCandidate.id, pickerFetch);
     const body = await response.json() as { workingCards: WorkingCard[] };
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(String(pickerFetch.mock.calls[0][1]?.body))).toMatchObject({ action: "select", faceId: "front", candidateId: frontCandidate.id });
+    expect(body.workingCards[0].selectedArtworkByFace.front).toMatchObject({ candidateId: frontCandidate.id, source: "scryfall", faceId: "front" });
     expect(body.workingCards[0].id).toBe(card.id);
     expect(body.workingCards[0].identity?.id).toBe(identity.id);
-    expect(body.workingCards[0].selectedArtworkByFace.front).toMatchObject({ candidateId: scryfall.id, source: "scryfall" });
+  });
+
+  it("selects the back candidate from the Artwork Picker for a DFC", async () => {
+    const backCandidate: ArtworkCandidate = { ...candidate, id: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:back", source: "scryfall", faceId: "back", originalUri: undefined, localOriginalPath: undefined, previewUri: "https://cards.scryfall.io/small/back.png" };
+    const dfcCard: WorkingCard = { ...card, faces: [{ id: "front", side: "front", name: "Front Face" }, { id: "back", side: "back", name: "Back Face" }] };
+    const workbench = testWorkbench({
+      getArtworkCandidate: vi.fn(async () => backCandidate),
+      selectArtwork: (workingCard: WorkingCard, faceId: "front" | "back", item: ArtworkCandidate) => selectWorkingCardArtwork(workingCard, faceId, { candidateId: item.id, source: item.source, identityId: workingCard.identity?.id ?? null, faceId }),
+    });
+    const pickerFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("/api/cards/resolve");
+      return handleResolve(new Request(new URL(String(input), "http://localhost"), init), workbench);
+    });
+
+    const response = await postArtworkSelection(dfcCard, "back", backCandidate.id, pickerFetch);
+    const body = await response.json() as { workingCards: WorkingCard[] };
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(String(pickerFetch.mock.calls[0][1]?.body))).toMatchObject({ action: "select", faceId: "back", candidateId: backCandidate.id });
+    expect(body.workingCards[0].selectedArtworkByFace.back).toMatchObject({ candidateId: backCandidate.id, source: "scryfall", faceId: "back" });
+    expect(body.workingCards[0].id).toBe(dfcCard.id);
+    expect(body.workingCards[0].identity?.id).toBe(identity.id);
   });
 
   it("preserves MPC reference candidates without inventing an original or preview", async () => {
