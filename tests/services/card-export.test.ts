@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import normal from "../fixtures/scryfall/normal-card.json";
 import { createCardWorkbench } from "../../services/card-workbench";
 import { handleCardExport } from "../../services/card-api";
+import { exportWorkingCards } from "../../services/card-export";
 import { PAPER_FORMATS } from "../../core/geometry";
 
 const roots: string[] = [];
@@ -94,4 +95,36 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     expect(dct).toBeDefined();
     expect(Buffer.from(dct!.contents)).toEqual(Buffer.from(jpeg));
   }, 20_000);
+
+  it("rejects a reference-only MPC selection without asking for an original", async () => {
+    const reference = {
+      id: `mpc:${"b".repeat(64)}`,
+      source: "mpc" as const,
+      identityId: null,
+      faceId: "front" as const,
+      originalAvailable: false,
+      metadata: { referenceOnly: true },
+    };
+    const card = {
+      id: "stable-working-card",
+      quantity: 1,
+      order: 0,
+      importSource: { sourceId: "mpc:1", importKind: "mpc", entryKind: "asset" },
+      identityHints: {},
+      identity: null,
+      identityResolution: { status: "unresolved" as const, candidates: [], confirmed: false },
+      faces: [{ id: "front", side: "front" as const }],
+      selectedArtworkByFace: { front: { candidateId: reference.id, source: "mpc" as const, identityId: null, faceId: "front" as const } },
+      localArtworkIds: [],
+      mpcReferences: [],
+      faceAssociations: [],
+    };
+    const catalog = {
+      getArtworkCandidate: vi.fn(async () => reference),
+      getArtworkOriginal: vi.fn(),
+    };
+
+    await expect(exportWorkingCards(catalog, [card], { bleedMm: 0, cutGuides: "none" })).rejects.toMatchObject({ code: "ARTWORK_ORIGINAL_UNAVAILABLE" });
+    expect(catalog.getArtworkOriginal).not.toHaveBeenCalled();
+  });
 });
