@@ -15,6 +15,7 @@
   "dependencies": {
     "@pdfme/pdf-lib": "6.1.13",
     "@tailwindcss/postcss": "^4.0.0",
+    "@tesseract.js-data/eng": "1.0.0",
     "@xmldom/xmldom": "0.9.12",
     "better-sqlite3": "^12.0.0",
     "csv-parse": "7.0.2",
@@ -24,6 +25,7 @@
     "sharp": "0.35.4",
     "svg4pdf-lib": "0.1.2",
     "tailwindcss": "^4.0.0",
+    "tesseract.js": "7.0.0",
     "yauzl": "3.4.0"
   },
   "devDependencies": {

@@ -6,7 +6,7 @@
 
 **Architecture:** Keep one stable WorkingCard per imported entry in browser session state. Node services adapt ImportResult, resolve identities, query Scryfall, aggregate upload/Scryfall/MPC candidates, and persist only provider metadata and content-addressed assets. Export accepts safe IDs and quantities, loads validated originals server-side, expands quantities only while composing, then calls the existing BleedEngine and LosslessPdfEngine.
 
-**Tech Stack:** TypeScript, Next.js Node.js routes, better-sqlite3, filesystem content-addressed assets, Sharp for image validation and thumbnails, fake HTTP in tests, and a lazy OCR adapter. No Projects/autosave or MPC online provider.
+**Tech Stack:** TypeScript, Next.js Node.js routes, better-sqlite3, filesystem content-addressed assets, Sharp for image validation and thumbnails, fake HTTP in tests, and a lazy OCR adapter. Tesseract.js, its WASM core, and the English model are externalized to the Node server; no Projects/autosave or MPC online provider.
 
 **Spec:** IMPLEMENTATION_PLAN.md sections 19–34, 58–64, 120, 134–146, 150–154; the approved Fase 5 request and architectural constraints in the task conversation.
 
@@ -25,7 +25,7 @@
 - Artwork thumbnails and originals have distinct IDs, storage records, and API routes; thumbnail data is never an export fallback.
 - An exportable artwork must be fetched or loaded as an original, byte-validated and fully decoded before it enters the PDF.
 - Resolve inputs in order: explicit Scryfall ID, set plus collector number, explicit imported card name, filename suggestion, local OCR, deterministic fuzzy candidates, human confirmation.
-- Filename exact matches remain suggestions until a user confirms them; only explicit strong metadata or explicit decklist names can resolve automatically.
+- Filename text only creates a search query; a provider-validated exact filename match may resolve, while fuzzy filename/OCR results stay suggestions until human confirmation.
 - Scryfall default selection priority: (a) retain any selected artwork; (b) if there is no selection, honor an explicit Scryfall ID; (c) otherwise honor set+collector; (d) only then choose a default for a name-resolved identity. For (d), use the newest non-digital English high-resolution printing with usable original art, sorting ties by release date descending, set code, collector number, and Scryfall UUID. Record the policy on the selection. Never replace upload/MPC selections.
 - DFC/MDFC faces are mapped and selected independently. Duplex is out of scope.
 - MPC Autofill references, slots, ordering, and selectedArtworkId from Fase 4 are preserved and never looked up/downloaded online.
@@ -36,7 +36,7 @@
 
 ## OCR Spike Notes
 
-The native Tesseract executable is not installed here and would be a separate platform-specific install. A temporary install of tesseract.js 7.0.0 succeeded outside the repository: npm reports Apache-2.0 and 1,411,341 unpacked bytes for tesseract.js; tesseract.js-core 7.0.0 is Apache-2.0 and 45,262,431 unpacked bytes. On Node.js 22.22.1 a local worker recognized the synthetic title band as “SOL RING”. The API documents Node workers from Node 16 onward, explicit workerPath/corePath, and cachePath for Node language data. The probe showed default traineddata was written into the current working directory, so production must set a dedicated app-local OCR cachePath. Next.js must keep this server-only in a Node route and may need to externalize the worker packages so their files remain addressable; test that build/runtime path. The Node/WASM option is selected because it avoids requiring a separately installed native executable, despite its large core. It remains dynamic-imported behind OcrRecognizer and runs only after filename/metadata are insufficient. The recognition image stays local; only the model is downloaded on first use and cached. This workspace has no Termux/proot runtime, so that compatibility is unverified and OCR failure must remain isolated from import/export.
+The native Tesseract executable is not installed here and would be a separate platform-specific install. A temporary install of tesseract.js 7.0.0 succeeded outside the repository: npm reports Apache-2.0 and 1,411,341 unpacked bytes for tesseract.js; tesseract.js-core 7.0.0 is Apache-2.0 and 45,262,431 unpacked bytes. On Node.js 22.22.1 a local worker recognized a synthetic title band exactly as “SOL RING”. The API documents Node workers from Node 16 onward, explicit workerPath/corePath, and cachePath for Node language data. The probe showed default traineddata was written into the current working directory, so production sets a dedicated app-local OCR cachePath. A real adapter smoke initially failed when the Node worker tried to fetch the English model from a CDN; package @tesseract.js-data/eng 1.0.0 (MIT, 13,876,967 unpacked bytes) now ships the model locally, avoiding runtime model-network dependency. Next externalizes Tesseract, core, and model packages so worker/WASM paths remain addressable. The Node/WASM option avoids requiring a separately installed native executable, despite its large core and model. It remains dynamic-imported behind OcrRecognizer and runs only after filename/metadata are insufficient. Recognition reads a temporary top title-band crop and does not mutate or send the source image. This workspace has no Termux/proot runtime, so that compatibility is unverified; Node 24 is unverified and OCR failure remains isolated from import/export.
 
 ## Review Focus
 
@@ -168,6 +168,7 @@ A candidate identifies source, identityId, faceId, printing/card IDs, preview UR
 - Create: providers/ocr/types.ts
 - Create: providers/ocr/tesseract-recognizer.ts
 - Modify: package.json and package-lock.json only after the OCR spike selects tesseract.js.
+- Modify: next.config.ts to externalize the Node-only worker, WASM core, and packaged English model.
 - Create: tests/core/cards/filename-resolver.test.ts, fuzzy-matcher.test.ts, identity-resolver.test.ts, tests/providers/ocr/recognizer.test.ts
 
 **Interfaces**
@@ -178,17 +179,17 @@ A candidate identifies source, identityId, faceId, printing/card IDs, preview UR
 - OCR preprocesses a temporary crop of the likely title band using Sharp; original bytes never pass through a mutating write.
 
 - [x] Run the OCR spike before adding a dependency: verify native executable availability; inspect current package version/license/package size and Node support; run a small Node-only worker smoke test with a synthetic title-band fixture; record Windows/Next/Termux implications below and in ADR. Do not bundle traineddata in the JS client.
-- [ ] Write filename tests for Sol Ring.png, Sol_Ring_custom.png, 01 - Sol Ring - alt art.jpg, 1x Sol Ring proxy.png, Sol Ring [MPC].png, and front/back suffixes; assert legitimate interior words remain.
-- [ ] Write fuzzy tests for exact, small typo, close alternatives/ambiguity, unresolved name, custom action, and policy-boundary values.
-- [ ] Write default-selection tests for retained artwork, explicit Scryfall ID, set+collector, and deterministic name-only ordering; assert upload/MPC selections are never replaced.
-- [ ] Write resolver tests asserting ID before set/collector before explicit name before filename before OCR/fuzzy; mocks prove later stages are not invoked after a strong result.
-- [ ] Write tests proving user-confirmed identity survives re-resolution/candidate refresh and uploaded bytes/hash remain unchanged after association or identity correction.
-- [ ] Run npm test -- tests/core/cards tests/providers/ocr; expect missing modules and expected policy behavior.
-- [ ] Implement filename/fuzzy logic, the staged resolver, and OcrRecognizer with dynamic server-only tesseract.js import; initialize/cache one worker lazily and process only title-region bytes.
-- [ ] Run focused tests and npm test; OCR tests use injected fake workers/recognizers, never network model download.
-- [ ] Commit as feat(identity): add safe upload resolver and lazy local OCR.
+- [x] Write filename tests for Sol Ring.png, Sol_Ring_custom.png, 01 - Sol Ring - alt art.jpg, 1x Sol Ring proxy.png, Sol Ring [MPC].png, and front/back suffixes; assert legitimate interior words remain.
+- [x] Write fuzzy tests for exact, small typo, close alternatives/ambiguity, unresolved name, custom action, and policy-boundary values.
+- [x] Write default-selection tests for retained artwork, explicit Scryfall ID, set+collector, and deterministic name-only ordering; assert upload/MPC selections are never replaced.
+- [x] Write resolver tests asserting ID before set/collector before explicit name before filename before OCR/fuzzy; mocks prove later stages are not invoked after a strong result.
+- [x] Write tests proving user-confirmed identity survives re-resolution/candidate refresh and uploaded bytes/hash remain unchanged after association or identity correction.
+- [x] Run npm test -- tests/core/cards tests/providers/ocr; expect missing modules and expected policy behavior.
+- [x] Implement filename/fuzzy logic, the staged resolver, and OcrRecognizer with dynamic server-only tesseract.js import; initialize/cache one worker lazily and process only title-region bytes.
+- [x] Run focused tests and npm test; fake OCR workers cover deterministic crop behavior and the real worker uses only the locally packaged English model, never a network download.
+- [x] Commit as feat(identity): add safe upload resolver and lazy local OCR.
 
-**OCR Spike Result:** Node.js v22.22.1; no native tesseract executable. Temporary npm install of tesseract.js 7.0.0 added 13 packages outside the repository. It is Apache-2.0 (1,411,341 unpacked bytes); tesseract.js-core 7.0.0 is Apache-2.0 (45,262,431 unpacked bytes). A Node worker with the English model recognized the locally generated 1000×220 title band exactly as “SOL RING”. The default model cache wrote eng.traineddata into the current directory; that probe artifact was removed and production must set cachePath to the app OCR data directory. Official docs warn framework bundlers can lose worker paths, so pass explicit local workerPath/corePath and verify Next build/runtime. Tesseract.js is selected as the lazy local recognizer; Termux/proot was not available and remains unverified.
+**OCR Spike Result:** Node.js v22.22.1; no native tesseract executable. Temporary npm install of tesseract.js 7.0.0 added 13 packages outside the repository. It is Apache-2.0 (1,411,341 unpacked bytes); tesseract.js-core 7.0.0 is Apache-2.0 (45,262,431 unpacked bytes). A Node worker with the English model recognized a generated title band exactly as “SOL RING”. The default model cache wrote eng.traineddata into the current directory; production now sets an app-local cachePath. The adapter CDN smoke failed with worker `fetch failed`, so @tesseract.js-data/eng 1.0.0 is pinned (MIT, 13,876,967 unpacked bytes). A real adapter smoke with that packaged model passed; the model is read from server-side package files rather than downloaded at runtime. Explicit local workerPath/corePath and Next server externalization preserve package files. Tesseract.js remains dynamically loaded behind OcrRecognizer. Termux/proot and Node 24 were unavailable and remain unverified.
 
 ## Task 6: Server Workbench Services and Safe Node API
 
