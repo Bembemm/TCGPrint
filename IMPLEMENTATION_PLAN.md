@@ -1378,13 +1378,34 @@ Implementar estratégia própria para quatro cantos.
 
 ## 40. Outros modos de bleed
 
-Suportar posteriormente:
+Suportar:
 
-- Subtle Edge Stretch — padrão;
+- Subtle Edge Stretch — fallback conservador;
+- Smart Border Fill — automático para Scryfall raster quando aplicável;
 - Mirror Edge;
 - Solid/Edge Color Sample;
 - Existing Bleed;
 - None.
+
+### Smart Border Fill
+
+Objetivo:
+
+> evitar que uma moldura externa preta/escura típica de scans Scryfall vire uma faixa de bleed preta dominante quando existe conteúdo visual adequado logo para dentro da borda.
+
+O modo deve:
+
+- classificar cada lado separadamente;
+- detectar faixa escura/uniforme com limiares centralizados e testáveis;
+- procurar a primeira faixa interna com informação visual suficiente dentro de um limite físico configurável;
+- usar essa faixa apenas para sintetizar a região externa;
+- nunca tocar nos pixels do trim;
+- usar fallback para Subtle Edge Stretch quando a confiança for insuficiente;
+- manter cantos determinísticos e sem costuras;
+- ser versionado para reprodutibilidade;
+- registrar a política efetiva no resultado/manifest quando disponível.
+
+Não usar preenchimento generativo remoto nem reconstruir partes da carta dentro do trim.
 
 ---
 
@@ -3433,6 +3454,88 @@ A interface do switcher já deve estar preparada para o provider MPC.
 
 ---
 
+## Fase 5.5 — MPC Artwork Provider + Smart Scryfall Bleed
+
+Esta fase foi antecipada após o primeiro teste real da Fase 5 porque o fluxo de uso prioritário depende de MPC Autofill e porque o PDF real mostrou a necessidade de um bleed mais natural para imagens Scryfall.
+
+### Frente A — MPC Artwork Provider online
+
+Implementar o provider MPC online antes do Editor:
+
+- `MpcArtworkProvider` isolado atrás do contrato de `ArtworkProvider`;
+- pesquisa por `CardIdentity`/nome sem alterar a identidade lógica da carta;
+- thumbnails;
+- download do original;
+- cache/provenance;
+- preservação de `providerAssetId`, `selectedArtworkId`, slots e shared cardback importados na Fase 4;
+- integração ao `ArtworkCatalog`;
+- switcher `Todas | Scryfall | MPC Autofill | Meus uploads`;
+- falha do MPC não pode quebrar Scryfall/uploads;
+- nenhum fallback silencioso de uma seleção MPC para Scryfall;
+- DFC/MDFC continua com seleção independente por face;
+- download de original somente quando necessário para seleção/export;
+- validar estabilidade, limites, origem e formato do endpoint/protocolo usado antes de acoplar ao core;
+- registrar ADR do provider e provenance suficiente para reproduzir a seleção.
+
+Filtros avançados de DPI/source/tags podem evoluir depois, mas busca, thumbnail, seleção e original fazem parte desta fase antecipada.
+
+### Frente B — Smart Scryfall Bleed / Auto Border Fill
+
+O bleed padrão atual continua preservando integralmente o trim, mas imagens Scryfall com moldura externa escura podem produzir uma faixa externa visualmente preta porque o algoritmo amostra a borda física da carta.
+
+Adicionar uma política automática específica para assets Scryfall:
+
+`smart-border-fill`
+
+Regras obrigatórias:
+
+- nunca alterar, ampliar, recortar, deslocar ou reamostrar a área de trim original;
+- gerar somente pixels externos ao trim;
+- detectar quando a faixa periférica é predominantemente moldura/borda escura e de baixa variação;
+- nesse caso, procurar uma faixa fonte mais interna e visualmente representativa antes de gerar o bleed;
+- preservar cada lado de forma independente;
+- tratar os quatro cantos sem costuras evidentes;
+- para borderless/full-art/frames não escuros, usar a própria borda ou fazer fallback determinístico para `subtle-edge-stretch`;
+- se a detecção for incerta, preferir fallback conservador em vez de inventar conteúdo;
+- nenhuma IA/cloud/inpainting remoto;
+- o algoritmo deve ser determinístico, versionado e entrar no cache key;
+- preview e export devem usar exatamente a mesma política;
+- o usuário deve poder sobrescrever o modo automático.
+
+Política inicial sugerida por origem:
+
+```text
+Scryfall raster → Smart Border Fill (auto)
+Upload local    → Subtle Edge Stretch, salvo override
+MPC             → respeitar metadata/bleed existente quando conhecido; caso contrário não assumir silenciosamente
+SVG             → manter regra vetorial atual até existir implementação específica
+```
+
+### Critério de conclusão
+
+Para uma carta identificada, o usuário pode:
+
+1. alternar entre Scryfall, MPC Autofill e upload local sem recriar o WorkingCard;
+2. selecionar uma arte MPC online e exportar usando o original validado;
+3. selecionar uma arte Scryfall e obter bleed externo visualmente preenchido sem transformar a borda preta em uma faixa externa dominante quando houver conteúdo adequado para extensão;
+4. gerar PDF mantendo trim 63.5 × 88.9 mm intacto e guias vetoriais corretas.
+
+Testes obrigatórios:
+
+- Scryfall com borda preta clássica;
+- Scryfall borderless/full-art;
+- borda clara;
+- borda assimétrica;
+- cantos;
+- 0 / 0.625 / 1 / 2 / 3 mm;
+- prova de identidade de pixels da área de trim antes/depois;
+- fallback determinístico;
+- cache key muda com versão/política;
+- MPC online indisponível sem quebrar Scryfall/uploads;
+- seleção Scryfall ↔ MPC ↔ upload preserva WorkingCard.id e CardIdentity.id.
+
+---
+
 ## Fase 6 — Editor
 
 Implementar:
@@ -3559,35 +3662,20 @@ Um desalinhamento duplex consistente deve poder ser compensado sem editar imagen
 
 ---
 
-## Fase 14 — MPC Artwork Provider
+## Fase 14 — MPC Artwork Provider avançado
 
-Primeiro:
+O provider MPC básico foi antecipado para a Fase 5.5 por prioridade de uso.
 
-- MPC Autofill XML;
-- preservação dos artwork IDs/slots escolhidos;
-- local assets provenientes de XML/pacotes.
+Esta fase fica reservada apenas para melhorias que dependam de estabilidade externa ou metadata adicional, por exemplo:
 
-Depois, quando a integração disponível for tecnicamente estável:
+- filtros avançados de DPI/source/tags;
+- ranking e preferências avançadas;
+- atualização/revalidação de assets;
+- ferramentas de diagnóstico do provider;
+- otimizações de cache e lote;
+- recursos adicionais que não sejam necessários para busca, thumbnail, seleção e download básico.
 
-- `MpcArtworkProvider`;
-- pesquisa por identidade da carta;
-- thumbnails;
-- download do original;
-- filtros de DPI/source/tags quando disponíveis;
-- integração completa ao `ArtworkCatalog`.
-
-### Critério de conclusão
-
-Para uma carta identificada, o usuário pode alternar na mesma tela entre:
-
-```text
-Scryfall
-MPC Autofill
-Meus uploads
-Todas
-```
-
-sem alterar a identidade da carta e sem reimportá-la.
+Não duplicar o provider nem criar uma segunda arquitetura MPC.
 
 ---
 
@@ -3664,7 +3752,7 @@ Projeto
 PDF
 ```
 
-`* MPC entra no switcher assim que o provider estiver implementado; a arquitetura/UI deve nascer preparada para ele.`
+`* MPC Artwork Provider foi antecipado para a Fase 5.5 e passa a fazer parte do fluxo prioritário antes do Editor.`
 
 Critérios adicionais:
 
