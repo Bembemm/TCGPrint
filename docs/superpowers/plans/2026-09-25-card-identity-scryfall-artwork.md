@@ -127,12 +127,12 @@ Types encode identity, selected artwork, and face data independently. WorkingCar
 - putMetadata(key, value, expiresAt) and getMetadata(key, now?) implement cache TTL; expired/malformed metadata is treated as a miss.
 - putThumbnail(candidateId, bytes, metadata) and getThumbnail(candidateId) use distinct identifiers and records. An absent thumbnail never falls through to original and an original never resolves by thumbnail ID.
 
-- [ ] Write tests for migrations from schema version zero, idempotent migration, transaction rollback, absence of Project/autosave tables, content-hash path derivation, byte-for-byte original reads, duplicate upload dedupe, metadata TTL, and thumbnail/original namespace separation.
-- [ ] Write tests proving filenames containing traversal sequences are metadata only and cannot affect storage destinations; reject tampered hash files rather than overwrite them.
-- [ ] Run npm test -- tests/artwork/storage.test.ts; expect absent exports/tables.
-- [ ] Implement safe IDs as lowercase SHA-256 hex and paths as originals/<first-two-hex>/<full-hash>.<validated-extension>; use atomic create/no-overwrite and verify existing bytes against the hash.
-- [ ] Run focused tests and npm test; expect all existing SQLite/import tests to pass.
-- [ ] Commit as feat(cache): add artwork metadata and original asset stores.
+- [x] Write tests for migrations from schema version zero, idempotent migration, transaction rollback, absence of Project/autosave tables, content-hash path derivation, byte-for-byte original reads, duplicate upload dedupe, metadata TTL, and thumbnail/original namespace separation.
+- [x] Write tests proving filenames containing traversal sequences are metadata only and cannot affect storage destinations; reject tampered hash files rather than overwrite them.
+- [x] Run npm test -- tests/artwork/storage.test.ts; expect absent exports/tables.
+- [x] Implement safe IDs as lowercase SHA-256 hex and paths as originals/<first-two-hex>/<full-hash>.<validated-extension>; use atomic create/no-overwrite and verify existing bytes against the hash.
+- [x] Run focused tests and npm test; expect all existing SQLite/import tests to pass.
+- [x] Commit as feat(cache): add artwork metadata and original asset stores.
 
 ## Task 4: Scryfall, Local, and MPC Artwork Providers plus Catalog
 
