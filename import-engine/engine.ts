@@ -327,7 +327,9 @@ export async function importFiles(
         }
       }
       if (importOutput) {
-        entries.push(...importOutput.entries.map((entry) => ({ ...entry, order: entries.length })));
+        for (const entry of importOutput.entries) {
+          entries.push({ ...entry, order: entries.length });
+        }
         warnings.push(...importOutput.warnings);
         if (importOutput.mappings) mappings.push(...importOutput.mappings);
         if (importOutput.metadata) {
