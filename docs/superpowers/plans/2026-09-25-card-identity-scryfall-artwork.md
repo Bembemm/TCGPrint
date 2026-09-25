@@ -77,12 +77,12 @@ The native Tesseract executable is not installed here and would be a separate pl
 
 Types encode identity, selected artwork, and face data independently. WorkingCard includes id, quantity, order, section, original import source metadata, identity resolution, optional confirmed identity, separate front/back selections, and MPC reference fields. createWorkingSet emits one card per ImportedEntry, preserves entry order and quantity and uses an injected ID factory in tests; it never expands copies.
 
-- [ ] Write tests asserting deck entries preserve order, quantity, section, set/collector/Scryfall hints and each import entry maps to one stable WorkingCard.
-- [ ] Write tests asserting MPC front/back slots and IDs remain reference-only when no bytes exist; DFC faces and different per-face selections are representable; selecting artwork changes neither WorkingCard.id nor CardIdentity.id.
-- [ ] Run npm test -- tests/core/cards/working-set.test.ts; expect missing module/export failures.
-- [ ] Implement only the domain types and pure import/session mapping needed by those tests.
-- [ ] Run the focused test and then npm test; expect all foundation/import/PDF tests to pass.
-- [ ] Commit as feat(cards): add identity and working-card domain.
+- [x] Write tests asserting deck entries preserve order, quantity, section, set/collector/Scryfall hints and each import entry maps to one stable WorkingCard.
+- [x] Write tests asserting MPC front/back slots and IDs remain reference-only when no bytes exist; DFC faces and different per-face selections are representable; selecting artwork changes neither WorkingCard.id nor CardIdentity.id.
+- [x] Run npm test -- tests/core/cards/working-set.test.ts; expect missing module/export failures.
+- [x] Implement only the domain types and pure import/session mapping needed by those tests.
+- [x] Run the focused test and then npm test; expect all foundation/import/PDF tests to pass.
+- [x] Commit as feat(cards): add identity and working-card domain.
 
 ## Task 2: Typed Scryfall Mapping, Client, and Central Rate Limit
 
