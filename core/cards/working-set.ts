@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { mpcArtworkCandidateId } from "./ids";
 import type { ImportedAsset, ImportedEntry, ImportResult, ImportedFace } from "../../import-engine/types";
 import type { CardFace, CardFaceSide, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "./types";
 
@@ -56,9 +57,8 @@ function selectedForImportedAsset(
     return { candidateId: asset.id, source: "upload", identityId: null, faceId: side };
   }
   if (providerAssetId || selectedArtworkId || asset.originalFormat === "mpc-reference") {
-    const referenceId = selectedArtworkId ?? providerAssetId ?? asset.id;
     return {
-      candidateId: `mpc:${referenceId}`,
+      candidateId: mpcArtworkCandidateId(asset.id, side),
       source: "mpc",
       identityId: null,
       faceId: side,
