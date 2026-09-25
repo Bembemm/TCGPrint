@@ -2,11 +2,12 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { inflateSync } from "node:zlib";
 import { join } from "node:path";
-import { PDFDict, PDFDocument, PDFName, PDFRawStream } from "@pdfme/pdf-lib";
+import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, PDFRef } from "@pdfme/pdf-lib";
 import { describe, expect, it } from "vitest";
 import { MAGIC_STANDARD_CARD, type CardFormat } from "../../core/geometry";
 import { mmToPoints, pointsToMm } from "../../core/units";
 import { BleedEngine } from "../../image-engine/bleed";
+import type { CutGuideConfig } from "../../core/geometry/cut-guides";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 
 const FIXTURES = join(process.cwd(), "tests", "fixtures", "pdf");
@@ -121,6 +122,24 @@ function getDrawMatrices(content: string): number[][] {
     .filter((line) => line.trim().endsWith(" cm"))
     .map((line) => line.trim().replace(/\s+cm$/, "").split(/\s+/).map(Number))
     .filter((matrix) => matrix.length === 6 && matrix.every(Number.isFinite));
+}
+
+function getVectorSegments(content: string): number[][] {
+  const number = "[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[Ee][+-]?\\d+)?";
+  const pattern = new RegExp(`(${number})\\s+(${number})\\s+m\\s+(${number})\\s+(${number})\\s+l\\s+S`, "g");
+  return [...content.matchAll(pattern)].map((match) => match.slice(1).map(Number));
+}
+
+function getExtGStateOpacity(pdf: ParsedPdf): number | undefined {
+  const resources = pdf.document.getPages()[0].node.Resources();
+  const states = resources?.lookupMaybe(PDFName.of("ExtGState"), PDFDict);
+  for (const value of states?.values() ?? []) {
+    const object = value instanceof PDFRef ? pdf.document.context.lookup(value, PDFDict) : value;
+    if (!(object instanceof PDFDict) || object.get(PDFName.of("Type"))?.toString() !== "/ExtGState") continue;
+    const alpha = object.lookupMaybe(PDFName.of("CA"), PDFNumber);
+    if (alpha) return alpha.asNumber();
+  }
+  return undefined;
 }
 
 function getImageDrawsWithClips(content: string): PdfImageDraw[] {
@@ -284,8 +303,8 @@ describe("LosslessPdfEngine", () => {
     const draws = getImageDrawsWithClips(parsed.content);
     const trimWidth = mmToPoints(63.5);
     const trimHeight = mmToPoints(88.9);
-    const trimX = mmToPoints((210 - 3 * 63.5) / 2);
-    const trimTop = (297 - 3 * 88.9) / 2;
+    const trimX = mmToPoints((210 - 63.5) / 2);
+    const trimTop = (297 - 88.9) / 2;
     const trimY = mmToPoints(297 - trimTop - 88.9);
     const bleedPoints = mmToPoints(bleedMm);
     const expectedClips: readonly PdfClipRectangle[] = [
@@ -393,14 +412,142 @@ describe("LosslessPdfEngine", () => {
       .rejects.toThrow(/trim size does not match/i);
   });
 
-  it("rejects bleed on touching multi-card PDF grids until they reserve inter-card gaps", async () => {
+  it("draws vector cut guides after the untouched card image with physical stroke styling", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const config: CutGuideConfig = {
+      mode: "full",
+      style: { color: "#123456", strokeWidthMm: 0.3, opacity: 0.4, lineStyle: "dashed" },
+    };
+    const withoutGuides = await engine.generate({ images: [original] });
+    const withGuides = await engine.generate({ images: [original], cutGuides: config });
+    const cleanPdf = await parsePdf(withoutGuides);
+    const guidedPdf = await parsePdf(withGuides);
+    const cleanImageHashes = cleanPdf.images.map((image) => createHash("sha256").update(getPdfStreamBytes(image)).digest("hex"));
+    const guidedImageHashes = guidedPdf.images.map((image) => createHash("sha256").update(getPdfStreamBytes(image)).digest("hex"));
+
+    expect(guidedPdf.images).toHaveLength(cleanPdf.images.length);
+    expect(guidedImageHashes).toEqual(cleanImageHashes);
+    expect(getVectorSegments(guidedPdf.content)).toHaveLength(4);
+    const strokeWidth = /([\d.]+) w\b/.exec(guidedPdf.content)?.[1];
+    const dashPattern = /\[([^\]]+)\] 0 d\b/.exec(guidedPdf.content)?.[1];
+    const strokeColor = /([\d.]+) ([\d.]+) ([\d.]+) RG\b/.exec(guidedPdf.content)?.slice(1).map(Number);
+    expect(Number(strokeWidth)).toBeCloseTo(mmToPoints(0.3), 8);
+    expect(dashPattern?.split(/\s+/).map(Number)).toEqual([
+      expect.closeTo(mmToPoints(0.9), 8),
+      expect.closeTo(mmToPoints(0.6), 8),
+    ]);
+    expect(strokeColor).toEqual([
+      expect.closeTo(0x12 / 255, 8),
+      expect.closeTo(0x34 / 255, 8),
+      expect.closeTo(0x56 / 255, 8),
+    ]);
+    expect(getExtGStateOpacity(guidedPdf)).toBeCloseTo(0.4, 10);
+    expect(guidedPdf.content.lastIndexOf("\nS")).toBeGreaterThan(guidedPdf.content.lastIndexOf(" Do"));
+
+    const fullLines = getVectorSegments(guidedPdf.content);
+    const trimWidthPoints = mmToPoints(63.5);
+    const trimHeightPoints = mmToPoints(88.9);
+    expect(fullLines).toContainEqual([
+      expect.closeTo(mmToPoints(73.25), 7),
+      expect.closeTo(mmToPoints(192.95), 7),
+      expect.closeTo(mmToPoints(136.75), 7),
+      expect.closeTo(mmToPoints(192.95), 7),
+    ]);
+    expect(trimWidthPoints).toBe(180);
+    expect(trimHeightPoints).toBeCloseTo(252, 10);
+  });
+
+  it.each([
+    ["none", { mode: "none", style: { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" } }, 0],
+    ["corners", { mode: "corners", style: { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" }, externalLengthMm: 2, internalLengthMm: 1, offsetMm: 0.5 }, 8],
+    ["sides", { mode: "sides", style: { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" }, externalLengthMm: 2, internalLengthMm: 1, offsetMm: 0.5 }, 8],
+    ["cross", { mode: "cross", style: { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" }, armLengthMm: 1 }, 8],
+    ["full", { mode: "full", style: { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" } }, 4],
+    ["guillotine", { mode: "guillotine", style: { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" } }, 4],
+  ] as const)("keeps %s mode vector-only and independent of image objects", async (_mode, config, segmentCount) => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const clean = await engine.generate({ images: [original] });
+    const guided = await engine.generate({ images: [original], cutGuides: config });
+    const cleanPdf = await parsePdf(clean);
+    const guidedPdf = await parsePdf(guided);
+
+    expect(guidedPdf.images).toHaveLength(cleanPdf.images.length);
+    expect(guidedPdf.images.map((image) => createHash("sha256").update(getPdfStreamBytes(image)).digest("hex")))
+      .toEqual(cleanPdf.images.map((image) => createHash("sha256").update(getPdfStreamBytes(image)).digest("hex")));
+    expect(getVectorSegments(guidedPdf.content)).toHaveLength(segmentCount);
+  });
+
+  it.each([0, 0.625, 1, 2, 3])("keeps trim cut coordinates fixed with %s mm bleed", async (bleedMm) => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm });
+    const pdf = await engine.generate({
+      images: [original],
+      bleedResults: [bleed],
+      cutGuides: {
+        mode: "full",
+        style: { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" },
+      },
+    });
+    const parsed = await parsePdf(pdf);
+    const guides = getVectorSegments(parsed.content);
+
+    expect(guides).toHaveLength(4);
+    expect(guides.map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8)))))
+      .toEqual([
+        [mmToPoints(73.25), mmToPoints(192.95), mmToPoints(136.75), mmToPoints(192.95)],
+        [mmToPoints(73.25), mmToPoints(104.05), mmToPoints(136.75), mmToPoints(104.05)],
+        [mmToPoints(73.25), mmToPoints(192.95), mmToPoints(73.25), mmToPoints(104.05)],
+        [mmToPoints(136.75), mmToPoints(192.95), mmToPoints(136.75), mmToPoints(104.05)],
+      ].map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8)))));
+    expect(pointsToMm(guides[0][2] - guides[0][0])).toBe(63.5);
+    expect(Math.abs(pointsToMm(guides[1][1] - guides[0][1]))).toBeCloseTo(88.9, 12);
+  });
+
+  it("places nine bleed-bearing cards on A4 without overlapping derivative slots", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
+    const pdf = await engine.generate({
+      images: Array.from({ length: 9 }, () => original),
+      bleedResults: Array.from({ length: 9 }, () => bleed),
+      cutGuides: {
+        mode: "guillotine",
+        style: { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" },
+      },
+    });
+    const parsed = await parsePdf(pdf);
+    const positionedMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d, e, f]) =>
+      Math.abs(a - 1) < 1e-10
+      && Math.abs(b) < 1e-10
+      && Math.abs(c) < 1e-10
+      && Math.abs(d - 1) < 1e-10
+      && (Math.abs(e) > 1e-10 || Math.abs(f) > 1e-10),
+    );
+
+    expect(parsed.document.getPages()).toHaveLength(1);
+    expect(parsed.images).toHaveLength(18);
+    expect(getVectorSegments(parsed.content)).toHaveLength(12);
+    const actualPositions = new Set(positionedMatrices.map(([, , , , x, y]) =>
+      `${pointsToMm(x).toFixed(7)},${pointsToMm(y).toFixed(7)}`,
+    ));
+    for (const [xMm, yMm] of [
+      [8.5, 194.2], [73.25, 194.2], [138, 194.2],
+      [8.5, 104.05], [73.25, 104.05], [138, 104.05],
+      [8.5, 13.9], [73.25, 13.9], [138, 13.9],
+    ]) {
+      expect(actualPositions.has(`${xMm.toFixed(7)},${yMm.toFixed(7)}`)).toBe(true);
+      expect(actualPositions.has(`${(xMm - 0.625).toFixed(7)},${(yMm - 0.625).toFixed(7)}`)).toBe(true);
+    }
+  });
+
+  it("fails clearly when the physical trim plus bleed cannot fit on the selected paper", async () => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
 
     await expect(engine.generate({
-      images: [original, original],
-      bleedResults: [bleed, bleed],
-    })).rejects.toThrow(/one card because the Phase 1 grid has no gaps/i);
+      images: [original],
+      bleedResults: [bleed],
+      paperFormat: { name: "Trim-sized sheet", widthMm: 63.5, heightMm: 88.9 },
+    })).rejects.toThrow(/no physical card slot fits/i);
   });
 
   it("rejects bleed that would be clipped by page bounds", async () => {
@@ -411,7 +558,7 @@ describe("LosslessPdfEngine", () => {
       images: [original],
       bleedResults: [bleed],
       paperFormat: { name: "Trim-sized sheet", widthMm: 63.5, heightMm: 88.9 },
-    })).rejects.toThrow(/extend beyond the PDF page bounds/i);
+    })).rejects.toThrow(/no physical card slot fits/i);
   });
 
   it("embeds an untouched JPEG DCT stream and accepts a non-zero-offset byte view", async () => {

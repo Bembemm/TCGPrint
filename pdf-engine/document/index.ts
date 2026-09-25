@@ -6,17 +6,29 @@ import {
   concatTransformationMatrix,
   drawObject,
   endPath,
+  LineCapStyle,
+  lineTo,
+  moveTo,
   PDFDocument,
   PDFName,
   popGraphicsState,
   pushGraphicsState,
   rectangle,
+  setDashPattern,
+  setGraphicsState,
+  setLineCap,
+  setLineWidth,
+  setStrokingRgbColor,
+  stroke,
 } from "@pdfme/pdf-lib";
 import { drawSvg } from "svg4pdf-lib";
 import type { BleedResult } from "../../image-engine/bleed";
 import {
   MAGIC_STANDARD_CARD,
   PAPER_FORMATS,
+  calculateGridPlacement,
+  CutGuideEngine,
+  type CutGuideConfig,
   type CardFormat,
   type PaperFormat,
 } from "../../core/geometry";
@@ -27,6 +39,8 @@ export interface LosslessPdfRequest {
   readonly images: readonly Uint8Array[];
   /** Precomputed derivatives; the PDF engine places them without generating bleed. */
   readonly bleedResults?: readonly (BleedResult | undefined)[];
+  /** Physical vector guides calculated from trim rectangles in millimeters. */
+  readonly cutGuides?: CutGuideConfig;
   readonly paperFormat?: PaperFormat;
   readonly cardFormat?: CardFormat;
 }
@@ -35,6 +49,7 @@ export interface LosslessPdfFileRequest {
   readonly imagePaths: readonly string[];
   readonly paperFormat?: PaperFormat;
   readonly cardFormat?: CardFormat;
+  readonly cutGuides?: CutGuideConfig;
 }
 
 type SupportedImageFormat = "jpeg" | "png" | "svg";
@@ -516,24 +531,10 @@ function stripSvgPreamble(svg: string): string {
     .replace(/^(?:\s+|<\?xml\b[\s\S]*?\?>|<!--[\s\S]*?-->)+/i, "");
 }
 
-interface PageGrid {
-  readonly columns: number;
-  readonly rows: number;
-  readonly count: number;
-  readonly horizontalOffsetMm: number;
-  readonly verticalOffsetMm: number;
-}
-
 export class PdfExportError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "PdfExportError";
-  }
-}
-
-function assertPositiveDimension(value: number, label: string): void {
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new RangeError(`${label} must be a finite number greater than zero.`);
   }
 }
 
@@ -696,28 +697,53 @@ function normalizeSvgForPhysicalSize(svg: string, widthPoints: number, heightPoi
   return `${source.slice(0, start)}${sizedRoot}${source.slice(end)}`;
 }
 
-function calculatePageGrid(paper: PaperFormat, card: CardFormat): PageGrid {
-  assertPositiveDimension(paper.widthMm, "Paper width");
-  assertPositiveDimension(paper.heightMm, "Paper height");
-  assertPositiveDimension(card.widthMm, "Card width");
-  assertPositiveDimension(card.heightMm, "Card height");
+function drawCutGuides(
+  pdf: PDFDocument,
+  page: ReturnType<PDFDocument["addPage"]>,
+  pageSize: PaperFormat,
+  config: CutGuideConfig,
+  trims: readonly { readonly xMm: number; readonly yMm: number; readonly widthMm: number; readonly heightMm: number }[],
+): void {
+  const geometry = new CutGuideEngine().generate({
+    trims,
+    pageSizeMm: { widthMm: pageSize.widthMm, heightMm: pageSize.heightMm },
+    config,
+  });
+  if (geometry.segments.length === 0) return;
 
-  const columns = Math.floor(paper.widthMm / card.widthMm);
-  const rows = Math.floor(paper.heightMm / card.heightMm);
-  if (columns < 1 || rows < 1) {
-    throw new RangeError("The card format does not fit on the selected paper size.");
+  const color = geometry.style.color.slice(1);
+  const red = Number.parseInt(color.slice(0, 2), 16) / 255;
+  const green = Number.parseInt(color.slice(2, 4), 16) / 255;
+  const blue = Number.parseInt(color.slice(4, 6), 16) / 255;
+  const strokeWidthPoints = mmToPoints(geometry.style.strokeWidthMm);
+  const dashPatternPoints = geometry.style.lineStyle === "solid"
+    ? []
+    : geometry.style.lineStyle === "dashed"
+      ? [3 * strokeWidthPoints, 2 * strokeWidthPoints]
+      : [0, 2 * strokeWidthPoints];
+  const extGState = pdf.context.obj({
+    Type: "ExtGState",
+    CA: geometry.style.opacity,
+    ca: geometry.style.opacity,
+  });
+  const stateName = page.node.newExtGState("CutGuide", extGState);
+
+  page.pushOperators(
+    pushGraphicsState(),
+    setGraphicsState(stateName),
+    setStrokingRgbColor(red, green, blue),
+    setLineWidth(strokeWidthPoints),
+    setDashPattern(dashPatternPoints, 0),
+    setLineCap(geometry.style.lineStyle === "dotted" ? LineCapStyle.Round : LineCapStyle.Butt),
+  );
+  for (const segment of geometry.segments) {
+    page.pushOperators(
+      moveTo(mmToPoints(segment.x1Mm), mmToPoints(pageSize.heightMm - segment.y1Mm)),
+      lineTo(mmToPoints(segment.x2Mm), mmToPoints(pageSize.heightMm - segment.y2Mm)),
+      stroke(),
+    );
   }
-
-  const usedWidthMm = columns * card.widthMm;
-  const usedHeightMm = rows * card.heightMm;
-
-  return {
-    columns,
-    rows,
-    count: columns * rows,
-    horizontalOffsetMm: (paper.widthMm - usedWidthMm) / 2,
-    verticalOffsetMm: (paper.heightMm - usedHeightMm) / 2,
-  };
+  page.pushOperators(popGraphicsState());
 }
 
 export class LosslessPdfEngine {
@@ -725,25 +751,28 @@ export class LosslessPdfEngine {
     if (request.bleedResults && request.bleedResults.length !== request.images.length) {
       throw new PdfExportError("PDF bleed results must contain one result per image.");
     }
-    if (
-      request.images.length > 1
-      && request.bleedResults?.some((result) => result?.status === "derived")
-    ) {
-      throw new PdfExportError("Bleed PDF placement currently requires one card because the Phase 1 grid has no gaps between trim boxes.");
-    }
 
     const paper = request.paperFormat ?? PAPER_FORMATS.A4;
     const card = request.cardFormat ?? MAGIC_STANDARD_CARD;
-    const grid = calculatePageGrid(paper, card);
+    const bleedMm = request.bleedResults?.reduce((maximum, result) =>
+      result?.status === "derived" ? Math.max(maximum, result.bleedMm) : maximum,
+    0) ?? 0;
+    const maximumGrid = calculateGridPlacement({ paper, card, count: 0, bleedMm });
     const pdf = await PDFDocument.create();
-    const pageCount = Math.max(1, Math.ceil(request.images.length / grid.count));
+    const pageCount = Math.max(1, Math.ceil(request.images.length / maximumGrid.capacity));
     const widthPoints = mmToPoints(card.widthMm);
     const heightPoints = mmToPoints(card.heightMm);
 
     for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
       const page = pdf.addPage([mmToPoints(paper.widthMm), mmToPoints(paper.heightMm)]);
-      const startCardIndex = pageIndex * grid.count;
-      const endCardIndex = Math.min(startCardIndex + grid.count, request.images.length);
+      const startCardIndex = pageIndex * maximumGrid.capacity;
+      const endCardIndex = Math.min(startCardIndex + maximumGrid.capacity, request.images.length);
+      const pagePlacement = calculateGridPlacement({
+        paper,
+        card,
+        count: endCardIndex - startCardIndex,
+        bleedMm,
+      });
 
       for (let imageIndex = startCardIndex; imageIndex < endCardIndex; imageIndex += 1) {
         const imageBytes = request.images[imageIndex];
@@ -753,10 +782,9 @@ export class LosslessPdfEngine {
 
         const format = detectFormat(imageBytes);
         const localCardIndex = imageIndex - startCardIndex;
-        const column = localCardIndex % grid.columns;
-        const row = Math.floor(localCardIndex / grid.columns);
-        const xMm = grid.horizontalOffsetMm + column * card.widthMm;
-        const topMm = grid.verticalOffsetMm + row * card.heightMm;
+        const trim = pagePlacement.slots[localCardIndex].trim;
+        const xMm = trim.xMm;
+        const topMm = trim.yMm;
         const xPoints = mmToPoints(xMm);
         const yPoints = mmToPoints(paper.heightMm - topMm - card.heightMm);
         const exactBytes = copyBytes(imageBytes);
@@ -856,6 +884,10 @@ export class LosslessPdfEngine {
           throw new PdfExportError(`SVG contains unsupported content: ${warnings.join("; ")}`);
         }
       }
+
+      if (request.cutGuides) {
+        drawCutGuides(pdf, page, paper, request.cutGuides, pagePlacement.slots.map(({ trim }) => trim));
+      }
     }
 
     return pdf.save();
@@ -868,6 +900,7 @@ export class LosslessPdfEngine {
       images,
       paperFormat: request.paperFormat,
       cardFormat: request.cardFormat,
+      cutGuides: request.cutGuides,
     });
   }
 }

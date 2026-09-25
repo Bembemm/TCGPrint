@@ -85,3 +85,22 @@ export function createPageConfiguration(
     marginsMm: Object.freeze({ ...marginsMm }),
   });
 }
+
+export {
+  CUT_GUIDE_LINE_STYLES,
+  CUT_GUIDE_MODES,
+  CutGuideEngine,
+} from "./cut-guides";
+export type {
+  CutGuideConfig,
+  CutGuideGeometry,
+  CutGuideLineStyle,
+  CutGuideMode,
+  CutGuidePageSizeMm,
+  CutGuideSegmentMm,
+  CutGuideStyle,
+  CutGuideRequest,
+  TrimRectangleMm,
+} from "./cut-guides";
+export { calculateGridPlacement } from "./placement";
+export type { CardSlotMm, GridPlacementMm, GridPlacementRequest } from "./placement";
