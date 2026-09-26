@@ -3878,6 +3878,201 @@ Se uma mudança alterar dimensões, bleed, layout ou PDF, incluir evidência/tes
 
 ---
 
+# PARTE XXII-A — FLUXO DE ORQUESTRAÇÃO E AUDITORIA
+
+Esta seção formaliza o fluxo operacional entre ChatGPT, Hermes e Codex. Ela não altera decisões técnicas, o roadmap, critérios de fase ou a precedência de fontes definida em **Fonte de verdade do projeto**.
+Handoffs entre ChatGPT e Hermes permanecem manuais; este fluxo não pressupõe nem introduz automação entre eles.
+
+## Papel do ChatGPT
+
+ChatGPT é o arquiteto, planejador e auditor do fluxo.
+
+Antes de definir a próxima etapa, deve:
+
+- ler este `IMPLEMENTATION_PLAN.md`;
+- identificar no roadmap oficial a fase correta;
+- verificar requisitos, critérios de conclusão, riscos, dependências e decisões abertas relevantes;
+- verificar o estado real do repositório disponível;
+- seguir as regras específicas deste documento, sem reconstruir o processo apenas a partir da conversa;
+- identificar lacunas e pedir esclarecimento quando necessário, em vez de inventar comportamento;
+- produzir o handoff de execução para Hermes;
+- auditar posteriormente o relatório e as evidências devolvidas por Hermes.
+
+ChatGPT não deve considerar uma fase concluída apenas porque Hermes ou Codex declararam sucesso.
+
+## Papel do Hermes
+
+Hermes é o orquestrador operacional; não substitui ChatGPT como arquiteto principal do projeto.
+
+Responsabilidades de Hermes:
+
+- receber o handoff produzido pelo ChatGPT;
+- consultar primeiro as notas curadas do segundo cérebro quando contexto persistente for necessário;
+- verificar o estado real do repositório antes da execução;
+- criar branches/worktrees isolados quando necessário;
+- escolher uma quantidade de agentes/Codex proporcional ao tamanho e à independência das tarefas;
+- delegar investigação, implementação, testes e revisão;
+- acompanhar e consolidar os resultados;
+- executar verificações integradas;
+- manter `main` intocada até autorização;
+- atualizar o segundo cérebro somente quando houver mudança real confirmada;
+- produzir relatório/handoff de retorno ao ChatGPT.
+
+## Papel do Codex
+
+Codex é executor técnico e pode ser utilizado para investigação, implementação, testes, revisão e refatoração quando solicitada.
+
+Cada agente deve trabalhar no checkout/worktree designado. Dois agentes não devem modificar simultaneamente o mesmo checkout.
+
+## Ciclo oficial de uma fase
+
+1. ChatGPT lê `IMPLEMENTATION_PLAN.md`.
+2. ChatGPT identifica a próxima fase pelo roadmap oficial.
+3. ChatGPT analisa arquitetura, riscos, dependências, decisões abertas e critérios.
+4. ChatGPT produz o handoff oficial para Hermes.
+5. Hermes verifica o repositório e o contexto persistente relevante.
+6. Hermes cria o isolamento necessário e delega trabalho ao Codex.
+7. Codex executa as tarefas solicitadas no checkout/worktree designado.
+8. Hermes consolida implementação, testes e evidências.
+9. Hermes devolve relatório/handoff para ChatGPT.
+10. ChatGPT audita o resultado contra este plano e o handoff original.
+11. Se houver falhas, ChatGPT produz handoff corretivo.
+12. Somente quando os critérios oficiais e a auditoria forem satisfeitos a fase pode ser considerada apta para integração/conclusão.
+13. Merge ou push em `main` depende de autorização explícita.
+
+## Regra operacional sobre `main`
+
+- `main` representa o estado estável.
+- Antes de iniciar, verificar `git status` e a sincronização com a referência remota pertinente.
+- Não desenvolver diretamente em `main`.
+- Não fazer merge em `main` sem autorização.
+- Não fazer push para `main` sem autorização explícita.
+- Branches e worktrees temporários devem ser isolados.
+- Após a integração e quando não forem mais necessários, worktrees e branches temporários devem ser limpos conforme apropriado.
+
+## Uso de múltiplos agentes
+
+Não há obrigação de usar muitos agentes. Hermes decide a quantidade proporcional ao trabalho e às dependências entre tarefas.
+
+Exemplos conceituais:
+
+```text
+Tarefa pequena:
+Hermes
+└── Codex implementação
+
+Tarefa média:
+Hermes
+├── Codex implementação
+└── Codex revisão/testes
+
+Fase grande:
+Hermes
+├── Codex investigação
+├── Codex implementação
+├── Codex testes
+└── Codex revisão
+```
+
+Trabalhos independentes podem ocorrer em paralelo, desde que usem branches/worktrees separados e nenhum checkout seja modificado simultaneamente por agentes diferentes.
+
+## Evidência obrigatória
+
+Uma tarefa ou fase não está concluída apenas porque um agente afirmou que terminou. Hermes deve devolver evidência suficiente para auditoria independente, conforme aplicável:
+
+- branch e worktree utilizados;
+- commit(s) produzidos;
+- arquivos alterados e diff relevante;
+- testes executados e seus resultados;
+- typecheck e build;
+- resultado de `git diff --check`;
+- fixtures, screenshots, PDFs e benchmarks produzidos;
+- limitações e riscos externos;
+- estado final do checkout;
+- confirmação de que `main` não foi alterada quando isso era exigido.
+
+ChatGPT deve confrontar essas evidências com os requisitos da fase, os critérios de conclusão, as regras gerais deste `IMPLEMENTATION_PLAN.md`, os ADRs aplicáveis e o handoff original.
+
+## Segundo cérebro / Obsidian
+
+As fontes têm responsabilidades distintas:
+
+- `IMPLEMENTATION_PLAN.md`: plano/processo oficial e regras de implementação;
+- Git/GitHub: fonte oficial do código e do histórico versionado;
+- segundo cérebro/Obsidian: memória persistente de estado, decisões, arquitetura, handoffs e contexto operacional.
+
+Quando o segundo cérebro for necessário:
+
+- priorizar notas curadas como `Estado Atual.md`, `Roadmap.md`, `Decisoes.md`, `Arquitetura.md` e `Handoffs.md`;
+- não tratar sessões brutas ou logs do Hermes como fonte principal do estado do projeto;
+- não registrar hipóteses como fatos;
+- atualizar as notas somente quando houver mudança real confirmada;
+- não armazenar logs ou sessões brutas dentro do repositório TCGPrint.
+
+## Precedência e divergências de estado
+
+A precedência técnica já definida em **Fonte de verdade do projeto** permanece inalterada. Operacionalmente:
+
+- um ADR aprovado mais recente continua prevalecendo quando alterar explicitamente uma decisão técnica;
+- `IMPLEMENTATION_PLAN.md` continua sendo a especificação principal de implementação;
+- Git representa o estado efetivamente versionado;
+- Obsidian complementa com memória persistente, mas não deve contradizer silenciosamente Git ou o plano oficial.
+
+Se houver divergência relevante entre o estado informado e o repositório real, interromper o planejamento que dependa desse estado, registrar/informar a divergência e usar como base o estado real confirmado.
+
+## Handoff ChatGPT → Hermes
+
+Todo handoff de execução deve conter, quando aplicável:
+
+- objetivo;
+- estado/base esperada;
+- escopo e fora de escopo;
+- requisitos e invariantes;
+- arquitetura/áreas afetadas;
+- riscos e decisões abertas;
+- estratégia sugerida de isolamento/delegação;
+- testes e verificações obrigatórias;
+- critérios de aceitação;
+- conteúdo esperado do relatório de retorno;
+- regra explícita de não integrar `main` sem autorização.
+
+O nível de detalhe deve ser proporcional à tarefa.
+
+## Retorno Hermes → ChatGPT
+
+O relatório deve permitir auditoria independente e conter, quando aplicável:
+
+- estado inicial encontrado;
+- branch/worktree utilizados;
+- agentes e tarefas delegadas;
+- commits produzidos;
+- arquivos principais alterados;
+- resumo técnico e decisões tomadas;
+- testes/comandos executados e respectivos resultados;
+- evidências produzidas;
+- limitações, riscos e divergências em relação ao handoff;
+- estado final dos checkouts;
+- confirmação sobre `main`;
+- atualizações feitas no segundo cérebro, se houver.
+
+Falhas e testes não executados devem ser informados, nunca ocultados.
+
+## Gate de conclusão
+
+Uma fase só pode ser tratada como concluída neste processo quando:
+
+1. os critérios específicos da fase no roadmap estiverem satisfeitos;
+2. os testes exigidos por este documento estiverem satisfeitos;
+3. os invariantes globais aplicáveis não tiverem sido violados;
+4. Hermes tiver fornecido evidência verificável;
+5. ChatGPT tiver auditado o retorno;
+6. pendências bloqueantes tiverem sido resolvidas;
+7. a integração em `main`, quando necessária, tiver sido explicitamente autorizada e posteriormente verificada.
+
+Se a implementação estiver tecnicamente pronta, mas ainda não tiver sido integrada ou autorizada, descrevê-la como **pronta para integração**, não como estado final de `main`.
+
+---
+
 # PARTE XXIII — DEFINITION OF DONE
 
 O produto só deve ser considerado funcional para produção quando:
