@@ -23,7 +23,7 @@ afterEach(async () => {
 });
 
 describe("decklist → identity → Scryfall artwork → PDF", () => {
-  it("keeps identical bytes in separate export groups when automatic source policies differ", async () => {
+  it("does not de-duplicate identical bytes at the same bleed when effective modes differ", async () => {
     const samples = new Uint8Array(127 * 178 * 3);
     for (let y = 0; y < 178; y += 1) {
       for (let x = 0; x < 127; x += 1) {
@@ -77,6 +77,9 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
       bleedMode: "auto",
     });
 
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate.mock.calls.map(([request]) => request.imageBytes)).toEqual([bytes, bytes]);
+    expect(generate.mock.calls.map(([request]) => request.bleedMm)).toEqual([1, 1]);
     expect(generate.mock.calls.map(([request]) => request.mode)).toEqual(["smart-border-fill", "subtle-edge-stretch"]);
   });
 

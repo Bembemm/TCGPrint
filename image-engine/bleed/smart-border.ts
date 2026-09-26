@@ -1,6 +1,6 @@
 import type { RasterPixels } from "./raster";
 
-export const SMART_BORDER_FILL_CONFIG_VERSION = "smart-border-fill-thresholds-v1" as const;
+export const SMART_BORDER_FILL_CONFIG_VERSION = "smart-border-fill-thresholds-v2" as const;
 
 export interface SmartBorderFillConfig {
   readonly version: typeof SMART_BORDER_FILL_CONFIG_VERSION;
@@ -12,7 +12,7 @@ export interface SmartBorderFillConfig {
   readonly maximumLuminanceStdDev: number;
   readonly maximumColorStdDev: number;
   readonly minimumSamples: number;
-  readonly inwardSearchBoundMm: number;
+  readonly maximumInwardSearchFractionOfTrim: number;
   readonly searchStepMm: number;
 }
 
@@ -26,7 +26,7 @@ export const SMART_BORDER_FILL_CONFIG: SmartBorderFillConfig = Object.freeze({
   maximumLuminanceStdDev: 0.045,
   maximumColorStdDev: 0.07,
   minimumSamples: 12,
-  inwardSearchBoundMm: 2,
+  maximumInwardSearchFractionOfTrim: 0.05,
   searchStepMm: 0.25,
 });
 
@@ -67,7 +67,7 @@ export function resolveSmartBorderFillConfig(overrides: SmartBorderFillConfigOve
     !finite(config.classificationStripMm) || config.classificationStripMm <= 0 || config.classificationStripMm > 3
     || thresholds.some((value) => !finite(value) || value < 0 || value > 1)
     || !Number.isInteger(config.minimumSamples) || config.minimumSamples < 1
-    || !finite(config.inwardSearchBoundMm) || config.inwardSearchBoundMm < 0 || config.inwardSearchBoundMm > 3
+    || !finite(config.maximumInwardSearchFractionOfTrim) || config.maximumInwardSearchFractionOfTrim < 0 || config.maximumInwardSearchFractionOfTrim > 0.05
     || !finite(config.searchStepMm) || config.searchStepMm <= 0 || config.searchStepMm > 3
   ) {
     throw new RangeError("Smart border fill thresholds must be finite and within their supported physical or normalized ranges.");
@@ -182,7 +182,8 @@ function classifySide(
     };
   }
 
-  const maximumInwardPx = Math.floor(config.inwardSearchBoundMm * scale);
+  const maximumInwardMm = trimMm * config.maximumInwardSearchFractionOfTrim;
+  const maximumInwardPx = Math.floor(maximumInwardMm * scale);
   const searchBoundPx = Math.min(Math.max(0, maximumInwardPx), sidePixels - stripPx);
   const searchStepPx = Math.max(1, Math.floor(config.searchStepMm * scale));
   for (const offsetPx of candidateOffsets(searchBoundPx, searchStepPx)) {

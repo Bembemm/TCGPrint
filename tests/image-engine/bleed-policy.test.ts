@@ -53,4 +53,8 @@ describe("bleed source policy", () => {
 
     expect(config.version).toBe(SMART_BORDER_FILL_CONFIG_VERSION);
   });
+
+  it("caps inward search at five percent of the physical trim dimension", () => {
+    expect(() => resolveSmartBorderFillConfig({ maximumInwardSearchFractionOfTrim: 0.051 })).toThrow(RangeError);
+  });
 });

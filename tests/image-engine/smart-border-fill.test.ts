@@ -194,7 +194,7 @@ describe("smart-border-fill", () => {
   });
 
   it("falls back when no representative source-strip start lies within the configured physical search bound", async () => {
-    const result = await new BleedEngine({ smartBorderFillConfig: { inwardSearchBoundMm: 1 } }).generate({
+    const result = await new BleedEngine({ smartBorderFillConfig: { maximumInwardSearchFractionOfTrim: 0.01 } }).generate({
       imageBytes: await syntheticDarkFrame(),
       bleedMm: 1,
       mode: "smart-border-fill",
@@ -346,6 +346,12 @@ describe("smart-border-fill", () => {
       mode: "smart-border-fill",
       policyId: "manual-override-upload-smart-border-fill-v1",
     });
+    const otherSearchBound = await new BleedEngine({ cache, smartBorderFillConfig: { maximumInwardSearchFractionOfTrim: 0.04 } }).generate({
+      imageBytes,
+      bleedMm: 1,
+      mode: "smart-border-fill",
+      policyId: "manual-override-upload-smart-border-fill-v1",
+    });
     const otherMode = await new BleedEngine({ cache }).generate({
       imageBytes,
       bleedMm: 1,
@@ -356,11 +362,12 @@ describe("smart-border-fill", () => {
     expect(first.status).toBe("derived");
     expect(otherPolicy.status).toBe("derived");
     expect(otherConfig.status).toBe("derived");
+    expect(otherSearchBound.status).toBe("derived");
     expect(otherMode.status).toBe("derived");
-    if (first.status !== "derived" || otherPolicy.status !== "derived" || otherConfig.status !== "derived" || otherMode.status !== "derived") {
+    if (first.status !== "derived" || otherPolicy.status !== "derived" || otherConfig.status !== "derived" || otherSearchBound.status !== "derived" || otherMode.status !== "derived") {
       throw new Error("Expected all cache identity requests to return derivatives.");
     }
-    expect(new Set([first.cacheKey, otherPolicy.cacheKey, otherConfig.cacheKey, otherMode.cacheKey]).size).toBe(4);
-    expect([first, otherPolicy, otherConfig, otherMode].every((result) => result.cacheStatus === "miss")).toBe(true);
+    expect(new Set([first.cacheKey, otherPolicy.cacheKey, otherConfig.cacheKey, otherSearchBound.cacheKey, otherMode.cacheKey]).size).toBe(5);
+    expect([first, otherPolicy, otherConfig, otherSearchBound, otherMode].every((result) => result.cacheStatus === "miss")).toBe(true);
   });
 });

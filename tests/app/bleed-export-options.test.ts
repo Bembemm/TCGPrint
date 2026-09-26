@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildBleedExportOptions, decodeBleedDiagnostics } from "../../src/app/bleed-export-options";
 import { encodeBleedDiagnostics } from "../../services/card-api";
 import type { CardExportBleedDiagnostic } from "../../services/card-export";
-import { BLEED_ALGORITHM_VERSION } from "../../image-engine/bleed";
+import { BLEED_ALGORITHM_VERSION, SMART_BORDER_FILL_CONFIG_VERSION } from "../../image-engine/bleed";
 
 describe("bleed export options", () => {
   it("sends the selected mode with the existing bleed and cut-guide settings", () => {
@@ -30,7 +30,7 @@ describe("bleed export options", () => {
       resolvedMode: "subtle-edge-stretch",
       effectiveMode: "subtle-edge-stretch",
       algorithmVersion: BLEED_ALGORITHM_VERSION,
-      smartBorderFillConfigVersion: "smart-border-fill-config-v1",
+      smartBorderFillConfigVersion: SMART_BORDER_FILL_CONFIG_VERSION,
       policyId: "mpc-metadata-unknown-v1",
       policyNotice: "MPC_BLEED_METADATA_UNKNOWN",
       bleedMm: 1,
