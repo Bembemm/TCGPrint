@@ -122,6 +122,13 @@ The v3 response schema is source-derived and was not observed live:
 response shape was `{ "results": { "Sol Ring": { "CARD": ["<card-id>",
 "…"] } } }`.
 
+The current upstream frontend derives the v3 map key from the full
+`SearchQuery` fields (`cardType`, `query`, `expansionCode`, and
+`collectorNumber`) using a 32-bit FNV-1a correlation hash. TCGPrint reimplements
+that serialization for the exact query object it sends; it does not reuse the
+upstream implementation. The live public host returned 404 for v3, so the key
+behavior is source-derived rather than live-validated.
+
 Hydration is described as:
 
 ```json

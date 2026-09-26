@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CardIdentity } from "../../core/cards/types";
-import type { WorkingCardMpcReference } from "../../core/cards/types";
-import type { ArtworkProvider } from "../../artwork/types";
+import type { ArtworkProvider, ProviderHealth } from "../../artwork/types";
 import { ArtworkCatalog } from "../../artwork/catalog";
-import { MpcReferenceArtworkProvider } from "../../artwork/mpc-reference-provider";
 
 const identity: CardIdentity = { id: "identity:sol-ring", provider: "scryfall", name: "Sol Ring", resolutionMethod: "manual", confidence: 1 };
 function provider(source: "scryfall" | "upload" | "mpc", items = [] as any[], shouldFail = false): ArtworkProvider {
@@ -29,17 +27,6 @@ describe("ArtworkCatalog", () => {
     await expect(catalog.search(identity, { source: "mpc" })).resolves.toMatchObject([{ source: "mpc" }]);
   });
 
-  it("preserves MPC reference IDs and selected artwork without attempting network lookup", async () => {
-    const mpc = new MpcReferenceArtworkProvider();
-    const catalog = new ArtworkCatalog([scryfallProvider, uploadProvider, mpc]);
-    const references: WorkingCardMpcReference[] = [{ faceId: "front", importedAssetId: "import-a", providerAssetId: "mpc-provider-17", selectedArtworkId: "mpc-choice-21", slots: ["A1", "A2"], availableLocally: false }];
-    const candidates = await catalog.search(identity, { source: "mpc", mpcReferences: references });
-    expect(candidates).toMatchObject([{ providerAssetId: "mpc-provider-17", selectedArtworkId: "mpc-choice-21", originalAvailable: false }]);
-    expect(candidates[0].id).toMatch(/^mpc:[a-f0-9]{64}$/);
-    await expect(mpc.getOriginal(candidates[0].id)).rejects.toMatchObject({ code: "ARTWORK_MISSING" });
-    expect(scryfallProvider.searchArtwork).not.toHaveBeenCalled();
-  });
-
   it("reports provider health independently while keeping other providers available", async () => {
     const broken = provider("scryfall", [], true);
     const local = provider("upload", [{ id: "upload:still-works", source: "upload", identityId: identity.id, faceId: "front", originalAvailable: true }]);
@@ -50,6 +37,27 @@ describe("ArtworkCatalog", () => {
       scryfall: { available: false, degraded: true, message: "scryfall unavailable" },
       upload: { available: true, degraded: false },
       mpc: { available: true, degraded: false },
+    });
+  });
+
+  it("reflects MPC health after an original-fetch failure outside catalog search", async () => {
+    let health: ProviderHealth = { available: true, degraded: false };
+    const mpc: ArtworkProvider = {
+      source: "mpc",
+      getHealth: () => health,
+      searchArtwork: async () => [],
+      getPreview: async () => undefined,
+      getOriginal: async () => {
+        health = { available: false, degraded: true, message: "MPC original timed out" };
+        throw new Error("MPC original timed out");
+      },
+      getCandidate: async () => undefined,
+    };
+    const catalog = new ArtworkCatalog([mpc]);
+
+    await expect(catalog.getOriginal(`mpc:${"c".repeat(64)}`)).rejects.toThrow("MPC original timed out");
+    expect(catalog.getProviderHealth()).toMatchObject({
+      mpc: { available: false, degraded: true, message: "MPC original timed out" },
     });
   });
 });

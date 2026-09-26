@@ -51,7 +51,11 @@ export async function exportWorkingCards(
     if (signal?.aborted) throw new CardExportServiceError("EXPORT_FAILED", "PDF export was cancelled.");
     const selection = card.selectedArtworkByFace.front;
     if (!selection) throw new CardExportServiceError("ARTWORK_REQUIRED", `${card.identity?.name ?? card.identityHints.name ?? "Custom card"} needs a selected front artwork.`);
-    const candidate = await catalog.getArtworkCandidate(selection.candidateId);
+    const candidate = await catalog.getArtworkCandidate(selection.candidateId, {
+      mpcReferences: card.mpcReferences,
+      ...(card.identity ? { identity: card.identity } : {}),
+      ...(signal ? { signal } : {}),
+    });
     if (!candidate || candidate.source !== selection.source || !candidate.originalAvailable) {
       throw new CardExportServiceError("ARTWORK_ORIGINAL_UNAVAILABLE", "The selected artwork has no locally available, validated original. MPC references need local bytes before PDF export.");
     }
