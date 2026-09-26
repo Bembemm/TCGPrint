@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import type { ImportKind } from "../../import-engine/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard } from "../../core/cards/types";
+import type { BleedModePreference } from "../../image-engine/bleed/policy";
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
 import { postArtworkSelection } from "./artwork-selection-request";
+import { buildBleedExportOptions, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
 
 type ArtworkFilter = "all" | "scryfall" | "mpc" | "upload";
 type CandidateDto = Omit<ArtworkCandidate, "originalUri" | "localOriginalPath" | "previewUri"> & {
@@ -76,6 +78,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [autocompleteNames, setAutocompleteNames] = useState<string[]>([]);
   const [manualIdentities, setManualIdentities] = useState<CardIdentity[]>([]);
   const [bleedMm, setBleedMm] = useState("0.625");
+  const [bleedMode, setBleedMode] = useState<BleedModePreference>("auto");
   const [cutGuides, setCutGuides] = useState(true);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -84,6 +87,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [providerHealth, setProviderHealth] = useState<Record<string, { available: boolean; degraded: boolean; message?: string }>>({});
   const [identityDetails, setIdentityDetails] = useState<IdentityDetails | null>(null);
   const [pdfUrl, setPdfUrl] = useState("");
+  const [bleedDiagnostics, setBleedDiagnostics] = useState<BleedDiagnosticsReport | null>(null);
 
   const activeCard = useMemo(() => workingCards.find((card) => card.id === selectedCardId), [workingCards, selectedCardId]);
   const filterCards = useMemo(() => artworkCandidates.filter((candidate) => artworkFilter === "all" || candidate.source === artworkFilter), [artworkCandidates, artworkFilter]);
@@ -231,19 +235,21 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
   async function exportPdf() {
     if (!workingCards.length) return;
+    setBleedDiagnostics(null);
     setBusy(true); setProblem(""); setStatus("Compondo quantidade física e gerando PDF A4…");
     try {
       const response = await fetch("/api/cards/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cards: workingCards, options: { bleedMm: Number(bleedMm), cutGuides: cutGuides ? "full" : "none" } }),
+        body: JSON.stringify({ cards: workingCards, options: buildBleedExportOptions(bleedMm, cutGuides, bleedMode) }),
       });
       if (!response.ok) {
         const body = await response.json() as ApiErrorBody;
         throw new Error(body.message ?? "Não foi possível gerar o PDF.");
       }
+      setBleedDiagnostics(decodeBleedDiagnostics(response.headers.get("x-tcgprint-bleed-diagnostics")));
       const nextUrl = URL.createObjectURL(await response.blob());
       setPdfUrl(nextUrl); setStatus("PDF pronto · A4 · trim 63,5 × 88,9 mm · bleed externo · guias vetoriais.");
-    } catch (error) { setProblem(error instanceof Error ? error.message : "Export falhou."); setStatus(""); }
+    } catch (error) { setBleedDiagnostics(null); setProblem(error instanceof Error ? error.message : "Export falhou."); setStatus(""); }
     finally { setBusy(false); }
   }
 
@@ -360,11 +366,32 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         <div className="panel-heading"><div><h3>Export PDF</h3><p>PDF A4 · Magic Standard 63,5 × 88,9 mm · quantities expandidas somente na composição.</p></div></div>
         <div className="pdf-controls">
           <label className="narrow-field">Bleed externo (mm)<input type="number" min="0" max="3" step="0.125" value={bleedMm} onChange={(event) => setBleedMm(event.currentTarget.value)} /></label>
+          <label>Modo do bleed<select value={bleedMode} onChange={(event) => setBleedMode(event.currentTarget.value as BleedModePreference)}>
+            <option value="auto">Automático por origem</option>
+            <option value="smart-border-fill">Smart Border Fill</option>
+            <option value="subtle-edge-stretch">Subtle Edge Stretch</option>
+          </select></label>
           <label className="checkbox-field"><input type="checkbox" checked={cutGuides} onChange={(event) => setCutGuides(event.currentTarget.checked)} /> Guias vetoriais</label>
           <button className="button primary" type="button" disabled={busy || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
           {pdfUrl && <a className="download-link" href={pdfUrl} download="tcgprint-cards.pdf">Baixar PDF</a>}
         </div>
-        <p className="muted">O trim e os guias são posicionados pelos engines atuais. Back fica associado por face para uma fase futura; esta exportação imprime a face front.</p>
+        <p className="muted">Automático usa Smart Border Fill para raster Scryfall e Subtle Edge Stretch para uploads. MPC sem metadata confiável de trim/bleed usa o modo conservador Subtle Edge Stretch, sem presumir recorte ou bleed existente. Trim e guias permanecem nos engines atuais; esta exportação imprime a face front.</p>
+        {bleedDiagnostics && <details className="bleed-diagnostics">
+          <summary>Diagnóstico aplicado pelo BleedEngine ({bleedDiagnostics.mode === "summary" ? "resumo" : `${bleedDiagnostics.diagnostics?.length ?? 0} carta(s)`})</summary>
+          {bleedDiagnostics.diagnostics?.map((diagnostic) => <article key={diagnostic.workingCardId}>
+            <strong>{diagnostic.cardName} · {labelSource(diagnostic.source)}</strong>
+            <p>{diagnostic.requestedMode} → {diagnostic.resolvedMode} → {diagnostic.effectiveMode} · {diagnostic.algorithmVersion} · {diagnostic.policyId}</p>
+            <p>Bleed {diagnostic.bleedMm} mm · trim {diagnostic.trimSizeMm.widthMm} × {diagnostic.trimSizeMm.heightMm} mm · preview SHA-256 <code>{diagnostic.previewSha256}</code></p>
+            {diagnostic.policyNotice && <p className="muted">Aviso: {diagnostic.policyNotice}</p>}
+            <ul>{Object.entries(diagnostic.sideDiagnostics).map(([side, result]) => <li key={side}>
+              {side}: {result.effectiveMode} · {result.classification ?? "sem classificação"} · fonte {result.sourceOffsetPx ?? 0}px/faixa {result.sourceStripPx ?? 0}px{result.fallbackReason ? ` · fallback: ${result.fallbackReason}` : ""}
+            </li>)}</ul>
+          </article>)}
+          {bleedDiagnostics.truncated && <p className="muted">Relatório detalhado excedeu o limite do cabeçalho; resumo de {bleedDiagnostics.count ?? 0} carta(s).</p>}
+          {Object.entries(bleedDiagnostics.effectiveModeCounts ?? {}).map(([mode, count]) => <p key={`mode-${mode}`}>Modo efetivo {mode}: {count}</p>)}
+          {Object.entries(bleedDiagnostics.fallbackCounts ?? {}).map(([reason, count]) => <p key={reason}>{reason}: {count}</p>)}
+          {Object.entries(bleedDiagnostics.noticeCounts ?? {}).map(([notice, count]) => <p key={notice}>Aviso {notice}: {count}</p>)}
+        </details>}
       </div>}
     </section>
   );
