@@ -1,6 +1,7 @@
-export const BLEED_ALGORITHM_VERSION = "subtle-edge-stretch-reflected-corners-v1" as const;
+export const BLEED_ALGORITHM_VERSION = "reflected-corners-v2-smart-border-fill-v1" as const;
 
-export type BleedMode = "subtle-edge-stretch";
+export type BleedMode = "subtle-edge-stretch" | "smart-border-fill";
+export type BleedEffectiveMode = BleedMode | "mixed";
 
 export interface AutoSourceStrip {
   readonly mode: "auto";
@@ -37,7 +38,11 @@ export interface BleedPreview {
 
 interface BleedResultBase {
   readonly bleedMm: number;
+  /** Requested mode retained as the legacy `mode` field for callers. */
   readonly mode: BleedMode;
+  readonly requestedMode: BleedMode;
+  readonly effectiveMode: BleedEffectiveMode;
+  readonly policyId: string;
   readonly sourceStrip: BleedSourceStrip;
   readonly trimSizeMm: TrimSizeMm;
   readonly preview: BleedPreview;
@@ -57,12 +62,22 @@ export interface BleedDerivativeResult extends BleedResultBase {
   readonly cacheKey: string;
   readonly cacheStatus: "hit" | "miss";
   readonly resolvedSourceStripMm: number;
+  readonly sideDiagnostics: Readonly<Record<"top" | "right" | "bottom" | "left", BleedSideDiagnostic>>;
   readonly preview: BleedPreview & {
     readonly mimeType: "image/png";
     readonly widthPx: number;
     readonly heightPx: number;
     readonly trimRectPx: PixelRect;
   };
+}
+
+export interface BleedSideDiagnostic {
+  readonly requestedMode: BleedMode;
+  readonly effectiveMode: BleedMode;
+  readonly classification: "not-analyzed" | "interior-strip-found" | "outer-band-not-dark-uniform" | "search-bound-exhausted";
+  readonly sourceOffsetPx: number;
+  readonly sourceStripPx: number;
+  readonly fallbackReason?: string;
 }
 
 export type BleedResult = BleedPassthroughResult | BleedDerivativeResult;
@@ -72,6 +87,8 @@ export interface BleedRequest {
   readonly bleedMm: number;
   readonly trimSizeMm?: TrimSizeMm;
   readonly mode?: BleedMode;
+  /** Identifies the source/default/override policy used for deterministic cache separation. */
+  readonly policyId?: string;
   readonly sourceStrip?: BleedSourceStrip;
 }
 

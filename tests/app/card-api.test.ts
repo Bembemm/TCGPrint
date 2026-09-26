@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import sharp from "sharp";
 import type { CardWorkbench } from "../../services/card-workbench";
 import {
   handleArtworkDownload,
@@ -17,6 +18,7 @@ import type { ArtworkCandidate, CardIdentity, WorkingCard } from "../../core/car
 import type { ArtworkOriginal } from "../../artwork/storage/types";
 import { selectArtwork as selectWorkingCardArtwork } from "../../core/cards/working-set";
 import { postArtworkSelection } from "../../src/app/artwork-selection-request";
+import { BleedEngine } from "../../image-engine/bleed";
 
 const candidateId = `upload:${"a".repeat(64)}`;
 const identity: CardIdentity = { id: "scryfall:oracle:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", provider: "scryfall", name: "Sol Ring", oracleId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", resolutionMethod: "manual", confidence: 1 };
@@ -81,6 +83,51 @@ function jsonRequest(url: string, value: unknown): Request {
 }
 
 describe("card APIs", () => {
+  it("forwards an explicit bleed mode override to the shared BleedEngine", async () => {
+    const bytes = new Uint8Array(await sharp({ create: { width: 127, height: 178, channels: 3, background: { r: 48, g: 126, b: 214 } } }).png().toBuffer());
+    const workbench = testWorkbench({
+      getArtworkCandidate: vi.fn(async () => candidate),
+      getArtworkOriginal: vi.fn(async () => ({
+        artworkId: "a".repeat(64),
+        contentHash: "b".repeat(64),
+        extension: "png",
+        format: "png",
+        byteLength: bytes.byteLength,
+        widthPx: 127,
+        heightPx: 178,
+        createdAt: new Date(0).toISOString(),
+        provenance: [],
+        bytes,
+      })),
+    });
+    const generate = vi.spyOn(BleedEngine.prototype, "generate");
+
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: { bleedMm: 1, cutGuides: "none", bleedMode: "smart-border-fill" },
+    }), workbench);
+
+    expect(response.status).toBe(200);
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ mode: "smart-border-fill" }));
+    const encodedDiagnostics = response.headers.get("x-tcgprint-bleed-diagnostics");
+    expect(encodedDiagnostics).toBeTruthy();
+    const diagnostics = JSON.parse(Buffer.from(encodedDiagnostics!, "base64url").toString("utf8")) as {
+      version: number;
+      diagnostics: Array<{ source: string; requestedMode: string; resolvedMode: string; effectiveMode: string; sideDiagnostics: Record<string, { classification?: string; sourceOffsetPx?: number; sourceStripPx?: number; fallbackReason?: string }> }>;
+    };
+    expect(diagnostics).toMatchObject({
+      version: 1,
+      diagnostics: [{ source: "upload", requestedMode: "smart-border-fill", resolvedMode: "smart-border-fill", effectiveMode: "subtle-edge-stretch" }],
+    });
+    expect(diagnostics.diagnostics[0].sideDiagnostics.top).toMatchObject({
+      classification: "outer-band-not-dark-uniform",
+      sourceOffsetPx: expect.any(Number),
+      sourceStripPx: expect.any(Number),
+      fallbackReason: "outer-band-not-dark-uniform",
+    });
+    generate.mockRestore();
+  });
+
   it("accepts only DTO working cards and rejects byte/path fields from the client", () => {
     expect(parseWorkingCards([card])).toMatchObject([{ id: card.id, identity: { id: identity.id }, quantity: 1 }]);
     expect(() => parseWorkingCards([{ ...card, localOriginalPath: "/tmp/card.png" }])).toThrow(/localOriginalPath/);

@@ -1,5 +1,5 @@
 import { artworkQualityFromCandidate, type CardWorkbench } from "./card-workbench";
-import { CardExportServiceError, exportWorkingCards } from "./card-export";
+import { CardExportServiceError, exportWorkingCardsWithDiagnostics, type CardExportBleedDiagnostic } from "./card-export";
 import type { ArtworkCatalogSource } from "../artwork/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
 import type { UniversalImportRequest } from "../import-engine/types";
@@ -481,6 +481,42 @@ export async function handleArtworkDownload(request: Request, candidateId: strin
   } catch (error) { return respondError(error); }
 }
 
+const BLEED_DIAGNOSTICS_HEADER_LIMIT = 6_000;
+
+export function encodeBleedDiagnostics(diagnostics: readonly CardExportBleedDiagnostic[], maxHeaderLength = BLEED_DIAGNOSTICS_HEADER_LIMIT): { value: string; mode: "full" | "summary" } {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+  const compactDiagnostics = diagnostics.map(({ sideDiagnostics, ...diagnostic }) => ({
+    ...diagnostic,
+    sideDiagnostics: Object.fromEntries(Object.entries(sideDiagnostics).map(([side, result]) => [side, {
+      effectiveMode: result.effectiveMode,
+      classification: result.classification,
+      sourceOffsetPx: result.sourceOffsetPx,
+      sourceStripPx: result.sourceStripPx,
+      ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
+    }])),
+  }));
+  const full = encode({ version: 1, mode: "full", diagnostics: compactDiagnostics });
+  if (full.length <= maxHeaderLength) return { value: full, mode: "full" };
+
+  const fallbackCounts: Record<string, number> = {};
+  const noticeCounts: Record<string, number> = {};
+  const effectiveModeCounts: Record<string, number> = {};
+  for (const diagnostic of diagnostics) {
+    effectiveModeCounts[diagnostic.effectiveMode] = (effectiveModeCounts[diagnostic.effectiveMode] ?? 0) + 1;
+    if (diagnostic.policyNotice) noticeCounts[diagnostic.policyNotice] = (noticeCounts[diagnostic.policyNotice] ?? 0) + 1;
+    for (const [side, sideResult] of Object.entries(diagnostic.sideDiagnostics)) {
+      if (sideResult.fallbackReason) {
+        const key = `${side}:${sideResult.fallbackReason}`;
+        fallbackCounts[key] = (fallbackCounts[key] ?? 0) + 1;
+      }
+    }
+  }
+  return {
+    value: encode({ version: 1, mode: "summary", truncated: true, count: diagnostics.length, effectiveModeCounts, fallbackCounts, noticeCounts }),
+    mode: "summary",
+  };
+}
+
 export async function handleCardExport(request: Request, workbench: CardWorkbench): Promise<Response> {
   try {
     const body = await parseJsonRequest(request, 4_000_000);
@@ -489,9 +525,20 @@ export async function handleCardExport(request: Request, workbench: CardWorkbenc
     const bleedMm = options.bleedMm === undefined ? 0.625 : Number(options.bleedMm);
     const cutGuides = options.cutGuides === "none" ? "none" : options.cutGuides === undefined || options.cutGuides === "full" ? "full" : undefined;
     if (cutGuides === undefined) throw new ApiRequestError(400, "INVALID_CUT_GUIDES", "Cut guides mode must be full or none.");
-    const pdf = await exportWorkingCards(workbench, cards, { bleedMm, cutGuides }, request.signal);
-    return new Response(new Uint8Array(pdf), {
-      headers: { "Content-Type": "application/pdf", "Content-Disposition": 'attachment; filename="tcgprint-cards.pdf"', "Cache-Control": "no-store" },
+    const bleedMode = options.bleedMode === undefined ? "auto" : options.bleedMode;
+    if (bleedMode !== "auto" && bleedMode !== "smart-border-fill" && bleedMode !== "subtle-edge-stretch") {
+      throw new ApiRequestError(400, "INVALID_BLEED_MODE", "Bleed mode must be auto, smart-border-fill, or subtle-edge-stretch.");
+    }
+    const result = await exportWorkingCardsWithDiagnostics(workbench, cards, { bleedMm, cutGuides, bleedMode }, request.signal);
+    const bleedReport = encodeBleedDiagnostics(result.bleedDiagnostics);
+    return new Response(new Uint8Array(result.pdfBytes), {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": 'attachment; filename="tcgprint-cards.pdf"',
+        "Cache-Control": "no-store",
+        "X-TCGPrint-Bleed-Diagnostics": bleedReport.value,
+        "X-TCGPrint-Bleed-Diagnostics-Mode": bleedReport.mode,
+      },
     });
   } catch (error) { return respondError(error); }
 }

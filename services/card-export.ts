@@ -1,13 +1,50 @@
 import { createHash } from "node:crypto";
-import { BleedEngine, BleedGenerationError, type BleedResult } from "../image-engine/bleed";
+import {
+  BLEED_ALGORITHM_VERSION,
+  BleedEngine,
+  BleedGenerationError,
+  createBleedCacheKey,
+  resolveBleedSourcePolicy,
+  resolveSmartBorderFillConfig,
+  SMART_BORDER_FILL_CONFIG,
+  type BleedModePreference,
+  type BleedDerivativeResult,
+  type BleedResult,
+  type SmartBorderFillConfigOverrides,
+} from "../image-engine/bleed";
 import { MAGIC_STANDARD_CARD, PAPER_FORMATS, type CutGuideConfig } from "../core/geometry";
 import { LosslessPdfEngine, PdfExportError } from "../pdf-engine/document";
-import type { WorkingCard } from "../core/cards/types";
+import type { ArtworkCandidate, WorkingCard } from "../core/cards/types";
 import type { CardWorkbench } from "./card-workbench";
 
 export interface CardExportOptions {
   readonly bleedMm: number;
   readonly cutGuides: "full" | "none";
+  readonly bleedMode?: BleedModePreference;
+  readonly smartBorderFillConfig?: SmartBorderFillConfigOverrides;
+}
+
+export interface CardExportBleedDiagnostic {
+  readonly workingCardId: string;
+  readonly identityId: string | null;
+  readonly cardName: string;
+  readonly source: ArtworkCandidate["source"];
+  readonly requestedMode: BleedModePreference;
+  readonly resolvedMode: "smart-border-fill" | "subtle-edge-stretch";
+  readonly effectiveMode: BleedResult["effectiveMode"];
+  readonly algorithmVersion: typeof BLEED_ALGORITHM_VERSION;
+  readonly smartBorderFillConfigVersion: string;
+  readonly policyId: string;
+  readonly policyNotice?: string;
+  readonly bleedMm: number;
+  readonly trimSizeMm: BleedResult["trimSizeMm"];
+  readonly sideDiagnostics: BleedDerivativeResult["sideDiagnostics"];
+  readonly previewSha256: string;
+}
+
+export interface CardExportResult {
+  readonly pdfBytes: Uint8Array;
+  readonly bleedDiagnostics: readonly CardExportBleedDiagnostic[];
 }
 
 export class CardExportServiceError extends Error {
@@ -27,14 +64,18 @@ function guides(mode: CardExportOptions["cutGuides"]): CutGuideConfig {
 }
 
 /** Composes quantity copies only here, then delegates all geometry/raster/PDF work to the existing engines. */
-export async function exportWorkingCards(
+export async function exportWorkingCardsWithDiagnostics(
   catalog: Pick<CardWorkbench, "getArtworkCandidate" | "getArtworkOriginal">,
   cards: readonly WorkingCard[],
   options: CardExportOptions,
   signal?: AbortSignal,
-): Promise<Uint8Array> {
+): Promise<CardExportResult> {
   if (!Number.isFinite(options.bleedMm) || options.bleedMm < 0 || options.bleedMm > 3) {
     throw new CardExportServiceError("INVALID_BLEED", "Bleed must be between 0 and 3 mm.");
+  }
+  const bleedMode = options.bleedMode ?? "auto";
+  if (bleedMode !== "auto" && bleedMode !== "smart-border-fill" && bleedMode !== "subtle-edge-stretch") {
+    throw new CardExportServiceError("INVALID_BLEED", "Bleed mode must be auto, smart-border-fill, or subtle-edge-stretch.");
   }
   const total = cards.reduce((sum, card) => sum + card.quantity, 0);
   if (total < 1) throw new CardExportServiceError("ARTWORK_REQUIRED", "Add at least one card to export.");
@@ -44,7 +85,9 @@ export async function exportWorkingCards(
   const uniqueBleeds = new Map<string, BleedResult>();
   const composedImages: Uint8Array[] = [];
   const composedBleeds: Array<BleedResult | undefined> = [];
-  const bleedEngine = new BleedEngine();
+  const bleedDiagnostics: CardExportBleedDiagnostic[] = [];
+  const smartBorderFillConfig = resolveSmartBorderFillConfig(options.smartBorderFillConfig ?? SMART_BORDER_FILL_CONFIG);
+  const bleedEngine = new BleedEngine({ smartBorderFillConfig });
   const pdfEngine = new LosslessPdfEngine();
 
   for (const card of [...cards].sort((a, b) => a.order - b.order)) {
@@ -71,14 +114,29 @@ export async function exportWorkingCards(
     let bleed: BleedResult | undefined;
     if (options.bleedMm > 0) {
       if (original.format === "svg") throw new CardExportServiceError("UNSUPPORTED_FORMAT", "SVG artwork stays vector at zero bleed; the current BleedEngine does not generate SVG bleed.");
-      const key = `${hash}:${options.bleedMm}`;
+      const policy = resolveBleedSourcePolicy({ source: candidate.source, format: original.format, override: bleedMode, metadata: candidate.metadata });
+      const trimSizeMm = { widthMm: MAGIC_STANDARD_CARD.widthMm, heightMm: MAGIC_STANDARD_CARD.heightMm };
+      const sourceStrip = { mode: "auto" as const };
+      const key = createBleedCacheKey({
+        originalSha256: hash,
+        bleedMm: options.bleedMm,
+        mode: policy.mode,
+        policyId: policy.policyId,
+        sourceStrip,
+        trimWidthMm: trimSizeMm.widthMm,
+        trimHeightMm: trimSizeMm.heightMm,
+        smartBorderFillConfig,
+      });
       bleed = uniqueBleeds.get(key);
       if (!bleed) {
         try {
           bleed = await bleedEngine.generate({
             imageBytes: image,
             bleedMm: options.bleedMm,
-            trimSizeMm: { widthMm: MAGIC_STANDARD_CARD.widthMm, heightMm: MAGIC_STANDARD_CARD.heightMm },
+            trimSizeMm,
+            sourceStrip,
+            mode: policy.mode,
+            policyId: policy.policyId,
           });
           uniqueBleeds.set(key, bleed);
         } catch (error) {
@@ -86,6 +144,24 @@ export async function exportWorkingCards(
           throw error;
         }
       }
+      if (bleed.status !== "derived") throw new CardExportServiceError("EXPORT_FAILED", "Positive bleed unexpectedly returned a passthrough result.");
+      bleedDiagnostics.push({
+        workingCardId: card.id,
+        identityId: card.identity?.id ?? null,
+        cardName: card.identity?.name ?? card.identityHints.name ?? "Custom card",
+        source: candidate.source,
+        requestedMode: policy.requestedMode,
+        resolvedMode: policy.mode,
+        effectiveMode: bleed.effectiveMode,
+        algorithmVersion: bleed.algorithmVersion,
+        smartBorderFillConfigVersion: smartBorderFillConfig.version,
+        policyId: policy.policyId,
+        ...(policy.notice ? { policyNotice: policy.notice } : {}),
+        bleedMm: options.bleedMm,
+        trimSizeMm: bleed.trimSizeMm,
+        sideDiagnostics: bleed.sideDiagnostics,
+        previewSha256: digest(bleed.preview.bytes),
+      });
     }
     for (let copy = 0; copy < card.quantity; copy += 1) {
       composedImages.push(image);
@@ -94,15 +170,25 @@ export async function exportWorkingCards(
   }
 
   try {
-    return await pdfEngine.generate({
+    const pdfBytes = await pdfEngine.generate({
       images: composedImages,
       bleedResults: composedBleeds,
       cutGuides: guides(options.cutGuides),
       paperFormat: PAPER_FORMATS.A4,
       cardFormat: MAGIC_STANDARD_CARD,
     });
+    return { pdfBytes, bleedDiagnostics };
   } catch (error) {
     if (error instanceof PdfExportError) throw new CardExportServiceError("EXPORT_FAILED", error.message, { cause: error });
     throw error;
   }
+}
+
+export async function exportWorkingCards(
+  catalog: Pick<CardWorkbench, "getArtworkCandidate" | "getArtworkOriginal">,
+  cards: readonly WorkingCard[],
+  options: CardExportOptions,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  return (await exportWorkingCardsWithDiagnostics(catalog, cards, options, signal)).pdfBytes;
 }

@@ -7,8 +7,17 @@ import {
   decodeRaster,
   encodeRasterPng,
   inspectRasterMetadata,
+  type RasterBleedSideSources,
   type RasterPixels,
 } from "./raster";
+import {
+  classifySmartBorderFillSides,
+  resolveSmartBorderFillConfig,
+  SMART_BORDER_FILL_CONFIG,
+  type BleedSide,
+  type SmartBorderFillConfig,
+  type SmartBorderFillConfigOverrides,
+} from "./smart-border";
 import {
   BLEED_ALGORITHM_VERSION,
   type BleedCache,
@@ -16,9 +25,25 @@ import {
   type BleedPreview,
   type BleedRequest,
   type BleedResult,
+  type BleedSideDiagnostic,
   type BleedSourceStrip,
   type TrimSizeMm,
 } from "./types";
+export {
+  resolveBleedSourcePolicy,
+  type BleedModePreference,
+  type BleedSourcePolicyRequest,
+  type ResolvedBleedSourcePolicy,
+} from "./policy";
+
+export {
+  SMART_BORDER_FILL_CONFIG,
+  SMART_BORDER_FILL_CONFIG_VERSION,
+  resolveSmartBorderFillConfig,
+  type BleedSide,
+  type SmartBorderFillConfig,
+  type SmartBorderFillConfigOverrides,
+} from "./smart-border";
 
 export {
   BLEED_ALGORITHM_VERSION,
@@ -31,6 +56,7 @@ export {
   type BleedPreview,
   type BleedRequest,
   type BleedResult,
+  type BleedSideDiagnostic,
   type BleedSourceStrip,
   type CustomSourceStrip,
   type PixelRect,
@@ -57,6 +83,24 @@ export class BleedGenerationError extends Error {
 
 export interface BleedEngineOptions {
   readonly cache?: BleedCache;
+  readonly smartBorderFillConfig?: SmartBorderFillConfigOverrides;
+}
+
+export interface BleedCacheIdentity {
+  readonly originalSha256: string;
+  readonly bleedMm: number;
+  readonly mode: BleedMode;
+  readonly policyId: string;
+  readonly sourceStrip: BleedSourceStrip;
+  readonly trimWidthMm: number;
+  readonly trimHeightMm: number;
+  readonly smartBorderFillConfig: SmartBorderFillConfig;
+}
+
+/** Shared by the engine cache and CardExportService's in-batch de-duplication. */
+export function createBleedCacheKey(identity: BleedCacheIdentity): string {
+  const serialized = JSON.stringify({ algorithmVersion: BLEED_ALGORITHM_VERSION, ...identity });
+  return createHash("sha256").update(serialized).digest("hex");
 }
 
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const;
@@ -111,7 +155,7 @@ function validateRequest(request: BleedRequest): {
   }
 
   const mode = request.mode ?? "subtle-edge-stretch";
-  if (mode !== "subtle-edge-stretch") {
+  if (mode !== "subtle-edge-stretch" && mode !== "smart-border-fill") {
     throw new BleedGenerationError(`Unsupported bleed mode: ${String(mode)}.`, "INVALID_BLEED_CONFIGURATION");
   }
 
@@ -140,26 +184,6 @@ function validateRequest(request: BleedRequest): {
   };
 }
 
-function createCacheKey(
-  originalSha256: string,
-  bleedMm: number,
-  mode: BleedMode,
-  sourceStrip: BleedSourceStrip,
-  trimWidthMm: number,
-  trimHeightMm: number,
-): string {
-  const identity = JSON.stringify({
-    algorithmVersion: BLEED_ALGORITHM_VERSION,
-    originalSha256,
-    bleedMm,
-    mode,
-    sourceStrip,
-    trimWidthMm,
-    trimHeightMm,
-  });
-  return createHash("sha256").update(identity).digest("hex");
-}
-
 function hasPngHeader(bytes: Uint8Array, width: number, height: number): boolean {
   if (bytes.length < 24 || !PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)) return false;
   const view = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -174,9 +198,11 @@ function calculateStripWidth(sourceStrip: BleedSourceStrip, bleedMm: number): nu
 
 export class BleedEngine {
   private readonly cache: BleedCache;
+  private readonly smartBorderFillConfig: SmartBorderFillConfig;
 
   constructor(options: BleedEngineOptions = {}) {
     this.cache = options.cache ?? new MemoryBleedCache();
+    this.smartBorderFillConfig = resolveSmartBorderFillConfig(options.smartBorderFillConfig);
   }
 
   async generate(request: BleedRequest): Promise<BleedResult> {
@@ -186,6 +212,9 @@ export class BleedEngine {
         status: "passthrough",
         bleedMm: 0,
         mode,
+        requestedMode: mode,
+        effectiveMode: mode,
+        policyId: request.policyId ?? "direct-mode-v1",
         sourceStrip,
         trimSizeMm: Object.freeze({ widthMm: trimWidthMm, heightMm: trimHeightMm }),
         cacheStatus: "bypass",
@@ -230,14 +259,73 @@ export class BleedEngine {
     const outputWidthPx = sourceWidthPx + 2 * dimensions.bleedXPx;
     const outputHeightPx = sourceHeightPx + 2 * dimensions.bleedYPx;
     const sourceSha256 = createHash("sha256").update(bufferView(request.imageBytes)).digest("hex");
-    const cacheKey = createCacheKey(
-      sourceSha256,
-      request.bleedMm,
+    const policyId = request.policyId ?? "direct-mode-v1";
+
+    let source: RasterPixels | undefined;
+    let rasterSideSources: RasterBleedSideSources | undefined;
+    let sideDiagnostics: Readonly<Record<BleedSide, BleedSideDiagnostic>>;
+    if (mode === "smart-border-fill") {
+      try {
+        source = await decodeRaster(request.imageBytes, metadata);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown decoder error.";
+        throw new BleedGenerationError(`Could not create bleed for this raster image. ${message}`, "IMAGE_DECODE_FAILED", { cause: error });
+      }
+      const classified = classifySmartBorderFillSides(
+        source,
+        dimensions.sourceStripXPx,
+        dimensions.sourceStripYPx,
+        trimWidthMm,
+        trimHeightMm,
+        this.smartBorderFillConfig,
+      );
+      const rasterSource = (side: BleedSide) => ({
+        offsetPx: classified[side].offsetPx,
+        sourceStripPx: classified[side].sourceStripPx,
+      });
+      const diagnostic = (side: BleedSide): BleedSideDiagnostic => ({
+        requestedMode: mode,
+        effectiveMode: classified[side].effectiveMode,
+        classification: classified[side].classification,
+        sourceOffsetPx: classified[side].offsetPx,
+        sourceStripPx: classified[side].sourceStripPx,
+        ...(classified[side].fallbackReason ? { fallbackReason: classified[side].fallbackReason } : {}),
+      });
+      rasterSideSources = {
+        top: rasterSource("top"),
+        right: rasterSource("right"),
+        bottom: rasterSource("bottom"),
+        left: rasterSource("left"),
+      };
+      sideDiagnostics = {
+        top: diagnostic("top"),
+        right: diagnostic("right"),
+        bottom: diagnostic("bottom"),
+        left: diagnostic("left"),
+      };
+    } else {
+      sideDiagnostics = Object.fromEntries((["top", "right", "bottom", "left"] as const).map((side) => [side, {
+        requestedMode: mode,
+        effectiveMode: mode,
+        classification: "not-analyzed" as const,
+        sourceOffsetPx: 0,
+        sourceStripPx: side === "left" || side === "right" ? dimensions.sourceStripXPx : dimensions.sourceStripYPx,
+      }])) as Readonly<Record<BleedSide, BleedSideDiagnostic>>;
+    }
+    const effectiveSides = Object.values(sideDiagnostics).map((diagnostic) => diagnostic.effectiveMode);
+    const effectiveMode = effectiveSides.every((sideMode) => sideMode === effectiveSides[0])
+      ? effectiveSides[0]!
+      : "mixed";
+    const cacheKey = createBleedCacheKey({
+      originalSha256: sourceSha256,
+      bleedMm: request.bleedMm,
       mode,
+      policyId,
       sourceStrip,
       trimWidthMm,
       trimHeightMm,
-    );
+      smartBorderFillConfig: this.smartBorderFillConfig,
+    });
 
     let cached: Uint8Array | undefined;
     try {
@@ -255,6 +343,9 @@ export class BleedEngine {
         sourceHeightPx,
         request,
         mode,
+        effectiveMode,
+        policyId,
+        sideDiagnostics,
         sourceStrip,
         trimWidthMm,
         trimHeightMm,
@@ -265,19 +356,20 @@ export class BleedEngine {
       });
     }
 
-    let source: RasterPixels;
-    try {
-      source = await decodeRaster(request.imageBytes, metadata);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown decoder error.";
-      throw new BleedGenerationError(
-        `Could not create bleed for this raster image. ${message}`,
-        "IMAGE_DECODE_FAILED",
-        { cause: error },
-      );
+    if (!source) {
+      try {
+        source = await decodeRaster(request.imageBytes, metadata);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown decoder error.";
+        throw new BleedGenerationError(
+          `Could not create bleed for this raster image. ${message}`,
+          "IMAGE_DECODE_FAILED",
+          { cause: error },
+        );
+      }
     }
 
-    const extended = addRasterBleed(source, dimensions);
+    const extended = addRasterBleed(source, dimensions, rasterSideSources);
     const derivedBytes = await encodeRasterPng(source, extended.width, extended.height, extended.samples);
     try {
       await this.cache.set(cacheKey, derivedBytes);
@@ -294,6 +386,9 @@ export class BleedEngine {
       sourceHeightPx,
       request,
       mode,
+      effectiveMode,
+      policyId,
+      sideDiagnostics,
       sourceStrip,
       trimWidthMm,
       trimHeightMm,
@@ -312,6 +407,9 @@ export class BleedEngine {
     readonly sourceHeightPx: number;
     readonly request: BleedRequest;
     readonly mode: BleedMode;
+    readonly effectiveMode: BleedResult["effectiveMode"];
+    readonly policyId: string;
+    readonly sideDiagnostics: Readonly<Record<BleedSide, BleedSideDiagnostic>>;
     readonly sourceStrip: BleedSourceStrip;
     readonly trimWidthMm: number;
     readonly trimHeightMm: number;
@@ -324,12 +422,16 @@ export class BleedEngine {
       status: "derived",
       bleedMm: options.request.bleedMm,
       mode: options.mode,
+      requestedMode: options.mode,
+      effectiveMode: options.effectiveMode,
+      policyId: options.policyId,
       sourceStrip: options.sourceStrip,
       trimSizeMm: Object.freeze({
         widthMm: options.trimWidthMm,
         heightMm: options.trimHeightMm,
       }),
       resolvedSourceStripMm: options.resolvedSourceStripMm,
+      sideDiagnostics: options.sideDiagnostics,
       originalSha256: options.sourceSha256,
       algorithmVersion: BLEED_ALGORITHM_VERSION,
       cacheKey: options.cacheKey,
