@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile } from "node:fs/promises";
+import { mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { originalPathForHash } from "./paths";
 import type { ArtworkRepository } from "./repository";
@@ -23,6 +23,16 @@ async function verifyExisting(path: string, contentHash: string): Promise<boolea
   } catch (error) {
     if (isMissing(error)) return false;
     throw error;
+  }
+}
+
+async function verifyOrRemoveCorrupt(path: string, contentHash: string): Promise<boolean> {
+  try {
+    return await verifyExisting(path, contentHash);
+  } catch (error) {
+    if (!(error instanceof ArtworkStorageError) || error.code !== "ARTWORK_CONTENT_CORRUPT") throw error;
+    try { await unlink(path); } catch (removeError) { if (!isMissing(removeError)) throw removeError; }
+    return false;
   }
 }
 
@@ -60,7 +70,12 @@ export class ArtworkOriginalStore {
     const existingRecord = this.repository.getOriginal(contentHash);
     if (existingRecord) {
       const existingPath = originalPathForHash(this.originalsDirectory, existingRecord.contentHash, existingRecord.extension);
-      if (await verifyExisting(existingPath, contentHash)) {
+      let existingIsValid = false;
+      try { existingIsValid = await verifyExisting(existingPath, contentHash); }
+      catch (error) {
+        if (!(error instanceof ArtworkStorageError) || error.code !== "ARTWORK_CONTENT_CORRUPT") throw error;
+      }
+      if (existingIsValid) {
         const record = this.repository.addOriginal({
           artworkId: existingRecord.artworkId,
           contentHash: existingRecord.contentHash,
@@ -76,7 +91,7 @@ export class ArtworkOriginalStore {
     const image = await validateImageBytes(bytes, this.maximumBytes);
     const artworkId = contentHash;
     const path = originalPathForHash(this.originalsDirectory, contentHash, image.extension);
-    if (!await verifyExisting(path, contentHash)) await writeCreateOnly(path, bytes, contentHash);
+    if (!await verifyOrRemoveCorrupt(path, contentHash)) await writeCreateOnly(path, bytes, contentHash);
     const record = this.repository.addOriginal({
       artworkId,
       contentHash,

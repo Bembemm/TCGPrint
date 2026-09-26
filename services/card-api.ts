@@ -275,6 +275,7 @@ function candidateDto(candidate: ArtworkCandidate) {
   for (const key of ["layout", "digital", "promo", "fullArt", "imageStatus", "borderColor", "referenceOnly", "slots", "importedAssetId", "originalFilename", "originalFormat", "contentHash", "provenanceCount", "name", "sourceType", "sourceName", "extension", "declaredSize", "dpi", "tags"]) {
     if (metadata[key] !== undefined) safeMetadata[key] = metadata[key];
   }
+  if (typeof metadata.localAvailabilityHint === "boolean") safeMetadata.localAvailabilityHint = metadata.localAvailabilityHint;
   const safeFilename = typeof safeMetadata.originalFilename === "string" ? safeMetadata.originalFilename.split(/[\\/]/).pop() : undefined;
   if (safeFilename) safeMetadata.originalFilename = safeFilename.replace(/[\u0000-\u001f]/g, "");
   const candidateId = encodeURIComponent(candidate.id);
@@ -298,6 +299,7 @@ function candidateDto(candidate: ArtworkCandidate) {
     ...(candidate.language ? { language: candidate.language } : {}),
     ...(candidate.releasedAt ? { releasedAt: candidate.releasedAt } : {}),
     originalAvailable: candidate.originalAvailable,
+    ...(candidate.originalCached !== undefined ? { originalCached: candidate.originalCached } : {}),
     metadata: safeMetadata,
   };
 }

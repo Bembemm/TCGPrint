@@ -166,6 +166,15 @@ describe("card APIs", () => {
     expect(body.candidates[0]).toMatchObject({ metadata: { originalFilename: "Sol Ring.png" } });
   });
 
+  it("preserves MPC online-versus-cached original status in artwork candidate DTOs", async () => {
+    const mpcCandidate: ArtworkCandidate = { ...candidate, id: "mpc:opaque", source: "mpc", originalAvailable: true, originalCached: false, metadata: { ...(candidate.metadata ?? {}), localAvailabilityHint: true } };
+    const workbench = testWorkbench({ listArtworkCandidates: vi.fn(async () => [mpcCandidate]) });
+    const response = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", { faceId: "front", source: "mpc" }), identity.id, workbench);
+    const body = await response.json() as { candidates: Array<Record<string, unknown>> };
+
+    expect(body.candidates[0]).toMatchObject({ source: "mpc", originalAvailable: true, originalCached: false, metadata: { localAvailabilityHint: true } });
+  });
+
   it("keeps preview and original separate and exposes validated original provenance", async () => {
     const workbench = testWorkbench();
     const preview = await handleArtworkPreview(new Request("http://localhost"), candidateId, workbench);

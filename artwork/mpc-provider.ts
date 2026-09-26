@@ -258,8 +258,9 @@ export class MpcArtworkProvider implements ArtworkProvider {
           faceId: reference.faceId,
           ...(reference.providerAssetId ? { providerAssetId: reference.providerAssetId } : {}),
           ...(reference.selectedArtworkId ? { selectedArtworkId: reference.selectedArtworkId } : {}),
-          originalAvailable: reference.availableLocally,
-          metadata: { referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots] },
+          originalAvailable: false,
+          originalCached: false,
+          metadata: { referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots], localAvailabilityHint: reference.availableLocally },
         });
       }
     }
@@ -270,7 +271,11 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const cached = this.metadata.getMetadata<readonly StoredCandidate[]>(searchKey);
     if (cached) {
       for (const item of cached) this.metadata.putMetadata(candidateKey(item.candidate.id), item, Date.now() + CANDIDATE_TTL_MS);
-      return this.combineCandidates(importedCandidates, cached.map(({ candidate }) => ({ ...candidate, identityId: identity.id })));
+      const refreshed = await Promise.all(cached.map(async ({ candidate }) => {
+        const current = await this.getCandidate(candidate.id);
+        return { ...(current ?? candidate), identityId: identity.id };
+      }));
+      return this.combineCandidates(importedCandidates, refreshed);
     }
 
     try {
@@ -346,16 +351,27 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const stored = this.metadata.getMetadata<StoredCandidate>(candidateKey(id));
     if (!stored) return undefined;
     const sourceUrl = stored.candidate.providerAssetId ? this.sourceUrl(stored.candidate.providerAssetId) : undefined;
-    const original = sourceUrl && stored.candidate.providerAssetId
+    const originalRecord = sourceUrl && stored.candidate.providerAssetId
       ? this.repository.findOriginalByProviderSource("mpc", stored.candidate.providerAssetId, sourceUrl)
       : undefined;
-    return original ? {
+    let original: ArtworkOriginal | undefined;
+    if (originalRecord) {
+      try { original = await this.originals.getOriginal(originalRecord.artworkId); }
+      catch (error) {
+        if (!(error instanceof ArtworkStorageError)) throw error;
+        this.degrade(error);
+      }
+    }
+    return {
       ...stored.candidate,
-      originalAvailable: true,
-      widthPx: original.widthPx,
-      heightPx: original.heightPx,
-      effectiveDpi: calculateEffectiveDpi(original.widthPx, original.heightPx),
-    } : stored.candidate;
+      originalAvailable: original ? true : stored.candidate.originalAvailable,
+      originalCached: Boolean(original),
+      ...(original ? {
+        widthPx: original.widthPx,
+        heightPx: original.heightPx,
+        effectiveDpi: calculateEffectiveDpi(original.widthPx, original.heightPx),
+      } : {}),
+    };
   }
 
   async getCandidateForReferences(id: string, references: readonly WorkingCardMpcReference[], identity: CardIdentity, signal?: AbortSignal): Promise<ArtworkCandidate | undefined> {
@@ -371,10 +387,22 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const cached = this.metadata.getMetadata<StoredCandidate>(candidateKey(id));
     if (cached && cached.candidate.providerAssetId === assetId && cached.candidate.selectedArtworkId === selectedArtworkId) {
       const candidate = await this.getCandidate(id);
-      return candidate ? { ...candidate, identityId: identity.id } : undefined;
+      return candidate ? {
+        ...candidate,
+        identityId: identity.id,
+        metadata: { ...candidate.metadata, referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots], localAvailabilityHint: reference.availableLocally },
+      } : undefined;
     }
     const sourceUrl = assetId ? this.sourceUrl(assetId) : undefined;
-    const localOriginal = sourceUrl && assetId ? this.repository.findOriginalByProviderSource("mpc", assetId, sourceUrl) : undefined;
+    const localOriginalRecord = sourceUrl && assetId ? this.repository.findOriginalByProviderSource("mpc", assetId, sourceUrl) : undefined;
+    let localOriginal: ArtworkOriginal | undefined;
+    if (localOriginalRecord) {
+      try { localOriginal = await this.originals.getOriginal(localOriginalRecord.artworkId); }
+      catch (error) {
+        if (!(error instanceof ArtworkStorageError) || (error.code !== "ARTWORK_MISSING" && error.code !== "ARTWORK_CONTENT_CORRUPT")) throw error;
+        this.degrade(error);
+      }
+    }
     if (localOriginal) {
       const candidate: ArtworkCandidate = {
         id,
@@ -387,7 +415,8 @@ export class MpcArtworkProvider implements ArtworkProvider {
         heightPx: localOriginal.heightPx,
         effectiveDpi: calculateEffectiveDpi(localOriginal.widthPx, localOriginal.heightPx),
         originalAvailable: true,
-        metadata: { referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots], sourceType: "Google Drive" },
+        originalCached: true,
+        metadata: { referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots], sourceType: "Google Drive", localAvailabilityHint: reference.availableLocally },
       };
       const stored: StoredCandidate = { candidate };
       this.metadata.putMetadata(candidateKey(id), stored, Date.now() + CANDIDATE_TTL_MS);
@@ -402,7 +431,8 @@ export class MpcArtworkProvider implements ArtworkProvider {
       ...(assetId ? { providerAssetId: assetId } : {}),
       ...(selectedArtworkId ? { selectedArtworkId } : {}),
       originalAvailable: false,
-      metadata: { referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots] },
+      originalCached: false,
+      metadata: { referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots], localAvailabilityHint: reference.availableLocally },
     };
     if (!assetId || !sourceUrl) {
       this.metadata.putMetadata(candidateKey(id), { candidate: baseCandidate }, Date.now() + CANDIDATE_TTL_MS);
@@ -439,7 +469,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
       id,
       providerAssetId: assetId,
       ...(selectedArtworkId ? { selectedArtworkId } : {}),
-      metadata: { ...online.candidate.metadata, referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots] },
+      metadata: { ...online.candidate.metadata, referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots], localAvailabilityHint: reference.availableLocally },
     };
     const stored: StoredCandidate = { ...online, candidate };
     this.metadata.putMetadata(candidateKey(id), stored, Date.now() + CANDIDATE_TTL_MS);
@@ -473,7 +503,16 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const sourceUrl = this.sourceUrl(candidate.providerAssetId);
     if (!sourceUrl) throw new MpcArtworkProviderError("unsafe-source", "MPC Google Drive identifier is invalid.");
     const existing = this.repository.findOriginalByProviderSource("mpc", candidate.providerAssetId, sourceUrl);
-    if (existing) return this.originals.getOriginal(existing.artworkId);
+    if (existing) {
+      try { return await this.originals.getOriginal(existing.artworkId); }
+      catch (error) {
+        if (!(error instanceof ArtworkStorageError) || (error.code !== "ARTWORK_MISSING" && error.code !== "ARTWORK_CONTENT_CORRUPT")) {
+          if (error instanceof ArtworkStorageError) this.degrade(error);
+          throw error;
+        }
+        this.degrade(error);
+      }
+    }
     const { response, bytes } = await this.fetchImage(sourceUrl, this.maximumOriginalBytes, "original", signal);
     const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
     const expectedType = imageType(bytes);
@@ -498,8 +537,9 @@ export class MpcArtworkProvider implements ArtworkProvider {
     });
     if (stored) this.metadata.putMetadata(candidateKey(id), {
       ...stored,
-      candidate: { ...stored.candidate, widthPx: original.widthPx, heightPx: original.heightPx, effectiveDpi: calculateEffectiveDpi(original.widthPx, original.heightPx), originalAvailable: true },
+      candidate: { ...stored.candidate, widthPx: original.widthPx, heightPx: original.heightPx, effectiveDpi: calculateEffectiveDpi(original.widthPx, original.heightPx), originalAvailable: true, originalCached: true },
     }, Date.now() + CANDIDATE_TTL_MS);
+    this.health = { available: true, degraded: false };
     return original;
   }
 
@@ -532,6 +572,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
       providerAssetId: item.identifier,
       selectedArtworkId: item.identifier,
       originalAvailable: declaredSize !== undefined && declaredSize <= this.maximumOriginalBytes,
+      originalCached: false,
       metadata: {
         ...(typeof item.name === "string" ? { name: item.name.slice(0, 200) } : {}),
         sourceType: item.sourceType,

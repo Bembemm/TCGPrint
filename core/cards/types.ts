@@ -47,6 +47,8 @@ export interface ArtworkCandidate {
   readonly language?: string;
   readonly releasedAt?: string;
   readonly originalAvailable: boolean;
+  /** True only when validated original bytes exist in the local content-addressed store. */
+  readonly originalCached?: boolean;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 

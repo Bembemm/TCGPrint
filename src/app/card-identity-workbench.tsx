@@ -352,7 +352,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
                     <strong>{candidate.faceName ?? candidate.metadata?.originalFilename as string ?? labelSource(candidate.source)}</strong>
                     <span>{labelSource(candidate.source)}{candidate.setCode ? ` · ${candidate.setCode.toUpperCase()} #${candidate.collectorNumber ?? "?"}` : ""}</span>
                     <span>{candidate.language ? candidate.language.toUpperCase() : "idioma não informado"}{candidate.effectiveDpi ? ` · ${candidate.effectiveDpi} DPI · ${resolutionQualityLabel(candidate.resolutionQuality)}` : " · DPI será calculado ao validar o original"}</span>
-                    {candidate.source === "mpc" && <span className="reference-status">{candidate.originalAvailable ? "bytes locais disponíveis" : "referência sem original local"}</span>}
+                    {candidate.source === "mpc" && <span className="reference-status">{candidate.originalCached ? "original em cache local" : candidate.originalAvailable ? "original remoto informado · validação no download" : "referência sem original disponível"}</span>}
+                    {candidate.source === "mpc" && candidate.metadata?.localAvailabilityHint === true && !candidate.originalCached && <span className="reference-status">XML relata disponibilidade local; bytes ainda não verificados no cache</span>}
                   </div>
                   <button className={`button ${isSelected ? "primary" : "secondary"}`} type="button" disabled={busy} onClick={() => void chooseArtwork(candidate)}>{isSelected && candidate.originalAvailable && !candidate.effectiveDpi ? "Validar original e calcular DPI" : isSelected ? "Selecionada" : candidate.originalAvailable ? "Selecionar arte" : "Selecionar referência"}</button>
                 </article>;

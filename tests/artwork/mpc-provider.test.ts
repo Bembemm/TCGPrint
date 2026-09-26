@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mpcArtworkCandidateId } from "../../core/cards/ids";
 import type { CardIdentity, WorkingCardMpcReference } from "../../core/cards/types";
 import type { ArtworkProvider } from "../../artwork/types";
-import { appDataPaths } from "../../artwork/storage/paths";
+import { appDataPaths, originalPathForHash } from "../../artwork/storage/paths";
 import { ArtworkCatalog } from "../../artwork/catalog";
 import { ArtworkMetadataCache } from "../../artwork/storage/metadata-cache";
 import { ArtworkOriginalStore } from "../../artwork/storage/original-store";
@@ -47,7 +47,7 @@ async function setup(fetchImpl: typeof fetch, options: { timeoutMs?: number; max
     timeoutMs: options.timeoutMs ?? 100,
     ...(options.maxOriginalBytes !== undefined ? { maxOriginalBytes: options.maxOriginalBytes } : {}),
   });
-  return { database, provider: createProvider(), createProvider, originals, thumbnails, metadata, repository };
+  return { database, provider: createProvider(), createProvider, originals, thumbnails, metadata, repository, paths };
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -401,6 +401,8 @@ describe("MPC artwork provider", () => {
     const { database, provider, createProvider } = await setup(fetchImpl);
 
     const [candidate] = await provider.searchArtwork(identity);
+    expect(candidate.originalAvailable).toBe(true);
+    expect(candidate.originalCached).toBe(false);
     expect(imageRequests).toEqual([]);
     const preview = await provider.getPreview(candidate.id);
     expect(preview?.bytes).toEqual(thumbnailBytes);
@@ -421,13 +423,89 @@ describe("MPC artwork provider", () => {
       importMetadata: expect.objectContaining({ faceId: "front", sourceType: "Google Drive" }),
     }));
     expect(imageRequests.filter((url) => url.includes("/uc?") || url.includes("drive.usercontent.google.com"))).toHaveLength(2);
-    expect(await provider.getCandidate(candidate.id)).toMatchObject({ widthPx: 1200, heightPx: 1680, originalAvailable: true });
+    expect(await provider.getCandidate(candidate.id)).toMatchObject({ widthPx: 1200, heightPx: 1680, originalAvailable: true, originalCached: true });
+    await expect(provider.searchArtwork(identity)).resolves.toMatchObject([{ id: candidate.id, originalCached: true }]);
 
     const offline = createProvider(async () => { throw new Error("offline cache should satisfy this request"); });
     expect(await offline.searchArtwork(identity)).toMatchObject([{ id: candidate.id }]);
     expect(await offline.getPreview(candidate.id)).toMatchObject({ bytes: thumbnailBytes });
     expect(await offline.getOriginal(candidate.id)).toMatchObject({ bytes: originalBytes });
     expect(imageRequests).toHaveLength(4);
+    database.close();
+  });
+
+  it.each(["missing", "corrupt"] as const)("does not report a %s content-addressed file as cached", async (fileState) => {
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 80, height: 120, channels: 3, background: "#445577" } }).png().toBuffer());
+    const fetchImpl = searchFake(driveCard({ size: originalBytes.byteLength }), async (url) => {
+      if (url.includes("/uc?")) return new Response(originalBytes, { headers: { "Content-Type": "image/png", "Content-Length": String(originalBytes.byteLength) } });
+      throw new Error(`Unexpected image fetch: ${url}`);
+    });
+    const { database, provider, createProvider, originals, paths } = await setup(fetchImpl);
+    const [candidate] = await provider.searchArtwork(identity);
+    const original = await provider.getOriginal(candidate.id);
+    const originalPath = originalPathForHash(paths.originalsDirectory, original.contentHash, original.extension);
+    if (fileState === "missing") await unlink(originalPath);
+    else await writeFile(originalPath, new Uint8Array(original.bytes.byteLength).fill(0));
+    const restartedProvider = createProvider();
+    const candidateAfterRestart = await restartedProvider.getCandidate(candidate.id);
+
+    expect(candidateAfterRestart).toMatchObject({ originalAvailable: true, originalCached: false });
+    expect(restartedProvider.getHealth()).toMatchObject({ available: false, degraded: true });
+    database.close();
+  });
+
+  it("does not trust an unverified imported local-availability hint as a cached original", async () => {
+    const { database, provider } = await setup(async () => { throw new Error("offline"); });
+    const reference: WorkingCardMpcReference = {
+      faceId: "front", importedAssetId: "xml-local-hint", providerAssetId: "opaque-drive-id_1234567890",
+      selectedArtworkId: "opaque-drive-id_1234567890", slots: ["1"], availableLocally: true,
+    };
+
+    const [candidate] = await provider.searchArtwork(identity, { mpcReferences: [reference] });
+    expect(candidate).toMatchObject({ originalAvailable: false, originalCached: false });
+    expect(provider.getHealth()).toMatchObject({ available: false, degraded: true });
+    database.close();
+  });
+
+  it.each(["missing", "corrupt"] as const)("rehydrates and repairs an imported MPC original whose local file is %s", async (fileState) => {
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 120, height: 168, channels: 3, background: "#537799" } }).png().toBuffer());
+    const requests: string[] = [];
+    const fetchImpl = searchFake(driveCard({ size: originalBytes.byteLength }), async (url) => {
+      requests.push(url);
+      if (url.includes("/uc?")) return new Response(originalBytes, { headers: { "Content-Type": "image/png", "Content-Length": String(originalBytes.byteLength) } });
+      throw new Error(`Unexpected image fetch: ${url}`);
+    });
+    const { database, provider, originals, paths } = await setup(fetchImpl);
+    const [onlineCandidate] = await provider.searchArtwork(identity);
+    const original = await provider.getOriginal(onlineCandidate.id);
+    const originalPath = originalPathForHash(paths.originalsDirectory, original.contentHash, original.extension);
+    if (fileState === "missing") await unlink(originalPath);
+    else await writeFile(originalPath, new Uint8Array(original.bytes.byteLength).fill(0));
+    const reference: WorkingCardMpcReference = {
+      faceId: "front",
+      importedAssetId: `xml-${fileState}-original`,
+      providerAssetId: onlineCandidate.providerAssetId!,
+      selectedArtworkId: onlineCandidate.selectedArtworkId!,
+      slots: ["1", "2"],
+      availableLocally: true,
+    };
+    const importedCandidateId = mpcArtworkCandidateId(reference.importedAssetId, "front");
+
+    const candidate = await provider.getCandidateForReferences(importedCandidateId, [reference], identity);
+
+    expect(candidate).toMatchObject({
+      id: importedCandidateId,
+      providerAssetId: onlineCandidate.providerAssetId,
+      selectedArtworkId: onlineCandidate.selectedArtworkId,
+      originalAvailable: true,
+      originalCached: false,
+      metadata: { referenceOnly: true, localAvailabilityHint: true, slots: ["1", "2"] },
+    });
+    const recovered = await provider.getOriginal(importedCandidateId);
+    expect(recovered.bytes).toEqual(originalBytes);
+    expect(await provider.getCandidate(importedCandidateId)).toMatchObject({ originalAvailable: true, originalCached: true });
+    expect(requests.filter((url) => url.includes("/uc?")).length).toBeGreaterThanOrEqual(2);
+    expect(await originals.getOriginal(original.contentHash)).toMatchObject({ bytes: originalBytes });
     database.close();
   });
 
@@ -456,7 +534,7 @@ describe("MPC artwork provider", () => {
       providerAssetId: "opaque-drive-id_1234567890",
       selectedArtworkId: "synthetic-selected-artwork-id",
       slots: ["1", "2"],
-      availableLocally: false,
+      availableLocally: true,
     };
     const importedCandidateId = mpcArtworkCandidateId(reference.importedAssetId, "front");
 
@@ -467,12 +545,14 @@ describe("MPC artwork provider", () => {
       id: importedCandidateId,
       providerAssetId: "opaque-drive-id_1234567890",
       selectedArtworkId: "synthetic-selected-artwork-id",
-      metadata: { importedAssetId: "internal-xml-import-id", slots: ["1", "2"], sourceType: "Google Drive" },
+      originalAvailable: true,
+      originalCached: false,
+      metadata: { importedAssetId: "internal-xml-import-id", slots: ["1", "2"], sourceType: "Google Drive", localAvailabilityHint: true },
     });
     expect(exportedOriginal.bytes).toEqual(originalBytes);
     expect(requests.map((url) => new URL(url).pathname)).toEqual(["/2/sources/", "/2/cards/", "/uc", "/download"]);
     expect(requests.some((url) => url.includes("editorSearch"))).toBe(false);
-    expect(await provider.getCandidate(importedCandidateId)).toMatchObject({ selectedArtworkId: "synthetic-selected-artwork-id", originalAvailable: true });
+    expect(await provider.getCandidate(importedCandidateId)).toMatchObject({ selectedArtworkId: "synthetic-selected-artwork-id", originalAvailable: true, originalCached: true });
     database.close();
   });
 
@@ -550,6 +630,8 @@ describe("MPC artwork provider", () => {
       originalAvailable: true,
       previewUri: "https://drive.google.com/thumbnail?id=opaque-drive-id_1234567890",
     }]);
+    const updatedHint = await provider.searchArtwork(customIdentity, { faceId: "front", mpcReferences: [{ ...reference, availableLocally: true }] });
+    expect(updatedHint[0]).toMatchObject({ originalCached: false, metadata: { localAvailabilityHint: true } });
     expect(requests.map((url) => new URL(url).pathname)).toEqual(["/2/sources/", "/2/cards/"]);
     database.close();
   });
