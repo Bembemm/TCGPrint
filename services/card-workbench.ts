@@ -7,7 +7,7 @@ import { sanitizeRelativeImportPath } from "../import-engine/source-path";
 import { ArtworkCatalog } from "../artwork/catalog";
 import { calculateEffectiveDpi, artworkResolutionQuality } from "../artwork/effective-dpi";
 import { LocalArtworkProvider } from "../artwork/local-provider";
-import { MpcReferenceArtworkProvider } from "../artwork/mpc-reference-provider";
+import { MpcArtworkProvider } from "../artwork/mpc-provider";
 import { ScryfallArtworkProvider } from "../artwork/scryfall-provider";
 import { ArtworkMetadataCache } from "../artwork/storage/metadata-cache";
 import { ArtworkOriginalStore } from "../artwork/storage/original-store";
@@ -58,6 +58,9 @@ export interface ResolveWorkingCardsResult {
 export interface CardWorkbenchOptions {
   readonly dataDirectory?: string;
   readonly fetchImpl?: typeof fetch;
+  /** Injectable MPC protocol transport for offline and deterministic environments. */
+  readonly mpcFetchImpl?: typeof fetch;
+  readonly mpcTimeoutMs?: number;
   readonly minIntervalMs?: number;
   readonly timeoutMs?: number;
   readonly maxUploadBytes?: number;
@@ -78,7 +81,7 @@ export interface CardWorkbench {
   confirmWorkingCardIdentity(card: WorkingCard, scryfallId: string, options?: { signal?: AbortSignal }): Promise<WorkingCard>;
   keepWorkingCardCustom(card: WorkingCard): WorkingCard;
   listArtworkCandidates(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
-  getArtworkCandidate(candidateId: string, options?: { mpcReferences?: readonly WorkingCardMpcReference[] }): Promise<ArtworkCandidate | undefined>;
+  getArtworkCandidate(candidateId: string, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; identity?: CardIdentity; signal?: AbortSignal }): Promise<ArtworkCandidate | undefined>;
   getArtworkPreview(candidateId: string, signal?: AbortSignal): Promise<ArtworkPreview | undefined>;
   getArtworkOriginal(candidateId: string, signal?: AbortSignal): ReturnType<ArtworkCatalog["getOriginal"]>;
   selectArtwork(card: WorkingCard, faceId: CardFaceSide, candidate: ArtworkCandidate): WorkingCard;
@@ -237,7 +240,15 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
   });
   const local = new LocalArtworkProvider(originals, thumbnails, repository);
   const scryfall = new ScryfallArtworkProvider(client, originals, thumbnails, metadata, repository);
-  const mpc = new MpcReferenceArtworkProvider();
+  const mpc = new MpcArtworkProvider({
+    fetchImpl: options.mpcFetchImpl ?? options.fetchImpl,
+    originals,
+    thumbnails,
+    metadata,
+    repository,
+    timeoutMs: options.mpcTimeoutMs,
+    maxOriginalBytes: options.maxUploadBytes ?? MAX_UPLOAD_BYTES,
+  });
   const catalog = new ArtworkCatalog([scryfall, local, mpc]);
   const resolver = new IdentityResolver(client);
   const recognizer = options.recognizer ?? new TesseractOcrRecognizer({ cachePath: paths.rootDirectory });
@@ -441,9 +452,8 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     async getArtworkCandidate(candidateId, callOptions = {}) {
       const candidate = await catalog.getCandidate(candidateId);
       if (candidate || !candidateId.startsWith("mpc:") || !callOptions.mpcReferences?.length) return candidate;
-      const syntheticIdentity: CardIdentity = { id: "local:mpc-reference", provider: "local", name: "MPC Autofill reference", resolutionMethod: "custom", confidence: 0 };
-      await mpc.searchArtwork(syntheticIdentity, { mpcReferences: callOptions.mpcReferences });
-      return mpc.getCandidate(candidateId);
+      const syntheticIdentity: CardIdentity = callOptions.identity ?? { id: "local:mpc-reference", provider: "local", name: "MPC Autofill reference", resolutionMethod: "custom", confidence: 0 };
+      return mpc.getCandidateForReferences(candidateId, callOptions.mpcReferences, syntheticIdentity, callOptions.signal);
     },
     getArtworkPreview(candidateId, signal) { return catalog.getPreview(candidateId, signal); },
     getArtworkOriginal(candidateId, signal) { return catalog.getOriginal(candidateId, signal); },

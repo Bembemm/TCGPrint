@@ -1,0 +1,848 @@
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import Database from "better-sqlite3";
+import sharp from "sharp";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mpcArtworkCandidateId } from "../../core/cards/ids";
+import type { CardIdentity, WorkingCardMpcReference } from "../../core/cards/types";
+import type { ArtworkProvider } from "../../artwork/types";
+import { appDataPaths } from "../../artwork/storage/paths";
+import { ArtworkCatalog } from "../../artwork/catalog";
+import { ArtworkMetadataCache } from "../../artwork/storage/metadata-cache";
+import { ArtworkOriginalStore } from "../../artwork/storage/original-store";
+import { ArtworkRepository } from "../../artwork/storage/repository";
+import { ArtworkThumbnailStore } from "../../artwork/storage/thumbnail-store";
+import { MpcArtworkProvider } from "../../artwork/mpc-provider";
+
+const temporaryDirectories: string[] = [];
+afterEach(async () => Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
+
+const identity: CardIdentity = {
+  id: "scryfall:oracle-sol-ring",
+  provider: "scryfall",
+  name: "Sol Ring",
+  oracleId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  resolutionMethod: "name",
+  confidence: 1,
+};
+
+async function setup(fetchImpl: typeof fetch, options: { timeoutMs?: number; maxOriginalBytes?: number } = {}) {
+  const base = await mkdtemp(join(tmpdir(), "tcgprint-mpc-provider-"));
+  temporaryDirectories.push(base);
+  const paths = appDataPaths(base);
+  await mkdir(dirname(paths.databaseFile), { recursive: true });
+  const database = new Database(paths.databaseFile);
+  const repository = new ArtworkRepository(database);
+  const originals = new ArtworkOriginalStore(paths.originalsDirectory, repository, { maximumBytes: options.maxOriginalBytes ?? 30 * 1024 * 1024 });
+  const thumbnails = new ArtworkThumbnailStore(paths.thumbnailsDirectory, repository);
+  const metadata = new ArtworkMetadataCache(repository);
+  const createProvider = (fetcher: typeof fetch = fetchImpl) => new MpcArtworkProvider({
+    fetchImpl: fetcher,
+    originals,
+    thumbnails,
+    metadata,
+    repository,
+    timeoutMs: options.timeoutMs ?? 100,
+    ...(options.maxOriginalBytes !== undefined ? { maxOriginalBytes: options.maxOriginalBytes } : {}),
+  });
+  return { database, provider: createProvider(), createProvider, originals, thumbnails, metadata, repository };
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function driveCard(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    identifier: "opaque-drive-id_1234567890",
+    cardType: "CARD",
+    name: "Sol Ring · Synthetic art",
+    sourceId: 41,
+    sourceType: "Google Drive",
+    extension: "png",
+    size: 8000,
+    dpi: 1200,
+    smallThumbnailUrl: "https://drive.google.com/thumbnail?id=opaque-drive-id_1234567890",
+    ...overrides,
+  };
+}
+
+function searchFake(card: Record<string, unknown>, imageFetch?: (url: string) => Promise<Response>, calls: string[] = []): typeof fetch {
+  return async (input, init = {}) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+    if (url.endsWith("/3/editorSearch/")) {
+      const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+      return jsonResponse({ results: { [Object.keys(body.queries)[0]]: [card.identifier] } });
+    }
+    if (url.endsWith("/2/cards/")) return jsonResponse({ results: { [String(card.identifier)]: card } });
+    if (imageFetch) return imageFetch(url);
+    throw new Error(`Unexpected fake request: ${url}`);
+  };
+}
+
+function staticProvider(source: "scryfall" | "upload", id: string): ArtworkProvider {
+  return {
+    source,
+    searchArtwork: async () => [{ id, source, identityId: identity.id, faceId: "front", originalAvailable: true }],
+    getPreview: async () => undefined,
+    getOriginal: async () => { throw new Error("unused"); },
+    getCandidate: async () => undefined,
+  };
+}
+
+describe("MPC artwork provider", () => {
+  it("uses the legacy query-array contract only after v3 returns 404", async () => {
+    const requests: Array<{ url: string; method: string; body?: unknown }> = [];
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      const body = typeof init.body === "string" ? JSON.parse(init.body) as unknown : undefined;
+      requests.push({ url, method: init.method ?? "GET", ...(body === undefined ? {} : { body }) });
+      if (url.endsWith("/2/sources/")) {
+        return jsonResponse({ results: { "41": { pk: 41, name: "Verified Drive source", sourceType: "Google Drive" } } });
+      }
+      if (url.endsWith("/3/editorSearch/")) return new Response("route missing", { status: 404 });
+      if (url.endsWith("/2/editorSearch/")) {
+        return jsonResponse({ results: { "Sol Ring": { CARD: ["opaque-drive-id_1234567890"] } } });
+      }
+      if (url.endsWith("/2/cards/")) {
+        return jsonResponse({ results: {
+          "opaque-drive-id_1234567890": {
+            identifier: "opaque-drive-id_1234567890",
+            cardType: "CARD",
+            name: "Sol Ring · Community frame",
+            sourceId: 41,
+            sourceType: "Google Drive",
+            extension: "png",
+            size: 8000,
+            dpi: 1200,
+            smallThumbnailUrl: "https://drive.google.com/thumbnail?id=opaque-drive-id_1234567890",
+            mediumThumbnailUrl: "https://drive.google.com/thumbnail?id=opaque-drive-id_1234567890",
+          },
+        } });
+      }
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    const candidates = await provider.searchArtwork(identity);
+
+    expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
+      "/2/sources/",
+      "/3/editorSearch/",
+      "/2/editorSearch/",
+      "/2/cards/",
+    ]);
+    expect((requests[1].body as { queries: unknown }).queries).toEqual(expect.objectContaining({}));
+    expect((requests[2].body as { queries: unknown }).queries).toEqual([{ query: "Sol Ring", cardType: "CARD" }]);
+    expect(candidates).toMatchObject([{
+      source: "mpc",
+      identityId: identity.id,
+      faceId: "front",
+      providerAssetId: "opaque-drive-id_1234567890",
+      selectedArtworkId: "opaque-drive-id_1234567890",
+      originalAvailable: true,
+      metadata: { name: "Sol Ring · Community frame", sourceType: "Google Drive", dpi: 1200 },
+    }]);
+    expect(candidates[0].effectiveDpi).toBeUndefined();
+    expect(candidates[0].id).toMatch(/^mpc:[a-f0-9]{64}$/);
+    database.close();
+  });
+
+  it("uses the v3 object-map schema first and derives stable candidate IDs from opaque IDs", async () => {
+    const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      const body = typeof init.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : undefined;
+      requests.push({ url, ...(body ? { body } : {}) });
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: {
+        "41": { pk: 41, sourceType: "Google Drive" },
+        "42": { pk: 42, sourceType: "HTTP" },
+      } });
+      if (url.endsWith("/3/editorSearch/")) {
+        const queries = body?.queries as Record<string, { query: string; cardType: string }>;
+        const [hash, query] = Object.entries(queries)[0];
+        expect(hash).toBe("1094235669");
+        expect(query).toEqual({ query: "Sol Ring", cardType: "CARD" });
+        return jsonResponse({ results: { [hash]: ["opaque-drive-id_1234567890"] } });
+      }
+      if (url.endsWith("/2/cards/")) return jsonResponse({ results: {
+        "opaque-drive-id_1234567890": {
+          identifier: "opaque-drive-id_1234567890", cardType: "CARD", name: "Sol Ring",
+          sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000, dpi: 1200,
+          smallThumbnailUrl: "https://drive.google.com/thumbnail?id=opaque-drive-id_1234567890",
+        },
+      } });
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    const candidates = await provider.searchArtwork(identity);
+    const v3Request = requests.find(({ url }) => url.endsWith("/3/editorSearch/"))!;
+    const settings = v3Request.body?.searchSettings as { sourceSettings: { sources: number[][] } };
+
+    expect(requests.map(({ url }) => new URL(url).pathname)).toEqual(["/2/sources/", "/3/editorSearch/", "/2/cards/"]);
+    expect(settings.sourceSettings.sources).toEqual([[41, true]]);
+    expect(candidates[0].id).toBe(mpcArtworkCandidateId("opaque-drive-id_1234567890", "front"));
+    expect((await provider.searchArtwork(identity))[0].id).toBe(candidates[0].id);
+    expect(requests).toHaveLength(3);
+    database.close();
+  });
+
+  it("treats a valid empty search result as success without card hydration", async () => {
+    let searchCalls = 0;
+    let cardCalls = 0;
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) {
+        searchCalls += 1;
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]]: [] } });
+      }
+      if (url.endsWith("/2/cards/")) { cardCalls += 1; throw new Error("empty search should not hydrate cards"); }
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    await expect(provider.searchArtwork(identity)).resolves.toEqual([]);
+    await expect(provider.searchArtwork(identity)).resolves.toEqual([]);
+    expect(searchCalls).toBe(1);
+    expect(cardCalls).toBe(0);
+    expect(provider.getHealth()).toMatchObject({ available: true, degraded: false });
+    database.close();
+  });
+
+  it("treats a malformed successful search envelope as protocol degradation and does not cache it empty", async () => {
+    let malformed = true;
+    let searchCalls = 0;
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) {
+        searchCalls += 1;
+        if (malformed) return jsonResponse({ results: {} });
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]]: ["opaque-drive-id_1234567890"] } });
+      }
+      if (url.endsWith("/2/cards/")) return jsonResponse({ results: { "opaque-drive-id_1234567890": driveCard() } });
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    await expect(provider.searchArtwork(identity)).rejects.toMatchObject({ kind: "protocol" });
+    expect(provider.getHealth()).toMatchObject({ available: false, degraded: true });
+    malformed = false;
+    await expect(provider.searchArtwork(identity)).resolves.toHaveLength(1);
+    expect(searchCalls).toBe(2);
+    database.close();
+  });
+
+  it("treats malformed successful card hydration as protocol degradation instead of an empty result", async () => {
+    let malformed = true;
+    let hydrationCalls = 0;
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]]: ["opaque-drive-id_1234567890"] } });
+      }
+      if (url.endsWith("/2/cards/")) {
+        hydrationCalls += 1;
+        return malformed ? jsonResponse({ documents: [] }) : jsonResponse({ results: { "opaque-drive-id_1234567890": driveCard() } });
+      }
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    await expect(provider.searchArtwork(identity)).rejects.toMatchObject({ kind: "protocol" });
+    expect(provider.getHealth()).toMatchObject({ available: false, degraded: true });
+    malformed = false;
+    await expect(provider.searchArtwork(identity)).resolves.toHaveLength(1);
+    expect(hydrationCalls).toBe(2);
+    database.close();
+  });
+
+  it("rejects extra hydrated artwork IDs not submitted in the search request", async () => {
+    const requestedId = "requested-drive-id-123456";
+    const extraId = "extra-drive-id-123456789";
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]]: [requestedId] } });
+      }
+      if (url.endsWith("/2/cards/")) return jsonResponse({ results: {
+        [requestedId]: driveCard({ identifier: requestedId }),
+        [extraId]: driveCard({ identifier: extraId }),
+      } });
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    await expect(provider.searchArtwork(identity)).rejects.toMatchObject({ kind: "protocol" });
+    expect(provider.getHealth()).toMatchObject({ available: false, degraded: true });
+    database.close();
+  });
+
+  it("rejects hydrated documents without an explicit cardType", async () => {
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]]: ["opaque-drive-id_1234567890"] } });
+      }
+      if (url.endsWith("/2/cards/")) {
+        const { cardType: _cardType, ...card } = driveCard();
+        return jsonResponse({ results: { "opaque-drive-id_1234567890": card } });
+      }
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    await expect(provider.searchArtwork(identity)).resolves.toEqual([]);
+    expect(provider.getHealth()).toMatchObject({ available: false, degraded: true });
+    database.close();
+  });
+
+  it("degrades when reference hydration omits the selected ID from a successful response", async () => {
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/2/cards/")) return jsonResponse({ results: {} });
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+    const reference: WorkingCardMpcReference = {
+      faceId: "front", importedAssetId: "xml-missing-card", providerAssetId: "opaque-drive-id_1234567890",
+      selectedArtworkId: "opaque-drive-id_1234567890", slots: [], availableLocally: false,
+    };
+
+    await expect(provider.getCandidateForReferences(mpcArtworkCandidateId("xml-missing-card", "front"), [reference], identity))
+      .rejects.toMatchObject({ kind: "protocol" });
+    expect(provider.getHealth()).toMatchObject({ available: false, degraded: true });
+    database.close();
+  });
+
+  it("rejects a hydrated document whose source ID is absent from the verified source map", async () => {
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]]: ["opaque-drive-id_1234567890"] } });
+      }
+      if (url.endsWith("/2/cards/")) return jsonResponse({ results: {
+        "opaque-drive-id_1234567890": driveCard({ sourceId: 999 }),
+      } });
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    await expect(provider.searchArtwork(identity)).resolves.toEqual([]);
+    expect(provider.getHealth()).toMatchObject({ available: false, degraded: true });
+    const reference: WorkingCardMpcReference = {
+      faceId: "front", importedAssetId: "xml-invalid-source", providerAssetId: "opaque-drive-id_1234567890",
+      selectedArtworkId: "opaque-drive-id_1234567890", slots: [], availableLocally: false,
+    };
+    await expect(provider.getCandidateForReferences(mpcArtworkCandidateId("xml-invalid-source", "front"), [reference], identity))
+      .rejects.toMatchObject({ kind: "unsafe-source" });
+    database.close();
+  });
+
+  it("does not use v2 when v3 fails with anything other than 404", async () => {
+    const requests: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      requests.push(new URL(url).pathname);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) return jsonResponse({ error: "invalid request" }, 400);
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    await expect(provider.searchArtwork(identity)).rejects.toMatchObject({ kind: "http", status: 400 });
+
+    expect(requests).toEqual(["/2/sources/", "/3/editorSearch/"]);
+    database.close();
+  });
+
+  it("fetches thumbnails separately, downloads originals lazily, and stores byte-hash provenance", async () => {
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 1200, height: 1680, channels: 3, background: "#336699" } }).png().toBuffer());
+    const thumbnailBytes = new Uint8Array(await sharp({ create: { width: 120, height: 168, channels: 3, background: "#993366" } }).png().toBuffer());
+    const imageRequests: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]]: ["opaque-drive-id_1234567890"] } });
+      }
+      if (url.endsWith("/2/cards/")) return jsonResponse({ results: {
+        "opaque-drive-id_1234567890": {
+          identifier: "opaque-drive-id_1234567890", cardType: "CARD", name: "Sol Ring", sourceId: 41,
+          sourceType: "Google Drive", extension: "png", size: originalBytes.byteLength, dpi: 1200,
+          smallThumbnailUrl: "https://drive.google.com/thumbnail?id=opaque-drive-id_1234567890",
+        },
+      } });
+      imageRequests.push(url);
+      if (url.includes("drive.google.com/thumbnail")) return new Response(null, { status: 302, headers: { Location: "https://lh3.googleusercontent.com/thumbnail.png" } });
+      if (url.startsWith("https://lh3.googleusercontent.com/")) return new Response(thumbnailBytes, { headers: { "Content-Type": "image/png", "Content-Length": String(thumbnailBytes.byteLength) } });
+      if (url.startsWith("https://drive.google.com/uc?")) return new Response(null, { status: 302, headers: { Location: "https://drive.usercontent.google.com/download?id=opaque-drive-id_1234567890" } });
+      if (url.startsWith("https://drive.usercontent.google.com/download")) return new Response(originalBytes, { headers: { "Content-Type": "image/png", "Content-Length": String(originalBytes.byteLength) } });
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider, createProvider } = await setup(fetchImpl);
+
+    const [candidate] = await provider.searchArtwork(identity);
+    expect(imageRequests).toEqual([]);
+    const preview = await provider.getPreview(candidate.id);
+    expect(preview?.bytes).toEqual(thumbnailBytes);
+    expect(imageRequests).toHaveLength(2);
+    expect(imageRequests[0]).toContain("drive.google.com/thumbnail");
+    expect(imageRequests[1]).toContain("lh3.googleusercontent.com/thumbnail.png");
+    expect(imageRequests[0]).not.toContain("/uc?");
+
+    const original = await provider.getOriginal(candidate.id);
+    const secondOriginal = await provider.getOriginal(candidate.id);
+    expect(original.bytes).toEqual(originalBytes);
+    expect(secondOriginal.bytes).toEqual(originalBytes);
+    expect(original.contentHash).toBe(createHash("sha256").update(originalBytes).digest("hex"));
+    expect(original.provenance).toContainEqual(expect.objectContaining({
+      provider: "mpc",
+      providerAssetId: "opaque-drive-id_1234567890",
+      contentType: "image/png",
+      importMetadata: expect.objectContaining({ faceId: "front", sourceType: "Google Drive" }),
+    }));
+    expect(imageRequests.filter((url) => url.includes("/uc?") || url.includes("drive.usercontent.google.com"))).toHaveLength(2);
+    expect(await provider.getCandidate(candidate.id)).toMatchObject({ widthPx: 1200, heightPx: 1680, originalAvailable: true });
+
+    const offline = createProvider(async () => { throw new Error("offline cache should satisfy this request"); });
+    expect(await offline.searchArtwork(identity)).toMatchObject([{ id: candidate.id }]);
+    expect(await offline.getPreview(candidate.id)).toMatchObject({ bytes: thumbnailBytes });
+    expect(await offline.getOriginal(candidate.id)).toMatchObject({ bytes: originalBytes });
+    expect(imageRequests).toHaveLength(4);
+    database.close();
+  });
+
+  it("hydrates an imported XML reference by its preserved provider ID without searching the gallery", async () => {
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 1200, height: 1680, channels: 3, background: "#447755" } }).png().toBuffer());
+    const requests: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/2/cards/")) return jsonResponse({ results: {
+        "opaque-drive-id_1234567890": {
+          identifier: "opaque-drive-id_1234567890", cardType: "CARD", name: "Sol Ring · Imported choice", sourceId: 41, sourceType: "Google Drive",
+          extension: "png", size: originalBytes.byteLength, dpi: 1200,
+          smallThumbnailUrl: "https://drive.google.com/thumbnail?id=opaque-drive-id_1234567890",
+        },
+      } });
+      if (url.startsWith("https://drive.google.com/uc?")) return new Response(null, { status: 302, headers: { Location: "https://drive.usercontent.google.com/download?id=opaque-drive-id_1234567890" } });
+      if (url.startsWith("https://drive.usercontent.google.com/download")) return new Response(originalBytes, { headers: { "Content-Type": "image/png", "Content-Length": String(originalBytes.byteLength) } });
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+    const reference: WorkingCardMpcReference = {
+      faceId: "front",
+      importedAssetId: "internal-xml-import-id",
+      providerAssetId: "opaque-drive-id_1234567890",
+      selectedArtworkId: "synthetic-selected-artwork-id",
+      slots: ["1", "2"],
+      availableLocally: false,
+    };
+    const importedCandidateId = mpcArtworkCandidateId(reference.importedAssetId, "front");
+
+    const candidate = await provider.getCandidateForReferences(importedCandidateId, [reference], identity);
+    const exportedOriginal = await provider.getOriginal(importedCandidateId);
+
+    expect(candidate).toMatchObject({
+      id: importedCandidateId,
+      providerAssetId: "opaque-drive-id_1234567890",
+      selectedArtworkId: "synthetic-selected-artwork-id",
+      metadata: { importedAssetId: "internal-xml-import-id", slots: ["1", "2"], sourceType: "Google Drive" },
+    });
+    expect(exportedOriginal.bytes).toEqual(originalBytes);
+    expect(requests.map((url) => new URL(url).pathname)).toEqual(["/2/sources/", "/2/cards/", "/uc", "/download"]);
+    expect(requests.some((url) => url.includes("editorSearch"))).toBe(false);
+    expect(await provider.getCandidate(importedCandidateId)).toMatchObject({ selectedArtworkId: "synthetic-selected-artwork-id", originalAvailable: true });
+    database.close();
+  });
+
+  it("propagates cancellation instead of returning an imported-reference fallback", async () => {
+    const fetchImpl: typeof fetch = async () => { throw new Error("pre-aborted lookup must not fetch"); };
+    const { database, provider } = await setup(fetchImpl);
+    const reference: WorkingCardMpcReference = {
+      faceId: "front", importedAssetId: "xml-cancel-id", providerAssetId: "opaque-drive-id_1234567890",
+      selectedArtworkId: "opaque-drive-id_1234567890", slots: ["1"], availableLocally: false,
+    };
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(provider.searchArtwork(identity, { faceId: "front", mpcReferences: [reference], signal: controller.signal }))
+      .rejects.toMatchObject({ kind: "aborted" });
+    expect(provider.getHealth()).toMatchObject({ available: true, degraded: false });
+    database.close();
+  });
+
+  it("propagates in-flight cancellation while hydrating an imported XML reference", async () => {
+    let requestCardsStarted!: () => void;
+    const cardsStarted = new Promise<void>((resolve) => { requestCardsStarted = resolve; });
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/2/cards/")) {
+        requestCardsStarted();
+        return new Promise<Response>(() => undefined);
+      }
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+    const reference: WorkingCardMpcReference = {
+      faceId: "front", importedAssetId: "xml-in-flight-cancel", providerAssetId: "opaque-drive-id_1234567890",
+      selectedArtworkId: "opaque-drive-id_1234567890", slots: ["1"], availableLocally: false,
+    };
+    const controller = new AbortController();
+
+    try {
+      const pending = provider.searchArtwork(identity, { faceId: "front", mpcReferences: [reference], signal: controller.signal });
+      await cardsStarted;
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ kind: "aborted" });
+      expect(provider.getHealth()).toMatchObject({ available: true, degraded: false });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("shows an imported reference in the gallery without searching custom identities", async () => {
+    const requests: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/2/cards/")) return jsonResponse({ results: {
+        "opaque-drive-id_1234567890": driveCard(),
+      } });
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+    const reference: WorkingCardMpcReference = {
+      faceId: "front", importedAssetId: "xml-import-id", providerAssetId: "opaque-drive-id_1234567890",
+      selectedArtworkId: "opaque-drive-id_1234567890", slots: ["1"], availableLocally: false,
+    };
+    const customIdentity: CardIdentity = { id: "custom:artwork-picker", provider: "local", name: "Artwork library", resolutionMethod: "custom", confidence: 0 };
+
+    const candidates = await provider.searchArtwork(customIdentity, { faceId: "front", mpcReferences: [reference] });
+
+    expect(candidates).toMatchObject([{
+      id: mpcArtworkCandidateId("xml-import-id", "front"),
+      identityId: customIdentity.id,
+      providerAssetId: "opaque-drive-id_1234567890",
+      selectedArtworkId: "opaque-drive-id_1234567890",
+      originalAvailable: true,
+      previewUri: "https://drive.google.com/thumbnail?id=opaque-drive-id_1234567890",
+    }]);
+    expect(requests.map((url) => new URL(url).pathname)).toEqual(["/2/sources/", "/2/cards/"]);
+    database.close();
+  });
+
+  it("keeps an imported MPC reference visible when online search is degraded", async () => {
+    const requests: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      requests.push(new URL(url).pathname);
+      if (url.endsWith("/2/cards/")) return jsonResponse({ results: { "opaque-drive-id_1234567890": driveCard() } });
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) return jsonResponse({ error: "offline" }, 503);
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+    const reference: WorkingCardMpcReference = {
+      faceId: "front", importedAssetId: "xml-import-id", providerAssetId: "opaque-drive-id_1234567890",
+      selectedArtworkId: "opaque-drive-id_1234567890", slots: ["1"], availableLocally: false,
+    };
+
+    const candidates = await provider.searchArtwork(identity, { faceId: "front", mpcReferences: [reference] });
+
+    expect(candidates).toMatchObject([{ id: mpcArtworkCandidateId("xml-import-id", "front"), originalAvailable: true }]);
+    expect(provider.getHealth()).toMatchObject({ available: false, degraded: true });
+    expect(requests).toEqual(["/2/sources/", "/2/cards/", "/3/editorSearch/"]);
+    database.close();
+  });
+
+  it("rejects unsupported MPC source types while hydrating XML references", async () => {
+    const fetchImpl: typeof fetch = async (input) => {
+      if (String(input).endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (String(input).endsWith("/2/cards/")) return jsonResponse({ results: { "opaque-drive-id_1234567890": driveCard({ sourceType: "Dropbox" }) } });
+      throw new Error(`Unexpected fake request: ${String(input)}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+    const reference: WorkingCardMpcReference = { faceId: "front", importedAssetId: "xml-ref", providerAssetId: "opaque-drive-id_1234567890", selectedArtworkId: "opaque-drive-id_1234567890", slots: [], availableLocally: false };
+
+    await expect(provider.getCandidateForReferences(mpcArtworkCandidateId("xml-ref", "front"), [reference], identity))
+      .rejects.toMatchObject({ kind: "unsafe-source" });
+    database.close();
+  });
+
+  it("rejects unsafe opaque IDs before making a hydration or download URL", async () => {
+    const requests: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => { requests.push(String(input)); throw new Error("should not fetch"); };
+    const { database, provider } = await setup(fetchImpl);
+    const reference: WorkingCardMpcReference = { faceId: "front", importedAssetId: "xml-ref", providerAssetId: "../private/file", selectedArtworkId: "../private/file", slots: [], availableLocally: false };
+
+    await expect(provider.getCandidateForReferences(mpcArtworkCandidateId("xml-ref", "front"), [reference], identity))
+      .rejects.toMatchObject({ kind: "unsafe-source" });
+    expect(requests).toEqual([]);
+    database.close();
+  });
+
+  it("does not accept a thumbnail CDN redirect as the original artwork", async () => {
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 120, height: 168, channels: 3, background: "#315" } }).png().toBuffer());
+    const requests: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]]: ["opaque-drive-id_1234567890"] } });
+      }
+      if (url.endsWith("/2/cards/")) return jsonResponse({ results: {
+        "opaque-drive-id_1234567890": driveCard({ size: originalBytes.byteLength }),
+      } });
+      if (url.startsWith("https://drive.google.com/uc?")) return new Response(null, { status: 302, headers: { Location: "https://lh3.googleusercontent.com/thumbnail.png" } });
+      if (url.startsWith("https://lh3.googleusercontent.com/")) return new Response(originalBytes, { headers: { "Content-Type": "image/png", "Content-Length": String(originalBytes.byteLength) } });
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+    const [candidate] = await provider.searchArtwork(identity);
+
+    await expect(provider.getOriginal(candidate.id)).rejects.toMatchObject({ kind: "unsafe-source" });
+    expect(requests.some((url) => url.startsWith("https://lh3.googleusercontent.com/"))).toBe(false);
+    database.close();
+  });
+
+  it("rejects provider thumbnails hosted outside the exact Google allowlist", async () => {
+    const requests: string[] = [];
+    const fetchImpl = searchFake(driveCard({ smallThumbnailUrl: "https://attacker.google.com/image.png" }), async (url) => {
+      requests.push(url);
+      throw new Error("unsafe host must never be fetched");
+    });
+    const { database, provider } = await setup(fetchImpl);
+
+    const candidates = await provider.searchArtwork(identity);
+
+    expect(candidates).toEqual([]);
+    expect(requests).toEqual([]);
+    database.close();
+  });
+
+  it.each([
+    ["a mismatched MIME type", "image/jpeg", new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+    ["an invalid image signature", "image/png", new TextEncoder().encode("not an image")],
+  ] as const)("rejects MPC originals with %s", async (_label, contentType, bytes) => {
+    const fetchImpl = searchFake(driveCard({ size: bytes.byteLength }), async (url) => {
+      if (url.startsWith("https://drive.google.com/uc?")) return new Response(bytes, { headers: { "Content-Type": contentType, "Content-Length": String(bytes.byteLength) } });
+      throw new Error(`Unexpected fake asset request: ${url}`);
+    });
+    const { database, provider } = await setup(fetchImpl);
+    const [candidate] = await provider.searchArtwork(identity);
+
+    await expect(provider.getOriginal(candidate.id)).rejects.toMatchObject({ kind: "invalid-image" });
+    database.close();
+  });
+
+  it("blocks unsafe redirects and never contacts the redirected host", async () => {
+    const contacted: string[] = [];
+    const fetchImpl = searchFake(driveCard(), async (url) => {
+      contacted.push(url);
+      if (url.startsWith("https://drive.google.com/uc?")) return new Response(null, { status: 302, headers: { Location: "https://evil.example/payload" } });
+      throw new Error(`Unsafe redirected host was contacted: ${url}`);
+    });
+    const { database, provider } = await setup(fetchImpl);
+    const [candidate] = await provider.searchArtwork(identity);
+
+    await expect(provider.getOriginal(candidate.id)).rejects.toMatchObject({ kind: "unsafe-source" });
+    expect(contacted).toEqual([expect.stringContaining("drive.google.com/uc?")]);
+    database.close();
+  });
+
+  it("validates API redirects as well as artwork redirects", async () => {
+    const contacted: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      contacted.push(String(input));
+      return new Response(null, { status: 302, headers: { Location: "https://evil.example/sources" } });
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    await expect(provider.searchArtwork(identity)).rejects.toMatchObject({ kind: "unsafe-source" });
+    expect(contacted).toEqual(["https://mpcfill.com/2/sources/"]);
+    database.close();
+  });
+
+  it("rejects malformed search IDs before hydration URL construction and degrades health", async () => {
+    const requests: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      requests.push(new URL(url).pathname);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]]: ["../private/file"] } });
+      }
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    await expect(provider.searchArtwork(identity)).rejects.toMatchObject({ kind: "protocol" });
+    expect(provider.getHealth()).toMatchObject({ available: false, degraded: true });
+    expect(requests).toEqual(["/2/sources/", "/3/editorSearch/"]);
+    database.close();
+  });
+
+  it("rejects malformed thumbnail MIME or image signatures", async () => {
+    const fetchImpl = searchFake(driveCard(), async (url) => {
+      if (url.includes("drive.google.com/thumbnail")) return new Response(new TextEncoder().encode("not an image"), { headers: { "Content-Type": "image/png" } });
+      throw new Error(`Unexpected fake asset request: ${url}`);
+    });
+    const { database, provider } = await setup(fetchImpl);
+    const [candidate] = await provider.searchArtwork(identity);
+
+    await expect(provider.getPreview(candidate.id)).rejects.toMatchObject({ kind: "invalid-image" });
+    database.close();
+  });
+
+  it("rejects a declared original larger than the configured byte cap before download", async () => {
+    const requests: string[] = [];
+    const fetchImpl = searchFake(driveCard({ size: 100 }), async (url) => { requests.push(url); throw new Error("must not download an oversized original"); });
+    const { database, provider } = await setup(fetchImpl, { maxOriginalBytes: 50 });
+    const [candidate] = await provider.searchArtwork(identity);
+
+    expect(candidate.originalAvailable).toBe(false);
+    await expect(provider.getOriginal(candidate.id)).rejects.toMatchObject({ code: "ARTWORK_MISSING" });
+    expect(requests).toEqual([]);
+    database.close();
+  });
+
+  it("stops reading and cancels an oversized streamed original", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array(32)); },
+      cancel() { cancelled = true; },
+    });
+    const fetchImpl = searchFake(driveCard({ size: 10 }), async (url) => {
+      if (url.startsWith("https://drive.google.com/uc?")) return new Response(stream, { headers: { "Content-Type": "image/png" } });
+      throw new Error(`Unexpected fake asset request: ${url}`);
+    });
+    const { database, provider } = await setup(fetchImpl, { maxOriginalBytes: 50 });
+    const [candidate] = await provider.searchArtwork(identity);
+
+    await expect(provider.getOriginal(candidate.id)).rejects.toMatchObject({ kind: "asset-too-large" });
+    expect(cancelled).toBe(true);
+    database.close();
+  });
+
+  it("searches independent DFC face names and keeps candidates on separate face IDs", async () => {
+    const searchNames: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, { query: string }> };
+        const [hash, query] = Object.entries(body.queries)[0];
+        searchNames.push(query.query);
+        const id = query.query === "Daybound" ? "front-drive-id_1234567890" : "back-drive-id_1234567890";
+        return jsonResponse({ results: { [hash]: [id] } });
+      }
+      if (url.endsWith("/2/cards/")) {
+        const body = JSON.parse(String(init.body)) as { cardIdentifiers: string[] };
+        return jsonResponse({ results: Object.fromEntries(body.cardIdentifiers.map((id) => [id, driveCard({ identifier: id, name: id })])) });
+      }
+      throw new Error(`Unexpected fake request: ${url}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+    const dfc: CardIdentity = { ...identity, name: "Front // Back", metadata: { faces: [{ name: "Daybound" }, { name: "Nightbound" }] } };
+
+    const front = await provider.searchArtwork(dfc, { faceId: "front" });
+    const back = await provider.searchArtwork(dfc, { faceId: "back" });
+
+    expect(searchNames).toEqual(["Daybound", "Nightbound"]);
+    expect(front).toMatchObject([{ faceId: "front", providerAssetId: "front-drive-id_1234567890" }]);
+    expect(back).toMatchObject([{ faceId: "back", providerAssetId: "back-drive-id_1234567890" }]);
+    expect(front[0].id).not.toBe(back[0].id);
+    database.close();
+  });
+
+  it("isolates MPC degradation and does not substitute Scryfall for an MPC-only search", async () => {
+    const mpcFetch: typeof fetch = async (input) => {
+      if (String(input).endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (String(input).endsWith("/3/editorSearch/")) return jsonResponse({ error: "offline" }, 503);
+      throw new Error(`Unexpected fake request: ${String(input)}`);
+    };
+    const { database, provider: mpc } = await setup(mpcFetch);
+    const scryfall = {
+      source: "scryfall" as const,
+      searchArtwork: vi.fn(async () => [{ id: "scryfall:must-not-fallback", source: "scryfall" as const, identityId: identity.id, faceId: "front", originalAvailable: true }]),
+      getPreview: vi.fn(async () => undefined),
+      getOriginal: vi.fn(async () => { throw new Error("unused"); }),
+      getCandidate: vi.fn(async () => undefined),
+    };
+    const catalog = new ArtworkCatalog([scryfall, mpc]);
+
+    await expect(catalog.search(identity, { source: "mpc" })).resolves.toEqual([]);
+    expect(catalog.getProviderHealth()).toMatchObject({ mpc: { available: false, degraded: true } });
+    expect(scryfall.searchArtwork).not.toHaveBeenCalled();
+    database.close();
+  });
+
+  it("keeps Scryfall and uploads available when MPC search degrades", async () => {
+    const mpcFetch: typeof fetch = async (input) => {
+      if (String(input).endsWith("/2/sources/")) return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (String(input).endsWith("/3/editorSearch/")) return jsonResponse({ error: "offline" }, 503);
+      throw new Error(`Unexpected fake request: ${String(input)}`);
+    };
+    const { database, provider: mpc } = await setup(mpcFetch);
+    const availableScryfall = staticProvider("scryfall", "scryfall:available");
+    const availableUpload = staticProvider("upload", "upload:available");
+    const catalog = new ArtworkCatalog([availableScryfall, availableUpload, mpc]);
+
+    const candidates = await catalog.search(identity, { source: "all" });
+
+    expect(candidates.map(({ id }) => id)).toEqual(["scryfall:available", "upload:available"]);
+    expect(catalog.getProviderHealth()).toMatchObject({
+      mpc: { available: false, degraded: true },
+      scryfall: { available: true, degraded: false },
+      upload: { available: true, degraded: false },
+    });
+    database.close();
+  });
+
+  it("enforces a timeout even when the injected HTTP transport ignores AbortSignal", async () => {
+    const fetchImpl: typeof fetch = async () => new Promise<Response>(() => undefined);
+    const { database, provider } = await setup(fetchImpl, { timeoutMs: 10 });
+    const timeout = new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("timeout was not enforced")), 100));
+
+    await expect(Promise.race([provider.searchArtwork(identity), timeout])).rejects.toMatchObject({ kind: "timeout" });
+    database.close();
+  });
+
+  it("honors caller cancellation even when the injected HTTP transport ignores AbortSignal", async () => {
+    const fetchImpl: typeof fetch = async () => new Promise<Response>(() => undefined);
+    const { database, provider } = await setup(fetchImpl, { timeoutMs: 500 });
+    const controller = new AbortController();
+    const cancellation = new Promise<never>((_resolve, reject) => setTimeout(() => controller.abort(), 5));
+    const timeout = new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("cancellation was not enforced")), 100));
+
+    await expect(Promise.race([provider.searchArtwork(identity, { signal: controller.signal }), cancellation, timeout]))
+      .rejects.toMatchObject({ kind: "aborted" });
+    database.close();
+  });
+});

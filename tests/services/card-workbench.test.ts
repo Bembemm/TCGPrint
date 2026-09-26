@@ -4,10 +4,11 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCardWorkbench, type CardWorkbenchOptions, type WorkingSetImportResult } from "../../services/card-workbench";
-import { handleArtworkList, handleCardImport, handleResolve, parseWorkingCards } from "../../services/card-api";
+import { handleArtworkList, handleCardExport, handleCardImport, handleResolve, parseWorkingCards } from "../../services/card-api";
 import { TesseractOcrRecognizer } from "../../providers/ocr/tesseract-recognizer";
 import type { ScryfallClient } from "../../providers/scryfall/client";
 import type { ScryfallCard } from "../../providers/scryfall/types";
+import { mapScryfallCard } from "../../providers/scryfall/mapper";
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
 
 const roots: string[] = [];
@@ -251,6 +252,57 @@ describe("card workbench services", () => {
     expect(fake.listPrintings).not.toHaveBeenCalled();
   });
 
+  it("switches the same resolved working card from Scryfall to MPC to upload", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tcgprint-artwork-switch-"));
+    roots.push(root);
+    const scryfall = fakeScryfallClient(resolvedDeckPrintings);
+    const mpcFetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return Response.json({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) return new Response("route missing", { status: 404 });
+      if (url.endsWith("/2/editorSearch/")) {
+        const body = JSON.parse(String(init.body)) as { queries: Array<{ query: string; cardType: string }> };
+        expect(body.queries).toEqual([{ query: "Sol Ring", cardType: "CARD" }]);
+        return Response.json({ results: { "Sol Ring": { CARD: ["switch-test-drive-id-123456"] } } });
+      }
+      if (url.endsWith("/2/cards/")) return Response.json({ results: {
+        "switch-test-drive-id-123456": {
+          identifier: "switch-test-drive-id-123456", cardType: "CARD", name: "Sol Ring",
+          sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000, dpi: 300,
+          smallThumbnailUrl: "https://drive.google.com/thumbnail?id=switch-test-drive-id-123456",
+        },
+      } });
+      throw new Error(`Unexpected fake MPC request: ${url}`);
+    };
+    const workbench = await createCardWorkbench({
+      dataDirectory: root,
+      scryfallClient: scryfall.client,
+      mpcFetchImpl,
+      minIntervalMs: 0,
+    });
+    workbenches.push(workbench);
+    const uploadBytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
+    await workbench.importForWorkingSet({ files: [{ filename: "local.png", bytes: uploadBytes }] });
+    const imported = await workbench.importForWorkingSet({ files: [{ filename: "local.png", bytes: uploadBytes }] });
+    const originalCard = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], resolvedDeckPrintings[0].id);
+    const identityId = originalCard.identity!.id;
+    const workingCardId = originalCard.id;
+
+    const scryfallCandidate = (await workbench.listArtworkCandidates(identityId, "front", "scryfall"))[0];
+    const scryfallSelected = workbench.selectArtwork(originalCard, "front", scryfallCandidate);
+    const mpcCandidate = (await workbench.listArtworkCandidates(identityId, "front", "mpc"))[0];
+    const mpcSelected = workbench.selectArtwork(scryfallSelected, "front", mpcCandidate);
+    const uploadCandidate = (await workbench.listArtworkCandidates(identityId, "front", "upload"))[0];
+    const uploadSelected = workbench.selectArtwork(mpcSelected, "front", uploadCandidate);
+
+    expect([scryfallSelected.selectedArtworkByFace.front?.source, mpcSelected.selectedArtworkByFace.front?.source, uploadSelected.selectedArtworkByFace.front?.source]).toEqual(["scryfall", "mpc", "upload"]);
+    for (const card of [scryfallSelected, mpcSelected, uploadSelected]) {
+      expect(card.id).toBe(workingCardId);
+      expect(card.identity?.id).toBe(identityId);
+    }
+    expect(uploadSelected.identity).toBe(originalCard.identity);
+  });
+
   it("keeps upload usage working with Scryfall degraded and does not call Scryfall for MPC references", async () => {
     const failingFetch = vi.fn(async () => new Response("offline", { status: 503 })) as typeof fetch;
     const { workbench } = await setup(failingFetch);
@@ -307,6 +359,112 @@ describe("card workbench services", () => {
     expect(response.status).toBe(200);
     expect(body.workingCards[0].sharedMpcCardback).toEqual(card.sharedMpcCardback);
     expect(body.workingCards[0].selectedArtworkByFace.back?.selectedArtworkId).toBe("synthetic-back-art-a");
+  });
+
+  it("hydrates and exports an XML-selected MPC original without opening the artwork gallery", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tcgprint-mpc-xml-export-"));
+    roots.push(root);
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 300, height: 420, channels: 3, background: "#476" } }).png().toBuffer());
+    const requests: string[] = [];
+    const mpcFetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.endsWith("/2/sources/")) return Response.json({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/2/cards/")) return Response.json({ results: {
+        "synthetic-front-art-a": {
+          identifier: "synthetic-front-art-a", cardType: "CARD", name: "Example Front", sourceId: 41, sourceType: "Google Drive",
+          extension: "png", size: originalBytes.byteLength, dpi: 300,
+        },
+      } });
+      if (url.startsWith("https://drive.google.com/uc?")) return new Response(originalBytes, { headers: { "Content-Type": "image/png", "Content-Length": String(originalBytes.byteLength) } });
+      throw new Error(`Unexpected fake MPC request: ${url}`);
+    };
+    const noScryfallNetwork = vi.fn(async () => { throw new Error("Scryfall must not be used for an MPC selection."); }) as typeof fetch;
+    const options = {
+      dataDirectory: root,
+      fetchImpl: noScryfallNetwork,
+      mpcFetchImpl,
+      minIntervalMs: 0,
+    } as CardWorkbenchOptions;
+    const workbench = await createCardWorkbench(options);
+    workbenches.push(workbench);
+    const xml = new Uint8Array(await readFile(new URL("../fixtures/import-engine/mpc-order-synthetic.xml", import.meta.url)));
+    const imported = await workbench.importForWorkingSet({ files: [{ filename: "mpc-order-synthetic.xml", bytes: xml }] });
+    const selectedId = imported.workingCards[0].selectedArtworkByFace.front?.candidateId;
+    const workingCardId = imported.workingCards[0].id;
+
+    const response = await handleCardExport(new Request("http://localhost/api/cards/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cards: imported.workingCards.slice(0, 1), options: { bleedMm: 0, cutGuides: "none" } }),
+    }), workbench);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/pdf");
+    expect(imported.workingCards[0].id).toBe(workingCardId);
+    expect(imported.workingCards[0].selectedArtworkByFace.front).toMatchObject({ candidateId: selectedId, selectedArtworkId: "synthetic-front-art-a" });
+    expect(imported.workingCards[0].mpcReferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ providerAssetId: "synthetic-front-art-a", selectedArtworkId: "synthetic-front-art-a", slots: ["2", "1"] }),
+    ]));
+    expect(requests.map((url) => new URL(url).pathname)).toEqual(["/2/sources/", "/2/cards/", "/uc"]);
+    expect(noScryfallNetwork).not.toHaveBeenCalled();
+
+    await workbench.close();
+    const offlineMpcFetch = vi.fn(async () => { throw new Error("offline MPC cache should be sufficient"); }) as typeof fetch;
+    const offlineWorkbench = await createCardWorkbench({ dataDirectory: root, fetchImpl: noScryfallNetwork, mpcFetchImpl: offlineMpcFetch });
+    workbenches.push(offlineWorkbench);
+    const offlineImport = await offlineWorkbench.importForWorkingSet({ files: [{ filename: "mpc-order-synthetic.xml", bytes: xml }] });
+    const offlineResponse = await handleCardExport(new Request("http://localhost/api/cards/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cards: offlineImport.workingCards.slice(0, 1), options: { bleedMm: 0, cutGuides: "none" } }),
+    }), offlineWorkbench);
+
+    expect(offlineResponse.status).toBe(200);
+    expect(offlineMpcFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps WorkingCard and CardIdentity IDs stable across independent MPC DFC face selections", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tcgprint-mpc-dfc-selection-"));
+    roots.push(root);
+    const identityCard = mapScryfallCard(delverCard);
+    const scryfall = fakeScryfallClient([identityCard]);
+    const mpcFetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith("/2/sources/")) return Response.json({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.endsWith("/3/editorSearch/")) {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, { query: string }> };
+        const [hash, query] = Object.entries(body.queries)[0];
+        const assetId = query.query === "Delver of Secrets" ? "dfc-front-id_1234567890" : "dfc-back-id_1234567890";
+        return Response.json({ results: { [hash]: [assetId] } });
+      }
+      if (url.endsWith("/2/cards/")) {
+        const body = JSON.parse(String(init.body)) as { cardIdentifiers: string[] };
+        return Response.json({ results: Object.fromEntries(body.cardIdentifiers.map((id) => [id, {
+          identifier: id, cardType: "CARD", name: id, sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000, dpi: 1200,
+        }])) });
+      }
+      throw new Error(`Unexpected fake MPC request: ${url}`);
+    };
+    const workbench = await createCardWorkbench({ dataDirectory: root, scryfallClient: scryfall.client, mpcFetchImpl });
+    workbenches.push(workbench);
+    const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
+    const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
+    const identityId = identified.identity!.id;
+    const [front] = await workbench.listArtworkCandidates(identityId, "front", "mpc");
+    const [back] = await workbench.listArtworkCandidates(identityId, "back", "mpc");
+    const frontSelected = workbench.selectArtwork(identified, "front", front);
+    const bothSelected = workbench.selectArtwork(frontSelected, "back", back);
+
+    expect(front.faceId).toBe("front");
+    expect(back.faceId).toBe("back");
+    expect(front.id).not.toBe(back.id);
+    expect(bothSelected.id).toBe(identified.id);
+    expect(bothSelected.identity).toEqual(identified.identity);
+    expect(bothSelected.selectedArtworkByFace).toMatchObject({
+      front: { candidateId: front.id, source: "mpc", faceId: "front" },
+      back: { candidateId: back.id, source: "mpc", faceId: "back" },
+    });
   });
 
   it("honors caller cancellation before starting resolution", async () => {

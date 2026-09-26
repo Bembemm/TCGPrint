@@ -31,6 +31,10 @@ export class ArtworkCatalog {
   }
 
   getProviderHealth(): Readonly<Record<string, ProviderHealth>> {
+    for (const provider of this.providers.values()) {
+      const providerHealth = provider.getHealth?.();
+      if (providerHealth?.degraded) this.health.set(provider.source, providerHealth);
+    }
     return Object.fromEntries(this.health.entries());
   }
 

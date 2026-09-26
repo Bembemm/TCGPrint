@@ -7,6 +7,7 @@ import { sanitizeRelativeImportPath } from "../import-engine/source-path";
 import { ImportFailureError } from "../import-engine/errors";
 import { ScryfallError } from "../providers/scryfall/errors";
 import { ArtworkStorageError } from "../artwork/storage/types";
+import { MpcArtworkProviderError } from "../artwork/mpc-provider";
 
 const FORBIDDEN_PROPERTIES = new Set(["originalBytes", "bytes", "sourcePath", "localOriginalPath", "originalUri", "previewUri", "filePaths", "absolutePath", "filesystemPath"]);
 const SOURCES = new Set(["scryfall", "upload", "mpc", "url", "custom"]);
@@ -251,6 +252,16 @@ function respondError(error: unknown): Response {
     const status = error.kind === "not-found" ? 404 : error.kind === "rate-limited" ? 429 : error.kind === "aborted" ? 499 : error.kind === "timeout" || error.kind === "server" || error.kind === "network" ? 503 : 502;
     return Response.json({ code: `SCRYFALL_${error.kind.toUpperCase().replaceAll("-", "_")}`, message: error.message }, { status });
   }
+  if (error instanceof MpcArtworkProviderError) {
+    const status = error.kind === "aborted" ? 499
+      : error.kind === "timeout" ? 504
+        : error.kind === "asset-too-large" ? 413
+          : error.kind === "unsafe-source" || error.kind === "invalid-image" ? 422
+            : error.kind === "http" && error.status && error.status < 500 ? 502
+              : error.kind === "http" || error.kind === "network" ? 503
+                : 502;
+    return Response.json({ code: `MPC_${error.kind.toUpperCase().replaceAll("-", "_")}`, message: error.message }, { status });
+  }
   if (error instanceof ArtworkStorageError) {
     const status = error.code === "ARTWORK_MISSING" ? 404 : error.code === "ARTWORK_TOO_LARGE" ? 413 : 422;
     return Response.json({ code: error.code, message: error.message }, { status });
@@ -261,7 +272,7 @@ function respondError(error: unknown): Response {
 function candidateDto(candidate: ArtworkCandidate) {
   const metadata = candidate.metadata ?? {};
   const safeMetadata: Record<string, unknown> = {};
-  for (const key of ["layout", "digital", "promo", "fullArt", "imageStatus", "borderColor", "referenceOnly", "slots", "importedAssetId", "originalFilename", "originalFormat", "contentHash", "provenanceCount"]) {
+  for (const key of ["layout", "digital", "promo", "fullArt", "imageStatus", "borderColor", "referenceOnly", "slots", "importedAssetId", "originalFilename", "originalFormat", "contentHash", "provenanceCount", "name", "sourceType", "sourceName", "extension", "declaredSize", "dpi", "tags"]) {
     if (metadata[key] !== undefined) safeMetadata[key] = metadata[key];
   }
   const safeFilename = typeof safeMetadata.originalFilename === "string" ? safeMetadata.originalFilename.split(/[\\/]/).pop() : undefined;
@@ -391,7 +402,11 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
       const faceId = body.faceId === "back" ? "back" : body.faceId === "front" ? "front" : undefined;
       if (!faceId) throw new ApiRequestError(400, "INVALID_FACE", "Face must be front or back.");
       const candidateId = requiredString(body.candidateId, "candidateId", 128);
-      const candidate = await workbench.getArtworkCandidate(candidateId, { mpcReferences: card.mpcReferences });
+      const candidate = await workbench.getArtworkCandidate(candidateId, {
+        mpcReferences: card.mpcReferences,
+        ...(card.identity ? { identity: card.identity } : {}),
+        signal: request.signal,
+      });
       if (!candidate) throw new ApiRequestError(404, "ARTWORK_CANDIDATE_NOT_FOUND", "Artwork candidate is not available in the local catalog.");
       const updated = workbench.selectArtwork(card, faceId, candidate);
       return Response.json({ workingCards: [updated], providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
@@ -444,7 +459,7 @@ export async function handleArtworkPreview(request: Request, candidateId: string
 export async function handleArtworkPrepare(request: Request, candidateId: string, workbench: CardWorkbench): Promise<Response> {
   try {
     if (!/^(upload:[a-f0-9]{64}|scryfall:[a-f0-9-]{36}:(front|back)|mpc:[a-f0-9]{64})$/.test(candidateId)) throw new ApiRequestError(400, "INVALID_ID", "Artwork ID is invalid.");
-    const candidate = await workbench.getArtworkCandidate(candidateId);
+    const candidate = await workbench.getArtworkCandidate(candidateId, { signal: request.signal });
     if (!candidate?.originalAvailable) throw new ApiRequestError(404, "ARTWORK_ORIGINAL_UNAVAILABLE", "This reference has no validated original artwork.");
     await workbench.getArtworkOriginal(candidateId, request.signal);
     const updated = await workbench.getArtworkCandidate(candidateId);
