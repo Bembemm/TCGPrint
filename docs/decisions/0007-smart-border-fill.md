@@ -1,6 +1,6 @@
 # ADR 0007: Smart Border Fill for raster bleed
 
-- Status: Accepted
+- Status: Accepted for isolated implementation; Phase 5.5 audit pending
 - Date: 2026-09-26
 - Scope: Phase 5.5, Front B — Scryfall raster bleed
 
@@ -39,7 +39,7 @@ unsupported-operation error for non-zero bleed.
 ## Classification and inward search
 
 Thresholds are centralized under
-`SMART_BORDER_FILL_CONFIG_VERSION = "smart-border-fill-thresholds-v1"`.
+`SMART_BORDER_FILL_CONFIG_VERSION = "smart-border-fill-thresholds-v2"`.
 Values are normalized to 0–1 unless marked in millimeters or samples.
 
 | Setting | Default | Use |
@@ -52,23 +52,26 @@ Values are normalized to 0–1 unless marked in millimeters or samples.
 | `maximumLuminanceStdDev` | 0.045 | Maximum luminance variation for a uniform dark frame |
 | `maximumColorStdDev` | 0.07 | Maximum average per-channel variation for a uniform dark frame |
 | `minimumSamples` | 12 | Minimum visible samples after transparent pixels are ignored |
-| `inwardSearchBoundMm` | 2 mm | Maximum physical depth of the leading edge of an inward candidate strip |
+| `maximumInwardSearchFractionOfTrim` | 0.05 | Maximum search depth as a fraction of the physical trim dimension perpendicular to that side; validation rejects values above 5% |
 | `searchStepMm` | 0.25 mm | Distance between inward candidate strips |
 
-The engine converts the configured millimeter distances using each source
-dimension and the fixed trim size, 63.5 × 88.9 mm. Each edge samples the central
-90% of its length, skipping 5% at each corner so corner pixels do not drive the
-classification. Alpha values at or below 5% are ignored. Luminance and color
-variation are measured from normalized 8-bit or 16-bit samples.
+For each side, the maximum search depth is `physical trim dimension ×
+maximumInwardSearchFractionOfTrim`, converted to pixels using that side's source
+scale. With the fixed 63.5 × 88.9 mm trim, left/right search is capped at
+3.175 mm and top/bottom at 4.445 mm. This keeps the search proportional to card
+geometry instead of a fixed pixel count and caps it at 5% of the corresponding
+dimension. Each edge samples the central 90% of its length, skipping 5% at each
+corner so corner pixels do not drive classification. Alpha values at or below
+5% are ignored. Luminance and color variation are measured from normalized
+8-bit or 16-bit samples.
 
 The outer source band is a frame only when its mean luminance, dark-pixel
 fraction, luminance deviation, and color deviation all meet the configured
-thresholds. The search then advances by the configured step. A candidate is
-accepted only if its mean luminance is above the dark limit and no more than
-10% of its pixels are dark. The leading edge of a candidate strip must be
-within the configured physical search bound; the strip width itself can extend
-farther inward. The existing requested source-strip width limits how much of
-the card is copied into the bleed.
+thresholds. The search advances inward in 0.25 mm steps and selects the first
+candidate whose mean luminance is above the dark limit and whose dark-pixel
+fraction is at most 10%. The leading edge must be within the geometry-derived
+search bound; the strip width itself can extend farther inward. The requested
+source-strip width limits how much of the card is copied into the bleed.
 
 ## Fallback and corner behavior
 
@@ -93,16 +96,17 @@ inward strip. This preserves the reflected-corner join invariant from
 
 The result remains a lossless PNG derivative. The original trim is overlaid
 once by the PDF engine, and the generated `BleedResult.preview.bytes` are the
-same bytes it embeds in the clipped outside-trim regions. The existing PDF path
-continues to place guides and trims at the nominal 63.5 × 88.9 mm size, with no
-downsampling. Zero millimeters remains original-byte passthrough. Tests cover
-exact trim samples, 16-bit RGBA and alpha, supported bleed widths, and the
-existing JPEG, PNG, and SVG paths.
+same bytes it embeds in the clipped outside-trim regions. The existing PDF path continues to place guides and trims at the nominal
+63.5 × 88.9 mm size, with no downsampling. Zero millimeters remains
+original-byte passthrough. Tests cover exact trim samples, 16-bit RGBA and
+alpha, 0 / 0.625 / 1 / 2 / 3 mm bleed, borderless/full-art and light-border
+fallbacks, asymmetric four-side results, and corner joins where adjacent sides
+choose different sources.
 
 ## Versioning and cache identity
 
 The algorithm version is
-`reflected-corners-v2-smart-border-fill-v1`. `createBleedCacheKey` hashes the
+`reflected-corners-v2-smart-border-fill-v2`. `createBleedCacheKey` hashes the
 source SHA-256, requested bleed, requested mode, source-policy identity, source
 strip, physical trim dimensions, algorithm version, and the complete
 versioned threshold configuration. `CardExportService` uses the same key helper
@@ -111,15 +115,15 @@ different policies or modes cannot reuse the wrong derivative.
 
 ## MPC metadata gap
 
-The current MPC artwork provider is reference-only: imported references have no
-local image bytes and do not carry trustworthy trim bounds or bleed state. The
-export path continues to reject a reference without validated original bytes.
-If an MPC raster original becomes available without trusted bleed metadata, the
-automatic policy labels that state as unknown and uses subtle edge stretch. It
-does not mark the image already bled, crop it, or require smart fill. The user
-can explicitly select either mode through the export UI or API. Implementing an
-MPC provider or changing importer XML is outside this decision; obtaining
-reliable MPC trim/bleed metadata remains unresolved.
+The online MPC provider resolves selected provider IDs independently of gallery
+search and distinguishes remote availability from validated local cache. XML
+`availableLocally` is retained only as an untrusted hint; export still requires
+validated original bytes. MPC does not provide trustworthy trim bounds or
+bleed state, so automatic policy reports `MPC_BLEED_METADATA_UNKNOWN` and uses
+`subtle-edge-stretch`. It does not assume the image is already bled, crop it,
+or silently substitute Scryfall. The user can explicitly choose `auto`,
+`smart-border-fill`, or `subtle-edge-stretch` in the export UI/API; preview
+diagnostics and PDF export share the same effective `BleedResult`.
 
 ## Synthetic visual review
 
@@ -137,6 +141,41 @@ borderless, light-border, and high-contrast-corner fixtures fall back to subtle
 stretch; the asymmetric fixture uses smart fill on its dark left edge and
 subtle fallback on the other sides. The reproducible renderer is
 [`spikes/smart-border-fill/render-matrix.cjs`](../../spikes/smart-border-fill/render-matrix.cjs).
+
+## Real Scryfall diagnostic
+
+The initial real-card failure was traced to the 2 mm search cap, not a bad dark
+frame classification or an overly strict interior threshold. On all three
+assets, the outer band passed the dark/uniform classifier, while every candidate
+inside the old cap still had mean luminance below 0.20 and dark-pixel fraction
+1.0. The first representative strips appeared about 2.993–3.791 mm inward;
+their dark-pixel fractions were at most 9.97%. Thus
+`search-bound-exhausted` was the internal classification and
+`no-representative-interior-strip-within-search-bound` the fallback reason.
+
+With the geometry-derived 5% cap, real assets were tested locally after the
+change. `auto` resolved to `smart-border-fill` for all three; source strips are
+8 px wide at 1 mm bleed. Values below are the effective result per side; offsets
+are pixels from the trim edge and physical millimeters. All results used
+`reflected-corners-v2-smart-border-fill-v2`.
+
+| Card | Requested | Effective overall | TOP | RIGHT | BOTTOM | LEFT | Fallback reasons | Algorithm version |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Lightning Bolt (me1/102) | `auto` | `mixed` | smart @ 26 px / 3.399 mm | smart @ 24 px / 3.123 mm | smart @ 28 px / 3.661 mm | subtle fallback | LEFT: `no-representative-interior-strip-within-search-bound` | `reflected-corners-v2-smart-border-fill-v2` |
+| Counterspell (me4/45) | `auto` | `smart-border-fill` | smart @ 26 px / 3.399 mm | smart @ 24 px / 3.123 mm | smart @ 28 px / 3.661 mm | smart @ 23 px / 2.993 mm | none | `reflected-corners-v2-smart-border-fill-v2` |
+| Island (inr/290) | `auto` | `smart-border-fill` | smart @ 27 px / 3.530 mm | smart @ 23 px / 2.993 mm | smart @ 29 px / 3.791 mm | smart @ 23 px / 2.993 mm | none | `reflected-corners-v2-smart-border-fill-v2` |
+
+For Counterspell, subtle bleed mean luminance was 0.000–0.0001, compared with
+0.3368–0.4395 for smart bleed. For Island, subtle was 0.0521 and smart was
+0.2658–0.3612. The black edge remained inside the unchanged trim; the generated
+outside bleed sampled the interior rather than extending a dominant black
+band. Pixel-by-pixel comparison of every trim pixel passed for both modes on
+all three assets (331,840 trim pixels per image). The real-art matrix and full
+per-side report are local-only at
+`/home/agent/.hermes/cache/scratch/tcgprint-phase5-5-evidence/smart-border-real/`
+and are not committed. It compares original edge, `subtle-edge-stretch`, and
+`smart-border-fill`; the committed synthetic matrix remains the portable visual
+regression artifact.
 
 ## Consequences
 

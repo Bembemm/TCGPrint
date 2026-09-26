@@ -2,7 +2,7 @@
 
 - Status: Accepted with conditions for Phase 5.5 A1
 - Date: 2026-09-26
-- Scope: Phase 5.5 — A0 protocol spike only
+- Scope: Phase 5.5 — protocol spike and A1 artwork-provider implementation
 
 ## Context
 
@@ -11,6 +11,10 @@ network lookup. This A0 spike checked whether the current public
 `chilli-axe/mpc-autofill` service can support an independently implemented
 artwork provider. It adds no provider or importer code and copies no upstream
 implementation.
+
+That no-provider statement describes only the historical A0 spike. The
+independent A1 provider now present on the Phase 5.5 integration branch is
+described under “Current TCGPrint A1 behavior and limits” below.
 
 Evidence distinguishes **live observations** from **upstream-source
 inspection**. Live tests were low-volume, unauthenticated HTTPS requests with
@@ -245,6 +249,32 @@ art. This matches ADR 0005; no cache or provider code was changed here.
   ADR; recheck before any implementation.
 - No authentication, WAF, or other security control was bypassed.
 
+## Current TCGPrint A1 behavior and limits
+
+The independent provider implementation on the Phase 5.5 integration branch
+uses MPCFill as an external backend.
+The upstream frontend supports choosing a backend URL, while TCGPrint's
+provider accepts a `baseUrl` option but pins API requests to its HTTPS
+`mpcfill.com` host allow-list; arbitrary hosts are intentionally rejected.
+This is an integration safety boundary, not a guarantee about future upstream
+configuration or service ownership.
+
+The live `/3/editorSearch/` probe returned HTTP 404. TCGPrint currently retries
+with the legacy `/2/editorSearch/` request shape only for that explicit 404.
+Unlike the inspected upstream frontend, TCGPrint does not fall back to v2 after
+an arbitrary caught request failure: timeout, network failure, 5xx, invalid
+response, or unsafe redirect degrades the provider and returns already-hydrated
+MPC references when available; without references, the search fails visibly.
+Cached search metadata may still serve results for its configured TTL. If the
+v2 endpoint is removed or stops responding, new uncached searches will degrade
+or fail under the same behavior. There is no silent fallback to Scryfall, and
+selected MPC references are preserved.
+
+The backend is externally operated and its API stability remains an external
+risk. `/2/editorSearch/` is a compatibility route, not a promised future
+contract. No future availability, compatibility, or community-artwork
+distribution right is asserted here.
+
 ## License implications
 
 The upstream repository's `LICENSE.md` is GNU GPL version 3. No upstream code
@@ -268,7 +298,7 @@ is proposed.
 - Do not vendor or adapt upstream GPL implementation code as part of this
   provider spike.
 
-## Gate recommendation
+## Historical A1 gate recommendation
 
 **APPROVED WITH CONDITIONS — proceed to Phase 5.5 A1 as an independently
 written protocol client.** The live public service is reachable at
