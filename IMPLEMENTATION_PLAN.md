@@ -3598,17 +3598,30 @@ interface CutGuideConfig {
 
 ## Fase 6 — Editor
 
-Implementar:
+### Fase 6A — Núcleo estrutural
 
-- lista;
-- quantidade;
-- reorder;
-- drag & drop;
-- duplicate;
-- delete;
-- card details;
-- override por carta;
-- undo/redo.
+Implementar sobre o Working Set da sessão, sem persistência de Projects:
+
+- lista editorial com seleção ativa robusta;
+- editar quantidade inteira positiva e apresentar entradas/cartas físicas;
+- reorder determinístico por `WorkingCard.id`, com `order` normalizado para `0..N-1`;
+- drag & drop com controles acessíveis equivalentes de mover para cima/baixo;
+- duplicate com novo `WorkingCard.id`, preservando identidade, artwork, faces e referências;
+- delete somente da entrada do Working Set, sem remover assets/cache compartilhados.
+
+Quantidade permanece compacta até exportação. A soma física continua sujeita ao limite existente de 500 cartas por PDF, compartilhado por uma única constante. Operações estruturais devem ser comandos puros fora do JSX, preparando a superfície para undo/redo.
+
+Não alterar algoritmos ou comportamento de export, bleed, rounded corners, cut guides, providers, geometria ou layout físico. Configurações de bleed, rounded corners, cut guides, papel e layout permanecem globais. Smoke: deck com quantidade, reorder por controles e drag, duplicate/delete, export físico na ordem editorial e caso DFC/MDFC com faces preservadas.
+
+### Fase 6B — Card Details e overrides por carta
+
+Ampliar o painel existente sem criar um segundo painel. Estado específico de `WorkingCard` cobre identidade escolhida manualmente, artwork selecionado, artwork independente por face DFC/MDFC, quantidade e posição/ordem. Quantidade e ordem são fundadas em 6A; esta frente cobre details e identidade/artwork.
+
+Não implementar bleed, rounded corners, cut guides, papel/layout individual por carta, persistência de Projects ou overrides sem requisito explícito. Essas configurações de export continuam globais.
+
+### Fase 6C — Undo/Redo e fechamento
+
+Adicionar undo/redo sobre os comandos editorais, preservando IDs e snapshots imutáveis. Cobrir operações estruturais e as mutações de details/override previstas em 6B; fechar regressões de export, DFC/MDFC, gates e smoke Chromium. Não incluir persistência de Projects.
 
 ---
 

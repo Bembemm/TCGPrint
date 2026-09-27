@@ -1,11 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 import Image from "next/image";
 import type { ImportKind } from "../../import-engine/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard } from "../../core/cards/types";
 
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
+import {
+  createWorkingCardEditorState,
+  deleteWorkingCard,
+  duplicateWorkingCard,
+  moveWorkingCard,
+  replaceWorkingCard,
+  replaceWorkingCards,
+  selectWorkingCard,
+  setWorkingCardQuantity,
+  type WorkingCardEditorState,
+} from "../../core/cards/working-card-editor";
+import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
 import { postArtworkSelection } from "./artwork-selection-request";
 import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
 import CutGuideControls from "./cut-guide-controls";
@@ -70,9 +82,142 @@ function relatedCardNames(card: WorkingCard): readonly { name: string; component
     : []);
 }
 
+interface WorkingCardListProps {
+  readonly cards: readonly WorkingCard[];
+  readonly selectedCardId: string | null;
+  readonly physicalCardCount: number;
+  readonly disabled: boolean;
+  readonly onSelect: (cardId: string) => void;
+  readonly onQuantityCommit: (cardId: string, value: string) => void;
+  readonly onQuantityAdjust: (cardId: string, delta: -1 | 1) => void;
+  readonly onMove: (cardId: string, targetIndex: number) => void;
+  readonly onDuplicate: (cardId: string) => void;
+  readonly onDelete: (cardId: string) => void;
+}
+
+export function WorkingCardList({ cards, selectedCardId, physicalCardCount, disabled, onSelect, onQuantityCommit, onQuantityAdjust, onMove, onDuplicate, onDelete }: WorkingCardListProps) {
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
+  const orderedCards = cards.slice().sort((left, right) => left.order - right.order);
+
+  return <div className="working-card-list" aria-label="Working cards da sessão">
+    <div className="compact-heading"><strong>{cards.length} {cards.length === 1 ? "entrada" : "entradas"} · {physicalCardCount} {physicalCardCount === 1 ? "carta física" : "cartas físicas"}</strong><span>quantidade compacta</span></div>
+    {orderedCards.map((card, index) => {
+      const name = displayCard(card);
+      const quantityDraft = quantityDrafts[card.id] ?? String(card.quantity);
+      const maximumQuantity = Math.max(card.quantity, MAX_PHYSICAL_CARDS_PER_EXPORT - physicalCardCount + card.quantity);
+      const artworkStatus = (["front", "back"] as const)
+        .filter((side) => card.faces.some((item) => item.side === side))
+        .map((side) => `${side === "front" ? "Front" : "Back"}: ${card.selectedArtworkByFace[side] ? labelSource(card.selectedArtworkByFace[side]!.source) : "sem arte"}`)
+        .join(" · ");
+
+      return <article
+        key={card.id}
+        className={`working-card-row ${card.id === selectedCardId ? "is-active" : ""}`}
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes("text/plain")) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          const draggedCardId = event.dataTransfer.getData("text/plain");
+          if (draggedCardId) onMove(draggedCardId, index);
+        }}
+      >
+        <span
+          className="working-card-drag"
+          draggable={!disabled}
+          aria-label={`Arraste ${name} para reordenar`}
+          title="Arraste para reordenar"
+          onDragStart={(event) => {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", card.id);
+          }}
+        >⠿</span>
+        <button type="button" className="working-card-select" aria-pressed={card.id === selectedCardId} onClick={() => onSelect(card.id)}>
+          <span className="working-card-name">{index + 1}/{orderedCards.length} · {name}</span>
+          <span className="working-card-meta">×{card.quantity} · {card.section ?? "sem seção"} · {statusLabel(card)}</span>
+          <span className="working-card-meta">{artworkStatus}</span>
+        </button>
+        <div className="working-card-controls">
+          <div className="working-card-quantity" role="group" aria-label={`Quantidade de ${name}`}>
+            <button className="button secondary" type="button" aria-label={`Diminuir quantidade de ${name}`} disabled={disabled || card.quantity <= 1} onClick={() => {
+              setQuantityDrafts((current) => { const next = { ...current }; delete next[card.id]; return next; });
+              onQuantityAdjust(card.id, -1);
+            }}>−</button>
+            <input
+              aria-label={`Quantidade de ${name}`}
+              type="number"
+              min={1}
+              max={maximumQuantity}
+              step={1}
+              value={quantityDraft}
+              disabled={disabled}
+              onChange={(event) => setQuantityDrafts((current) => ({ ...current, [card.id]: event.currentTarget.value }))}
+              onBlur={() => {
+                onQuantityCommit(card.id, quantityDraft);
+                setQuantityDrafts((current) => { const next = { ...current }; delete next[card.id]; return next; });
+              }}
+              onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+            />
+            <button className="button secondary" type="button" aria-label={`Aumentar quantidade de ${name}`} disabled={disabled || physicalCardCount >= MAX_PHYSICAL_CARDS_PER_EXPORT} onClick={() => {
+              setQuantityDrafts((current) => { const next = { ...current }; delete next[card.id]; return next; });
+              onQuantityAdjust(card.id, 1);
+            }}>+</button>
+          </div>
+          <button className="button secondary" type="button" aria-label={`Mover ${name} para cima`} disabled={disabled || index === 0} onClick={() => onMove(card.id, index - 1)}>↑</button>
+          <button className="button secondary" type="button" aria-label={`Mover ${name} para baixo`} disabled={disabled || index === orderedCards.length - 1} onClick={() => onMove(card.id, index + 1)}>↓</button>
+          <button className="button secondary" type="button" aria-label={`Duplicar ${name}`} disabled={disabled || physicalCardCount + card.quantity > MAX_PHYSICAL_CARDS_PER_EXPORT} onClick={() => onDuplicate(card.id)}>Duplicar</button>
+          <button className="button secondary" type="button" aria-label={`Excluir ${name}`} disabled={disabled} onClick={() => onDelete(card.id)}>Excluir</button>
+        </div>
+      </article>;
+    })}
+  </div>;
+}
+
+interface EditorUiState extends WorkingCardEditorState {
+  readonly error?: string;
+}
+
+type EditorAction =
+  | { readonly type: "load-cards"; readonly cards: readonly WorkingCard[] }
+  | { readonly type: "replace-cards"; readonly cards: readonly WorkingCard[] }
+  | { readonly type: "replace-card"; readonly cardId: string; readonly card: WorkingCard }
+  | { readonly type: "select-card"; readonly cardId: string }
+  | { readonly type: "set-quantity"; readonly cardId: string; readonly quantity: number }
+  | { readonly type: "adjust-quantity"; readonly cardId: string; readonly delta: -1 | 1 }
+  | { readonly type: "move-card"; readonly cardId: string; readonly targetIndex: number }
+  | { readonly type: "duplicate-card"; readonly cardId: string; readonly newCardId: string }
+  | { readonly type: "delete-card"; readonly cardId: string };
+
+function workingCardEditorReducer(state: EditorUiState, action: EditorAction): EditorUiState {
+  try {
+    switch (action.type) {
+      case "load-cards": return createWorkingCardEditorState(action.cards);
+      case "replace-cards": return replaceWorkingCards(state, action.cards);
+      case "replace-card": return replaceWorkingCard(state, action.cardId, action.card);
+      case "select-card": return selectWorkingCard(state, action.cardId);
+      case "set-quantity": return setWorkingCardQuantity(state, action.cardId, action.quantity);
+      case "adjust-quantity": {
+        const card = state.cards.find((item) => item.id === action.cardId);
+        return setWorkingCardQuantity(state, action.cardId, (card?.quantity ?? 0) + action.delta);
+      }
+      case "move-card": return moveWorkingCard(state, action.cardId, action.targetIndex);
+      case "duplicate-card": return duplicateWorkingCard(state, action.cardId, action.newCardId);
+      case "delete-card": return deleteWorkingCard(state, action.cardId);
+    }
+  } catch (error) {
+    return { ...state, error: error instanceof Error ? error.message : "A operação do Editor falhou." };
+  }
+}
+
+const initialEditorState: EditorUiState = createWorkingCardEditorState([]);
+
 export default function CardIdentityWorkbench({ files, text, choices }: Props) {
-  const [workingCards, setWorkingCards] = useState<WorkingCard[]>([]);
-  const [selectedCardId, setSelectedCardId] = useState("");
+  const [editorState, dispatchEditor] = useReducer(workingCardEditorReducer, initialEditorState);
+  const workingCards = editorState.cards;
+  const selectedCardId = editorState.selectedCardId;
   const [artworkCandidates, setArtworkCandidates] = useState<CandidateDto[]>([]);
   const [artworkFilter, setArtworkFilter] = useState<ArtworkFilter>("all");
   const [face, setFace] = useState<CardFaceSide>("front");
@@ -97,6 +242,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [bleedDiagnostics, setBleedDiagnostics] = useState<BleedDiagnosticsReport | null>(null);
 
   const activeCard = useMemo(() => workingCards.find((card) => card.id === selectedCardId), [workingCards, selectedCardId]);
+  const physicalCardCount = useMemo(() => workingCards.reduce((sum, card) => sum + card.quantity, 0), [workingCards]);
   const filterCards = useMemo(() => artworkCandidates.filter((candidate) => artworkFilter === "all" || candidate.source === artworkFilter), [artworkCandidates, artworkFilter]);
   const activeFaceExists = Boolean(activeCard?.faces.some((item) => item.side === face));
 
@@ -152,7 +298,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   }, [activeCard?.identity?.id]);
 
   function replaceCard(cardId: string, next: WorkingCard) {
-    setWorkingCards((current) => current.map((card) => card.id === cardId ? next : card));
+    dispatchEditor({ type: "replace-card", cardId, card: next });
   }
 
   async function importToWorkingSet() {
@@ -166,8 +312,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       form.set("selections", JSON.stringify(choices));
       const response = await fetch("/api/cards/import", { method: "POST", body: form });
       const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth: typeof providerHealth }>(response);
-      setWorkingCards(result.workingCards);
-      setSelectedCardId(result.workingCards[0]?.id ?? "");
+      dispatchEditor({ type: "load-cards", cards: result.workingCards });
       setArtworkFilter("all"); setFace("front"); setManualIdentities([]);
       setProviderHealth(result.providerHealth);
       setStatus(`${result.workingCards.length} entradas no Working Set. Quantidades permanecem compactas.`);
@@ -182,7 +327,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     try {
       const response = await fetch("/api/cards/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resolve", cards: workingCards }) });
       const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth: typeof providerHealth }>(response);
-      setWorkingCards(result.workingCards); setProviderHealth(result.providerHealth);
+      dispatchEditor({ type: "replace-cards", cards: result.workingCards }); setProviderHealth(result.providerHealth);
       setStatus(formatResolutionSummary(result.workingCards, result.providerHealth));
     } catch (error) { setProblem(error instanceof Error ? error.message : "A resolução falhou."); setStatus(""); }
     finally { setBusy(false); }
@@ -270,7 +415,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     <section className="panel card-identity-workbench" aria-labelledby="identity-workbench-heading">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">Fase 5 · Working Set da sessão</p>
+          <p className="eyebrow">Fase 6A · Working Set da sessão</p>
           <h2 id="identity-workbench-heading">Identidade da carta e artwork</h2>
           <p>CardIdentity permanece estável enquanto a arte pode ser trocada por face. Nenhum projeto é salvo.</p>
         </div>
@@ -287,20 +432,21 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         <button className="button secondary" type="button" onClick={resolveAll} disabled={busy || !workingCards.length}>Resolver identidades</button>
         <span className="status" aria-live="polite">{status}</span>
       </div>
-      {problem && <p className="error-message" role="alert">{problem}</p>}
+      {(problem || editorState.error) && <p className="error-message" role="alert">{problem || editorState.error}</p>}
 
       {workingCards.length > 0 && <div className="card-workbench-layout">
-        <div className="working-card-list" aria-label="Working cards da sessão">
-          <div className="compact-heading"><strong>{workingCards.length} WorkingCard(s)</strong><span>quantidade compacta</span></div>
-          {workingCards.slice().sort((a, b) => a.order - b.order).map((card) => (
-            <button key={card.id} type="button" className={`working-card-row ${card.id === selectedCardId ? "is-active" : ""}`} onClick={() => { setSelectedCardId(card.id); setFace("front"); }}>
-              <span className="working-card-name">{displayCard(card)}</span>
-              <span className="working-card-meta">×{card.quantity} · {card.section ?? "sem seção"}</span>
-              <span className={`resolution-status status-${card.identityResolution.status}`}>{statusLabel(card)}</span>
-              <span className="working-card-meta">Front: {card.selectedArtworkByFace.front ? labelSource(card.selectedArtworkByFace.front.source) : "sem arte"}</span>
-            </button>
-          ))}
-        </div>
+        <WorkingCardList
+          cards={workingCards}
+          selectedCardId={selectedCardId}
+          physicalCardCount={physicalCardCount}
+          disabled={busy}
+          onSelect={(cardId) => { dispatchEditor({ type: "select-card", cardId }); setFace("front"); }}
+          onQuantityCommit={(cardId, value) => dispatchEditor({ type: "set-quantity", cardId, quantity: Number(value) })}
+          onQuantityAdjust={(cardId, delta) => dispatchEditor({ type: "adjust-quantity", cardId, delta })}
+          onMove={(cardId, targetIndex) => dispatchEditor({ type: "move-card", cardId, targetIndex })}
+          onDuplicate={(cardId) => dispatchEditor({ type: "duplicate-card", cardId, newCardId: globalThis.crypto.randomUUID() })}
+          onDelete={(cardId) => { if (cardId === selectedCardId) setFace("front"); dispatchEditor({ type: "delete-card", cardId }); }}
+        />
 
         {activeCard && <div className="working-card-detail">
           <div className="compact-heading detail-title">

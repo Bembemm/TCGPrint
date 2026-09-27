@@ -13,6 +13,7 @@ import {
 import { MAGIC_STANDARD_CARD, PAPER_FORMATS, type CutGuideConfig } from "../core/geometry";
 import { LosslessPdfEngine, PdfExportError } from "../pdf-engine/document";
 import { mpcArtworkCandidateId } from "../core/cards/ids";
+import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../core/cards/limits";
 import type { ArtworkCandidate, CardFaceSide, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
 import type { CardWorkbench } from "./card-workbench";
 
@@ -107,7 +108,7 @@ export async function exportWorkingCardsWithDiagnostics(
 
   const total = cards.reduce((sum, card) => sum + card.quantity, 0);
   if (total < 1) throw new CardExportServiceError("ARTWORK_REQUIRED", "Add at least one card to export.");
-  if (total > 500) throw new CardExportServiceError("EXPORT_TOO_LARGE", "The first export is limited to 500 physical cards per PDF.");
+  if (total > MAX_PHYSICAL_CARDS_PER_EXPORT) throw new CardExportServiceError("EXPORT_TOO_LARGE", `The first export is limited to ${MAX_PHYSICAL_CARDS_PER_EXPORT} physical cards per PDF.`);
 
   const uniqueImages = new Map<string, Uint8Array>();
   const uniqueBleeds = new Map<string, BleedResult>();

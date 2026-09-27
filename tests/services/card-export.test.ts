@@ -10,6 +10,7 @@ import { createCardWorkbench } from "../../services/card-workbench";
 import { handleCardExport } from "../../services/card-api";
 import { exportWorkingCards, exportWorkingCardsWithDiagnostics } from "../../services/card-export";
 import { PAPER_FORMATS } from "../../core/geometry";
+import { createWorkingCardEditorState, deleteWorkingCard, duplicateWorkingCard, moveWorkingCard } from "../../core/cards/working-card-editor";
 import { BleedEngine } from "../../image-engine/bleed";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 import type { ArtworkCandidate, WorkingCard } from "../../core/cards/types";
@@ -282,5 +283,73 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
 
     await expect(exportWorkingCards(catalog, [card], { bleedMm: 0, cutGuides: NO_CUT_GUIDES })).rejects.toMatchObject({ code: "ARTWORK_ORIGINAL_UNAVAILABLE" });
     expect(catalog.getArtworkOriginal).not.toHaveBeenCalled();
+  });
+
+  it("exports edited order, keeps quantity compact until composition, and includes/removes duplicated entries", async () => {
+    const names = ["A", "B", "C", "B-back"] as const;
+    const bytesByName = new Map<string, Uint8Array>();
+    const candidates: Record<string, ArtworkCandidate> = {};
+    for (const [index, name] of names.entries()) {
+      const bytes = new Uint8Array(await sharp({ create: { width: 24, height: 36, channels: 3, background: { r: index * 70, g: 30, b: 180 - index * 50 } } }).png().toBuffer());
+      bytesByName.set(name, bytes);
+      candidates[`scryfall:${name}`] = { id: `scryfall:${name}`, source: "scryfall", identityId: null, faceId: "front", originalAvailable: true };
+    }
+    const nameByBytes = new Map([...bytesByName].map(([name, bytes]) => [Buffer.from(bytes).toString("base64"), name]));
+    const catalog = {
+      getArtworkCandidate: vi.fn(async (id: string) => candidates[id]),
+      getArtworkOriginal: vi.fn(async (id: string) => {
+        const name = id.replace("scryfall:", "");
+        const bytes = bytesByName.get(name)!;
+        return { artworkId: id, contentHash: createHash("sha256").update(bytes).digest("hex"), format: "png" as const, extension: "png", byteLength: bytes.byteLength, widthPx: 24, heightPx: 36, provenance: [], createdAt: "2026-09-27T00:00:00.000Z", bytes };
+      }),
+    };
+    const card = (name: string, order: number, quantity: number): WorkingCard => ({
+      id: `working-${name}`,
+      quantity,
+      order,
+      importSource: { sourceId: `source-${name}`, importKind: "text", entryKind: "deck-card" },
+      identityHints: { name },
+      identity: null,
+      identityResolution: { status: "unresolved", candidates: [], confirmed: false },
+      faces: name === "B" ? [{ id: "front", side: "front" }, { id: "back", side: "back" }] : [{ id: "front", side: "front" }],
+      selectedArtworkByFace: {
+        front: { candidateId: `scryfall:${name}`, source: "scryfall", identityId: null, faceId: "front" },
+        ...(name === "B" ? { back: { candidateId: "scryfall:B-back", source: "scryfall" as const, identityId: null, faceId: "back" as const } } : {}),
+      },
+      localArtworkIds: [],
+      mpcReferences: [],
+      faceAssociations: [],
+    });
+    const pdfGenerate = vi.spyOn(LosslessPdfEngine.prototype, "generate").mockResolvedValue(new Uint8Array([37, 80, 68, 70]));
+    const initial = createWorkingCardEditorState([card("A", 0, 2), card("B", 1, 1), card("C", 2, 1)]);
+    const reordered = moveWorkingCard(initial, "working-C", 0);
+
+    expect(reordered.cards.map(({ id, quantity, order }) => [id, quantity, order])).toEqual([
+      ["working-C", 1, 0], ["working-A", 2, 1], ["working-B", 1, 2],
+    ]);
+    await exportWorkingCardsWithDiagnostics(catalog, reordered.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
+    const exportedNames = (images: readonly Uint8Array[]) => images.map((bytes) => nameByBytes.get(Buffer.from(bytes).toString("base64")));
+    expect(exportedNames(pdfGenerate.mock.calls[0][0].images)).toEqual(["C", "A", "A", "B"]);
+    expect(pdfGenerate.mock.calls[0][0].cutGuides).toEqual(NO_CUT_GUIDES);
+
+    const duplicated = duplicateWorkingCard(reordered, "working-A", "working-A-copy");
+    const deleted = deleteWorkingCard(duplicated, "working-B");
+    await exportWorkingCardsWithDiagnostics(catalog, deleted.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
+    expect(exportedNames(pdfGenerate.mock.calls[1][0].images)).toEqual(["C", "A", "A", "A", "A"]);
+    expect(catalog.getArtworkCandidate.mock.calls.slice(3).map(([id]) => id)).toEqual([
+      "scryfall:C", "scryfall:A", "scryfall:A",
+    ]);
+
+    const dfc = createWorkingCardEditorState([card("B", 0, 1)]);
+    const duplicatedDfc = duplicateWorkingCard(dfc, "working-B", "working-B-copy");
+    const reorderedDfc = moveWorkingCard(duplicatedDfc, "working-B-copy", 0);
+    const dfcClone = reorderedDfc.cards.find(({ id }) => id === "working-B-copy")!;
+    expect(dfcClone.selectedArtworkByFace).toEqual(dfc.cards[0].selectedArtworkByFace);
+    expect(dfcClone.selectedArtworkByFace.back?.candidateId).toBe("scryfall:B-back");
+    await exportWorkingCardsWithDiagnostics(catalog, reorderedDfc.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
+    expect(exportedNames(pdfGenerate.mock.calls[2][0].images)).toEqual(["B", "B"]);
+    expect(catalog.getArtworkCandidate.mock.calls.slice(6).map(([id]) => id)).toEqual([
+      "scryfall:B", "scryfall:B",
+    ]);
   });
 });
