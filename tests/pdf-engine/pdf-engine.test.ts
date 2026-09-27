@@ -605,10 +605,29 @@ describe("LosslessPdfEngine", () => {
     }));
     const horizontal = segments.filter(({ y1Mm, y2Mm }) => Math.abs(y1Mm - y2Mm) < 1e-8);
     const vertical = segments.filter(({ x1Mm, x2Mm }) => Math.abs(x1Mm - x2Mm) < 1e-8);
+    const actualSegments = segments.map(({ x1Mm, y1Mm, x2Mm, y2Mm }) => {
+      if (Math.abs(y1Mm - y2Mm) < 1e-8) {
+        return [Math.min(x1Mm, x2Mm), y1Mm, Math.max(x1Mm, x2Mm), y1Mm];
+      }
+      return [x1Mm, Math.min(y1Mm, y2Mm), x1Mm, Math.max(y1Mm, y2Mm)];
+    }).map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8))))
+      .sort((a, b) => a.join(",").localeCompare(b.join(",")));
+    const expectedSegments = [
+      [73.25, 104.05, 74.25, 104.05],
+      [135.75, 104.05, 136.75, 104.05],
+      [73.25, 192.95, 74.25, 192.95],
+      [135.75, 192.95, 136.75, 192.95],
+      [73.25, 104.05, 73.25, 105.05],
+      [136.75, 104.05, 136.75, 105.05],
+      [73.25, 191.95, 73.25, 192.95],
+      [136.75, 191.95, 136.75, 192.95],
+    ].sort((a, b) => a.join(",").localeCompare(b.join(",")));
 
     expect(segments).toHaveLength(8);
     expect(horizontal).toHaveLength(4);
     expect(vertical).toHaveLength(4);
+    expect(new Set(actualSegments.map((segment) => segment.join(","))).size).toBe(8);
+    expect(actualSegments).toEqual(expectedSegments);
     for (const { x1Mm, y1Mm, x2Mm, y2Mm } of segments) {
       expect(Math.hypot(x2Mm - x1Mm, y2Mm - y1Mm)).toBeCloseTo(1, 8);
     }
