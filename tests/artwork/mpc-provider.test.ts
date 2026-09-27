@@ -160,10 +160,22 @@ describe("MPC artwork provider", () => {
     database.close();
   });
 
-  it.each(["png", "jpg", "jpeg", "svg"])("lists %s MPC originals supported by the current export policy", async (extension) => {
+  it.each(["png", "jpg", "jpeg"])("lists %s MPC originals supported by the current export policy", async (extension) => {
     const { database, provider } = await setup(searchFake(driveCard({ extension })));
 
     await expect(provider.searchArtwork(identity)).resolves.toMatchObject([{ metadata: { extension }, originalAvailable: true }]);
+    database.close();
+  });
+
+  it("lists MPC SVGs as unverified instead of claiming PDF exportability from the extension", async () => {
+    const { database, provider } = await setup(searchFake(driveCard({ extension: "svg" })));
+
+    const [candidate] = await provider.searchArtwork(identity);
+    const refreshed = await provider.getCandidate(candidate.id);
+
+    expect(candidate).toMatchObject({ originalAvailable: true, metadata: { extension: "svg", originalFormatKnown: true } });
+    expect(candidate.metadata?.originalFormatExportable).toBeUndefined();
+    expect(refreshed?.metadata?.originalFormatExportable).toBeUndefined();
     database.close();
   });
 
@@ -195,6 +207,18 @@ describe("MPC artwork provider", () => {
     expect(original).toMatchObject({ format: "png", extension: "png", bytes: png });
     expect(await provider.getCandidate(candidate.id)).toMatchObject({ originalAvailable: true, originalCached: true, metadata: { extension: "png", originalFormatKnown: true, originalFormatExportable: true } });
     database.close();
+  });
+
+  it("accepts a JPEG MPC original with matching format metadata", async () => {
+    const jpeg = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#496" } }).jpeg().toBuffer());
+    const { database, provider } = await setup(searchFake(driveCard({ extension: "jpg", size: jpeg.byteLength }), async () => new Response(jpeg, {
+      headers: { "Content-Type": "image/jpeg", "Content-Length": String(jpeg.byteLength) },
+    })));
+    const [candidate] = await provider.searchArtwork(identity);
+
+    await expect(provider.getOriginal(candidate.id)).resolves.toMatchObject({ format: "jpeg", extension: "jpg", bytes: jpeg });
+    await expect(provider.getCandidate(candidate.id)).resolves.toMatchObject({ metadata: { originalFormatExportable: true } });
+    await database.close();
   });
 
   it("accepts a WebP thumbnail when the declared original is PNG", async () => {
@@ -552,6 +576,50 @@ describe("MPC artwork provider", () => {
     expect(candidateAfterRestart).toMatchObject({ originalAvailable: true, originalCached: false });
     expect(restartedProvider.getHealth()).toMatchObject({ available: false, degraded: true });
     database.close();
+  });
+
+  it.each(["missing", "corrupt"] as const)("withholds SVG exportability when a previously validated original is %s, including cached references", async (fileState) => {
+    const svgBytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="140" viewBox="0 0 100 140"><rect width="100" height="140" fill="#123456"/></svg>');
+    const fetchImpl = searchFake(driveCard({ extension: "svg", size: svgBytes.byteLength }), async () => new Response(svgBytes, {
+      headers: { "Content-Type": "image/svg+xml", "Content-Length": String(svgBytes.byteLength) },
+    }));
+    const { database, provider, paths } = await setup(fetchImpl);
+    try {
+      const [candidate] = await provider.searchArtwork(identity);
+      const original = await provider.getOriginal(candidate.id);
+      const reference: WorkingCardMpcReference = {
+        faceId: "front",
+        importedAssetId: "xml-stale-svg-original",
+        providerAssetId: candidate.providerAssetId!,
+        selectedArtworkId: candidate.selectedArtworkId!,
+        slots: ["1"],
+        availableLocally: true,
+      };
+      const importedCandidateId = mpcArtworkCandidateId(reference.importedAssetId, "front");
+
+      await expect(provider.getCandidateForReferences(importedCandidateId, [reference], identity))
+        .resolves.toMatchObject({ originalCached: true, metadata: { originalFormatExportable: true } });
+      const originalPath = originalPathForHash(paths.originalsDirectory, original.contentHash, original.extension);
+      if (fileState === "missing") await unlink(originalPath);
+      else await writeFile(originalPath, new Uint8Array(original.bytes.byteLength).fill(0));
+
+      const directCandidate = await provider.getCandidate(candidate.id);
+      const importedCandidate = await provider.getCandidateForReferences(importedCandidateId, [reference], identity);
+      for (const refreshed of [directCandidate, importedCandidate]) {
+        expect(refreshed).toMatchObject({ originalAvailable: true, originalCached: false });
+        expect(refreshed?.metadata?.originalFormatExportable).toBeUndefined();
+        expect(refreshed?.metadata).not.toHaveProperty("svgPdfValidationVersion");
+      }
+
+      await expect(provider.getOriginal(importedCandidateId)).resolves.toMatchObject({ bytes: svgBytes, extension: "svg" });
+      await expect(provider.getCandidate(importedCandidateId)).resolves.toMatchObject({
+        originalAvailable: true,
+        originalCached: true,
+        metadata: { originalFormatExportable: true },
+      });
+    } finally {
+      await database.close();
+    }
   });
 
   it("does not trust an unverified imported local-availability hint as a cached original", async () => {
@@ -1035,8 +1103,30 @@ describe("MPC artwork provider", () => {
     })));
     const [candidate] = await provider.searchArtwork(identity);
 
+    expect(candidate.metadata?.originalFormatExportable).toBeUndefined();
     await expect(provider.getOriginal(candidate.id)).resolves.toMatchObject({ extension: "svg", bytes: svgBytes });
+    await expect(provider.getCandidate(candidate.id)).resolves.toMatchObject({ metadata: { originalFormatExportable: true } });
 
+    await database.close();
+  });
+
+  it.each([
+    ["outside the PDF SVG subset", '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="140" viewBox="0 0 100 140"><path d="M0 0h100v140z" fill-rule="evenodd" /></svg>', "unsupported-format"],
+    ["invalid SVG bytes", "not an SVG document", "invalid-image"],
+  ] as const)("rejects MPC SVG originals that are %s and records them as non-exportable", async (_label, source, kind) => {
+    const svgBytes = new TextEncoder().encode(source);
+    const { database, provider, repository } = await setup(searchFake(driveCard({ extension: "svg", size: svgBytes.byteLength }), async () => new Response(svgBytes, {
+      headers: { "Content-Type": "image/svg+xml", "Content-Length": String(svgBytes.byteLength) },
+    })));
+    const [candidate] = await provider.searchArtwork(identity);
+
+    expect(candidate.metadata?.originalFormatExportable).toBeUndefined();
+    await expect(provider.getOriginal(candidate.id)).rejects.toMatchObject({ name: "MpcArtworkProviderError", kind });
+    await expect(provider.getCandidate(candidate.id)).resolves.toMatchObject({
+      originalAvailable: false,
+      metadata: { originalFormatExportable: false },
+    });
+    expect(repository.findOriginalByProviderSource("mpc", "opaque-drive-id_1234567890", "https://drive.google.com/uc?export=download&id=opaque-drive-id_1234567890")).toBeUndefined();
     await database.close();
   });
 });

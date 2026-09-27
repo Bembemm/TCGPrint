@@ -9,12 +9,14 @@ import type { ArtworkThumbnailStore } from "./storage/thumbnail-store";
 import { ArtworkStorageError, type ArtworkOriginal } from "./storage/types";
 import { validateImageBytes } from "./storage/image-validation";
 import type { ArtworkPreview, ArtworkProvider, ArtworkSearchOptions, ProviderHealth } from "./types";
+import { validateSvgForPdfExport } from "../pdf-engine/document";
 
 const API_BASE_URL = "https://mpcfill.com";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CANDIDATE_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const THUMBNAIL_LIMIT = 10 * 1024 * 1024;
 const DEFAULT_MAX_ORIGINAL_BYTES = 30 * 1024 * 1024;
+const SVG_PDF_VALIDATION_VERSION = 1;
 const THUMBNAIL_HOSTS = new Set(["drive.google.com", "lh3.googleusercontent.com", "lh4.googleusercontent.com"]);
 const ORIGINAL_HOSTS = new Set(["drive.google.com", "drive.usercontent.google.com"]);
 const API_HOSTS = new Set(["mpcfill.com"]);
@@ -137,7 +139,9 @@ function isExportableOriginalExtension(value: unknown): boolean {
 }
 
 function candidateHasKnownUnsupportedFormat(candidate: ArtworkCandidate): boolean {
+  if (candidate.metadata?.originalFormatExportable === false) return true;
   const extension = normalizeExtension(candidate.metadata?.extension);
+  if (canonicalExtension(extension) === "svg") return false;
   const known = candidate.metadata?.originalFormatKnown === true || extension !== undefined;
   return known && !isExportableOriginalExtension(extension);
 }
@@ -394,6 +398,35 @@ export class MpcArtworkProvider implements ArtworkProvider {
     return [...combined.values()];
   }
 
+  private recordSvgPdfValidation(stored: StoredCandidate, exportable: boolean, originalCached = stored.candidate.originalCached): StoredCandidate {
+    const updated: StoredCandidate = {
+      ...stored,
+      candidate: {
+        ...stored.candidate,
+        originalAvailable: exportable,
+        originalCached,
+        metadata: {
+          ...stored.candidate.metadata,
+          extension: "svg",
+          originalFormatKnown: true,
+          originalFormatExportable: exportable,
+          svgPdfValidationVersion: SVG_PDF_VALIDATION_VERSION,
+        },
+      },
+    };
+    this.metadata.putMetadata(candidateKey(updated.candidate.id), updated, Date.now() + CANDIDATE_TTL_MS);
+    return updated;
+  }
+
+  private async svgPdfExportable(bytes: Uint8Array): Promise<boolean> {
+    try {
+      await validateSvgForPdfExport(bytes);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async getCandidate(id: string): Promise<ArtworkCandidate | undefined> {
     if (!/^mpc:[a-f0-9]{64}$/.test(id)) return undefined;
     const stored = this.metadata.getMetadata<StoredCandidate>(candidateKey(id));
@@ -411,19 +444,40 @@ export class MpcArtworkProvider implements ArtworkProvider {
       }
     }
     const actualExtension = original?.extension ?? originalRecord?.extension ?? normalizeExtension(stored.candidate.metadata?.extension);
-    const formatKnown = stored.candidate.metadata?.originalFormatKnown === true || actualExtension !== undefined;
-    const formatExportable = !formatKnown || isExportableOriginalExtension(actualExtension);
+    const isSvg = canonicalExtension(actualExtension) === "svg";
+    let effectiveStored = stored;
+    if (isSvg && original && stored.candidate.metadata?.svgPdfValidationVersion !== SVG_PDF_VALIDATION_VERSION) {
+      effectiveStored = this.recordSvgPdfValidation(stored, await this.svgPdfExportable(original.bytes), true);
+    }
+    const formatKnown = effectiveStored.candidate.metadata?.originalFormatKnown === true || actualExtension !== undefined;
+    const {
+      originalFormatExportable: storedFormatExportable,
+      svgPdfValidationVersion: _storedSvgPdfValidationVersion,
+      ...metadataWithoutExportability
+    } = effectiveStored.candidate.metadata ?? {};
+    const svgValidationCurrent = isSvg
+      && Boolean(original)
+      && effectiveStored.candidate.metadata?.svgPdfValidationVersion === SVG_PDF_VALIDATION_VERSION
+      && typeof storedFormatExportable === "boolean";
+    const formatExportable = isSvg
+      ? svgValidationCurrent
+        ? storedFormatExportable
+        : storedFormatExportable === false ? false : undefined
+      : !formatKnown || isExportableOriginalExtension(actualExtension);
     return {
-      ...stored.candidate,
-      originalAvailable: formatExportable && (original ? true : stored.candidate.originalAvailable),
+      ...effectiveStored.candidate,
+      originalAvailable: formatExportable === false ? false : original ? true : effectiveStored.candidate.originalAvailable,
       originalCached: Boolean(original),
       metadata: {
-        ...stored.candidate.metadata,
+        ...metadataWithoutExportability,
         ...(formatKnown ? {
           ...(actualExtension ? { extension: actualExtension } : {}),
           originalFormatKnown: true,
-          originalFormatExportable: formatExportable,
         } : {}),
+        ...(formatExportable !== undefined ? { originalFormatExportable: formatExportable } : {}),
+        ...(svgValidationCurrent
+          ? { svgPdfValidationVersion: SVG_PDF_VALIDATION_VERSION }
+          : {}),
       },
       ...(original ? {
         widthPx: original.widthPx,
@@ -465,6 +519,8 @@ export class MpcArtworkProvider implements ArtworkProvider {
       }
     }
     if (localOriginal) {
+      const isSvg = canonicalExtension(localOriginal.extension) === "svg";
+      const originalFormatExportable = isExportableOriginalExtension(localOriginal.extension);
       const candidate: ArtworkCandidate = {
         id,
         source: "mpc",
@@ -475,19 +531,19 @@ export class MpcArtworkProvider implements ArtworkProvider {
         widthPx: localOriginal.widthPx,
         heightPx: localOriginal.heightPx,
         effectiveDpi: calculateEffectiveDpi(localOriginal.widthPx, localOriginal.heightPx),
-        originalAvailable: isExportableOriginalExtension(localOriginal.extension),
+        originalAvailable: isSvg || originalFormatExportable,
         originalCached: true,
         metadata: {
           ...referenceMetadata(reference),
           sourceType: "Google Drive",
           extension: localOriginal.extension,
           originalFormatKnown: true,
-          originalFormatExportable: isExportableOriginalExtension(localOriginal.extension),
+          ...(!isSvg ? { originalFormatExportable } : {}),
         },
       };
       const stored: StoredCandidate = { candidate };
       this.metadata.putMetadata(candidateKey(id), stored, Date.now() + CANDIDATE_TTL_MS);
-      return candidate;
+      return await this.getCandidate(id) ?? candidate;
     }
 
     const baseCandidate: ArtworkCandidate = {
@@ -604,7 +660,9 @@ export class MpcArtworkProvider implements ArtworkProvider {
       validatedImage = await validateImageBytes(bytes, this.maximumOriginalBytes);
     } catch (error) {
       const unsupported = error instanceof ArtworkStorageError && error.code === "ARTWORK_UNSUPPORTED_FORMAT";
-      if (unsupported && stored) this.metadata.putMetadata(candidateKey(id), {
+      if (stored && canonicalExtension(candidate.metadata?.extension) === "svg") {
+        this.recordSvgPdfValidation(stored, false, false);
+      } else if (unsupported && stored) this.metadata.putMetadata(candidateKey(id), {
         ...stored,
         candidate: {
           ...stored.candidate,
@@ -621,6 +679,9 @@ export class MpcArtworkProvider implements ArtworkProvider {
     }
     const expectedType = mimeTypeForFormat(validatedImage.format);
     if (!expectedType || contentType !== expectedType) {
+      if (stored && (canonicalExtension(candidate.metadata?.extension) === "svg" || validatedImage.format === "svg")) {
+        this.recordSvgPdfValidation(stored, false, false);
+      }
       const error = new MpcArtworkProviderError("invalid-image", "MPC original content type does not match its image signature.");
       this.degrade(error);
       throw error;
@@ -639,9 +700,16 @@ export class MpcArtworkProvider implements ArtworkProvider {
     }
     const declaredExtension = canonicalExtension(candidate.metadata?.extension);
     if (declaredExtension && declaredExtension !== canonicalExtension(validatedImage.extension)) {
+      if (stored && (declaredExtension === "svg" || canonicalExtension(validatedImage.extension) === "svg")) {
+        this.recordSvgPdfValidation(stored, false, false);
+      }
       const error = new MpcArtworkProviderError("invalid-image", "MPC original format differs from the hydrated card metadata.");
       this.degrade(error);
       throw error;
+    }
+    if (validatedImage.format === "svg" && !(await this.svgPdfExportable(bytes))) {
+      if (stored) this.recordSvgPdfValidation(stored, false, false);
+      throw new MpcArtworkProviderError("unsupported-format", "MPC SVG original is not supported by PDF export.");
     }
     if (stored?.declaredSize && bytes.byteLength !== stored.declaredSize) {
       const error = new MpcArtworkProviderError("invalid-image", "MPC original byte length differs from the hydrated card metadata.");
@@ -665,7 +733,13 @@ export class MpcArtworkProvider implements ArtworkProvider {
         effectiveDpi: calculateEffectiveDpi(original.widthPx, original.heightPx),
         originalAvailable: true,
         originalCached: true,
-        metadata: { ...stored.candidate.metadata, extension: original.extension, originalFormatKnown: true, originalFormatExportable: true },
+        metadata: {
+          ...stored.candidate.metadata,
+          extension: original.extension,
+          originalFormatKnown: true,
+          originalFormatExportable: true,
+          ...(original.format === "svg" ? { svgPdfValidationVersion: SVG_PDF_VALIDATION_VERSION } : {}),
+        },
       },
     }, Date.now() + CANDIDATE_TTL_MS);
     this.health = { available: true, degraded: false };
@@ -683,7 +757,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
       throw new MpcArtworkProviderError("unsafe-source", "MPC artwork does not belong to a verified Google Drive source.");
     }
     const extension = normalizeExtension(item.extension);
-    if (extension && !isExportableOriginalExtension(extension)) return undefined;
+    if (extension && !isExportableOriginalExtension(extension) && canonicalExtension(extension) !== "svg") return undefined;
     const size = Number(item.size);
     const declaredSize = Number.isSafeInteger(size) && size > 0 ? size : undefined;
     const rawThumbnail = item.smallThumbnailUrl ?? item.mediumThumbnailUrl;
@@ -708,7 +782,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         ...(typeof item.sourceName === "string" ? { sourceName: item.sourceName.slice(0, 200) } : {}),
         ...(extension ? { extension } : {}),
         originalFormatKnown: Boolean(extension),
-        ...(extension ? { originalFormatExportable: true } : {}),
+        ...(extension && canonicalExtension(extension) !== "svg" ? { originalFormatExportable: true } : {}),
         ...(declaredSize ? { declaredSize } : {}),
         ...(Number.isFinite(dpi) && dpi > 0 ? { dpi } : {}),
       },

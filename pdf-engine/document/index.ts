@@ -1010,3 +1010,10 @@ export class LosslessPdfEngine {
     });
   }
 }
+
+export async function validateSvgForPdfExport(bytes: Uint8Array): Promise<void> {
+  if (detectFormat(copyBytes(bytes)) !== "svg") {
+    throw new PdfExportError("PDF SVG validation requires SVG input.");
+  }
+  await new LosslessPdfEngine().generate({ images: [bytes] });
+}
