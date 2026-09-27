@@ -580,6 +580,8 @@ async function drawClippedBleedRaster(
   page: ReturnType<PDFDocument["addPage"]>,
   bytes: Uint8Array,
   resourceId: number,
+  expectedWidthPx: number,
+  expectedHeightPx: number,
   x: number,
   y: number,
   width: number,
@@ -595,11 +597,17 @@ async function drawClippedBleedRaster(
 
   const png16 = parsePng16(exactBytes);
   if (png16) {
+    if (png16.width !== expectedWidthPx || png16.height !== expectedHeightPx) {
+      throw new PdfExportError("Bleed preview dimensions do not match its PNG pixels.");
+    }
     drawPng16(pdf, page, png16, resourceId, x, y, width, height, clipRegions);
     return;
   }
 
   const image = await pdf.embedPng(exactBytes);
+  if (image.width !== expectedWidthPx || image.height !== expectedHeightPx) {
+    throw new PdfExportError("Bleed preview dimensions do not match its PNG pixels.");
+  }
   for (const region of clipRegions) {
     page.pushOperators(
       pushGraphicsState(),
@@ -859,6 +867,31 @@ export class LosslessPdfEngine {
           if (bleed.preview.mimeType !== "image/png" || !bleed.preview.trimRectPx) {
             throw new PdfExportError("PDF bleed derivatives must expose a lossless PNG preview and trim rectangle.");
           }
+          const previewWidthPx = bleed.preview.widthPx;
+          const previewHeightPx = bleed.preview.heightPx;
+          const trimRectPx = bleed.preview.trimRectPx;
+          if (
+            typeof previewWidthPx !== "number"
+            || !Number.isSafeInteger(previewWidthPx)
+            || previewWidthPx <= 0
+            || typeof previewHeightPx !== "number"
+            || !Number.isSafeInteger(previewHeightPx)
+            || previewHeightPx <= 0
+            || !Number.isSafeInteger(trimRectPx.x)
+            || !Number.isSafeInteger(trimRectPx.y)
+            || !Number.isSafeInteger(trimRectPx.width)
+            || !Number.isSafeInteger(trimRectPx.height)
+            || trimRectPx.x < 0
+            || trimRectPx.y < 0
+            || trimRectPx.width <= 0
+            || trimRectPx.height <= 0
+            || trimRectPx.x + trimRectPx.width > previewWidthPx
+            || trimRectPx.y + trimRectPx.height > previewHeightPx
+          ) {
+            throw new PdfExportError("PDF bleed derivative has invalid pixel dimensions or trim bounds.");
+          }
+          const rightPaddingPx = previewWidthPx - trimRectPx.x - trimRectPx.width;
+          const bottomPaddingPx = previewHeightPx - trimRectPx.y - trimRectPx.height;
           const epsilonMm = 1e-9;
           if (bleed.bleedMm > 0 && (
             xMm - bleed.bleedMm < -epsilonMm
@@ -870,8 +903,18 @@ export class LosslessPdfEngine {
           }
 
           const bleedPoints = mmToPoints(bleed.bleedMm);
-          const expandedWidthPoints = widthPoints + 2 * bleedPoints;
-          const expandedHeightPoints = heightPoints + 2 * bleedPoints;
+          const pointsPerSourcePixelX = widthPoints / trimRectPx.width;
+          const pointsPerSourcePixelY = heightPoints / trimRectPx.height;
+          if (bleed.bleedMm > 0 && (
+            Math.min(trimRectPx.x, rightPaddingPx) * pointsPerSourcePixelX < bleedPoints - mmToPoints(epsilonMm)
+            || Math.min(trimRectPx.y, bottomPaddingPx) * pointsPerSourcePixelY < bleedPoints - mmToPoints(epsilonMm)
+          )) {
+            throw new PdfExportError("Bleed derivative pixel padding is smaller than the requested physical bleed.");
+          }
+          const expandedWidthPoints = previewWidthPx * pointsPerSourcePixelX;
+          const expandedHeightPoints = previewHeightPx * pointsPerSourcePixelY;
+          const imageXPoints = xPoints - trimRectPx.x * pointsPerSourcePixelX;
+          const imageYPoints = yPoints - bottomPaddingPx * pointsPerSourcePixelY;
           const clipRegions = [
             ...(bleed.bleedMm > 0 ? makeBleedClipRegions(
               xPoints,
@@ -888,8 +931,10 @@ export class LosslessPdfEngine {
               page,
               bleed.preview.bytes,
               request.images.length + imageIndex,
-              xPoints - bleedPoints,
-              yPoints - bleedPoints,
+              previewWidthPx,
+              previewHeightPx,
+              imageXPoints,
+              imageYPoints,
               expandedWidthPoints,
               expandedHeightPoints,
               clipRegions,

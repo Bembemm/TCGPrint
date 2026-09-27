@@ -256,12 +256,19 @@ describe("LosslessPdfEngine", () => {
     const jpeg = parsed.images.find((image) => image.dictionary.includes("/DCTDecode"));
     const derivative = parsed.images.find((image) => image.dictionary.includes("/FlateDecode"));
     const matrices = getDrawMatrices(parsed.content);
-    const trim = matrices.find(([a, , , d]) => Math.abs(a - 180) < 1e-8 && Math.abs(d - 252) < 1e-8);
-    const bleedPoints = mmToPoints(0.625);
-    const expanded = matrices.find(([a, , , d]) =>
-      Math.abs(a - mmToPoints(63.5 + 2 * 0.625)) < 1e-8
-        && Math.abs(d - mmToPoints(88.9 + 2 * 0.625)) < 1e-8,
+    const trim = matrices.find(([a, , , d]) => Math.abs(a - MAGIC_CARD_WIDTH_POINTS) < 1e-8 && Math.abs(d - MAGIC_CARD_HEIGHT_POINTS) < 1e-8);
+    const trimRect = bleed.preview.trimRectPx!;
+    const previewWidthPx = bleed.preview.widthPx!;
+    const previewHeightPx = bleed.preview.heightPx!;
+    const pointsPerSourcePixelX = MAGIC_CARD_WIDTH_POINTS / trimRect.width;
+    const pointsPerSourcePixelY = MAGIC_CARD_HEIGHT_POINTS / trimRect.height;
+    const expanded = matrices.find(([a, b, c, d]) =>
+      Math.abs(a - previewWidthPx * pointsPerSourcePixelX) < 1e-8
+        && Math.abs(b) < 1e-8
+        && Math.abs(c) < 1e-8
+        && Math.abs(d - previewHeightPx * pointsPerSourcePixelY) < 1e-8,
     );
+    const imageDraws = getImageDrawsWithClips(parsed.content);
     const positionedMatrices = matrices.filter(([a, b, c, d, e, f]) =>
       Math.abs(a - 1) < 1e-10
         && Math.abs(b) < 1e-10
@@ -269,6 +276,10 @@ describe("LosslessPdfEngine", () => {
         && Math.abs(d - 1) < 1e-10
         && (Math.abs(e) > 1e-10 || Math.abs(f) > 1e-10),
     );
+    const trimX = mmToPoints((210 - 63.5) / 2);
+    const trimTop = (297 - 88.9) / 2;
+    const trimY = mmToPoints(297 - trimTop - 88.9);
+    const bottomPaddingPx = previewHeightPx - trimRect.y - trimRect.height;
 
     expect(jpeg).toMatchObject({ width: 8, height: 6 });
     expect(createHash("sha256").update(getPdfStreamBytes(jpeg!)).digest("hex"))
@@ -276,17 +287,25 @@ describe("LosslessPdfEngine", () => {
     expect(derivative).toMatchObject({ width: 10, height: 8 });
     expect(trim).toBeDefined();
     expect(expanded).toBeDefined();
+    expect(imageDraws).toHaveLength(5);
+    expect(imageDraws.slice(0, 4).every((draw) => draw.clip !== undefined)).toBe(true);
+    expect(imageDraws[4].clip).toBeUndefined();
     expect(positionedMatrices).toHaveLength(5);
     expect(pointsToMm(trim![0])).toBe(63.5);
     expect(pointsToMm(trim![3])).toBeCloseTo(88.9, 12);
     for (const matrix of positionedMatrices.slice(1, 4)) {
-      expect(matrix[4]).toBeCloseTo(positionedMatrices[0][4], 8);
-      expect(matrix[5]).toBeCloseTo(positionedMatrices[0][5], 8);
+      expect(matrix[4]).toBeCloseTo(positionedMatrices[0][4], 10);
+      expect(matrix[5]).toBeCloseTo(positionedMatrices[0][5], 10);
     }
-    expect(positionedMatrices[4][4] - positionedMatrices[0][4]).toBeCloseTo(bleedPoints, 8);
-    expect(positionedMatrices[4][5] - positionedMatrices[0][5]).toBeCloseTo(bleedPoints, 8);
-    expect(expanded![0] - trim![0]).toBeCloseTo(2 * bleedPoints, 8);
-    expect(expanded![3] - trim![3]).toBeCloseTo(2 * bleedPoints, 8);
+    expect(positionedMatrices[0][4]).toBeCloseTo(trimX - trimRect.x * pointsPerSourcePixelX, 10);
+    expect(positionedMatrices[0][5]).toBeCloseTo(trimY - bottomPaddingPx * pointsPerSourcePixelY, 10);
+    expect(positionedMatrices[4][4]).toBeCloseTo(trimX, 10);
+    expect(positionedMatrices[4][5]).toBeCloseTo(trimY, 10);
+    const requestedBleedPoints = mmToPoints(0.625);
+    expect(imageDraws[0].clip!.width).toBeCloseTo(requestedBleedPoints, 10);
+    expect(imageDraws[1].clip!.width).toBeCloseTo(requestedBleedPoints, 10);
+    expect(imageDraws[2].clip!.height).toBeCloseTo(requestedBleedPoints, 10);
+    expect(imageDraws[3].clip!.height).toBeCloseTo(requestedBleedPoints, 10);
   });
 
   it("places a rounded-corner derivative inside the unchanged physical trim when bleed is zero", async () => {
@@ -341,7 +360,36 @@ describe("LosslessPdfEngine", () => {
     expect(trimClip).toBeDefined();
     expect(pointsToMm(trimClip!.width)).toBe(63.5);
     expect(pointsToMm(trimClip!.height)).toBeCloseTo(88.9, 12);
-    assertMatrixContainsSize(parsed.content, mmToPoints(63.5 + 2 * 0.625), mmToPoints(88.9 + 2 * 0.625));
+
+    const trimRect = rounded.preview.trimRectPx!;
+    const previewWidthPx = rounded.preview.widthPx!;
+    const previewHeightPx = rounded.preview.heightPx!;
+    const matrices = getDrawMatrices(parsed.content);
+    const imageTransform = matrices.find(([a, b, c, d]) =>
+      Math.abs(b) < 1e-8 && Math.abs(c) < 1e-8 && a > MAGIC_CARD_WIDTH_POINTS && d > MAGIC_CARD_HEIGHT_POINTS,
+    );
+    const positionedMatrices = matrices.filter(([a, b, c, d, e, f]) =>
+      Math.abs(a - 1) < 1e-10
+        && Math.abs(b) < 1e-10
+        && Math.abs(c) < 1e-10
+        && Math.abs(d - 1) < 1e-10
+        && (Math.abs(e) > 1e-10 || Math.abs(f) > 1e-10),
+    );
+    expect(imageTransform).toBeDefined();
+    expect(positionedMatrices).toHaveLength(5);
+    const [a, b, c, d, e, f] = imageTransform!;
+    const pointsPerSourcePixelX = trimClip!.width / trimRect.width;
+    const pointsPerSourcePixelY = trimClip!.height / trimRect.height;
+    const bottomPaddingPx = previewHeightPx - trimRect.y - trimRect.height;
+    expect(a).toBeCloseTo(previewWidthPx * pointsPerSourcePixelX, 10);
+    expect(d).toBeCloseTo(previewHeightPx * pointsPerSourcePixelY, 10);
+    expect([b, c, e, f]).toEqual([0, 0, 0, 0]);
+    const expectedImageX = trimClip!.x - trimRect.x * pointsPerSourcePixelX;
+    const expectedImageY = trimClip!.y - bottomPaddingPx * pointsPerSourcePixelY;
+    for (const matrix of positionedMatrices) {
+      expect(matrix[4]).toBeCloseTo(expectedImageX, 10);
+      expect(matrix[5]).toBeCloseTo(expectedImageY, 10);
+    }
   });
 
   it("draws bleed, one partial-alpha PNG trim, then vector guides", async () => {
@@ -580,28 +628,40 @@ describe("LosslessPdfEngine", () => {
       },
     });
     const parsed = await parsePdf(pdf);
-    const positionedMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d, e, f]) =>
-      Math.abs(a - 1) < 1e-10
-      && Math.abs(b) < 1e-10
-      && Math.abs(c) < 1e-10
-      && Math.abs(d - 1) < 1e-10
-      && (Math.abs(e) > 1e-10 || Math.abs(f) > 1e-10),
-    );
+    const imageDraws = getImageDrawsWithClips(parsed.content);
 
     expect(parsed.document.getPages()).toHaveLength(1);
     expect(parsed.images).toHaveLength(18);
     expect(getVectorSegments(parsed.content)).toHaveLength(12);
-    const actualPositions = new Set(positionedMatrices.map(([, , , , x, y]) =>
-      `${pointsToMm(x).toFixed(7)},${pointsToMm(y).toFixed(7)}`,
-    ));
-    for (const [xMm, yMm] of [
+    expect(imageDraws).toHaveLength(45);
+    const actualClips = new Set(imageDraws.filter((draw) => draw.clip).map((draw) => {
+      const clip = draw.clip!;
+      return [clip.x, clip.y, clip.width, clip.height].map((value) => pointsToMm(value).toFixed(7)).join(",");
+    }));
+    const requestedBleedPoints = mmToPoints(0.625);
+    const trimWidthPoints = mmToPoints(63.5);
+    const trimHeightPoints = mmToPoints(88.9);
+    const expectedClips = new Set<string>();
+    for (const [xMm, topMm] of [
       [8.5, 194.2], [73.25, 194.2], [138, 194.2],
       [8.5, 104.05], [73.25, 104.05], [138, 104.05],
       [8.5, 13.9], [73.25, 13.9], [138, 13.9],
     ]) {
-      expect(actualPositions.has(`${xMm.toFixed(7)},${yMm.toFixed(7)}`)).toBe(true);
-      expect(actualPositions.has(`${(xMm - 0.625).toFixed(7)},${(yMm - 0.625).toFixed(7)}`)).toBe(true);
+      const trimXPoints = mmToPoints(xMm);
+      const trimYPoints = mmToPoints(297 - topMm - 88.9);
+      const clips = [
+        { x: trimXPoints - requestedBleedPoints, y: trimYPoints - requestedBleedPoints, width: requestedBleedPoints, height: trimHeightPoints + 2 * requestedBleedPoints },
+        { x: trimXPoints + trimWidthPoints, y: trimYPoints - requestedBleedPoints, width: requestedBleedPoints, height: trimHeightPoints + 2 * requestedBleedPoints },
+        { x: trimXPoints, y: trimYPoints + trimHeightPoints, width: trimWidthPoints, height: requestedBleedPoints },
+        { x: trimXPoints, y: trimYPoints - requestedBleedPoints, width: trimWidthPoints, height: requestedBleedPoints },
+      ];
+      for (const clip of clips) {
+        expectedClips.add([clip.x, clip.y, clip.width, clip.height]
+          .map((value) => pointsToMm(value).toFixed(7)).join(","));
+      }
     }
+    expect(actualClips.size).toBe(36);
+    expect(actualClips).toEqual(expectedClips);
   });
 
   it("packs a mixed 0 mm and 3 mm bleed run on one Letter page with vector guides", async () => {
