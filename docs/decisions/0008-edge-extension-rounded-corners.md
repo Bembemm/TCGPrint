@@ -24,6 +24,7 @@ Arredondar cantos é uma necessidade distinta e opcional. Não é uma operação
 - Borda preta permanece preta; full-art, borda clara e arte texturizada continuam a partir de sua própria beirada.
 - Nenhuma IA, inpainting, serviço remoto ou alteração de pixels internos participa do bleed.
 - Bleed de 0 mm é passthrough do original. Bleed não-zero preserva alpha e profundidade de cor suportados pelo pipeline.
+- SVG continua vetorial em 0 mm; extensão raster e cantos arredondados são rejeitados explicitamente para SVG, sem rasterizar o trim.
 - Preview e export usam exatamente a mesma implementação/resultado de Edge Extension.
 - O algoritmo é determinístico e versionado. A cache key representa os bytes originais, bleed físico, versão do algoritmo e toda configuração que efetivamente altera pixels; rótulos de policy que não alteram pixels não devem impedir deduplicação.
 

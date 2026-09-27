@@ -1322,9 +1322,8 @@ Consequências intencionais:
 Nunca fazer:
 
 - crop, zoom, deslocamento ou resize da carta/trim;
-- busca por source strip mais interna;
-- seleção de faixa baseada em luminância, variação ou conteúdo “representativo”;
-- inferência de pixels a partir de outras regiões da arte;
+- consultar pixels além da linha/coluna externa da beirada correspondente;
+- classificar ou inferir conteúdo para substituir a amostra imediatamente adjacente;
 - preenchimento generativo ou IA.
 
 O bleed de 0 mm deve continuar sendo passthrough do original. Alpha e profundidade de cor devem ser preservados no derivado quando houver bleed.
@@ -3111,9 +3110,9 @@ Modo básico:
 
 Modo avançado:
 
-- source strip do bleed;
-- corner strategy;
-- offsets;
+- bleed físico em milímetros;
+- `roundedCorners` ON/OFF e raio físico do formato;
+- não há seleção de faixas-fonte nem offsets por lado: Edge Extension usa sempre a beirada imediata.
 - gaps;
 - registration geometry;
 - compression;

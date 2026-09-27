@@ -1,8 +1,11 @@
-# ADR 0003: Raster bleed corners and vector SVG policy
+# ADR 0003: Raster bleed corners and vector SVG policy (superseded)
 
-- Status: Accepted
+- Status: Superseded on 2026-09-27 by [ADR 0008](0008-edge-extension-rounded-corners.md); retained only as historical context
 - Date: 2026-09-24
 - Scope: Phase 2 — Bleed Engine
+
+> The corner-generation decision below is not active. The current pixel rule and
+> SVG behavior are restated in ADR 0008.
 
 ## Context
 
@@ -12,14 +15,11 @@ bottom, left, and right extensions without a visible seam. The plan also leaves
 open how non-zero bleed should work for SVG while requiring the original vector
 trim to remain vector.
 
-## Corner spike
+## Corner spike (historical)
 
-The isolated diagnostic in [`spikes/bleed-corners/run.cjs`](../../spikes/bleed-corners/run.cjs)
-creates a high-contrast corner containing a checker, light and dark marks,
-colored edges, and a smooth gradient. The four panels use the same source,
-bleed width, and source strip; only the corner rule changes:
-
-![Visual comparison of four bleed corner candidates](../../spikes/bleed-corners/candidate-matrix.png)
+The original diagnostic compared four ways to fill an external corner. Its
+renderer and image were retired with this proposal; their prior contents remain
+available in Git history.
 
 - **Dominant side:** selects the horizontal or vertical extension according to
   which outside distance is greater. The selection boundary creates a diagonal
@@ -32,7 +32,7 @@ bleed width, and source strip; only the corner rule changes:
 - **Constant corner:** repeats the corner pixel. It avoids a seam but produces
   a flat patch that can contrast with the adjacent stretched edges.
 
-## Decision
+## Historical corner decision (superseded)
 
 Use the reflected corner patch for all four corners. TOP, BOTTOM, LEFT, and
 RIGHT are generated independently from their own source strips. In each corner,
@@ -55,7 +55,7 @@ would add an unselected raster resolution. A later SVG-specific spike may add a
 validated vector extension path. Zero bleed continues to pass the original SVG
 through unchanged.
 
-## Consequences
+## Historical consequences
 
 - No source pixel inside the trim rectangle is resized, sampled, or rewritten.
 - The corner patch can mirror a small amount of edge detail into the discardable
@@ -76,4 +76,4 @@ through unchanged.
 ## References
 
 - [Implementation plan, Image Engine and bleed algorithm decision](../../IMPLEMENTATION_PLAN.md#parte-vii--image-engine)
-- [Reproducible corner spike source and image](../../spikes/bleed-corners/)
+- [Current bleed and corner decision](0008-edge-extension-rounded-corners.md)
