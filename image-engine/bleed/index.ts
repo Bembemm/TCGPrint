@@ -157,8 +157,11 @@ function validateRequest(request: BleedRequest): {
   const trimWidthMm = request.trimSizeMm?.widthMm ?? MAGIC_STANDARD_CARD.widthMm;
   const trimHeightMm = request.trimSizeMm?.heightMm ?? MAGIC_STANDARD_CARD.heightMm;
   const roundedCorners = request.roundedCorners ?? false;
-  const cornerRadiusMm = request.cornerRadiusMm ?? MAGIC_STANDARD_CARD.cornerRadiusMm;
-  if (roundedCorners && (!Number.isFinite(cornerRadiusMm) || cornerRadiusMm! <= 0)) {
+  const hasMagicStandardTrim = trimWidthMm === MAGIC_STANDARD_CARD.widthMm
+    && trimHeightMm === MAGIC_STANDARD_CARD.heightMm;
+  const cornerRadiusMm = request.cornerRadiusMm
+    ?? (hasMagicStandardTrim ? MAGIC_STANDARD_CARD.cornerRadiusMm : undefined);
+  if (roundedCorners && (cornerRadiusMm === undefined || !Number.isFinite(cornerRadiusMm) || cornerRadiusMm <= 0)) {
     throw new RangeError("A positive CardFormat cornerRadiusMm is required when roundedCorners is enabled.");
   }
   for (const [value, label] of [[trimWidthMm, "Trim width"], [trimHeightMm, "Trim height"]] as const) {

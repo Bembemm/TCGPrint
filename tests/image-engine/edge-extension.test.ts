@@ -145,6 +145,26 @@ describe("immediate-edge bleed", () => {
     }
   });
 
+  it("requires an explicit radius for non-Magic trims", async () => {
+    const original = await encodeRgbaPixels(() => [25, 90, 155, 255]);
+
+    await expect(new BleedEngine().generate({
+      imageBytes: original,
+      bleedMm: 0,
+      roundedCorners: true,
+      trimSizeMm: { widthMm: 70, heightMm: 100 },
+    })).rejects.toThrow(/cornerRadiusMm/);
+
+    const explicitRadius = await new BleedEngine().generate({
+      imageBytes: original,
+      bleedMm: 0,
+      roundedCorners: true,
+      trimSizeMm: { widthMm: 70, heightMm: 100 },
+      cornerRadiusMm: 3.5,
+    });
+    expect(explicitRadius).toMatchObject({ status: "derived", cornerRadiusMm: 3.5 });
+  });
+
   it("rounds square corners only when the separate option is enabled", async () => {
     const original = await encodeRgbaPixels(() => [25, 90, 155, 255]);
     const result = await new BleedEngine().generate({
