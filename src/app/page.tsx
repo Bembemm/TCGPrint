@@ -6,6 +6,7 @@ import type { ImportKind, ImportPreview } from "../../import-engine/types";
 import CutGuideControls from "./cut-guide-controls";
 import { buildCutGuideConfig } from "./bleed-export-options";
 import CardIdentityWorkbench from "./card-identity-workbench";
+import type { GuideColor } from "../../core/geometry";
 
 function sourceId(index: number, filename: string): string {
   return `input:${index}:${encodeURIComponent(filename)}`;
@@ -29,8 +30,10 @@ export default function HomePage() {
   const [bleedMm, setBleedMm] = useState("0.625");
   const [trimGuideEnabled, setTrimGuideEnabled] = useState(false);
   const [trimGuideExtentMm, setTrimGuideExtentMm] = useState("1");
+  const [trimGuideColor, setTrimGuideColor] = useState<GuideColor>("blue");
   const [externalGuideEnabled, setExternalGuideEnabled] = useState(false);
   const [externalGuideStrokeWidthPt, setExternalGuideStrokeWidthPt] = useState("0.3");
+  const [externalGuideColor, setExternalGuideColor] = useState<GuideColor>("black");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
@@ -131,6 +134,8 @@ export default function HomePage() {
         trimGuideExtentMm,
         externalGuideEnabled,
         externalGuideStrokeWidthPt,
+        trimGuideColor,
+        externalGuideColor,
       )));
       const response = await fetch("/api/import/pdf", { method: "POST", body: form });
       if (!response.ok) {
@@ -348,12 +353,16 @@ export default function HomePage() {
               <CutGuideControls
                 trimEnabled={trimGuideEnabled}
                 trimExtentMm={trimGuideExtentMm}
+                trimColor={trimGuideColor}
                 externalEnabled={externalGuideEnabled}
                 externalStrokeWidthPt={externalGuideStrokeWidthPt}
+                externalColor={externalGuideColor}
                 onTrimEnabledChange={setTrimGuideEnabled}
                 onTrimExtentMmChange={setTrimGuideExtentMm}
+                onTrimColorChange={setTrimGuideColor}
                 onExternalEnabledChange={setExternalGuideEnabled}
                 onExternalStrokeWidthPtChange={setExternalGuideStrokeWidthPt}
+                onExternalColorChange={setExternalGuideColor}
               />
               <button className="button primary" type="button" disabled={busy || !directFile || !previewImageKind(selectedFormat)} onClick={generatePdf}>Gerar PDF de teste</button>
             </div>}

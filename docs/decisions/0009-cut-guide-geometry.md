@@ -39,11 +39,13 @@ O contrato explícito é:
 interface TrimGuideConfig {
   enabled: boolean;
   extentMm: number | "full";
+  color: GuideColor;
 }
 
 interface ExternalCutGuideConfig {
   enabled: boolean;
   strokeWidthPt: number;
+  color: GuideColor;
 }
 
 interface CutGuideConfig {
@@ -52,7 +54,7 @@ interface CutGuideConfig {
 }
 ```
 
-Ambos começam desabilitados por segurança; habilitar um nunca habilita o outro. A extensão interna é expressa em milímetros ao longo das bordas. A única opção variável externa é a espessura em points. As cores são fixas nesta fase: Trim Guide ciano `#00A6D6`, External Cut Guide laranja `#E87500`; não há controles de cor ou comprimento externo.
+Ambos começam desabilitados por segurança; habilitar ou colorir um nunca altera o outro. A extensão interna é expressa em milímetros ao longo das bordas. A espessura externa é expressa em points. Como complemento/correção da Fase 5.6, ambos recebem cor independente na união fechada `GuideColor = "red" | "pink" | "green" | "blue" | "black" | "white"`: Vermelho `#E53935`, Rosa `#EC407A`, Verde `#43A047`, Azul `#1E88E5`, Preto `#000000`, Branco `#FFFFFF`. Os defaults são trim azul e external preto, inclusive quando cada cor está ausente de um payload Phase 5.6 anterior; valores inválidos são rejeitados.
 
 ### Trim Guide / Card Edge Guide
 
@@ -69,7 +71,7 @@ Ambos começam desabilitados por segurança; habilitar um nunca habilita o outro
 - Projetar as quatro bordas de trim até os limites úteis da folha; subtrair os intervalos obstruídos pelas regiões de bleed de todas as cartas, incluindo a carta de origem. Isso deixa as marcas começarem depois do bleed e permite prolongá-las por gutters/áreas livres até a borda da folha.
 - Considerar a meia espessura do traço ao excluir obstáculos, para que nenhum pixel do stroke invada bleed ou artwork. Guias externas não atravessam outra carta nem seu bleed.
 - Linhas com coordenada compartilhada podem ser consolidadas e unidas somente ao longo de intervalos livres; obstruções e limites da folha continuam respeitados.
-- A espessura inicial da UI é `0.3 pt`; validar qualquer valor como finito e positivo. Usar a cor fixa externa especificada acima.
+- A espessura inicial da UI é `0.3 pt`; validar qualquer valor como finito e positivo. Usar a cor external selecionada, sem alterar a geometria.
 
 ### Rounded Corners
 
@@ -99,3 +101,9 @@ A matriz de geometria inclui ambos ON/OFF, extensões 1/intermediária/meia ares
 - A geometria de corte deixa de depender do bleed; bleed só determina onde os strokes externos podem aparecer.
 - O default sem guias é deliberado para não inserir linhas no artwork nem prolongar traços na folha sem escolha explícita do usuário.
 - PDFs e configuração antiga `full`/`none` precisam ser atualizados, em vez de receber uma conversão silenciosa.
+
+### Complemento de cor da Fase 5.6
+
+- A UI apresenta um seletor independente de seis cores para cada guia, desabilitado quando a guia está OFF; rótulos e valores RGB seguem a paleta acima.
+- A escolha de cor só muda o operador RGB do stroke vetorial PDF. Segmentos, imagens embutidas e geometria de trim/bleed permanecem iguais.
+- Configurações Phase 5.6 sem cores mantêm compatibilidade por meio dos defaults trim azul e external preto, aplicados separadamente.

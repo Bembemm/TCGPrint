@@ -11,8 +11,8 @@ import { mmToPoints, pointsToMm } from "../../core/units";
 const fixturePath = join(process.cwd(), "tests", "fixtures", "pdf");
 const svgBytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="140" viewBox="0 0 100 140"><rect width="100" height="140" fill="#123456"/></svg>');
 const fullTrimGuides = JSON.stringify({
-  trim: { enabled: true, extentMm: "full" },
-  external: { enabled: false, strokeWidthPt: 0.3 },
+  trim: { enabled: true, extentMm: "full", color: "blue" },
+  external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
 });
 
 interface PdfClipRectangle {

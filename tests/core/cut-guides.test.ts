@@ -56,20 +56,63 @@ function assertExternalStrokesClear(
 describe("CutGuideEngine physical geometry", () => {
   it("defaults both systems to OFF with safe physical control values", () => {
     expect(parseCutGuideConfig(undefined)).toEqual({
-      trim: { enabled: false, extentMm: 1 },
-      external: { enabled: false, strokeWidthPt: 0.3 },
+      trim: { enabled: false, extentMm: 1, color: "blue" },
+      external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
     });
   });
 
+  it("adds independent defaults when parsing pre-color Phase 5.6 payloads", () => {
+    expect(parseCutGuideConfig({
+      trim: { enabled: true, extentMm: 5 },
+      external: { enabled: false, strokeWidthPt: 0.3, color: "pink" },
+    })).toEqual({
+      trim: { enabled: true, extentMm: 5, color: "blue" },
+      external: { enabled: false, strokeWidthPt: 0.3, color: "pink" },
+    });
+    expect(parseCutGuideConfig({
+      trim: { enabled: false, extentMm: 1, color: "green" },
+      external: { enabled: true, strokeWidthPt: 0.7 },
+    })).toEqual({
+      trim: { enabled: false, extentMm: 1, color: "green" },
+      external: { enabled: true, strokeWidthPt: 0.7, color: "black" },
+    });
+  });
+
+  it.each(["red", "pink", "green", "blue", "black", "white"] as const)("accepts %s as either guide color", (color) => {
+    expect(parseCutGuideConfig({
+      trim: { enabled: true, extentMm: 1, color },
+      external: { enabled: true, strokeWidthPt: 0.3, color },
+    })).toMatchObject({ trim: { color }, external: { color } });
+  });
+
+  it.each([
+    { trim: { enabled: true, extentMm: 1, color: "cyan" }, external: { enabled: false, strokeWidthPt: 0.3, color: "black" } },
+    { trim: { enabled: true, extentMm: 1, color: "blue" }, external: { enabled: false, strokeWidthPt: 0.3, color: "orange" } },
+  ])("rejects colors outside the closed palette", (config) => {
+    expect(() => parseCutGuideConfig(config)).toThrow(/color/i);
+  });
+
+  it("keeps exact trim and external segments unchanged when colors vary", () => {
+    const blueBlack = parseCutGuideConfig({
+      trim: { enabled: true, extentMm: 5, color: "blue" },
+      external: { enabled: true, strokeWidthPt: 0.3, color: "black" },
+    });
+    const pinkGreen = parseCutGuideConfig({
+      trim: { enabled: true, extentMm: 5, color: "pink" },
+      external: { enabled: true, strokeWidthPt: 0.3, color: "green" },
+    });
+    expect(guide(blueBlack)).toEqual(guide(pinkGreen));
+  });
+
   it("emits no paths when both independent guide systems are disabled", () => {
-    expect(guide({ trim: { enabled: false, extentMm: 1 }, external: { enabled: false, strokeWidthPt: 0.3 } }))
+    expect(guide({ trim: { enabled: false, extentMm: 1, color: "blue" }, external: { enabled: false, strokeWidthPt: 0.3, color: "black" } }))
       .toEqual({ trimSegments: [], externalSegments: [] });
   });
 
   it.each([1, 5])("measures trim corner segments as %s mm along the physical trim edges", (extentMm) => {
     const geometry = guide({
-      trim: { enabled: true, extentMm },
-      external: { enabled: false, strokeWidthPt: 0.3 },
+      trim: { enabled: true, extentMm, color: "blue" },
+      external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
     });
     const segments = sorted(geometry.trimSegments);
 
@@ -83,8 +126,8 @@ describe("CutGuideEngine physical geometry", () => {
 
   it("unions opposite trim corner intervals when they meet at the half-edge point", () => {
     const { trimSegments } = guide({
-      trim: { enabled: true, extentMm: 31.75 },
-      external: { enabled: false, strokeWidthPt: 0.3 },
+      trim: { enabled: true, extentMm: 31.75, color: "blue" },
+      external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
     });
     const horizontal = trimSegments.filter(({ y1Mm, y2Mm }) => y1Mm === y2Mm);
 
@@ -96,8 +139,8 @@ describe("CutGuideEngine physical geometry", () => {
 
   it("draws exactly the four physical trim edges for full extent", () => {
     const { trimSegments } = guide({
-      trim: { enabled: true, extentMm: "full" },
-      external: { enabled: false, strokeWidthPt: 0.3 },
+      trim: { enabled: true, extentMm: "full", color: "blue" },
+      external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
     });
 
     expect(sorted(trimSegments)).toEqual([
@@ -119,8 +162,8 @@ describe("CutGuideEngine physical geometry", () => {
   ])("clips external centerlines outside %s mm bleed with a %s pt stroke", (bleedMm, strokeWidthPt) => {
     const card = { trim: TRIM, bleedMm };
     const { externalSegments } = guide({
-      trim: { enabled: false, extentMm: 1 },
-      external: { enabled: true, strokeWidthPt },
+      trim: { enabled: false, extentMm: 1, color: "blue" },
+      external: { enabled: true, strokeWidthPt, color: "black" },
     }, [card]);
     const radiusMm = strokeWidthPt * 25.4 / 72 / 2;
     const horizontalTop = externalSegments.filter(({ y1Mm, y2Mm }) => y1Mm === TRIM.yMm && y2Mm === TRIM.yMm);
@@ -132,9 +175,9 @@ describe("CutGuideEngine physical geometry", () => {
   });
 
   it.each([
-    { trim: { enabled: true, extentMm: 2 }, external: { enabled: false, strokeWidthPt: 0.3 } },
-    { trim: { enabled: false, extentMm: 2 }, external: { enabled: true, strokeWidthPt: 0.3 } },
-    { trim: { enabled: true, extentMm: 2 }, external: { enabled: true, strokeWidthPt: 0.3 } },
+    { trim: { enabled: true, extentMm: 2, color: "blue" }, external: { enabled: false, strokeWidthPt: 0.3, color: "black" } },
+    { trim: { enabled: false, extentMm: 2, color: "blue" }, external: { enabled: true, strokeWidthPt: 0.3, color: "black" } },
+    { trim: { enabled: true, extentMm: 2, color: "blue" }, external: { enabled: true, strokeWidthPt: 0.3, color: "black" } },
   ] satisfies CutGuideConfig[])("keeps trim and external systems independent", (config) => {
     const geometry = guide(config);
     expect(geometry.trimSegments.length > 0).toBe(config.trim.enabled);
@@ -154,7 +197,7 @@ describe("CutGuideEngine physical geometry", () => {
     const { externalSegments } = new CutGuideEngine().generate({
       cards,
       pageSizeMm: PAGE,
-      config: { trim: { enabled: false, extentMm: 1 }, external: { enabled: true, strokeWidthPt: 0.3 } },
+      config: { trim: { enabled: false, extentMm: 1, color: "blue" }, external: { enabled: true, strokeWidthPt: 0.3, color: "black" } },
     });
     const edgeCoordinates = new Set(cards.flatMap(({ trim }) => [
       trim.xMm, trim.xMm + trim.widthMm, trim.yMm, trim.yMm + trim.heightMm,
@@ -181,7 +224,7 @@ describe("CutGuideEngine physical geometry", () => {
     const { externalSegments } = new CutGuideEngine().generate({
       cards,
       pageSizeMm: PAGE,
-      config: { trim: { enabled: false, extentMm: 1 }, external: { enabled: true, strokeWidthPt: 0.3 } },
+      config: { trim: { enabled: false, extentMm: 1, color: "blue" }, external: { enabled: true, strokeWidthPt: 0.3, color: "black" } },
     });
     const horizontalCoordinates = externalSegments
       .filter(({ y1Mm, y2Mm }) => y1Mm === y2Mm)
@@ -195,18 +238,18 @@ describe("CutGuideEngine physical geometry", () => {
   });
 
   it.each([
-    { trim: { enabled: true, extentMm: 0 }, external: { enabled: false, strokeWidthPt: 0.3 } },
-    { trim: { enabled: true, extentMm: Number.NaN }, external: { enabled: false, strokeWidthPt: 0.3 } },
-    { trim: { enabled: false, extentMm: 1 }, external: { enabled: true, strokeWidthPt: 0 } },
-    { trim: { enabled: false, extentMm: 1 }, external: { enabled: true, strokeWidthPt: Number.POSITIVE_INFINITY } },
+    { trim: { enabled: true, extentMm: 0, color: "blue" }, external: { enabled: false, strokeWidthPt: 0.3, color: "black" } },
+    { trim: { enabled: true, extentMm: Number.NaN, color: "blue" }, external: { enabled: false, strokeWidthPt: 0.3, color: "black" } },
+    { trim: { enabled: false, extentMm: 1, color: "blue" }, external: { enabled: true, strokeWidthPt: 0, color: "black" } },
+    { trim: { enabled: false, extentMm: 1, color: "blue" }, external: { enabled: true, strokeWidthPt: Number.POSITIVE_INFINITY, color: "black" } },
   ] satisfies CutGuideConfig[])("rejects invalid physical guide dimensions", (config) => {
     expect(() => guide(config)).toThrow(RangeError);
   });
 
   it("rejects overlapping physical trims before generating external paths", () => {
     expect(() => guide({
-      trim: { enabled: true, extentMm: "full" },
-      external: { enabled: true, strokeWidthPt: 0.3 },
+      trim: { enabled: true, extentMm: "full", color: "blue" },
+      external: { enabled: true, strokeWidthPt: 0.3, color: "black" },
     }, [
       { trim: TRIM, bleedMm: 0 },
       { trim: { xMm: 70, yMm: 20, widthMm: 63.5, heightMm: 88.9 }, bleedMm: 0 },

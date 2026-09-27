@@ -23,12 +23,12 @@ import { drawSvg } from "svg4pdf-lib";
 import type { BleedResult } from "../../image-engine/bleed";
 import {
   MAGIC_STANDARD_CARD,
-  EXTERNAL_CUT_GUIDE_COLOR,
-  TRIM_GUIDE_COLOR,
+  GUIDE_COLOR_HEX,
   TRIM_GUIDE_STROKE_WIDTH_PT,
   PAPER_FORMATS,
   calculateGridPlacement,
   CutGuideEngine,
+  parseCutGuideConfig,
   type CutGuideConfig,
   type CutGuideCardMm,
   type CutGuideGeometry,
@@ -714,10 +714,11 @@ function drawCutGuides(
   config: CutGuideConfig,
   cards: readonly CutGuideCardMm[],
 ): void {
+  const normalizedConfig = parseCutGuideConfig(config);
   const geometry = new CutGuideEngine().generate({
     cards,
     pageSizeMm: { widthMm: pageSize.widthMm, heightMm: pageSize.heightMm },
-    config,
+    config: normalizedConfig,
   });
 
   const drawSegments = (segments: CutGuideGeometry["trimSegments"], colorHex: string, strokeWidthPoints: number) => {
@@ -742,8 +743,8 @@ function drawCutGuides(
     page.pushOperators(popGraphicsState());
   };
 
-  drawSegments(geometry.trimSegments, TRIM_GUIDE_COLOR, TRIM_GUIDE_STROKE_WIDTH_PT);
-  drawSegments(geometry.externalSegments, EXTERNAL_CUT_GUIDE_COLOR, config.external.strokeWidthPt);
+  drawSegments(geometry.trimSegments, GUIDE_COLOR_HEX[normalizedConfig.trim.color], TRIM_GUIDE_STROKE_WIDTH_PT);
+  drawSegments(geometry.externalSegments, GUIDE_COLOR_HEX[normalizedConfig.external.color], normalizedConfig.external.strokeWidthPt);
 }
 
 export class LosslessPdfEngine {

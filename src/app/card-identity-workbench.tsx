@@ -9,6 +9,7 @@ import { formatResolutionSummary } from "../../core/cards/resolution-summary";
 import { postArtworkSelection } from "./artwork-selection-request";
 import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
 import CutGuideControls from "./cut-guide-controls";
+import type { GuideColor } from "../../core/geometry";
 
 type ArtworkFilter = "all" | "scryfall" | "mpc" | "upload";
 type CandidateDto = Omit<ArtworkCandidate, "originalUri" | "localOriginalPath" | "previewUri"> & {
@@ -82,8 +83,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [roundedCorners, setRoundedCorners] = useState(false);
   const [trimGuideEnabled, setTrimGuideEnabled] = useState(false);
   const [trimGuideExtentMm, setTrimGuideExtentMm] = useState("1");
+  const [trimGuideColor, setTrimGuideColor] = useState<GuideColor>("blue");
   const [externalGuideEnabled, setExternalGuideEnabled] = useState(false);
   const [externalGuideStrokeWidthPt, setExternalGuideStrokeWidthPt] = useState("0.3");
+  const [externalGuideColor, setExternalGuideColor] = useState<GuideColor>("black");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
@@ -246,7 +249,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cards: workingCards, options: buildBleedExportOptions(
           bleedMm,
-          buildCutGuideConfig(trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt),
+          buildCutGuideConfig(trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor),
           roundedCorners,
         ) }),
       });
@@ -379,12 +382,16 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           <CutGuideControls
             trimEnabled={trimGuideEnabled}
             trimExtentMm={trimGuideExtentMm}
+            trimColor={trimGuideColor}
             externalEnabled={externalGuideEnabled}
             externalStrokeWidthPt={externalGuideStrokeWidthPt}
+            externalColor={externalGuideColor}
             onTrimEnabledChange={setTrimGuideEnabled}
             onTrimExtentMmChange={setTrimGuideExtentMm}
+            onTrimColorChange={setTrimGuideColor}
             onExternalEnabledChange={setExternalGuideEnabled}
             onExternalStrokeWidthPtChange={setExternalGuideStrokeWidthPt}
+            onExternalColorChange={setExternalGuideColor}
           />
           <button className="button primary" type="button" disabled={busy || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
           {pdfUrl && <a className="download-link" href={pdfUrl} download="tcgprint-cards.pdf">Baixar PDF</a>}

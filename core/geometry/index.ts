@@ -90,6 +90,8 @@ export function createPageConfiguration(
 export {
   DEFAULT_CUT_GUIDE_CONFIG,
   EXTERNAL_CUT_GUIDE_COLOR,
+  GUIDE_COLOR_HEX,
+  GUIDE_COLOR_OPTIONS,
   TRIM_GUIDE_COLOR,
   TRIM_GUIDE_STROKE_WIDTH_PT,
   CutGuideEngine,
@@ -97,6 +99,7 @@ export {
 } from "./cut-guides";
 export type {
   CutGuideConfig,
+  GuideColor,
   CutGuideCardMm,
   CutGuideGeometry,
   CutGuidePageSizeMm,

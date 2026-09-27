@@ -3505,6 +3505,10 @@ Testes obrigatórios:
 
 Esta fase corrige exclusivamente os dois sistemas de guias de corte. A Fase 5.5 permanece concluída e histórica: não reabrir nem alterar `edge-extension-v1`, a geração de bleed ou `rounded-corners-v1`.
 
+### Complemento/correção pós-integração
+
+Cada sistema de guia tem cor própria na paleta fechada de seis opções (`red`, `pink`, `green`, `blue`, `black`, `white`). Os defaults são Trim Guide azul e External Cut Guide preto. Esta correção permanece dentro da Fase 5.6 e não altera geometria, bleed, rounded corners nem inicia a Fase 6.
+
 ### Modelo geométrico
 
 - `trimRect` é o tamanho físico final da carta. Magic Standard mede exatamente `63.5 × 88.9 mm`.
@@ -3521,11 +3525,13 @@ O contrato explícito de exportação é:
 interface TrimGuideConfig {
   enabled: boolean;
   extentMm: number | "full";
+  color: GuideColor;
 }
 
 interface ExternalCutGuideConfig {
   enabled: boolean;
   strokeWidthPt: number;
+  color: GuideColor;
 }
 
 interface CutGuideConfig {
@@ -3534,7 +3540,7 @@ interface CutGuideConfig {
 }
 ```
 
-Os defaults seguros são ambos desabilitados; cada opção pode ser habilitada sem alterar a outra. O contrato antigo `cutGuides: "full" | "none"` não pode ser reinterpretado silenciosamente: migrar os chamadores ao novo objeto e rejeitar explicitamente valores legados no limite da API.
+`GuideColor` é a união fechada `"red" | "pink" | "green" | "blue" | "black" | "white"`, exibida como Vermelho, Rosa, Verde, Azul, Preto e Branco com os valores sugeridos `#E53935`, `#EC407A`, `#43A047`, `#1E88E5`, `#000000` e `#FFFFFF`. Os defaults são ambos desabilitados, trim azul, external preto, extensão trim `1 mm` e espessura external `0.3 pt`; cada opção pode ser habilitada e colorida sem alterar a outra. Payloads Phase 5.6 anteriores sem `color` recebem esses dois defaults independentemente; qualquer cor fora da união é rejeitada. O contrato antigo `cutGuides: "full" | "none"` não pode ser reinterpretado silenciosamente: migrar os chamadores ao novo objeto e rejeitar explicitamente valores legados no limite da API.
 
 ### Trim Guide / Card Edge Guide
 
@@ -3543,7 +3549,7 @@ Os defaults seguros são ambos desabilitados; cada opção pode ser habilitada s
 - O comprimento pode ser progressivo e em unidades físicas. Em cada aresta, unir/normalizar os intervalos dos cantos: quando se tocam ou se sobrepõem, desenhar uma única aresta contínua, sem duplicação.
 - `"full"` desenha um retângulo vetorial limpo com largura/altura iguais às dimensões físicas do trim (Magic Standard: `63.5 × 88.9 mm`).
 - Com `enabled: false`, nenhuma linha interna é desenhada sobre a imagem; isso não afeta imagem, bleed, trim ou layout.
-- Cor fixa distinta e leve, sem rasterização; a espessura interna é um default vetorial fino, não um novo controle de produto.
+- A cor é selecionável independentemente na paleta fechada; a espessura interna segue `0.2 pt`, sem novo controle de espessura.
 
 ### External Cut Guide
 
@@ -3551,7 +3557,7 @@ Os defaults seguros são ambos desabilitados; cada opção pode ser habilitada s
 - O segmento visível começa somente em intervalos de folha fora de todas as regiões `bleedRect`; comprimento é derivado automaticamente até a borda útil da folha ou próximo obstáculo.
 - Subtrair/recortar intervalos obstruídos por qualquer bleed de carta, incluindo a própria carta. Considerar a meia espessura do traço ao evitar obstáculos, para que o traço vetorial não invada bleed nem arte.
 - Não atravessar cartas ou bleed de vizinhas. Guias colineares podem ser unidas apenas através de intervalos realmente livres; limites de página, gutters e bordas da folha devem ser tratados.
-- `strokeWidthPt` é a única configuração variável externa. Usar cor vetorial fixa distinta da Trim Guide, com tratamento visual discreto.
+- `strokeWidthPt` e `color` são configuráveis independentemente da Trim Guide; a cor selecionada só muda o stroke vetorial.
 
 ### Rounded Corners
 
@@ -3559,10 +3565,10 @@ Os defaults seguros são ambos desabilitados; cada opção pode ser habilitada s
 
 ### UI e PDF
 
-- Expor checkboxes independentes para Trim Guide e External Cut Guide.
-- Controles de comprimento e espessura ficam visualmente desabilitados quando seu guia correspondente estiver OFF.
-- Comprimento interno oferece valores progressivos em mm e `full`; espessura externa é expressa em points. Não criar o Editor da Fase 6 nem controles de comprimento externo/cor.
-- As linhas são objetos vetoriais PDF, com cores distintas, e nunca são rasterizadas na artwork.
+- Expor checkboxes, seletores de cor independentes (exatamente seis opções) para Guia de corte no trim e Guia externa de corte.
+- Controles de comprimento, espessura e cor ficam visualmente desabilitados quando seu guia correspondente estiver OFF.
+- Comprimento interno oferece valores progressivos em mm e `full`; espessura externa é expressa em points. Não criar o Editor da Fase 6 nem controles de comprimento externo.
+- As linhas são objetos vetoriais PDF. A cor selecionada não altera segmentos, objetos de imagem, bleed, trim, dimensões ou posicionamento.
 - Inspecionar coordenadas dos paths no PDF em points/mm; provar trim Magic Standard de `63.5 × 88.9 mm`, segmentos internos com comprimento real em mm e coordenadas externas coincidentes com trim.
 
 ### Testes de aceitação
@@ -3574,7 +3580,10 @@ Os defaults seguros são ambos desabilitados; cada opção pode ser habilitada s
 - Rounded OFF/ON; uma carta e grid 3×3; primeira, central, última e cartas junto às bordas da folha; gutters e alinhamentos compartilhados.
 - Nenhuma guia externa cruza qualquer trim/arte/bleed. Guias permanecem vetoriais.
 - Alternar configurações de guia não altera bytes da artwork, bleed, dimensões do trim ou posição da carta.
+- As seis cores são aceitas em cada sistema e valores inválidos são rejeitados; payloads Phase 5.6 sem `color` recebem blue/black independentemente.
+- RGB PDF é validado para as seis cores (incluindo preto `0 0 0` e branco `1 1 1`); mudar apenas cor preserva exatamente os segmentos, image objects e hashes.
 - Provar no PDF que `extentMm: 1` mede `1 mm`; `"full"` mede `63.5 × 88.9 mm` para Magic Standard; alinhamento externo usa trim e início visível fica além do bleed.
+- Gerar o complemento visual A4 com bleed `0.625 mm`, trim 1 mm azul + external 0.3 pt preto, e variante independente trim rosa + external verde.
 - Gerar PDFs A–E com o deck da Fase 5.5 (1 Sol Ring, 1 Lightning Bolt, 1 Counterspell, 6 Island), A4, bleed 0.625 mm: ambos OFF; trim 1 mm; trim full; somente external; trim 1 mm + external. Gerar também pelo menos uma variante com bleed 3 mm.
 - Reutilizar as evidências/deck de teste da Fase 5.5 quando disponíveis; não mudar a geração de bleed para produzir os artefatos.
 

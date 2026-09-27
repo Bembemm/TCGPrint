@@ -1,11 +1,41 @@
+export type GuideColor = "red" | "pink" | "green" | "blue" | "black" | "white";
+
+export const GUIDE_COLOR_OPTIONS: readonly {
+  readonly value: GuideColor;
+  readonly label: string;
+  readonly hex: string;
+}[] = Object.freeze([
+  Object.freeze({ value: "red", label: "Vermelho", hex: "#E53935" }),
+  Object.freeze({ value: "pink", label: "Rosa", hex: "#EC407A" }),
+  Object.freeze({ value: "green", label: "Verde", hex: "#43A047" }),
+  Object.freeze({ value: "blue", label: "Azul", hex: "#1E88E5" }),
+  Object.freeze({ value: "black", label: "Preto", hex: "#000000" }),
+  Object.freeze({ value: "white", label: "Branco", hex: "#FFFFFF" }),
+]);
+
+export const GUIDE_COLOR_HEX: Readonly<Record<GuideColor, string>> = Object.freeze({
+  red: "#E53935",
+  pink: "#EC407A",
+  green: "#43A047",
+  blue: "#1E88E5",
+  black: "#000000",
+  white: "#FFFFFF",
+});
+
+/** Backward-compatible default color constants; guide drawing uses config.color. */
+export const TRIM_GUIDE_COLOR = GUIDE_COLOR_HEX.blue;
+export const EXTERNAL_CUT_GUIDE_COLOR = GUIDE_COLOR_HEX.black;
+
 export interface TrimGuideConfig {
   readonly enabled: boolean;
   readonly extentMm: number | "full";
+  readonly color: GuideColor;
 }
 
 export interface ExternalCutGuideConfig {
   readonly enabled: boolean;
   readonly strokeWidthPt: number;
+  readonly color: GuideColor;
 }
 
 export interface CutGuideConfig {
@@ -14,13 +44,11 @@ export interface CutGuideConfig {
 }
 
 export const DEFAULT_CUT_GUIDE_CONFIG: CutGuideConfig = Object.freeze({
-  trim: Object.freeze({ enabled: false, extentMm: 1 }),
-  external: Object.freeze({ enabled: false, strokeWidthPt: 0.3 }),
+  trim: Object.freeze({ enabled: false, extentMm: 1, color: "blue" }),
+  external: Object.freeze({ enabled: false, strokeWidthPt: 0.3, color: "black" }),
 });
 
-export const TRIM_GUIDE_COLOR = "#00A6D6";
 export const TRIM_GUIDE_STROKE_WIDTH_PT = 0.2;
-export const EXTERNAL_CUT_GUIDE_COLOR = "#E87500";
 
 export interface TrimRectangleMm {
   /** Page coordinate from the upper-left corner, in millimeters. */
@@ -65,6 +93,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function isGuideColor(value: unknown): value is GuideColor {
+  return GUIDE_COLOR_OPTIONS.some((option) => option.value === value);
+}
+
 function assertFinite(value: number, label: string): void {
   if (!Number.isFinite(value)) throw new RangeError(`${label} must be a finite number.`);
 }
@@ -91,17 +123,21 @@ export function parseCutGuideConfig(value: unknown): CutGuideConfig {
 
   const { trim, external } = value;
   if (typeof trim.enabled !== "boolean") throw new TypeError("Trim guide enabled must be a boolean.");
+  const trimColor = trim.color === undefined ? "blue" : trim.color;
+  if (!isGuideColor(trimColor)) throw new TypeError("Trim guide color must be one of red, pink, green, blue, black, or white.");
   if (trim.extentMm !== "full" && typeof trim.extentMm !== "number") {
     throw new TypeError("Trim guide extent must be a positive number in millimeters or 'full'.");
   }
   if (trim.extentMm !== "full") assertPositive(trim.extentMm, "Trim guide extent");
   if (typeof external.enabled !== "boolean") throw new TypeError("External guide enabled must be a boolean.");
+  const externalColor = external.color === undefined ? "black" : external.color;
+  if (!isGuideColor(externalColor)) throw new TypeError("External guide color must be one of red, pink, green, blue, black, or white.");
   if (typeof external.strokeWidthPt !== "number") throw new TypeError("External guide stroke width must be a number in points.");
   assertPositive(external.strokeWidthPt, "External guide stroke width");
 
   return Object.freeze({
-    trim: Object.freeze({ enabled: trim.enabled, extentMm: trim.extentMm as number | "full" }),
-    external: Object.freeze({ enabled: external.enabled, strokeWidthPt: external.strokeWidthPt }),
+    trim: Object.freeze({ enabled: trim.enabled, extentMm: trim.extentMm as number | "full", color: trimColor }),
+    external: Object.freeze({ enabled: external.enabled, strokeWidthPt: external.strokeWidthPt, color: externalColor }),
   });
 }
 

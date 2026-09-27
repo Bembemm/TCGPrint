@@ -1,5 +1,5 @@
 import type { BleedModePreference } from "../../image-engine/bleed";
-import type { CutGuideConfig } from "../../core/geometry";
+import type { CutGuideConfig, GuideColor } from "../../core/geometry";
 
 export interface BleedDiagnosticsReport {
   readonly version: 1;
@@ -30,15 +30,19 @@ export function buildCutGuideConfig(
   trimExtentValue: string,
   externalEnabled: boolean,
   externalStrokeWidthValue: string,
+  trimColor: GuideColor = "blue",
+  externalColor: GuideColor = "black",
 ): CutGuideConfig {
   return {
     trim: {
       enabled: trimEnabled,
       extentMm: trimExtentValue === "full" ? "full" : Number(trimExtentValue),
+      color: trimColor,
     },
     external: {
       enabled: externalEnabled,
       strokeWidthPt: Number(externalStrokeWidthValue),
+      color: externalColor,
     },
   };
 }

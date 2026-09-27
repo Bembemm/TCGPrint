@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { calculateGridPlacement, MAGIC_STANDARD_CARD, type CardFormat } from "../../core/geometry";
 import { mmToPoints, pointsToMm } from "../../core/units";
 import { BleedEngine } from "../../image-engine/bleed";
-import type { CutGuideConfig } from "../../core/geometry/cut-guides";
+import type { CutGuideConfig, GuideColor } from "../../core/geometry/cut-guides";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 
 const FIXTURES = join(process.cwd(), "tests", "fixtures", "pdf");
@@ -429,8 +429,8 @@ describe("LosslessPdfEngine", () => {
       images: [original],
       bleedResults: [bleed],
       cutGuides: {
-        trim: { enabled: true, extentMm: "full" },
-        external: { enabled: false, strokeWidthPt: 0.3 },
+        trim: { enabled: true, extentMm: "full", color: "blue" },
+        external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
       },
     });
     const parsed = await parsePdf(pdf);
@@ -551,8 +551,8 @@ describe("LosslessPdfEngine", () => {
   it("draws vector cut guides after the untouched card image with physical stroke styling", async () => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const config: CutGuideConfig = {
-      trim: { enabled: true, extentMm: "full" },
-      external: { enabled: false, strokeWidthPt: 0.3 },
+      trim: { enabled: true, extentMm: "full", color: "blue" },
+      external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
     };
     const withoutGuides = await engine.generate({ images: [original] });
     const withGuides = await engine.generate({ images: [original], cutGuides: config });
@@ -568,9 +568,9 @@ describe("LosslessPdfEngine", () => {
     const strokeColor = /([\d.]+) ([\d.]+) ([\d.]+) RG\b/.exec(guidedPdf.content)?.slice(1).map(Number);
     expect(Number(strokeWidth)).toBeCloseTo(0.2, 8);
     expect(strokeColor).toEqual([
-      expect.closeTo(0x00 / 255, 8),
-      expect.closeTo(0xa6 / 255, 8),
-      expect.closeTo(0xd6 / 255, 8),
+      expect.closeTo(0x1e / 255, 8),
+      expect.closeTo(0x88 / 255, 8),
+      expect.closeTo(0xe5 / 255, 8),
     ]);
     expect(guidedPdf.content.lastIndexOf("\nS")).toBeGreaterThan(guidedPdf.content.lastIndexOf(" Do"));
 
@@ -587,13 +587,112 @@ describe("LosslessPdfEngine", () => {
     expect(trimHeightPoints).toBeCloseTo(252, 10);
   });
 
+  it("draws each selected guide color as PDF RGB without changing image objects or segment arrays", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const cleanPdf = await parsePdf(await engine.generate({ images: [original] }));
+    const imageHashes = cleanPdf.images.map((image) => createHash("sha256").update(getPdfStreamBytes(image)).digest("hex"));
+    const palette = [
+      ["red", [0xe5 / 255, 0x39 / 255, 0x35 / 255]],
+      ["pink", [0xec / 255, 0x40 / 255, 0x7a / 255]],
+      ["green", [0x43 / 255, 0xa0 / 255, 0x47 / 255]],
+      ["blue", [0x1e / 255, 0x88 / 255, 0xe5 / 255]],
+      ["black", [0, 0, 0]],
+      ["white", [1, 1, 1]],
+    ] as const satisfies readonly (readonly [GuideColor, readonly [number, number, number]])[];
+    let referenceTrimSegments: number[][] | undefined;
+    let referenceExternalSegments: number[][] | undefined;
+
+    for (const [color, rgb] of palette) {
+      for (const guideKind of ["trim", "external"] as const) {
+        const config: CutGuideConfig = {
+          trim: { enabled: guideKind === "trim", extentMm: "full", color: guideKind === "trim" ? color : "blue" },
+          external: { enabled: guideKind === "external", strokeWidthPt: 0.3, color: guideKind === "external" ? color : "black" },
+        };
+        const pdf = await parsePdf(await engine.generate({ images: [original], cutGuides: config }));
+        const rgbOperators = [...pdf.content.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) RG\b/g)]
+          .map((match) => match.slice(1).map(Number));
+        const segments = getVectorSegments(pdf.content);
+
+        expect(pdf.images).toHaveLength(cleanPdf.images.length);
+        expect(pdf.images.map((image) => createHash("sha256").update(getPdfStreamBytes(image)).digest("hex"))).toEqual(imageHashes);
+        expect(rgbOperators).toEqual([rgb.map((component) => expect.closeTo(component, 8))]);
+        if (guideKind === "external" && color === "black") expect(pdf.content).toContain("0 0 0 RG");
+        if (guideKind === "external" && color === "white") expect(pdf.content).toContain("1 1 1 RG");
+        if (guideKind === "trim") {
+          referenceTrimSegments ??= segments;
+          expect(segments).toEqual(referenceTrimSegments);
+        } else {
+          referenceExternalSegments ??= segments;
+          expect(segments).toEqual(referenceExternalSegments);
+        }
+      }
+    }
+  });
+
+  it("serializes colorless legacy guide configs with independent default colors", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const legacyConfig = {
+      trim: { enabled: true, extentMm: "full" },
+      external: { enabled: true, strokeWidthPt: 0.3 },
+    } as unknown as CutGuideConfig;
+    const defaultedConfig: CutGuideConfig = {
+      trim: { enabled: true, extentMm: "full", color: "blue" },
+      external: { enabled: true, strokeWidthPt: 0.3, color: "black" },
+    };
+    const legacyPdf = await parsePdf(await engine.generate({ images: [original], cutGuides: legacyConfig }));
+    const defaultedPdf = await parsePdf(await engine.generate({ images: [original], cutGuides: defaultedConfig }));
+    const strokeColors = (content: string) => [...content.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) RG\b/g)]
+      .map((match) => match.slice(1).map(Number));
+    const imageHashes = (pdf: ParsedPdf) => pdf.images
+      .map((image) => createHash("sha256").update(getPdfStreamBytes(image)).digest("hex"));
+
+    expect(strokeColors(legacyPdf.content)).toEqual(strokeColors(defaultedPdf.content));
+    expect(legacyPdf.content).toContain("0 0 0 RG");
+    expect(getVectorSegments(legacyPdf.content)).toEqual(getVectorSegments(defaultedPdf.content));
+    expect(legacyPdf.images).toHaveLength(defaultedPdf.images.length);
+    expect(imageHashes(legacyPdf)).toEqual(imageHashes(defaultedPdf));
+  });
+
+  it("serializes independent trim pink and external black, and trim green and external blue", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    let referenceSegments: number[][] | undefined;
+    let referenceImageHashes: string[] | undefined;
+
+    for (const { trimColor, externalColor, expected } of [
+      { trimColor: "pink", externalColor: "black", expected: [[0xec / 255, 0x40 / 255, 0x7a / 255], [0, 0, 0]] },
+      { trimColor: "green", externalColor: "blue", expected: [[0x43 / 255, 0xa0 / 255, 0x47 / 255], [0x1e / 255, 0x88 / 255, 0xe5 / 255]] },
+    ] as const satisfies readonly { trimColor: GuideColor; externalColor: GuideColor; expected: readonly (readonly number[])[] }[]) {
+      const config: CutGuideConfig = {
+        trim: { enabled: true, extentMm: 1, color: trimColor },
+        external: { enabled: true, strokeWidthPt: 0.3, color: externalColor },
+      };
+      const pdf = await parsePdf(await engine.generate({
+        images: [original],
+        cutGuides: config,
+      }));
+      const rgbOperators = [...pdf.content.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) RG\b/g)]
+        .map((match) => match.slice(1).map(Number));
+      const segments = getVectorSegments(pdf.content);
+      const imageHashes = pdf.images.map((image) => createHash("sha256").update(getPdfStreamBytes(image)).digest("hex"));
+
+      expect(rgbOperators).toHaveLength(2);
+      expect(rgbOperators[0]).toEqual(expected[0].map((component) => expect.closeTo(component, 8)));
+      expect(rgbOperators[1]).toEqual(expected[1].map((component) => expect.closeTo(component, 8)));
+      expect(segments).toHaveLength(16);
+      expect(segments).toEqual(referenceSegments ?? segments);
+      expect(imageHashes).toEqual(referenceImageHashes ?? imageHashes);
+      referenceSegments ??= segments;
+      referenceImageHashes ??= imageHashes;
+    }
+  });
+
   it("serializes 1 mm trim corner segments at exact physical trim coordinates", async () => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const pdf = await engine.generate({
       images: [original],
       cutGuides: {
-        trim: { enabled: true, extentMm: 1 },
-        external: { enabled: false, strokeWidthPt: 0.3 },
+        trim: { enabled: true, extentMm: 1, color: "blue" },
+        external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
       },
     });
     const parsed = await parsePdf(pdf);
@@ -652,10 +751,10 @@ describe("LosslessPdfEngine", () => {
   });
 
   it.each([
-    ["both OFF", { trim: { enabled: false, extentMm: 1 }, external: { enabled: false, strokeWidthPt: 0.3 } }, 0],
-    ["trim only", { trim: { enabled: true, extentMm: "full" }, external: { enabled: false, strokeWidthPt: 0.3 } }, 4],
-    ["external only", { trim: { enabled: false, extentMm: 1 }, external: { enabled: true, strokeWidthPt: 0.3 } }, 8],
-    ["both ON", { trim: { enabled: true, extentMm: 1 }, external: { enabled: true, strokeWidthPt: 0.3 } }, 16],
+    ["both OFF", { trim: { enabled: false, extentMm: 1, color: "blue" }, external: { enabled: false, strokeWidthPt: 0.3, color: "black" } }, 0],
+    ["trim only", { trim: { enabled: true, extentMm: "full", color: "blue" }, external: { enabled: false, strokeWidthPt: 0.3, color: "black" } }, 4],
+    ["external only", { trim: { enabled: false, extentMm: 1, color: "blue" }, external: { enabled: true, strokeWidthPt: 0.3, color: "black" } }, 8],
+    ["both ON", { trim: { enabled: true, extentMm: 1, color: "blue" }, external: { enabled: true, strokeWidthPt: 0.3, color: "black" } }, 16],
   ] as const)("keeps %s vector-only and independent of image objects", async (_mode, config, segmentCount) => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const clean = await engine.generate({ images: [original] });
@@ -676,8 +775,8 @@ describe("LosslessPdfEngine", () => {
       images: [original],
       bleedResults: [bleed],
       cutGuides: {
-        trim: { enabled: false, extentMm: 1 },
-        external: { enabled: true, strokeWidthPt: 0.3 },
+        trim: { enabled: false, extentMm: 1, color: "blue" },
+        external: { enabled: true, strokeWidthPt: 0.3, color: "black" },
       },
     });
     const parsed = await parsePdf(pdf);
@@ -702,9 +801,9 @@ describe("LosslessPdfEngine", () => {
     ]);
     expect(/([\d.]+) w\b/.exec(parsed.content)?.[1]).toBe("0.3");
     expect(/([\d.]+) ([\d.]+) ([\d.]+) RG\b/.exec(parsed.content)?.slice(1).map(Number)).toEqual([
-      expect.closeTo(0xe8 / 255, 8),
-      expect.closeTo(0x75 / 255, 8),
-      expect.closeTo(0x00 / 255, 8),
+      0,
+      0,
+      0,
     ]);
   });
 
@@ -713,8 +812,8 @@ describe("LosslessPdfEngine", () => {
     const withoutRoundedCorners = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
     const withRoundedCorners = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625, roundedCorners: true });
     const config: CutGuideConfig = {
-      trim: { enabled: true, extentMm: 1 },
-      external: { enabled: true, strokeWidthPt: 0.3 },
+      trim: { enabled: true, extentMm: 1, color: "blue" },
+      external: { enabled: true, strokeWidthPt: 0.3, color: "black" },
     };
     const plainPdf = await engine.generate({ images: [original], bleedResults: [withoutRoundedCorners], cutGuides: config });
     const roundedPdf = await engine.generate({ images: [original], bleedResults: [withRoundedCorners], cutGuides: config });
@@ -730,8 +829,8 @@ describe("LosslessPdfEngine", () => {
       images: [original],
       bleedResults: [bleed],
       cutGuides: {
-        trim: { enabled: true, extentMm: "full" },
-        external: { enabled: false, strokeWidthPt: 0.3 },
+        trim: { enabled: true, extentMm: "full", color: "blue" },
+        external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
       },
     });
     const parsed = await parsePdf(pdf);
@@ -756,8 +855,8 @@ describe("LosslessPdfEngine", () => {
       images: Array.from({ length: 9 }, () => original),
       bleedResults: Array.from({ length: 9 }, () => bleed),
       cutGuides: {
-        trim: { enabled: false, extentMm: 1 },
-        external: { enabled: false, strokeWidthPt: 0.3 },
+        trim: { enabled: false, extentMm: 1, color: "blue" },
+        external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
       },
     });
     const parsed = await parsePdf(pdf);
@@ -807,8 +906,8 @@ describe("LosslessPdfEngine", () => {
       bleedResults: [bleed, ...Array.from({ length: 8 }, () => undefined)],
       paperFormat,
       cutGuides: {
-        trim: { enabled: false, extentMm: 1 },
-        external: { enabled: true, strokeWidthPt },
+        trim: { enabled: false, extentMm: 1, color: "blue" },
+        external: { enabled: true, strokeWidthPt, color: "black" },
       },
     });
     const parsed = await parsePdf(pdf);

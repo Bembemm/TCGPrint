@@ -101,8 +101,8 @@ describe("card APIs", () => {
       options: {
         bleedMm: 0,
         cutGuides: {
-          trim: { enabled: false, extentMm: 1 },
-          external: { enabled: true, strokeWidthPt: "0.3" },
+          trim: { enabled: false, extentMm: 1, color: "blue" },
+          external: { enabled: true, strokeWidthPt: "0.3", color: "black" },
         },
       },
     }), testWorkbench());
