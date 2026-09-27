@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { PDFDocument, PDFName, PDFRawStream } from "@pdfme/pdf-lib";
+import { PDFDict, PDFDocument, PDFName, PDFRawStream } from "@pdfme/pdf-lib";
 import { inflateSync } from "node:zlib";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
@@ -10,6 +10,35 @@ import { mmToPoints, pointsToMm } from "../../core/units";
 
 const fixturePath = join(process.cwd(), "tests", "fixtures", "pdf");
 const svgBytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="140" viewBox="0 0 100 140"><rect width="100" height="140" fill="#123456"/></svg>');
+
+interface PdfClipRectangle {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+type PdfTransform = readonly [number, number, number, number, number, number];
+
+interface PdfClipPath {
+  readonly rectangles: readonly PdfClipRectangle[];
+  readonly hasAdditionalGeometry: boolean;
+  readonly matrices: readonly PdfTransform[];
+  readonly scopeId: number;
+}
+
+interface PdfImageDraw {
+  readonly resourceName: string;
+  readonly clips: readonly PdfClipPath[];
+  readonly matrices: readonly PdfTransform[];
+  readonly scopeIds: readonly number[];
+  readonly offset: number;
+}
+
+interface PdfVectorSegment {
+  readonly coordinates: readonly number[];
+  readonly strokeOffset: number;
+}
 
 async function postFile(route: typeof pdfPost, filename: string, bytes: Uint8Array, extras: Record<string, string> = {}): Promise<Response> {
   const form = new FormData();
@@ -22,18 +51,145 @@ async function postFile(route: typeof pdfPost, filename: string, bytes: Uint8Arr
 
 async function imageStreams(pdfBytes: Uint8Array) {
   const pdf = await PDFDocument.load(pdfBytes);
-  const images: Array<{ readonly raw: PDFRawStream; readonly dictionary: string }> = [];
+  const images: Array<{ readonly raw: PDFRawStream; readonly dictionary: string; readonly reference: string }> = [];
   const content: Buffer[] = [];
-  for (const [, object] of pdf.context.enumerateIndirectObjects()) {
+  for (const [reference, object] of pdf.context.enumerateIndirectObjects()) {
     if (!(object instanceof PDFRawStream)) continue;
     const dictionary = object.dict.toString();
-    if (object.dict.get(PDFName.of("Subtype"))?.toString() === "/Image") images.push({ raw: object, dictionary });
+    if (object.dict.get(PDFName.of("Subtype"))?.toString() === "/Image") images.push({ raw: object, dictionary, reference: reference.toString() });
     else if (object.dict.get(PDFName.of("Filter"))?.toString() === "/FlateDecode") {
       content.push(inflateSync(Buffer.from(object.contents)));
     }
   }
   return { pdf, images, rawContent: Buffer.concat(content).toString("latin1") };
 }
+
+function getImageDrawsWithClips(content: string): PdfImageDraw[] {
+  const tokenMatches = [...content.matchAll(/\/[\w.-]+|[+-]?(?:\d+\.?\d*|\.\d+)(?:[Ee][+-]?\d+)?|[A-Za-z*]+/g)];
+  const tokens = tokenMatches.map((match) => match[0]);
+  const graphicsStack: Array<{
+    readonly clips: readonly PdfClipPath[];
+    readonly matrices: readonly PdfTransform[];
+    readonly scopeIds: readonly number[];
+  }> = [];
+  const draws: PdfImageDraw[] = [];
+  let activeClips: readonly PdfClipPath[] = [];
+  let activeMatrices: readonly PdfTransform[] = [];
+  let activeScopeIds: readonly number[] = [];
+  let nextScopeId = 1;
+  let pendingPath: PdfClipPath | undefined;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "q") {
+      graphicsStack.push({ clips: activeClips, matrices: activeMatrices, scopeIds: activeScopeIds });
+      activeScopeIds = [...activeScopeIds, nextScopeId];
+      nextScopeId += 1;
+    } else if (token === "Q") {
+      const state = graphicsStack.pop();
+      activeClips = state?.clips ?? [];
+      activeMatrices = state?.matrices ?? [];
+      activeScopeIds = state?.scopeIds ?? [];
+      pendingPath = undefined;
+    } else if (token === "re") {
+      const operands = tokens.slice(index - 4, index).map(Number);
+      if (operands.length === 4 && operands.every(Number.isFinite)) {
+        const rectangle = { x: operands[0], y: operands[1], width: operands[2], height: operands[3] };
+        pendingPath = pendingPath
+          ? { ...pendingPath, rectangles: [...pendingPath.rectangles, rectangle] }
+          : {
+              rectangles: [rectangle],
+              hasAdditionalGeometry: false,
+              matrices: activeMatrices,
+              scopeId: activeScopeIds.at(-1) ?? 0,
+            };
+      }
+    } else if (token === "W" || token === "W*") {
+      activeClips = [
+        ...activeClips,
+        pendingPath ?? {
+          rectangles: [],
+          hasAdditionalGeometry: false,
+          matrices: activeMatrices,
+          scopeId: activeScopeIds.at(-1) ?? 0,
+        },
+      ];
+      pendingPath = undefined;
+    } else if (["m", "l", "c", "v", "y", "h"].includes(token)) {
+      pendingPath = pendingPath
+        ? { ...pendingPath, hasAdditionalGeometry: true }
+        : {
+            rectangles: [],
+            hasAdditionalGeometry: true,
+            matrices: activeMatrices,
+            scopeId: activeScopeIds.at(-1) ?? 0,
+          };
+    } else if (["n", "S", "s", "f", "F", "f*", "B", "B*", "b", "b*"].includes(token)) {
+      pendingPath = undefined;
+    } else if (token === "cm") {
+      const operands = tokens.slice(index - 6, index).map(Number);
+      if (operands.length === 6 && operands.every(Number.isFinite)) {
+        activeMatrices = [
+          ...activeMatrices,
+          [operands[0], operands[1], operands[2], operands[3], operands[4], operands[5]],
+        ];
+      }
+    } else if (token === "Do") {
+      const resourceName = tokens[index - 1]?.replace(/^\//, "");
+      if (resourceName) {
+        draws.push({
+          resourceName,
+          clips: activeClips,
+          matrices: activeMatrices,
+          scopeIds: activeScopeIds,
+          offset: tokenMatches[index].index ?? 0,
+        });
+      }
+    }
+  }
+
+  return draws;
+}
+
+function getImageResourceReference(pdf: PDFDocument, resourceName: string): string {
+  const resources = pdf.getPages()[0].node.Resources();
+  const xObjects = resources?.lookup(PDFName.of("XObject"), PDFDict);
+  const reference = xObjects?.get(PDFName.of(resourceName));
+  if (!reference) throw new Error(`PDF image resource /${resourceName} is missing.`);
+  return reference.toString();
+}
+
+function getVectorSegments(content: string): PdfVectorSegment[] {
+  const number = "[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[Ee][+-]?\\d+)?";
+  const pattern = new RegExp(`(${number})\\s+(${number})\\s+m\\s+(${number})\\s+(${number})\\s+l\\s+S`, "g");
+  return [...content.matchAll(pattern)].map((match) => ({
+    coordinates: match.slice(1).map(Number),
+    strokeOffset: (match.index ?? 0) + match[0].lastIndexOf("S"),
+  }));
+}
+
+describe("PDF content inspection", () => {
+  it("retains every rectangle subpath in a clipping path", () => {
+    const [draw] = getImageDrawsWithClips("q 0 0 10 10 re 20 20 5 5 re W n /Im0 Do Q");
+
+    expect(draw.clips[0]).toMatchObject({
+      rectangles: [
+        { x: 0, y: 0, width: 10, height: 10 },
+        { x: 20, y: 20, width: 5, height: 5 },
+      ],
+      hasAdditionalGeometry: false,
+    });
+  });
+
+  it("flags non-rectangular geometry in a clipping path", () => {
+    const [draw] = getImageDrawsWithClips("q 0 0 m 10 10 l 20 20 5 5 re W n /Im0 Do Q");
+
+    expect(draw.clips[0]).toMatchObject({
+      rectangles: [{ x: 20, y: 20, width: 5, height: 5 }],
+      hasAdditionalGeometry: true,
+    });
+  });
+});
 
 describe("minimal import workbench API", () => {
   it("returns a serializable preview with detections, entries and reports", async () => {
@@ -110,13 +266,71 @@ describe("minimal import workbench API", () => {
     expect(response.status).toBe(200);
     const parsed = await imageStreams(new Uint8Array(await response.arrayBuffer()));
     const dct = parsed.images.find((image) => image.dictionary.includes("/DCTDecode"));
+    const bleedRaster = parsed.images.find((image) => image.dictionary.includes("/FlateDecode"));
     expect(dct).toBeDefined();
+    expect(bleedRaster).toBeDefined();
     expect(Buffer.from(dct!.raw.contents)).toEqual(Buffer.from(jpeg));
-    const matrices = parsed.rawContent.split(/\r?\n/)
-      .filter((line) => line.trim().endsWith(" cm"))
-      .map((line) => line.trim().replace(/\s+cm$/, "").split(/\s+/).map(Number));
-    expect(matrices.some(([width]) => Math.abs(width - mmToPoints(63.5 + 1.25)) < 1e-8)).toBe(true);
-    expect(parsed.rawContent).toMatch(/\s+m\s+/);
+    const imageDraws = getImageDrawsWithClips(parsed.rawContent);
+    expect(imageDraws).toHaveLength(5);
+    const bleedDraws = imageDraws.slice(0, 4);
+    const trimDraw = imageDraws[4]!;
+    expect(trimDraw.clips).toHaveLength(0);
+    const bleedClips = bleedDraws.map((draw) => {
+      expect(draw.clips).toHaveLength(1);
+      const clip = draw.clips[0]!;
+      expect(draw.scopeIds).toContain(clip.scopeId);
+      expect(clip.rectangles).toHaveLength(1);
+      expect(clip.hasAdditionalGeometry).toBe(false);
+      expect(clip.matrices).toEqual([]);
+      return clip;
+    });
+    expect(new Set(bleedClips.map((clip) => clip.scopeId)).size).toBe(4);
+    const bleedResource = getImageResourceReference(parsed.pdf, bleedDraws[0].resourceName);
+    expect(bleedDraws.every((draw) => getImageResourceReference(parsed.pdf, draw.resourceName) === bleedResource)).toBe(true);
+    expect(bleedResource).toBe(bleedRaster!.reference);
+    expect(getImageResourceReference(parsed.pdf, trimDraw.resourceName)).toBe(dct!.reference);
+
+    const trimWidth = mmToPoints(63.5);
+    const trimHeight = mmToPoints(88.9);
+    const trimX = mmToPoints((210 - 63.5) / 2);
+    const trimTop = (297 - 88.9) / 2;
+    const trimY = mmToPoints(297 - trimTop - 88.9);
+    const expectedTrimTransforms: readonly PdfTransform[] = [
+      [1, 0, 0, 1, trimX, trimY],
+      [1, 0, 0, 1, 0, 0],
+      [trimWidth, 0, 0, trimHeight, 0, 0],
+      [1, 0, 0, 1, 0, 0],
+    ];
+    expect(trimDraw.matrices.map((matrix) => matrix.map((coordinate) => Number(coordinate.toFixed(8)))))
+      .toEqual(expectedTrimTransforms.map((matrix) => matrix.map((coordinate) => Number(coordinate.toFixed(8)))));
+
+    const bleedPoints = mmToPoints(0.625);
+    const expectedClips: readonly PdfClipRectangle[] = [
+      { x: trimX - bleedPoints, y: trimY - bleedPoints, width: bleedPoints, height: trimHeight + 2 * bleedPoints },
+      { x: trimX + trimWidth, y: trimY - bleedPoints, width: bleedPoints, height: trimHeight + 2 * bleedPoints },
+      { x: trimX, y: trimY + trimHeight, width: trimWidth, height: bleedPoints },
+      { x: trimX, y: trimY - bleedPoints, width: trimWidth, height: bleedPoints },
+    ];
+    for (const [index, expected] of expectedClips.entries()) {
+      const actual = bleedClips[index].rectangles[0]!;
+      expect(actual.x).toBeCloseTo(expected.x, 8);
+      expect(actual.y).toBeCloseTo(expected.y, 8);
+      expect(actual.width).toBeCloseTo(expected.width, 8);
+      expect(actual.height).toBeCloseTo(expected.height, 8);
+    }
+
+    const guides = getVectorSegments(parsed.rawContent);
+    expect(guides).toHaveLength(4);
+    const expectedGuides = [
+      [trimX, mmToPoints(192.95), trimX + trimWidth, mmToPoints(192.95)],
+      [trimX, mmToPoints(104.05), trimX + trimWidth, mmToPoints(104.05)],
+      [trimX, mmToPoints(192.95), trimX, mmToPoints(104.05)],
+      [trimX + trimWidth, mmToPoints(192.95), trimX + trimWidth, mmToPoints(104.05)],
+    ];
+    expect(guides.map(({ coordinates }) => coordinates.map((coordinate) => Number(coordinate.toFixed(8)))))
+      .toEqual(expectedGuides.map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8)))));
+    const lastImageDrawOffset = imageDraws.at(-1)!.offset;
+    expect(guides.every((guide) => guide.strokeOffset > lastImageDrawOffset)).toBe(true);
   });
 
   it("reports explicit export limits for WebP and TIFF and preserves SVG bleed limitations", async () => {

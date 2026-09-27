@@ -117,7 +117,7 @@ describe("artwork storage", () => {
     database.close();
   });
 
-  it("rejects tampered content-addressed originals instead of overwriting them", async () => {
+  it("repairs a tampered content-addressed original from bytes matching its hash", async () => {
     const base = await directory();
     const paths = appDataPaths(base);
     const { database, repository } = await dbAt(paths.databaseFile);
@@ -129,7 +129,16 @@ describe("artwork storage", () => {
     tampered[tampered.length - 1] ^= 0xff;
     await writeFile(filePath, tampered);
     await expect(store.getOriginal(stored.artworkId)).rejects.toMatchObject({ code: "ARTWORK_CONTENT_CORRUPT" });
-    await expect(store.addOriginal(bytes, { provider: "upload" })).rejects.toMatchObject({ code: "ARTWORK_CONTENT_CORRUPT" });
+    const differentBytes = await png({ r: 3, g: 77, b: 210 });
+    const different = await store.addOriginal(differentBytes, { provider: "upload" });
+    expect(different.contentHash).not.toBe(stored.contentHash);
+    await expect(store.getOriginal(stored.artworkId)).rejects.toMatchObject({ code: "ARTWORK_CONTENT_CORRUPT" });
+    await expect(readFile(filePath)).resolves.toEqual(Buffer.from(tampered));
+    await expect(store.getOriginal(different.artworkId)).resolves.toMatchObject({ bytes: differentBytes, contentHash: different.contentHash });
+    const repaired = await store.addOriginal(bytes, { provider: "upload" });
+    expect(repaired).toMatchObject({ artworkId: stored.artworkId, contentHash: stored.contentHash });
+    await expect(store.getOriginal(stored.artworkId)).resolves.toMatchObject({ bytes, contentHash: stored.contentHash });
+    await expect(readFile(filePath)).resolves.toEqual(Buffer.from(bytes));
     await expect(stat(filePath)).resolves.toBeDefined();
     database.close();
   });
