@@ -48,6 +48,12 @@ export function resolveBleedSourcePolicy(request: BleedSourcePolicyRequest): Res
     if (!isRaster(request.format)) {
       return { requestedMode, mode: "subtle-edge-stretch", policyId: "scryfall-unknown-format-subtle-v1" };
     }
+    const borderColor = typeof request.metadata?.borderColor === "string"
+      ? request.metadata.borderColor.trim().toLowerCase()
+      : undefined;
+    if (request.metadata?.fullArt === true || (borderColor !== undefined && borderColor !== "black")) {
+      return { requestedMode, mode: "subtle-edge-stretch", policyId: "scryfall-full-art-auto-subtle-v1" };
+    }
     return { requestedMode, mode: "smart-border-fill", policyId: "scryfall-raster-auto-v1" };
   }
   if (request.source === "mpc") {

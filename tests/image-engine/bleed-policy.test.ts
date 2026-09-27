@@ -4,7 +4,7 @@ import { resolveBleedSourcePolicy } from "../../image-engine/bleed/policy";
 
 describe("bleed source policy", () => {
   it("selects source defaults, preserves SVG behavior, marks unknown MPC metadata, and honors overrides", () => {
-    expect(resolveBleedSourcePolicy({ source: "scryfall", format: "png" })).toMatchObject({
+    expect(resolveBleedSourcePolicy({ source: "scryfall", format: "png", metadata: { fullArt: false, borderColor: "black" } })).toMatchObject({
       requestedMode: "auto",
       mode: "smart-border-fill",
       policyId: "scryfall-raster-auto-v1",
@@ -28,16 +28,32 @@ describe("bleed source policy", () => {
       mode: "smart-border-fill",
       policyId: "manual-override-upload-smart-border-fill-v1",
     });
+    expect(resolveBleedSourcePolicy({ source: "scryfall", format: "png", metadata: { borderColor: "black" }, override: "subtle-edge-stretch" })).toMatchObject({
+      requestedMode: "subtle-edge-stretch",
+      mode: "subtle-edge-stretch",
+    });
   });
 
-  it("keeps every Scryfall raster on smart policy and lets pixel confidence choose the side fallback", () => {
+  it("keeps full-art and borderless Scryfall art out of automatic frame classification", () => {
     expect(resolveBleedSourcePolicy({ source: "scryfall", format: "png", metadata: { fullArt: true } })).toMatchObject({
-      mode: "smart-border-fill",
-      policyId: "scryfall-raster-auto-v1",
+      requestedMode: "auto",
+      mode: "subtle-edge-stretch",
+      policyId: "scryfall-full-art-auto-subtle-v1",
     });
     expect(resolveBleedSourcePolicy({ source: "scryfall", format: "png", metadata: { borderColor: "borderless" } })).toMatchObject({
+      mode: "subtle-edge-stretch",
+      policyId: "scryfall-full-art-auto-subtle-v1",
+    });
+    for (const borderColor of ["white", "silver", "gold"]) {
+      expect(resolveBleedSourcePolicy({ source: "scryfall", format: "png", metadata: { borderColor } })).toMatchObject({
+        mode: "subtle-edge-stretch",
+        policyId: "scryfall-full-art-auto-subtle-v1",
+      });
+    }
+    expect(resolveBleedSourcePolicy({ source: "scryfall", format: "png", metadata: { fullArt: true }, override: "smart-border-fill" })).toMatchObject({
+      requestedMode: "smart-border-fill",
       mode: "smart-border-fill",
-      policyId: "scryfall-raster-auto-v1",
+      policyId: "manual-override-scryfall-smart-border-fill-v1",
     });
   });
 

@@ -38,6 +38,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     const contentHash = createHash("sha256").update(bytes).digest("hex");
     const candidates: Record<string, ArtworkCandidate> = {
       "scryfall:synthetic": { id: "scryfall:synthetic", source: "scryfall", identityId: null, faceId: "front", originalAvailable: true },
+      "scryfall:synthetic-full-art": { id: "scryfall:synthetic-full-art", source: "scryfall", identityId: null, faceId: "front", originalAvailable: true, metadata: { fullArt: true, borderColor: "borderless" } },
       "upload:synthetic": { id: "upload:synthetic", source: "upload", identityId: null, faceId: "front", originalAvailable: true },
     };
     const catalog = {
@@ -55,7 +56,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
         bytes,
       }),
     };
-    const card = (id: string, source: "scryfall" | "upload", order: number): WorkingCard => ({
+    const card = (id: string, source: "scryfall" | "upload", order: number, candidateId = `${source}:synthetic`): WorkingCard => ({
       id,
       quantity: 1,
       order,
@@ -64,14 +65,18 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
       identity: null,
       identityResolution: { status: "unresolved", candidates: [], confirmed: false },
       faces: [{ id: `${id}-front`, side: "front" }],
-      selectedArtworkByFace: { front: { candidateId: `${source}:synthetic`, source, identityId: null, faceId: "front" } },
+      selectedArtworkByFace: { front: { candidateId, source, identityId: null, faceId: "front" } },
       localArtworkIds: [],
       mpcReferences: [],
       faceAssociations: [],
     });
     const generate = vi.spyOn(BleedEngine.prototype, "generate");
 
-    await exportWorkingCards(catalog, [card("scryfall-card", "scryfall", 0), card("upload-card", "upload", 1)], {
+    const result = await exportWorkingCardsWithDiagnostics(catalog, [
+      card("scryfall-card", "scryfall", 0),
+      card("upload-card", "upload", 1),
+      card("full-art-card", "scryfall", 2, "scryfall:synthetic-full-art"),
+    ], {
       bleedMm: 1,
       cutGuides: "none",
       bleedMode: "auto",
@@ -81,6 +86,12 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     expect(generate.mock.calls.map(([request]) => request.imageBytes)).toEqual([bytes, bytes]);
     expect(generate.mock.calls.map(([request]) => request.bleedMm)).toEqual([1, 1]);
     expect(generate.mock.calls.map(([request]) => request.mode)).toEqual(["smart-border-fill", "subtle-edge-stretch"]);
+    expect(result.bleedDiagnostics[2]).toMatchObject({
+      requestedMode: "auto",
+      resolvedMode: "subtle-edge-stretch",
+      policyId: "scryfall-full-art-auto-subtle-v1",
+      algorithmVersion: "reflected-corners-v2-smart-border-fill-v3",
+    });
   });
 
   it("returns per-side policy diagnostics for the exact bleed results consumed by PDF export", async () => {
@@ -150,10 +161,12 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     const pdfBleeds = pdfGenerate.mock.calls[0][0].bleedResults!;
     const generatedBleeds = await Promise.all(bleedGenerate.mock.results.map((result) => result.value));
     expect(pdfBleeds).toHaveLength(3);
+    expect(generatedBleeds).toHaveLength(2);
     for (const [index, bleed] of pdfBleeds.entries()) {
+      const generatedIndex = index === 2 ? 1 : index;
       expect(bleed).toBeDefined();
-      expect(bleed).toBe(generatedBleeds[index]);
-      expect(bleed!.preview.bytes).toBe(generatedBleeds[index].preview.bytes);
+      expect(bleed).toBe(generatedBleeds[generatedIndex]);
+      expect(bleed!.preview.bytes).toBe(generatedBleeds[generatedIndex].preview.bytes);
       expect(createHash("sha256").update(bleed!.preview.bytes).digest("hex")).toBe(result.bleedDiagnostics[index].previewSha256);
     }
   });

@@ -1,4 +1,4 @@
-export const BLEED_ALGORITHM_VERSION = "reflected-corners-v2-smart-border-fill-v2" as const;
+export const BLEED_ALGORITHM_VERSION = "reflected-corners-v2-smart-border-fill-v3" as const;
 
 export type BleedMode = "subtle-edge-stretch" | "smart-border-fill";
 export type BleedEffectiveMode = BleedMode | "mixed";

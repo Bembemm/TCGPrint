@@ -90,7 +90,6 @@ export interface BleedCacheIdentity {
   readonly originalSha256: string;
   readonly bleedMm: number;
   readonly mode: BleedMode;
-  readonly policyId: string;
   readonly sourceStrip: BleedSourceStrip;
   readonly trimWidthMm: number;
   readonly trimHeightMm: number;
@@ -320,7 +319,6 @@ export class BleedEngine {
       originalSha256: sourceSha256,
       bleedMm: request.bleedMm,
       mode,
-      policyId,
       sourceStrip,
       trimWidthMm,
       trimHeightMm,

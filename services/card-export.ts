@@ -125,7 +125,6 @@ export async function exportWorkingCardsWithDiagnostics(
         originalSha256: hash,
         bleedMm: options.bleedMm,
         mode: policy.mode,
-        policyId: policy.policyId,
         sourceStrip,
         trimWidthMm: trimSizeMm.widthMm,
         trimHeightMm: trimSizeMm.heightMm,

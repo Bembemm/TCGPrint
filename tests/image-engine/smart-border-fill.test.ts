@@ -335,7 +335,7 @@ describe("smart-border-fill", () => {
     }
   });
 
-  it("separates cache entries by source policy, mode, and threshold configuration", async () => {
+  it("shares derivatives across policy labels but separates pixel-affecting modes and thresholds", async () => {
     const cache = new MemoryBleedCache();
     const imageBytes = await syntheticDarkFrame();
     const first = await new BleedEngine({ cache }).generate({ imageBytes, bleedMm: 1, mode: "smart-border-fill", policyId: "scryfall-raster-auto-v1" });
@@ -367,7 +367,10 @@ describe("smart-border-fill", () => {
     if (first.status !== "derived" || otherPolicy.status !== "derived" || otherConfig.status !== "derived" || otherSearchBound.status !== "derived" || otherMode.status !== "derived") {
       throw new Error("Expected all cache identity requests to return derivatives.");
     }
-    expect(new Set([first.cacheKey, otherPolicy.cacheKey, otherConfig.cacheKey, otherSearchBound.cacheKey, otherMode.cacheKey]).size).toBe(5);
-    expect([first, otherPolicy, otherConfig, otherSearchBound, otherMode].every((result) => result.cacheStatus === "miss")).toBe(true);
+    expect(otherPolicy.cacheKey).toBe(first.cacheKey);
+    expect(otherPolicy.policyId).toBe("manual-override-upload-smart-border-fill-v1");
+    expect(new Set([first.cacheKey, otherConfig.cacheKey, otherSearchBound.cacheKey, otherMode.cacheKey]).size).toBe(4);
+    expect([first, otherConfig, otherSearchBound, otherMode].every((result) => result.cacheStatus === "miss")).toBe(true);
+    expect(otherPolicy.cacheStatus).toBe("hit");
   });
 });
