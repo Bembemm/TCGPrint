@@ -1356,6 +1356,7 @@ Disponibilizar uma opção explícita `roundedCorners: boolean`, desligada por p
 
 - `false`: não aplicar arredondamento automático;
 - `true`: completar o raio físico de canto do `CardFormat` quando a origem não tiver cantos arredondados completos;
+- `Magic Standard` usa raio inicial configurável de `3.175 mm`; outros formatos devem declarar seu próprio `cornerRadiusMm`;
 - se a origem já tiver os cantos compatíveis, a operação deve ser idempotente e não degradá-los;
 - se não houver raio físico configurado ou a detecção não for confiável, não inventar um valor nem alterar a origem;
 - a opção é aplicada como transformação geométrica separada, sem mudar a amostragem do bleed;

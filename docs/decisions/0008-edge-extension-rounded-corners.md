@@ -32,6 +32,7 @@ Arredondar cantos é uma necessidade distinta e opcional. Não é uma operação
 - A configuração explícita `roundedCorners: boolean` controla o recurso; seu padrão é `false`.
 - Quando desligado, não há arredondamento automático e a comparação pixel a pixel do trim deve passar integralmente.
 - Quando ligado, o sistema pode completar os cantos até o raio físico definido por `CardFormat`, somente se a origem ainda não tiver cantos completos compatíveis.
+- `Magic Standard` inicia com `cornerRadiusMm = 3.175`; é um valor interno configurável, não uma inferência sobre pixels da imagem. Outros formatos precisam declarar seu raio.
 - Uma origem que já tenha os cantos adequados não pode ser degradada nem arredondada duas vezes. Detecção e aplicação devem ser determinísticas; quando não houver evidência confiável ou raio configurado, preservar a origem.
 - O arredondamento é uma transformação geométrica separada do Edge Extension. Não escolhe pixels-fonte do bleed nem altera a identidade dos demais pixels da carta; a mídia original permanece imutável.
 - Preview e export obedecem ao mesmo valor da opção. A configuração e a versão da transformação entram na identidade/cache somente quando alterarem o derivado.
