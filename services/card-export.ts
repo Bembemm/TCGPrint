@@ -14,7 +14,8 @@ import {
 } from "../image-engine/bleed";
 import { MAGIC_STANDARD_CARD, PAPER_FORMATS, type CutGuideConfig } from "../core/geometry";
 import { LosslessPdfEngine, PdfExportError } from "../pdf-engine/document";
-import type { ArtworkCandidate, WorkingCard } from "../core/cards/types";
+import { mpcArtworkCandidateId } from "../core/cards/ids";
+import type { ArtworkCandidate, CardFaceSide, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
 import type { CardWorkbench } from "./card-workbench";
 
 export interface CardExportOptions {
@@ -58,6 +59,40 @@ function digest(bytes: Uint8Array): string {
   return createHash("sha256").update(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)).digest("hex");
 }
 
+function mpcReferencesForSelection(card: WorkingCard, selection: SelectedArtwork): readonly WorkingCardMpcReference[] {
+  if (selection.source !== "mpc") return card.mpcReferences;
+  const faceId: CardFaceSide = selection.faceId === "back" ? "back" : "front";
+  const providerAssetId = selection.providerAssetId ?? selection.selectedArtworkId;
+  if (!providerAssetId || mpcArtworkCandidateId(providerAssetId, faceId) !== selection.candidateId) return card.mpcReferences;
+  const alreadyReferenced = card.mpcReferences.some((reference) =>
+    (reference.faceId === "front" || reference.faceId === "back")
+    && mpcArtworkCandidateId(reference.importedAssetId, reference.faceId) === selection.candidateId,
+  );
+  if (alreadyReferenced) return card.mpcReferences;
+  return [...card.mpcReferences, {
+    faceId,
+    importedAssetId: providerAssetId,
+    providerAssetId,
+    selectedArtworkId: selection.selectedArtworkId ?? providerAssetId,
+    referenceOrigin: "gallery-selection",
+    slots: [],
+    availableLocally: false,
+  }];
+}
+
+function isMpcUnsupportedFormat(error: unknown): error is Error & { readonly kind: "unsupported-format" } {
+  return error instanceof Error && "kind" in error && error.kind === "unsupported-format";
+}
+
+function mpcExportFailure(error: unknown): CardExportServiceError {
+  if (isMpcUnsupportedFormat(error)) return new CardExportServiceError("UNSUPPORTED_FORMAT", error.message, { cause: error });
+  return new CardExportServiceError(
+    "ARTWORK_ORIGINAL_UNAVAILABLE",
+    `The selected MPC original is missing, corrupt, or not validated in local storage, and the provider could not revalidate it${error instanceof Error ? `: ${error.message}` : "."}`,
+    { cause: error },
+  );
+}
+
 function guides(mode: CardExportOptions["cutGuides"]): CutGuideConfig {
   const style = { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" as const };
   return mode === "none" ? { mode: "none", style } : { mode: "full", style };
@@ -94,15 +129,27 @@ export async function exportWorkingCardsWithDiagnostics(
     if (signal?.aborted) throw new CardExportServiceError("EXPORT_FAILED", "PDF export was cancelled.");
     const selection = card.selectedArtworkByFace.front;
     if (!selection) throw new CardExportServiceError("ARTWORK_REQUIRED", `${card.identity?.name ?? card.identityHints.name ?? "Custom card"} needs a selected front artwork.`);
-    const candidate = await catalog.getArtworkCandidate(selection.candidateId, {
-      mpcReferences: card.mpcReferences,
-      ...(card.identity ? { identity: card.identity } : {}),
-      ...(signal ? { signal } : {}),
-    });
+    let candidate: ArtworkCandidate | undefined;
+    try {
+      candidate = await catalog.getArtworkCandidate(selection.candidateId, {
+        mpcReferences: mpcReferencesForSelection(card, selection),
+        ...(card.identity ? { identity: card.identity } : {}),
+        ...(signal ? { signal } : {}),
+      });
+    } catch (error) {
+      if (selection.source === "mpc") throw mpcExportFailure(error);
+      throw error;
+    }
     if (!candidate || candidate.source !== selection.source || !candidate.originalAvailable) {
       throw new CardExportServiceError("ARTWORK_ORIGINAL_UNAVAILABLE", "The selected artwork has no locally available, validated original. MPC references need local bytes before PDF export.");
     }
-    const original = await catalog.getArtworkOriginal(candidate.id, signal);
+    let original: Awaited<ReturnType<CardWorkbench["getArtworkOriginal"]>>;
+    try {
+      original = await catalog.getArtworkOriginal(candidate.id, signal);
+    } catch (error) {
+      if (selection.source === "mpc") throw mpcExportFailure(error);
+      throw error;
+    }
     if (!(original.bytes instanceof Uint8Array) || original.bytes.byteLength !== original.byteLength) {
       throw new CardExportServiceError("ARTWORK_ORIGINAL_UNAVAILABLE", "The selected original failed local byte validation.");
     }

@@ -152,6 +152,106 @@ describe("MPC artwork provider", () => {
     database.close();
   });
 
+  it.each(["webp", "gif"])("does not list %s MPC originals that the current PDF exporter cannot encode", async (extension) => {
+    const { database, provider } = await setup(searchFake(driveCard({ extension })));
+
+    await expect(provider.searchArtwork(identity)).resolves.toEqual([]);
+    expect(provider.getHealth()).toMatchObject({ available: true, degraded: false });
+    database.close();
+  });
+
+  it.each(["png", "jpg", "jpeg", "svg"])("lists %s MPC originals supported by the current export policy", async (extension) => {
+    const { database, provider } = await setup(searchFake(driveCard({ extension })));
+
+    await expect(provider.searchArtwork(identity)).resolves.toMatchObject([{ metadata: { extension }, originalAvailable: true }]);
+    database.close();
+  });
+
+  it("keeps a candidate with unknown remote format metadata until downloaded bytes are validated", async () => {
+    const webp = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#496" } }).webp().toBuffer());
+    const fetchImpl = searchFake(driveCard({ extension: undefined, size: webp.byteLength }), async (url) => {
+      if (url.includes("/uc?")) return new Response(webp, { headers: { "Content-Type": "image/webp", "Content-Length": String(webp.byteLength) } });
+      throw new Error(`Unexpected MPC image request: ${url}`);
+    });
+    const { database, provider, repository } = await setup(fetchImpl);
+    const [candidate] = await provider.searchArtwork(identity);
+
+    expect(candidate).toMatchObject({ originalAvailable: true, metadata: { originalFormatKnown: false } });
+    await expect(provider.getOriginal(candidate.id)).rejects.toMatchObject({ name: "MpcArtworkProviderError", kind: "unsupported-format" });
+    expect(repository.findOriginalByProviderSource("mpc", "opaque-drive-id_1234567890", "https://drive.google.com/uc?export=download&id=opaque-drive-id_1234567890")).toBeUndefined();
+    database.close();
+  });
+
+  it("accepts PNG bytes when the MPC original format metadata is unknown", async () => {
+    const png = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#496" } }).png().toBuffer());
+    const fetchImpl = searchFake(driveCard({ extension: undefined, size: png.byteLength }), async (url) => {
+      if (url.includes("/uc?")) return new Response(png, { headers: { "Content-Type": "image/png", "Content-Length": String(png.byteLength) } });
+      throw new Error(`Unexpected MPC image request: ${url}`);
+    });
+    const { database, provider } = await setup(fetchImpl);
+    const [candidate] = await provider.searchArtwork(identity);
+    const original = await provider.getOriginal(candidate.id);
+
+    expect(original).toMatchObject({ format: "png", extension: "png", bytes: png });
+    expect(await provider.getCandidate(candidate.id)).toMatchObject({ originalAvailable: true, originalCached: true, metadata: { extension: "png", originalFormatKnown: true, originalFormatExportable: true } });
+    database.close();
+  });
+
+  it("accepts a WebP thumbnail when the declared original is PNG", async () => {
+    const webp = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#496" } }).webp().toBuffer());
+    const fetchImpl = searchFake(driveCard({ extension: "png" }), async () => new Response(webp, { headers: { "Content-Type": "image/webp" } }));
+    const { database, provider } = await setup(fetchImpl);
+    const [candidate] = await provider.searchArtwork(identity);
+    const preview = await provider.getPreview(candidate.id);
+
+    expect(candidate.metadata).toMatchObject({ extension: "png" });
+    expect(preview).toMatchObject({ contentType: "image/webp" });
+    database.close();
+  });
+
+  it.each(["missing", "corrupt"] as const)("reports a %s local original when expired MPC metadata cannot be revalidated offline", async (fileState) => {
+    const baseTime = Date.now();
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 80, height: 120, channels: 3, background: "#537799" } }).png().toBuffer());
+    const assetId = "opaque-drive-id_1234567890";
+    let online = true;
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      if (!online) throw new Error("MPC offline");
+      return searchFake(driveCard({ identifier: assetId, extension: "png", size: originalBytes.byteLength }), async (url) => {
+        if (url.includes("/uc?")) return new Response(originalBytes, { headers: { "Content-Type": "image/png", "Content-Length": String(originalBytes.byteLength) } });
+        throw new Error(`Unexpected MPC image request: ${url}`);
+      })(input, init);
+    };
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(baseTime));
+    const { database, provider, paths } = await setup(fetchImpl);
+    try {
+      const [candidate] = await provider.searchArtwork(identity);
+      const original = await provider.getOriginal(candidate.id);
+      const path = originalPathForHash(paths.originalsDirectory, original.contentHash, original.extension);
+      if (fileState === "missing") await unlink(path);
+      else await writeFile(path, new Uint8Array([1, 2, 3, 4]));
+
+      vi.setSystemTime(new Date(baseTime + 366 * 24 * 60 * 60 * 1000));
+      online = false;
+      await expect(provider.getCandidateForReferences(candidate.id, [{
+        faceId: "front",
+        importedAssetId: assetId,
+        providerAssetId: assetId,
+        selectedArtworkId: assetId,
+        referenceOrigin: "gallery-selection",
+        slots: [],
+        availableLocally: false,
+      }], identity)).rejects.toMatchObject({
+        name: "MpcArtworkProviderError",
+        kind: "network",
+        message: expect.stringContaining(fileState === "missing" ? "ARTWORK_MISSING" : "ARTWORK_CONTENT_CORRUPT"),
+      });
+    } finally {
+      vi.useRealTimers();
+      database.close();
+    }
+  });
+
   it("uses the v3 object-map schema first and derives stable candidate IDs from opaque IDs", async () => {
     const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
     const fetchImpl: typeof fetch = async (input, init = {}) => {
@@ -926,5 +1026,17 @@ describe("MPC artwork provider", () => {
     await expect(Promise.race([provider.searchArtwork(identity, { signal: controller.signal }), cancellation, timeout]))
       .rejects.toMatchObject({ kind: "aborted" });
     database.close();
+  });
+
+  it("downloads and stores an SVG original without converting it", async () => {
+    const svgBytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="140" viewBox="0 0 100 140"><rect width="100" height="140" fill="#123456"/></svg>');
+    const { database, provider } = await setup(searchFake(driveCard({ extension: "svg", size: svgBytes.byteLength }), async () => new Response(svgBytes, {
+      headers: { "Content-Type": "image/svg+xml", "Content-Length": String(svgBytes.byteLength) },
+    })));
+    const [candidate] = await provider.searchArtwork(identity);
+
+    await expect(provider.getOriginal(candidate.id)).resolves.toMatchObject({ extension: "svg", bytes: svgBytes });
+
+    await database.close();
   });
 });

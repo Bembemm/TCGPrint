@@ -7,6 +7,7 @@ import type { ArtworkOriginalStore } from "./storage/original-store";
 import type { ArtworkRepository } from "./storage/repository";
 import type { ArtworkThumbnailStore } from "./storage/thumbnail-store";
 import { ArtworkStorageError, type ArtworkOriginal } from "./storage/types";
+import { validateImageBytes } from "./storage/image-validation";
 import type { ArtworkPreview, ArtworkProvider, ArtworkSearchOptions, ProviderHealth } from "./types";
 
 const API_BASE_URL = "https://mpcfill.com";
@@ -19,7 +20,7 @@ const ORIGINAL_HOSTS = new Set(["drive.google.com", "drive.usercontent.google.co
 const API_HOSTS = new Set(["mpcfill.com"]);
 
 export class MpcArtworkProviderError extends Error {
-  constructor(readonly kind: "http" | "protocol" | "unsafe-source" | "invalid-image" | "asset-too-large" | "timeout" | "aborted" | "network", message: string, readonly status?: number) {
+  constructor(readonly kind: "http" | "protocol" | "unsafe-source" | "invalid-image" | "unsupported-format" | "asset-too-large" | "timeout" | "aborted" | "network", message: string, readonly status?: number) {
     super(message);
     this.name = "MpcArtworkProviderError";
   }
@@ -116,6 +117,53 @@ function cardItems(payload: unknown, expectedIds?: ReadonlySet<string>): Record<
 }
 
 function candidateKey(id: string): string { return `mpc:candidate:${id}`; }
+
+const EXPORTABLE_ORIGINAL_EXTENSIONS = new Set(["png", "jpg", "jpeg", "svg"]);
+
+function normalizeExtension(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const extension = value.trim().toLowerCase().replace(/^\./, "");
+  return extension || undefined;
+}
+
+function canonicalExtension(value: unknown): string | undefined {
+  const extension = normalizeExtension(value);
+  return extension === "jpeg" ? "jpg" : extension;
+}
+
+function isExportableOriginalExtension(value: unknown): boolean {
+  const extension = canonicalExtension(value);
+  return extension !== undefined && EXPORTABLE_ORIGINAL_EXTENSIONS.has(extension);
+}
+
+function candidateHasKnownUnsupportedFormat(candidate: ArtworkCandidate): boolean {
+  const extension = normalizeExtension(candidate.metadata?.extension);
+  const known = candidate.metadata?.originalFormatKnown === true || extension !== undefined;
+  return known && !isExportableOriginalExtension(extension);
+}
+
+function mimeTypeForFormat(format: string): string | undefined {
+  const mimeTypes: Readonly<Record<string, string>> = {
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+    avif: "image/avif",
+    gif: "image/gif",
+    svg: "image/svg+xml",
+    tiff: "image/tiff",
+  };
+  return mimeTypes[format];
+}
+
+function referenceMetadata(reference: WorkingCardMpcReference): Readonly<Record<string, unknown>> {
+  return {
+    referenceOnly: true,
+    referenceOrigin: reference.referenceOrigin ?? "order-import",
+    importedAssetId: reference.importedAssetId,
+    slots: [...reference.slots],
+    localAvailabilityHint: reference.availableLocally,
+  };
+}
 
 function safeUrl(value: string, hosts: ReadonlySet<string>): URL | undefined {
   try {
@@ -260,11 +308,11 @@ export class MpcArtworkProvider implements ArtworkProvider {
           ...(reference.selectedArtworkId ? { selectedArtworkId: reference.selectedArtworkId } : {}),
           originalAvailable: false,
           originalCached: false,
-          metadata: { referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots], localAvailabilityHint: reference.availableLocally },
+          metadata: referenceMetadata(reference),
         });
       }
     }
-    if (identity.id === "custom:artwork-picker" || identity.provider === "local") return importedCandidates;
+    if (identity.id === "custom:artwork-picker" || identity.provider === "local") return importedCandidates.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate));
     const query = faceQuery(identity, options.faceId);
     if (!query) return importedCandidates;
     const searchKey = `mpc:search:${createHash("sha256").update(`${query.toLocaleLowerCase("en-US")}\0${options.faceId ?? "any"}`).digest("hex")}`;
@@ -275,7 +323,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         const current = await this.getCandidate(candidate.id);
         return { ...(current ?? candidate), identityId: identity.id };
       }));
-      return this.combineCandidates(importedCandidates, refreshed);
+      return this.combineCandidates(importedCandidates, refreshed.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate)));
     }
 
     try {
@@ -331,12 +379,12 @@ export class MpcArtworkProvider implements ArtworkProvider {
         this.metadata.putMetadata(searchKey, candidates, Date.now() + CACHE_TTL_MS);
         this.health = { available: true, degraded: false };
       }
-      return this.combineCandidates(importedCandidates, candidates.map(({ candidate }) => candidate));
+      return this.combineCandidates(importedCandidates, candidates.map(({ candidate }) => candidate).filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate)));
     } catch (error) {
       if (isCancellation(error, options.signal)) throw error;
       this.degrade(error);
       if (!importedCandidates.length) throw error;
-      return importedCandidates;
+      return importedCandidates.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate));
     }
   }
 
@@ -362,10 +410,21 @@ export class MpcArtworkProvider implements ArtworkProvider {
         this.degrade(error);
       }
     }
+    const actualExtension = original?.extension ?? originalRecord?.extension ?? normalizeExtension(stored.candidate.metadata?.extension);
+    const formatKnown = stored.candidate.metadata?.originalFormatKnown === true || actualExtension !== undefined;
+    const formatExportable = !formatKnown || isExportableOriginalExtension(actualExtension);
     return {
       ...stored.candidate,
-      originalAvailable: original ? true : stored.candidate.originalAvailable,
+      originalAvailable: formatExportable && (original ? true : stored.candidate.originalAvailable),
       originalCached: Boolean(original),
+      metadata: {
+        ...stored.candidate.metadata,
+        ...(formatKnown ? {
+          ...(actualExtension ? { extension: actualExtension } : {}),
+          originalFormatKnown: true,
+          originalFormatExportable: formatExportable,
+        } : {}),
+      },
       ...(original ? {
         widthPx: original.widthPx,
         heightPx: original.heightPx,
@@ -390,16 +449,18 @@ export class MpcArtworkProvider implements ArtworkProvider {
       return candidate ? {
         ...candidate,
         identityId: identity.id,
-        metadata: { ...candidate.metadata, referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots], localAvailabilityHint: reference.availableLocally },
+        metadata: { ...candidate.metadata, ...referenceMetadata(reference) },
       } : undefined;
     }
     const sourceUrl = assetId ? this.sourceUrl(assetId) : undefined;
     const localOriginalRecord = sourceUrl && assetId ? this.repository.findOriginalByProviderSource("mpc", assetId, sourceUrl) : undefined;
     let localOriginal: ArtworkOriginal | undefined;
+    let localStorageFailure: ArtworkStorageError | undefined;
     if (localOriginalRecord) {
       try { localOriginal = await this.originals.getOriginal(localOriginalRecord.artworkId); }
       catch (error) {
         if (!(error instanceof ArtworkStorageError) || (error.code !== "ARTWORK_MISSING" && error.code !== "ARTWORK_CONTENT_CORRUPT")) throw error;
+        localStorageFailure = error;
         this.degrade(error);
       }
     }
@@ -414,9 +475,15 @@ export class MpcArtworkProvider implements ArtworkProvider {
         widthPx: localOriginal.widthPx,
         heightPx: localOriginal.heightPx,
         effectiveDpi: calculateEffectiveDpi(localOriginal.widthPx, localOriginal.heightPx),
-        originalAvailable: true,
+        originalAvailable: isExportableOriginalExtension(localOriginal.extension),
         originalCached: true,
-        metadata: { referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots], sourceType: "Google Drive", localAvailabilityHint: reference.availableLocally },
+        metadata: {
+          ...referenceMetadata(reference),
+          sourceType: "Google Drive",
+          extension: localOriginal.extension,
+          originalFormatKnown: true,
+          originalFormatExportable: isExportableOriginalExtension(localOriginal.extension),
+        },
       };
       const stored: StoredCandidate = { candidate };
       this.metadata.putMetadata(candidateKey(id), stored, Date.now() + CANDIDATE_TTL_MS);
@@ -432,49 +499,62 @@ export class MpcArtworkProvider implements ArtworkProvider {
       ...(selectedArtworkId ? { selectedArtworkId } : {}),
       originalAvailable: false,
       originalCached: false,
-      metadata: { referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots], localAvailabilityHint: reference.availableLocally },
+      metadata: referenceMetadata(reference),
     };
     if (!assetId || !sourceUrl) {
       this.metadata.putMetadata(candidateKey(id), { candidate: baseCandidate }, Date.now() + CANDIDATE_TTL_MS);
       return baseCandidate;
     }
 
-    const sources = await this.sources(signal);
-    if (!sources.length) {
-      const error = new MpcArtworkProviderError("protocol", "MPC returned no verified Google Drive sources.");
-      this.degrade(error);
+    try {
+      const sources = await this.sources(signal);
+      if (!sources.length) {
+        const error = new MpcArtworkProviderError("protocol", "MPC returned no verified Google Drive sources.");
+        this.degrade(error);
+        throw error;
+      }
+      const verifiedSourceIds = new Set(sources.map(({ pk }) => pk));
+      const response = await this.apiJson("/2/cards/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cardIdentifiers: [assetId] }),
+      }, signal);
+      let documents: Record<string, unknown>[];
+      try { documents = cardItems(response.payload, new Set([assetId])); }
+      catch (error) { this.degrade(error); throw error; }
+      const document = documents.find((item) => item.identifier === assetId);
+      if (!document) {
+        const error = new MpcArtworkProviderError("protocol", "MPC card hydration omitted the selected imported artwork ID.");
+        this.degrade(error);
+        throw error;
+      }
+      let online: StoredCandidate | undefined;
+      try { online = this.candidateFromCard(document, identity, faceId, verifiedSourceIds); }
+      catch (error) { this.degrade(error); throw error; }
+      if (!online) return undefined;
+      const candidate: ArtworkCandidate = {
+        ...online.candidate,
+        id,
+        providerAssetId: assetId,
+        ...(selectedArtworkId ? { selectedArtworkId } : {}),
+        metadata: { ...online.candidate.metadata, ...referenceMetadata(reference) },
+      };
+      const stored: StoredCandidate = { ...online, candidate };
+      this.metadata.putMetadata(candidateKey(id), stored, Date.now() + CANDIDATE_TTL_MS);
+      this.health = { available: true, degraded: false };
+      return candidate;
+    } catch (error) {
+      if (localStorageFailure && !isCancellation(error, signal) && error instanceof MpcArtworkProviderError && ["network", "timeout", "http"].includes(error.kind)) {
+        const failure = new MpcArtworkProviderError(
+          error.kind,
+          `The cached MPC original failed local validation (${localStorageFailure.code}), and provider revalidation failed: ${error.message}`,
+          error.status,
+        );
+        this.degrade(failure);
+        throw failure;
+      }
       throw error;
     }
-    const verifiedSourceIds = new Set(sources.map(({ pk }) => pk));
-    const response = await this.apiJson("/2/cards/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cardIdentifiers: [assetId] }),
-    }, signal);
-    let documents: Record<string, unknown>[];
-    try { documents = cardItems(response.payload, new Set([assetId])); }
-    catch (error) { this.degrade(error); throw error; }
-    const document = documents.find((item) => item.identifier === assetId);
-    if (!document) {
-      const error = new MpcArtworkProviderError("protocol", "MPC card hydration omitted the selected imported artwork ID.");
-      this.degrade(error);
-      throw error;
-    }
-    let online: StoredCandidate | undefined;
-    try { online = document ? this.candidateFromCard(document, identity, faceId, verifiedSourceIds) : undefined; }
-    catch (error) { this.degrade(error); throw error; }
-    if (!online) throw new MpcArtworkProviderError("unsafe-source", "Imported MPC reference is not a verified Google Drive artwork.");
-    const candidate: ArtworkCandidate = {
-      ...online.candidate,
-      id,
-      providerAssetId: assetId,
-      ...(selectedArtworkId ? { selectedArtworkId } : {}),
-      metadata: { ...online.candidate.metadata, referenceOnly: true, importedAssetId: reference.importedAssetId, slots: [...reference.slots], localAvailabilityHint: reference.availableLocally },
-    };
-    const stored: StoredCandidate = { ...online, candidate };
-    this.metadata.putMetadata(candidateKey(id), stored, Date.now() + CANDIDATE_TTL_MS);
-    this.health = { available: true, degraded: false };
-    return candidate;
   }
 
   async getPreview(id: string, signal?: AbortSignal): Promise<ArtworkPreview | undefined> {
@@ -499,6 +579,9 @@ export class MpcArtworkProvider implements ArtworkProvider {
 
   async getOriginal(id: string, signal?: AbortSignal): Promise<ArtworkOriginal> {
     const candidate = await this.getCandidate(id);
+    if (candidate?.metadata?.originalFormatExportable === false) {
+      throw new MpcArtworkProviderError("unsupported-format", `MPC original format ${String(candidate.metadata.extension ?? "unknown").toUpperCase()} is not supported by PDF export.`);
+    }
     if (!candidate?.providerAssetId || !candidate.originalAvailable) throw new ArtworkStorageError("ARTWORK_MISSING", `MPC original for ${id} is unavailable.`);
     const sourceUrl = this.sourceUrl(candidate.providerAssetId);
     if (!sourceUrl) throw new MpcArtworkProviderError("unsafe-source", "MPC Google Drive identifier is invalid.");
@@ -515,13 +598,51 @@ export class MpcArtworkProvider implements ArtworkProvider {
     }
     const { response, bytes } = await this.fetchImage(sourceUrl, this.maximumOriginalBytes, "original", signal);
     const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
-    const expectedType = imageType(bytes);
+    const stored = this.metadata.getMetadata<StoredCandidate>(candidateKey(id));
+    let validatedImage: Awaited<ReturnType<typeof validateImageBytes>>;
+    try {
+      validatedImage = await validateImageBytes(bytes, this.maximumOriginalBytes);
+    } catch (error) {
+      const unsupported = error instanceof ArtworkStorageError && error.code === "ARTWORK_UNSUPPORTED_FORMAT";
+      if (unsupported && stored) this.metadata.putMetadata(candidateKey(id), {
+        ...stored,
+        candidate: {
+          ...stored.candidate,
+          originalAvailable: false,
+          originalCached: false,
+          metadata: { ...stored.candidate.metadata, originalFormatKnown: true, originalFormatExportable: false },
+        },
+      }, Date.now() + CANDIDATE_TTL_MS);
+      const validationFailure = new MpcArtworkProviderError(unsupported ? "unsupported-format" : "invalid-image", unsupported
+        ? "MPC original format is not supported by the current artwork pipeline."
+        : "MPC original bytes failed image validation.");
+      if (!unsupported) this.degrade(validationFailure);
+      throw validationFailure;
+    }
+    const expectedType = mimeTypeForFormat(validatedImage.format);
     if (!expectedType || contentType !== expectedType) {
       const error = new MpcArtworkProviderError("invalid-image", "MPC original content type does not match its image signature.");
       this.degrade(error);
       throw error;
     }
-    const stored = this.metadata.getMetadata<StoredCandidate>(candidateKey(id));
+    if (!isExportableOriginalExtension(validatedImage.extension)) {
+      if (stored) this.metadata.putMetadata(candidateKey(id), {
+        ...stored,
+        candidate: {
+          ...stored.candidate,
+          originalAvailable: false,
+          originalCached: false,
+          metadata: { ...stored.candidate.metadata, extension: validatedImage.extension, originalFormatKnown: true, originalFormatExportable: false },
+        },
+      }, Date.now() + CANDIDATE_TTL_MS);
+      throw new MpcArtworkProviderError("unsupported-format", `MPC original format ${validatedImage.extension.toUpperCase()} is not supported by PDF export.`);
+    }
+    const declaredExtension = canonicalExtension(candidate.metadata?.extension);
+    if (declaredExtension && declaredExtension !== canonicalExtension(validatedImage.extension)) {
+      const error = new MpcArtworkProviderError("invalid-image", "MPC original format differs from the hydrated card metadata.");
+      this.degrade(error);
+      throw error;
+    }
     if (stored?.declaredSize && bytes.byteLength !== stored.declaredSize) {
       const error = new MpcArtworkProviderError("invalid-image", "MPC original byte length differs from the hydrated card metadata.");
       this.degrade(error);
@@ -537,7 +658,15 @@ export class MpcArtworkProvider implements ArtworkProvider {
     });
     if (stored) this.metadata.putMetadata(candidateKey(id), {
       ...stored,
-      candidate: { ...stored.candidate, widthPx: original.widthPx, heightPx: original.heightPx, effectiveDpi: calculateEffectiveDpi(original.widthPx, original.heightPx), originalAvailable: true, originalCached: true },
+      candidate: {
+        ...stored.candidate,
+        widthPx: original.widthPx,
+        heightPx: original.heightPx,
+        effectiveDpi: calculateEffectiveDpi(original.widthPx, original.heightPx),
+        originalAvailable: true,
+        originalCached: true,
+        metadata: { ...stored.candidate.metadata, extension: original.extension, originalFormatKnown: true, originalFormatExportable: true },
+      },
     }, Date.now() + CANDIDATE_TTL_MS);
     this.health = { available: true, degraded: false };
     return original;
@@ -553,8 +682,8 @@ export class MpcArtworkProvider implements ArtworkProvider {
     if (!Number.isSafeInteger(sourceId) || !verifiedSourceIds.has(sourceId)) {
       throw new MpcArtworkProviderError("unsafe-source", "MPC artwork does not belong to a verified Google Drive source.");
     }
-    const extension = typeof item.extension === "string" ? item.extension.toLowerCase().replace(/^\./, "") : "";
-    if (!["png", "jpg", "jpeg", "webp", "gif"].includes(extension)) return undefined;
+    const extension = normalizeExtension(item.extension);
+    if (extension && !isExportableOriginalExtension(extension)) return undefined;
     const size = Number(item.size);
     const declaredSize = Number.isSafeInteger(size) && size > 0 ? size : undefined;
     const rawThumbnail = item.smallThumbnailUrl ?? item.mediumThumbnailUrl;
@@ -577,7 +706,9 @@ export class MpcArtworkProvider implements ArtworkProvider {
         ...(typeof item.name === "string" ? { name: item.name.slice(0, 200) } : {}),
         sourceType: item.sourceType,
         ...(typeof item.sourceName === "string" ? { sourceName: item.sourceName.slice(0, 200) } : {}),
-        extension,
+        ...(extension ? { extension } : {}),
+        originalFormatKnown: Boolean(extension),
+        ...(extension ? { originalFormatExportable: true } : {}),
         ...(declaredSize ? { declaredSize } : {}),
         ...(Number.isFinite(dpi) && dpi > 0 ? { dpi } : {}),
       },

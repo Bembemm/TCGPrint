@@ -89,6 +89,7 @@ export interface WorkingCardMpcReference {
   readonly importedAssetId: string;
   readonly providerAssetId?: string;
   readonly selectedArtworkId?: string;
+  readonly referenceOrigin?: "order-import" | "gallery-selection";
   readonly slots: readonly string[];
   readonly availableLocally: boolean;
 }

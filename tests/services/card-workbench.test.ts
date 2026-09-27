@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCardWorkbench, type CardWorkbenchOptions, type WorkingSetImportResult } from "../../services/card-workbench";
 import { handleArtworkList, handleCardExport, handleCardImport, handleResolve, parseWorkingCards } from "../../services/card-api";
+import { appDataPaths, originalPathForHash } from "../../artwork/storage/paths";
 import { TesseractOcrRecognizer } from "../../providers/ocr/tesseract-recognizer";
 import type { ScryfallClient } from "../../providers/scryfall/client";
 import type { ScryfallCard } from "../../providers/scryfall/types";
@@ -422,6 +423,88 @@ describe("card workbench services", () => {
 
     expect(offlineResponse.status).toBe(200);
     expect(offlineMpcFetch).not.toHaveBeenCalled();
+  });
+
+  it("exports a gallery-selected MPC original offline after candidate metadata expires", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tcgprint-mpc-gallery-offline-"));
+    roots.push(root);
+    const baseTime = Date.now();
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 300, height: 420, channels: 3, background: "#476" } }).png().toBuffer());
+    const assetId = "gallery-choice-id_1234567890";
+    let online = true;
+    const mpcRequests: string[] = [];
+    const mpcFetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      mpcRequests.push(url.href);
+      if (!online) throw new Error("MPC is offline after the original is cached.");
+      if (url.pathname === "/2/sources/") return Response.json({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.pathname === "/3/editorSearch/") {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return Response.json({ results: { [Object.keys(body.queries)[0]]: [assetId] } });
+      }
+      if (url.pathname === "/2/cards/") return Response.json({ results: {
+        [assetId]: { identifier: assetId, cardType: "CARD", name: "Sol Ring · Gallery choice", sourceId: 41, sourceType: "Google Drive", extension: "png", size: originalBytes.byteLength, dpi: 600 },
+      } });
+      if (url.pathname === "/uc") return new Response(originalBytes, { headers: { "Content-Type": "image/png", "Content-Length": String(originalBytes.byteLength) } });
+      throw new Error(`Unexpected MPC request: ${url.href}`);
+    };
+    const scryfall = fakeScryfallClient(resolvedDeckPrintings);
+    const workbench = await createCardWorkbench({ dataDirectory: root, scryfallClient: scryfall.client, mpcFetchImpl, minIntervalMs: 0 });
+    workbenches.push(workbench);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(baseTime));
+    try {
+      const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
+      const resolved = await workbench.resolveWorkingCards(imported.workingCards);
+      const card = resolved.workingCards[0];
+      const [candidate] = await workbench.listArtworkCandidates(card.identity!.id, "front", "mpc");
+      const selected = workbench.selectArtwork(card, "front", candidate);
+      const cachedOriginal = await workbench.getArtworkOriginal(candidate.id);
+      expect(cachedOriginal.bytes).toEqual(originalBytes);
+      expect(selected.id).toBe(card.id);
+      expect(selected.identity?.id).toBe(card.identity?.id);
+      expect(selected.selectedArtworkByFace.front?.candidateId).toBe(candidate.id);
+      expect(await workbench.getArtworkCandidate(candidate.id)).toMatchObject({ originalAvailable: true, originalCached: true });
+
+      vi.setSystemTime(new Date(baseTime + 366 * 24 * 60 * 60 * 1000));
+      online = false;
+      const callsWhenOffline = mpcRequests.length;
+      const response = await handleCardExport(new Request("http://localhost/api/cards/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cards: [selected], options: { bleedMm: 0, cutGuides: "none" } }),
+      }), workbench);
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe("application/pdf");
+      expect(mpcRequests).toHaveLength(callsWhenOffline);
+
+      vi.setSystemTime(new Date(baseTime + 732 * 24 * 60 * 60 * 1000));
+      const originalPath = originalPathForHash(appDataPaths(root).originalsDirectory, cachedOriginal.contentHash, cachedOriginal.extension);
+      await unlink(originalPath);
+      const missingResponse = await handleCardExport(new Request("http://localhost/api/cards/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cards: [selected], options: { bleedMm: 0, cutGuides: "none" } }),
+      }), workbench);
+      const missingBody = await missingResponse.json() as { code: string; message: string };
+      expect(missingResponse.status).toBe(422);
+      expect(missingBody).toMatchObject({ code: "ARTWORK_ORIGINAL_UNAVAILABLE" });
+      expect(missingBody.message).toContain("ARTWORK_MISSING");
+
+      await writeFile(originalPath, new Uint8Array([1, 2, 3, 4]));
+      const corruptResponse = await handleCardExport(new Request("http://localhost/api/cards/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cards: [selected], options: { bleedMm: 0, cutGuides: "none" } }),
+      }), workbench);
+      const corruptBody = await corruptResponse.json() as { code: string; message: string };
+      expect(corruptResponse.status).toBe(422);
+      expect(corruptBody).toMatchObject({ code: "ARTWORK_ORIGINAL_UNAVAILABLE" });
+      expect(corruptBody.message).toContain("ARTWORK_CONTENT_CORRUPT");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps WorkingCard and CardIdentity IDs stable across independent MPC DFC face selections", async () => {
