@@ -1293,119 +1293,76 @@ Quando um template importado tiver metadata/recomendação própria, o projeto p
 
 ---
 
-## 37. Subtle Edge Stretch
+## 37. Edge Extension da borda imediata
 
-Modo padrão de bleed.
+Edge Extension é o modo padrão e único de bleed raster desta fase.
 
 Regra fundamental:
 
-> A área de corte original da carta não pode ser ampliada, recortada ou deslocada para criar bleed.
+> O bleed cria pixels somente fora do trim e repete os pixels imediatamente adjacentes à lateral correspondente. A região de trim permanece pixel-identical.
+
+O algoritmo usa a última linha/coluna de pixels do trim de cada lado e a estende para fora pela quantidade física de bleed convertida em pixels:
+
+```text
+linha superior do trim   → repetir para fora acima
+linha inferior do trim   → repetir para fora abaixo
+coluna esquerda do trim  → repetir para fora à esquerda
+coluna direita do trim   → repetir para fora à direita
+```
+
+Consequências intencionais:
+
+- borda preta → bleed preto;
+- full-art → continuação dos pixels da beirada da própria arte;
+- borda clara, azul, vermelha ou texturizada → continuação da respectiva beirada;
+- nenhuma classificação de cor altera a origem dos pixels.
 
 Nunca fazer:
 
-```text
-imagem
- ↓
-zoom
- ↓
-crop
-```
+- crop, zoom, deslocamento ou resize da carta/trim;
+- busca por source strip mais interna;
+- seleção de faixa baseada em luminância, variação ou conteúdo “representativo”;
+- inferência de pixels a partir de outras regiões da arte;
+- preenchimento generativo ou IA.
 
-Fazer:
+O bleed de 0 mm deve continuar sendo passthrough do original. Alpha e profundidade de cor devem ser preservados no derivado quando houver bleed.
 
-```text
-canvas maior
- ↓
-carta original colocada sem alteração no centro
- ↓
-somente região externa é gerada
-```
+## 38. Lados e resolução do bleed
 
-Visualmente:
+TOP, RIGHT, BOTTOM e LEFT são tratados separadamente. A largura externa de cada lado vem do valor físico de bleed e da escala da imagem; o algoritmo não procura uma nova faixa dentro da carta.
 
-```text
-┌──────────────────────────────┐
-│        BLEED EXTERNO         │
-│  ┌────────────────────────┐  │
-│  │                        │  │
-│  │    CARTA ORIGINAL      │  │
-│  │      INTACTA           │  │
-│  │                        │  │
-│  └────────────────────────┘  │
-└──────────────────────────────┘
-```
+A regra de cópia é determinística e versionada. A fonte é a linha/coluna externa de um pixel; não há configuração de faixa interna nem busca por outra região.
 
----
+O trim é copiado sem resampling. Os quatro retângulos externos são gerados a partir das respectivas linhas/colunas adjacentes.
 
-## 38. Faixa de origem
+## 39. Cantos do bleed
 
-O Edge Stretch deve usar uma faixa pequena da borda para que o esticamento seja discreto caso o corte passe ligeiramente da área original.
-
-A largura da faixa fonte deve ser adaptativa e ajustável em modo avançado.
-
-Não simplesmente esticar vários milímetros de conteúdo interno.
-
-Possíveis controles:
-
-- Auto;
-- 0.25 mm;
-- 0.50 mm;
-- 0.75 mm;
-- 1.00 mm;
-- Custom.
-
-Os valores finais devem ser definidos por testes visuais.
-
----
-
-## 39. Cantos
-
-Tratar separadamente:
+Os quatro cantos externos devem ser fechados deterministicamente com a amostra do canto correspondente do trim, sem misturar pixels de regiões internas.
 
 ```text
-TL | TOP | TR
----+-----+---
-L  |CARD | R
----+-----+---
-BL | BOT | BR
+TOP-LEFT     → pixel do canto superior esquerdo
+TOP-RIGHT    → pixel do canto superior direito
+BOTTOM-LEFT  → pixel do canto inferior esquerdo
+BOTTOM-RIGHT → pixel do canto inferior direito
 ```
 
-Não deixar cantos com costuras evidentes.
+As extensões dos lados e dos cantos devem se encontrar sem lacunas, costuras ou alteração dos pixels do trim.
 
-Implementar estratégia própria para quatro cantos.
+## 40. Cantos arredondados (recurso separado e opcional)
 
----
+Arredondar cantos não faz parte do algoritmo de bleed.
 
-## 40. Outros modos de bleed
+Disponibilizar uma opção explícita `roundedCorners: boolean`, desligada por padrão:
 
-Suportar:
+- `false`: não aplicar arredondamento automático;
+- `true`: completar o raio físico de canto do `CardFormat` quando a origem não tiver cantos arredondados completos;
+- se a origem já tiver os cantos compatíveis, a operação deve ser idempotente e não degradá-los;
+- se não houver raio físico configurado ou a detecção não for confiável, não inventar um valor nem alterar a origem;
+- a opção é aplicada como transformação geométrica separada, sem mudar a amostragem do bleed;
+- original permanece imutável; preview e export usam o mesmo resultado/configuração;
+- a configuração de arredondamento entra na identidade/cache de qualquer derivado que ela alterar.
 
-- Subtle Edge Stretch — fallback conservador;
-- Smart Border Fill — automático para Scryfall raster quando aplicável;
-- Mirror Edge;
-- Solid/Edge Color Sample;
-- Existing Bleed;
-- None.
-
-### Smart Border Fill
-
-Objetivo:
-
-> evitar que uma moldura externa preta/escura típica de scans Scryfall vire uma faixa de bleed preta dominante quando existe conteúdo visual adequado logo para dentro da borda.
-
-O modo deve:
-
-- classificar cada lado separadamente;
-- detectar faixa escura/uniforme com limiares centralizados e testáveis;
-- procurar a primeira faixa interna com informação visual suficiente dentro de um limite físico configurável;
-- usar essa faixa apenas para sintetizar a região externa;
-- nunca tocar nos pixels do trim;
-- usar fallback para Subtle Edge Stretch quando a confiança for insuficiente;
-- manter cantos determinísticos e sem costuras;
-- ser versionado para reprodutibilidade;
-- registrar a política efetiva no resultado/manifest quando disponível.
-
-Não usar preenchimento generativo remoto nem reconstruir partes da carta dentro do trim.
+Com arredondamento desligado, a prova de identidade do trim compara todos os pixels do retângulo original. Quando ligado, qualquer máscara de canto deve ser limitada ao raio configurado e registrada como efeito separado do bleed.
 
 ---
 
@@ -1903,7 +1860,7 @@ Se houver suporte direto lossless ao formato no futuro, preferir o caminho diret
 
 Quando não houver bleed ou transformação, usar o caminho mais direto possível descrito acima.
 
-Quando houver `Subtle Edge Stretch`, é inevitável criar uma imagem derivada maior porque novos pixels precisam existir fora da área original.
+Quando houver Edge Extension, é inevitável criar uma imagem derivada maior porque novos pixels precisam existir fora da área original.
 
 Regra:
 
@@ -3365,10 +3322,11 @@ Teste físico confirma dimensão correta.
 Implementar:
 
 - 0–3 mm;
-- Subtle Edge Stretch;
+- Edge Extension da borda imediata;
 - cantos;
 - cache;
 - preview.
+- rounded corners opcional e separado.
 
 ### Critério de conclusão
 
@@ -3454,9 +3412,9 @@ A interface do switcher já deve estar preparada para o provider MPC.
 
 ---
 
-## Fase 5.5 — MPC Artwork Provider + Smart Scryfall Bleed
+## Fase 5.5 — MPC Artwork Provider + Edge-Extension Bleed
 
-Esta fase foi antecipada após o primeiro teste real da Fase 5 porque o fluxo de uso prioritário depende de MPC Autofill e porque o PDF real mostrou a necessidade de um bleed mais natural para imagens Scryfall.
+Esta fase foi antecipada após o primeiro teste real da Fase 5 porque o fluxo de uso prioritário depende de MPC Autofill e precisa de um bleed externo reproduzível que preserve integralmente a carta.
 
 ### Frente A — MPC Artwork Provider online
 
@@ -3474,42 +3432,42 @@ Implementar o provider MPC online antes do Editor:
 - nenhum fallback silencioso de uma seleção MPC para Scryfall;
 - DFC/MDFC continua com seleção independente por face;
 - download de original somente quando necessário para seleção/export;
+- metadata MPC pode expirar sem invalidar um original local que já tenha sido baixado, validado e associado à seleção;
+- “disponível localmente” só pode ser confirmado pela leitura e validação física do storage, nunca apenas por um hint XML;
 - validar estabilidade, limites, origem e formato do endpoint/protocolo usado antes de acoplar ao core;
 - registrar ADR do provider e provenance suficiente para reproduzir a seleção.
 
 Filtros avançados de DPI/source/tags podem evoluir depois, mas busca, thumbnail, seleção e original fazem parte desta fase antecipada.
 
-### Frente B — Smart Scryfall Bleed / Auto Border Fill
+### Frente B — Bleed por extensão da borda imediata
 
-O bleed padrão atual continua preservando integralmente o trim, mas imagens Scryfall com moldura externa escura podem produzir uma faixa externa visualmente preta porque o algoritmo amostra a borda física da carta.
-
-Adicionar uma política automática específica para assets Scryfall:
-
-`smart-border-fill`
+O bleed de raster usa exclusivamente os pixels imediatamente adjacentes ao trim. Não há uma policy Scryfall que procure conteúdo interno nem que tente evitar a cor da borda.
 
 Regras obrigatórias:
 
-- nunca alterar, ampliar, recortar, deslocar ou reamostrar a área de trim original;
-- gerar somente pixels externos ao trim;
-- detectar quando a faixa periférica é predominantemente moldura/borda escura e de baixa variação;
-- nesse caso, procurar uma faixa fonte mais interna e visualmente representativa antes de gerar o bleed;
-- preservar cada lado de forma independente;
-- tratar os quatro cantos sem costuras evidentes;
-- para borderless/full-art/frames não escuros, usar a própria borda ou fazer fallback determinístico para `subtle-edge-stretch`;
-- se a detecção for incerta, preferir fallback conservador em vez de inventar conteúdo;
-- nenhuma IA/cloud/inpainting remoto;
-- o algoritmo deve ser determinístico, versionado e entrar no cache key;
-- preview e export devem usar exatamente a mesma política;
-- o usuário deve poder sobrescrever o modo automático.
+- preservar integralmente o trim; criar pixels somente fora dele;
+- repetir para fora a linha/coluna de pixels da beirada correspondente;
+- analisar TOP, RIGHT, BOTTOM e LEFT independentemente;
+- fechar os quatro cantos com as amostras dos cantos do trim, deterministicamente;
+- não procurar source strip interna, não classificar bordas e não inferir conteúdo;
+- borda preta continua preta e full-art continua a partir da própria beirada;
+- suportar alpha e 16-bit sem alterar os pixels do trim;
+- bleed de 0 mm preserva o original;
+- algoritmo determinístico/versionado; cache key inclui todos os parâmetros que mudam pixels;
+- preview e export consomem exatamente o mesmo resultado;
+- Scryfall, MPC e upload usam a mesma semântica de extensão; metadata de origem não escolhe uma região interior.
+- ADR 0008 é a decisão normativa; ADR 0007 está supersedido e permanece apenas como histórico da interpretação abandonada.
 
-Política inicial sugerida por origem:
+### Frente C — Rounded corners opcional
 
-```text
-Scryfall raster → Smart Border Fill (auto)
-Upload local    → Subtle Edge Stretch, salvo override
-MPC             → respeitar metadata/bleed existente quando conhecido; caso contrário não assumir silenciosamente
-SVG             → manter regra vetorial atual até existir implementação específica
-```
+Adicionar o controle explícito `roundedCorners: boolean`, default `false`, separado do bleed:
+
+- desligado: não aplicar cantos arredondados automáticos;
+- ligado: completar somente cantos que ainda não atendem ao raio de `CardFormat`;
+- cantos já completos não devem ser degradados nem arredondados duas vezes;
+- sem raio confiável, não inventar geometria;
+- original imutável e política idêntica em preview/export;
+- alteração de arredondamento deve estar versionada/cacheada separadamente da amostragem do bleed.
 
 ### Critério de conclusão
 
@@ -3517,20 +3475,23 @@ Para uma carta identificada, o usuário pode:
 
 1. alternar entre Scryfall, MPC Autofill e upload local sem recriar o WorkingCard;
 2. selecionar uma arte MPC online e exportar usando o original validado;
-3. selecionar uma arte Scryfall e obter bleed externo visualmente preenchido sem transformar a borda preta em uma faixa externa dominante quando houver conteúdo adequado para extensão;
-4. gerar PDF mantendo trim 63.5 × 88.9 mm intacto e guias vetoriais corretas.
+3. exportar arte Scryfall, MPC ou upload com bleed formado pela repetição imediata de cada beirada; preto pode continuar preto e full-art deve continuar a partir da própria arte;
+4. manter todos os pixels do trim idênticos quando arredondamento opcional estiver desligado;
+5. ativar/desativar rounded corners sem misturá-los à extensão do bleed;
+6. gerar PDF mantendo trim físico 63.5 × 88.9 mm e guias vetoriais corretas.
 
 Testes obrigatórios:
 
-- Scryfall com borda preta clássica;
-- Scryfall borderless/full-art;
-- borda clara;
-- borda assimétrica;
-- cantos;
+- borda preta clássica → bleed preto;
+- Scryfall borderless/full-art → continuidade dos pixels da própria beirada;
+- borda clara e borda assimétrica;
+- quatro lados e quatro cantos;
 - 0 / 0.625 / 1 / 2 / 3 mm;
-- prova de identidade de pixels da área de trim antes/depois;
-- fallback determinístico;
-- cache key muda com versão/política;
+- alpha e 16-bit;
+- identidade pixel a pixel do trim;
+- preview/export usam o mesmo resultado;
+- cache key muda com versão/configuração pixel-affecting;
+- rounded corners off não altera a imagem; on arredonda imagem quadrada e não degrada cantos já completos;
 - MPC online indisponível sem quebrar Scryfall/uploads;
 - seleção Scryfall ↔ MPC ↔ upload preserva WorkingCard.id e CardIdentity.id.
 
@@ -3717,7 +3678,7 @@ Layout em A4
       ↓
 Bleed 0–3 mm
       ↓
-Subtle Edge Stretch
+Edge Extension da borda imediata
       ↓
 Guias
       ↓
@@ -3796,7 +3757,8 @@ Qualquer mudança nestes itens deve ser explicitamente documentada:
 - mm como unidade canônica;
 - trim original não deve ser ampliado para bleed;
 - bleed 0–3 mm;
-- Subtle Edge Stretch como modo principal;
+- Edge Extension da borda imediata como modo principal de bleed raster;
+- rounded corners como opção separada, desligada por padrão;
 - PDF não deve ser screenshot de canvas;
 - export padrão é lossless/source-quality, sem downsampling ou recompressão destrutiva;
 - JPEG sem processamento deve ser incorporado por passthrough do stream original;

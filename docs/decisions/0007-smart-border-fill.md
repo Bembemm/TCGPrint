@@ -1,8 +1,13 @@
-# ADR 0007: Smart Border Fill for raster bleed
+# ADR 0007: Smart Border Fill for raster bleed (superseded)
 
-- Status: Accepted for isolated implementation; Phase 5.5 audit pending
+- Status: Superseded on 2026-09-27; retained only as a historical record
 - Date: 2026-09-26
 - Scope: Phase 5.5, Front B — Scryfall raster bleed
+
+> Historical only: the product direction below was rejected. Do not implement or
+> use its interior-strip search, thresholds, visual matrix, or diagnostics as
+> current requirements or acceptance evidence. The normative decision is now
+> [ADR 0008: Edge Extension e Rounded Corners opcionais](0008-edge-extension-rounded-corners.md).
 
 ## Context
 
