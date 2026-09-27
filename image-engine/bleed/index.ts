@@ -2,31 +2,24 @@ import { createHash } from "node:crypto";
 import { MAGIC_STANDARD_CARD } from "../../core/geometry";
 import { FileBleedCache, MemoryBleedCache } from "./cache";
 import {
+  applyRoundedCornerMask,
   addRasterBleed,
   calculateRasterBleedDimensions,
   decodeRaster,
   encodeRasterPng,
   inspectRasterMetadata,
-  type RasterBleedSideSources,
   type RasterPixels,
 } from "./raster";
 import {
-  classifySmartBorderFillSides,
-  resolveSmartBorderFillConfig,
-  SMART_BORDER_FILL_CONFIG,
-  type BleedSide,
-  type SmartBorderFillConfig,
-  type SmartBorderFillConfigOverrides,
-} from "./smart-border";
-import {
   BLEED_ALGORITHM_VERSION,
+  ROUNDED_CORNERS_VERSION,
   type BleedCache,
   type BleedMode,
   type BleedPreview,
   type BleedRequest,
   type BleedResult,
   type BleedSideDiagnostic,
-  type BleedSourceStrip,
+  type BleedSide,
   type TrimSizeMm,
 } from "./types";
 export {
@@ -37,18 +30,8 @@ export {
 } from "./policy";
 
 export {
-  SMART_BORDER_FILL_CONFIG,
-  SMART_BORDER_FILL_CONFIG_VERSION,
-  resolveSmartBorderFillConfig,
-  type BleedSide,
-  type SmartBorderFillConfig,
-  type SmartBorderFillConfigOverrides,
-} from "./smart-border";
-
-export {
   BLEED_ALGORITHM_VERSION,
-  BLEED_SOURCE_STRIP_SUGGESTIONS_MM,
-  type AutoSourceStrip,
+  ROUNDED_CORNERS_VERSION,
   type BleedCache,
   type BleedDerivativeResult,
   type BleedMode,
@@ -56,9 +39,8 @@ export {
   type BleedPreview,
   type BleedRequest,
   type BleedResult,
+  type BleedSide,
   type BleedSideDiagnostic,
-  type BleedSourceStrip,
-  type CustomSourceStrip,
   type PixelRect,
   type TrimSizeMm,
 } from "./types";
@@ -83,22 +65,32 @@ export class BleedGenerationError extends Error {
 
 export interface BleedEngineOptions {
   readonly cache?: BleedCache;
-  readonly smartBorderFillConfig?: SmartBorderFillConfigOverrides;
 }
 
 export interface BleedCacheIdentity {
   readonly originalSha256: string;
   readonly bleedMm: number;
-  readonly mode: BleedMode;
-  readonly sourceStrip: BleedSourceStrip;
   readonly trimWidthMm: number;
   readonly trimHeightMm: number;
-  readonly smartBorderFillConfig: SmartBorderFillConfig;
+  readonly roundedCorners?: boolean;
+  readonly cornerRadiusMm?: number;
 }
 
 /** Shared by the engine cache and CardExportService's in-batch de-duplication. */
 export function createBleedCacheKey(identity: BleedCacheIdentity): string {
-  const serialized = JSON.stringify({ algorithmVersion: BLEED_ALGORITHM_VERSION, ...identity });
+  const roundedCorners = identity.roundedCorners ?? false;
+  const serialized = JSON.stringify({
+    algorithmVersion: BLEED_ALGORITHM_VERSION,
+    originalSha256: identity.originalSha256,
+    bleedMm: identity.bleedMm,
+    trimWidthMm: identity.trimWidthMm,
+    trimHeightMm: identity.trimHeightMm,
+    roundedCorners,
+    ...(roundedCorners ? {
+      roundedCornersVersion: ROUNDED_CORNERS_VERSION,
+      cornerRadiusMm: identity.cornerRadiusMm,
+    } : {}),
+  });
   return createHash("sha256").update(serialized).digest("hex");
 }
 
@@ -142,9 +134,10 @@ function sniffMimeType(bytes: Uint8Array): string {
 
 function validateRequest(request: BleedRequest): {
   readonly mode: BleedMode;
-  readonly sourceStrip: BleedSourceStrip;
   readonly trimWidthMm: number;
   readonly trimHeightMm: number;
+  readonly roundedCorners: boolean;
+  readonly cornerRadiusMm?: number;
 } {
   if (!Number.isFinite(request.bleedMm) || request.bleedMm < 0 || request.bleedMm > 3) {
     throw new RangeError("Bleed must be a finite number from 0.000 mm through 3.000 mm.");
@@ -152,23 +145,22 @@ function validateRequest(request: BleedRequest): {
   if (!(request.imageBytes instanceof Uint8Array)) {
     throw new TypeError("Bleed input must be a Uint8Array of the original image bytes.");
   }
-
-  const mode = request.mode ?? "subtle-edge-stretch";
-  if (mode !== "subtle-edge-stretch" && mode !== "smart-border-fill") {
-    throw new BleedGenerationError(`Unsupported bleed mode: ${String(mode)}.`, "INVALID_BLEED_CONFIGURATION");
+  if (request.roundedCorners !== undefined && typeof request.roundedCorners !== "boolean") {
+    throw new TypeError("roundedCorners must be a boolean when provided.");
   }
 
-  const sourceStrip = request.sourceStrip ?? { mode: "auto" };
-  if (sourceStrip.mode === "custom") {
-    if (!Number.isFinite(sourceStrip.widthMm) || sourceStrip.widthMm <= 0 || sourceStrip.widthMm > 3) {
-      throw new RangeError("Custom source strip must be a finite width greater than 0 mm and at most 3 mm.");
-    }
-  } else if (sourceStrip.mode !== "auto") {
-    throw new BleedGenerationError("Unsupported source strip mode.", "INVALID_BLEED_CONFIGURATION");
+  const mode = request.mode ?? "edge-extension";
+  if (mode !== "edge-extension") {
+    throw new BleedGenerationError(`Unsupported bleed mode: ${String(mode)}.`, "INVALID_BLEED_CONFIGURATION");
   }
 
   const trimWidthMm = request.trimSizeMm?.widthMm ?? MAGIC_STANDARD_CARD.widthMm;
   const trimHeightMm = request.trimSizeMm?.heightMm ?? MAGIC_STANDARD_CARD.heightMm;
+  const roundedCorners = request.roundedCorners ?? false;
+  const cornerRadiusMm = request.cornerRadiusMm ?? MAGIC_STANDARD_CARD.cornerRadiusMm;
+  if (roundedCorners && (!Number.isFinite(cornerRadiusMm) || cornerRadiusMm! <= 0)) {
+    throw new RangeError("A positive CardFormat cornerRadiusMm is required when roundedCorners is enabled.");
+  }
   for (const [value, label] of [[trimWidthMm, "Trim width"], [trimHeightMm, "Trim height"]] as const) {
     if (!Number.isFinite(value) || value <= 0) {
       throw new RangeError(`${label} must be a finite number greater than zero.`);
@@ -177,9 +169,10 @@ function validateRequest(request: BleedRequest): {
 
   return {
     mode,
-    sourceStrip: Object.freeze({ ...sourceStrip }),
     trimWidthMm,
     trimHeightMm,
+    roundedCorners,
+    cornerRadiusMm: roundedCorners ? cornerRadiusMm : undefined,
   };
 }
 
@@ -189,24 +182,16 @@ function hasPngHeader(bytes: Uint8Array, width: number, height: number): boolean
   return view.readUInt32BE(16) === width && view.readUInt32BE(20) === height;
 }
 
-function calculateStripWidth(sourceStrip: BleedSourceStrip, bleedMm: number): number {
-  return sourceStrip.mode === "auto"
-    ? Math.min(bleedMm, 1)
-    : Math.min(sourceStrip.widthMm, bleedMm);
-}
-
 export class BleedEngine {
   private readonly cache: BleedCache;
-  private readonly smartBorderFillConfig: SmartBorderFillConfig;
 
   constructor(options: BleedEngineOptions = {}) {
     this.cache = options.cache ?? new MemoryBleedCache();
-    this.smartBorderFillConfig = resolveSmartBorderFillConfig(options.smartBorderFillConfig);
   }
 
   async generate(request: BleedRequest): Promise<BleedResult> {
-    const { mode, sourceStrip, trimWidthMm, trimHeightMm } = validateRequest(request);
-    if (request.bleedMm === 0) {
+    const { mode, trimWidthMm, trimHeightMm, roundedCorners, cornerRadiusMm } = validateRequest(request);
+    if (request.bleedMm === 0 && !roundedCorners) {
       return {
         status: "passthrough",
         bleedMm: 0,
@@ -214,7 +199,7 @@ export class BleedEngine {
         requestedMode: mode,
         effectiveMode: mode,
         policyId: request.policyId ?? "direct-mode-v1",
-        sourceStrip,
+        roundedCorners: false,
         trimSizeMm: Object.freeze({ widthMm: trimWidthMm, heightMm: trimHeightMm }),
         cacheStatus: "bypass",
         preview: {
@@ -225,7 +210,7 @@ export class BleedEngine {
     }
 
     const sourceMimeType = sniffMimeType(request.imageBytes);
-    if (sourceMimeType === "image/svg+xml") {
+    if (sourceMimeType === "image/svg+xml" && request.bleedMm > 0) {
       throw new BleedGenerationError(
         "Non-zero SVG bleed is not supported yet. The SVG trim remains vector-only; no raster fallback was generated.",
         "SVG_VECTOR_BLEED_UNSUPPORTED",
@@ -246,83 +231,32 @@ export class BleedEngine {
 
     const sourceWidthPx = metadata.width!;
     const sourceHeightPx = metadata.height!;
-    const resolvedSourceStripMm = calculateStripWidth(sourceStrip, request.bleedMm);
-    const dimensions = calculateRasterBleedDimensions(
-      sourceWidthPx,
-      sourceHeightPx,
-      request.bleedMm,
-      resolvedSourceStripMm,
-      trimWidthMm,
-      trimHeightMm,
-    );
+    const dimensions = request.bleedMm === 0
+      ? { bleedXPx: 0, bleedYPx: 0 }
+      : calculateRasterBleedDimensions(sourceWidthPx, sourceHeightPx, request.bleedMm, trimWidthMm, trimHeightMm);
     const outputWidthPx = sourceWidthPx + 2 * dimensions.bleedXPx;
     const outputHeightPx = sourceHeightPx + 2 * dimensions.bleedYPx;
     const sourceSha256 = createHash("sha256").update(bufferView(request.imageBytes)).digest("hex");
     const policyId = request.policyId ?? "direct-mode-v1";
 
-    let source: RasterPixels | undefined;
-    let rasterSideSources: RasterBleedSideSources | undefined;
-    let sideDiagnostics: Readonly<Record<BleedSide, BleedSideDiagnostic>>;
-    if (mode === "smart-border-fill") {
-      try {
-        source = await decodeRaster(request.imageBytes, metadata);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown decoder error.";
-        throw new BleedGenerationError(`Could not create bleed for this raster image. ${message}`, "IMAGE_DECODE_FAILED", { cause: error });
-      }
-      const classified = classifySmartBorderFillSides(
-        source,
-        dimensions.sourceStripXPx,
-        dimensions.sourceStripYPx,
-        trimWidthMm,
-        trimHeightMm,
-        this.smartBorderFillConfig,
-      );
-      const rasterSource = (side: BleedSide) => ({
-        offsetPx: classified[side].offsetPx,
-        sourceStripPx: classified[side].sourceStripPx,
-      });
-      const diagnostic = (side: BleedSide): BleedSideDiagnostic => ({
-        requestedMode: mode,
-        effectiveMode: classified[side].effectiveMode,
-        classification: classified[side].classification,
-        sourceOffsetPx: classified[side].offsetPx,
-        sourceStripPx: classified[side].sourceStripPx,
-        ...(classified[side].fallbackReason ? { fallbackReason: classified[side].fallbackReason } : {}),
-      });
-      rasterSideSources = {
-        top: rasterSource("top"),
-        right: rasterSource("right"),
-        bottom: rasterSource("bottom"),
-        left: rasterSource("left"),
-      };
-      sideDiagnostics = {
-        top: diagnostic("top"),
-        right: diagnostic("right"),
-        bottom: diagnostic("bottom"),
-        left: diagnostic("left"),
-      };
-    } else {
-      sideDiagnostics = Object.fromEntries((["top", "right", "bottom", "left"] as const).map((side) => [side, {
-        requestedMode: mode,
-        effectiveMode: mode,
-        classification: "not-analyzed" as const,
-        sourceOffsetPx: 0,
-        sourceStripPx: side === "left" || side === "right" ? dimensions.sourceStripXPx : dimensions.sourceStripYPx,
-      }])) as Readonly<Record<BleedSide, BleedSideDiagnostic>>;
-    }
-    const effectiveSides = Object.values(sideDiagnostics).map((diagnostic) => diagnostic.effectiveMode);
-    const effectiveMode = effectiveSides.every((sideMode) => sideMode === effectiveSides[0])
-      ? effectiveSides[0]!
-      : "mixed";
+    const decodedSource = await decodeRaster(request.imageBytes, metadata);
+    const source = roundedCorners
+      ? applyRoundedCornerMask(decodedSource, trimWidthMm, trimHeightMm, cornerRadiusMm!)
+      : decodedSource;
+    const sideDiagnostics: Readonly<Record<BleedSide, BleedSideDiagnostic>> = {
+      top: { strategy: "nearest-edge-pixel" },
+      right: { strategy: "nearest-edge-pixel" },
+      bottom: { strategy: "nearest-edge-pixel" },
+      left: { strategy: "nearest-edge-pixel" },
+    };
+    const effectiveMode = mode;
     const cacheKey = createBleedCacheKey({
       originalSha256: sourceSha256,
       bleedMm: request.bleedMm,
-      mode,
-      sourceStrip,
       trimWidthMm,
       trimHeightMm,
-      smartBorderFillConfig: this.smartBorderFillConfig,
+      roundedCorners,
+      ...(roundedCorners ? { cornerRadiusMm } : {}),
     });
 
     let cached: Uint8Array | undefined;
@@ -344,30 +278,17 @@ export class BleedEngine {
         effectiveMode,
         policyId,
         sideDiagnostics,
-        sourceStrip,
+        roundedCorners,
+        cornerRadiusMm,
         trimWidthMm,
         trimHeightMm,
         sourceSha256,
         cacheKey,
-        resolvedSourceStripMm,
         cacheStatus: "hit",
       });
     }
 
-    if (!source) {
-      try {
-        source = await decodeRaster(request.imageBytes, metadata);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown decoder error.";
-        throw new BleedGenerationError(
-          `Could not create bleed for this raster image. ${message}`,
-          "IMAGE_DECODE_FAILED",
-          { cause: error },
-        );
-      }
-    }
-
-    const extended = addRasterBleed(source, dimensions, rasterSideSources);
+    const extended = addRasterBleed(source, dimensions);
     const derivedBytes = await encodeRasterPng(source, extended.width, extended.height, extended.samples);
     try {
       await this.cache.set(cacheKey, derivedBytes);
@@ -387,12 +308,12 @@ export class BleedEngine {
       effectiveMode,
       policyId,
       sideDiagnostics,
-      sourceStrip,
+      roundedCorners,
+      cornerRadiusMm,
       trimWidthMm,
       trimHeightMm,
       sourceSha256,
       cacheKey,
-      resolvedSourceStripMm,
       cacheStatus: "miss",
     });
   }
@@ -408,12 +329,12 @@ export class BleedEngine {
     readonly effectiveMode: BleedResult["effectiveMode"];
     readonly policyId: string;
     readonly sideDiagnostics: Readonly<Record<BleedSide, BleedSideDiagnostic>>;
-    readonly sourceStrip: BleedSourceStrip;
+    readonly roundedCorners: boolean;
+    readonly cornerRadiusMm?: number;
     readonly trimWidthMm: number;
     readonly trimHeightMm: number;
     readonly sourceSha256: string;
     readonly cacheKey: string;
-    readonly resolvedSourceStripMm: number;
     readonly cacheStatus: "hit" | "miss";
   }): BleedResult {
     return {
@@ -423,12 +344,14 @@ export class BleedEngine {
       requestedMode: options.mode,
       effectiveMode: options.effectiveMode,
       policyId: options.policyId,
-      sourceStrip: options.sourceStrip,
+      roundedCorners: options.roundedCorners,
+      ...(options.roundedCorners && options.cornerRadiusMm !== undefined
+        ? { cornerRadiusMm: options.cornerRadiusMm }
+        : {}),
       trimSizeMm: Object.freeze({
         widthMm: options.trimWidthMm,
         heightMm: options.trimHeightMm,
       }),
-      resolvedSourceStripMm: options.resolvedSourceStripMm,
       sideDiagnostics: options.sideDiagnostics,
       originalSha256: options.sourceSha256,
       algorithmVersion: BLEED_ALGORITHM_VERSION,

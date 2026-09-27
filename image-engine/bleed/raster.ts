@@ -15,20 +15,6 @@ export interface RasterPixels {
 export interface RasterBleedDimensions {
   readonly bleedXPx: number;
   readonly bleedYPx: number;
-  readonly sourceStripXPx: number;
-  readonly sourceStripYPx: number;
-}
-
-export interface RasterBleedSideSource {
-  readonly offsetPx: number;
-  readonly sourceStripPx: number;
-}
-
-export interface RasterBleedSideSources {
-  readonly top: RasterBleedSideSource;
-  readonly right: RasterBleedSideSource;
-  readonly bottom: RasterBleedSideSource;
-  readonly left: RasterBleedSideSource;
 }
 
 export async function inspectRasterMetadata(imageBytes: Uint8Array): Promise<SharpMetadata> {
@@ -108,19 +94,67 @@ export async function decodeRaster(
   }
 }
 
-function mapBleedDepthToSourceStrip(depthPx: number, bleedPx: number, stripPx: number): number {
-  return Math.min(stripPx - 1, Math.floor(((depthPx - 1) * stripPx) / bleedPx));
-}
+export function applyRoundedCornerMask(
+  source: RasterPixels,
+  trimWidthMm: number,
+  trimHeightMm: number,
+  cornerRadiusMm: number,
+): RasterPixels {
+  const radiusXPx = (source.width * cornerRadiusMm) / trimWidthMm;
+  const radiusYPx = (source.height * cornerRadiusMm) / trimHeightMm;
+  if (!(radiusXPx > 0 && radiusYPx > 0 && radiusXPx < source.width / 2 && radiusYPx < source.height / 2)) {
+    throw new RangeError("Rounded-corner radius must be positive and smaller than half of both trim dimensions.");
+  }
 
-function mapAlongEdgeToCornerSource(
-  coordinatePx: number,
-  sourceLengthPx: number,
-  leadingOffsetPx: number,
-  trailingOffsetPx: number,
-): number {
-  const first = Math.min(sourceLengthPx - 1, leadingOffsetPx);
-  const last = Math.max(first, sourceLengthPx - 1 - trailingOffsetPx);
-  return Math.max(first, Math.min(last, coordinatePx));
+  const hasAlpha = source.channels === 2 || source.channels === 4;
+  const colourChannels = hasAlpha ? source.channels - 1 : source.channels;
+  const outputChannels = (hasAlpha ? source.channels : source.channels + 1) as SharpChannels;
+  const maxSample = source.depth === "ushort" ? 0xffff : 0xff;
+  const samples = source.depth === "ushort"
+    ? new Uint16Array(source.width * source.height * outputChannels)
+    : new Uint8Array(source.width * source.height * outputChannels);
+  const subsamplesPerAxis = 4;
+  const subsampleCount = subsamplesPerAxis * subsamplesPerAxis;
+
+  for (let y = 0; y < source.height; y += 1) {
+    const inTopCorner = y < radiusYPx;
+    const inBottomCorner = y >= source.height - radiusYPx;
+    for (let x = 0; x < source.width; x += 1) {
+      const sourceOffset = (y * source.width + x) * source.channels;
+      const targetOffset = (y * source.width + x) * outputChannels;
+      samples.set(source.samples.subarray(sourceOffset, sourceOffset + colourChannels), targetOffset);
+
+      let existingAlpha = hasAlpha ? source.samples[sourceOffset + colourChannels]! : maxSample;
+      const inLeftCorner = x < radiusXPx;
+      const inRightCorner = x >= source.width - radiusXPx;
+      if ((inTopCorner || inBottomCorner) && (inLeftCorner || inRightCorner)) {
+        const centerX = inLeftCorner ? radiusXPx : source.width - radiusXPx;
+        const centerY = inTopCorner ? radiusYPx : source.height - radiusYPx;
+        let insideSamples = 0;
+
+        for (let subY = 0; subY < subsamplesPerAxis; subY += 1) {
+          const sampleY = y + (subY + 0.5) / subsamplesPerAxis;
+          for (let subX = 0; subX < subsamplesPerAxis; subX += 1) {
+            const sampleX = x + (subX + 0.5) / subsamplesPerAxis;
+            const normalizedX = (sampleX - centerX) / radiusXPx;
+            const normalizedY = (sampleY - centerY) / radiusYPx;
+            if (normalizedX * normalizedX + normalizedY * normalizedY <= 1) insideSamples += 1;
+          }
+        }
+
+        const maskAlpha = Math.round((maxSample * insideSamples) / subsampleCount);
+        existingAlpha = Math.min(existingAlpha, maskAlpha);
+      }
+
+      samples[targetOffset + colourChannels] = existingAlpha;
+    }
+  }
+
+  return {
+    ...source,
+    channels: outputChannels,
+    samples,
+  };
 }
 
 function copyPixel(
@@ -138,55 +172,18 @@ function copyPixel(
 export function addRasterBleed(
   source: RasterPixels,
   dimensions: RasterBleedDimensions,
-  sideSources: RasterBleedSideSources = {
-    top: { offsetPx: 0, sourceStripPx: dimensions.sourceStripYPx },
-    right: { offsetPx: 0, sourceStripPx: dimensions.sourceStripXPx },
-    bottom: { offsetPx: 0, sourceStripPx: dimensions.sourceStripYPx },
-    left: { offsetPx: 0, sourceStripPx: dimensions.sourceStripXPx },
-  },
 ): { readonly width: number; readonly height: number; readonly samples: Uint8Array | Uint16Array } {
-  const { bleedXPx, bleedYPx, sourceStripXPx, sourceStripYPx } = dimensions;
+  const { bleedXPx, bleedYPx } = dimensions;
   const width = source.width + bleedXPx * 2;
   const height = source.height + bleedYPx * 2;
   const sampleCount = width * height * source.channels;
   const samples = source.depth === "ushort" ? new Uint16Array(sampleCount) : new Uint8Array(sampleCount);
 
   for (let y = 0; y < height; y += 1) {
-    const sourceY = y - bleedYPx;
+    const sourceY = Math.max(0, Math.min(source.height - 1, y - bleedYPx));
     for (let x = 0; x < width; x += 1) {
-      const sourceX = x - bleedXPx;
-      const outsideX = sourceX < 0 || sourceX >= source.width;
-      const outsideY = sourceY < 0 || sourceY >= source.height;
-      let sampleX: number;
-      let sampleY: number;
-
-      if (!outsideX && !outsideY) {
-        sampleX = sourceX;
-        sampleY = sourceY;
-      } else if (outsideX && outsideY) {
-        const depthX = sourceX < 0 ? -sourceX : sourceX - source.width + 1;
-        const depthY = sourceY < 0 ? -sourceY : sourceY - source.height + 1;
-        const xSide = sourceX < 0 ? sideSources.left : sideSources.right;
-        const ySide = sourceY < 0 ? sideSources.top : sideSources.bottom;
-        const stripOffsetX = mapBleedDepthToSourceStrip(depthX, bleedXPx, xSide.sourceStripPx);
-        const stripOffsetY = mapBleedDepthToSourceStrip(depthY, bleedYPx, ySide.sourceStripPx);
-        sampleX = sourceX < 0 ? xSide.offsetPx + stripOffsetX : source.width - 1 - xSide.offsetPx - stripOffsetX;
-        sampleY = sourceY < 0 ? ySide.offsetPx + stripOffsetY : source.height - 1 - ySide.offsetPx - stripOffsetY;
-      } else if (outsideY) {
-        const depthY = sourceY < 0 ? -sourceY : sourceY - source.height + 1;
-        const ySide = sourceY < 0 ? sideSources.top : sideSources.bottom;
-        const stripOffsetY = mapBleedDepthToSourceStrip(depthY, bleedYPx, ySide.sourceStripPx);
-        sampleX = mapAlongEdgeToCornerSource(sourceX, source.width, sideSources.left.offsetPx, sideSources.right.offsetPx);
-        sampleY = sourceY < 0 ? ySide.offsetPx + stripOffsetY : source.height - 1 - ySide.offsetPx - stripOffsetY;
-      } else {
-        const depthX = sourceX < 0 ? -sourceX : sourceX - source.width + 1;
-        const xSide = sourceX < 0 ? sideSources.left : sideSources.right;
-        const stripOffsetX = mapBleedDepthToSourceStrip(depthX, bleedXPx, xSide.sourceStripPx);
-        sampleX = sourceX < 0 ? xSide.offsetPx + stripOffsetX : source.width - 1 - xSide.offsetPx - stripOffsetX;
-        sampleY = mapAlongEdgeToCornerSource(sourceY, source.height, sideSources.top.offsetPx, sideSources.bottom.offsetPx);
-      }
-
-      copyPixel(source, samples, sampleX, sampleY, y * width + x);
+      const sourceX = Math.max(0, Math.min(source.width - 1, x - bleedXPx));
+      copyPixel(source, samples, sourceX, sourceY, y * width + x);
     }
   }
 
@@ -218,20 +215,11 @@ export function calculateRasterBleedDimensions(
   sourceWidthPx: number,
   sourceHeightPx: number,
   bleedMm: number,
-  sourceStripMm: number,
   trimWidthMm: number,
   trimHeightMm: number,
 ): RasterBleedDimensions {
   const bleedXPx = Math.max(1, Math.ceil((sourceWidthPx * bleedMm) / trimWidthMm));
   const bleedYPx = Math.max(1, Math.ceil((sourceHeightPx * bleedMm) / trimHeightMm));
-  const sourceStripXPx = Math.min(
-    sourceWidthPx,
-    Math.max(1, Math.ceil((sourceWidthPx * sourceStripMm) / trimWidthMm)),
-  );
-  const sourceStripYPx = Math.min(
-    sourceHeightPx,
-    Math.max(1, Math.ceil((sourceHeightPx * sourceStripMm) / trimHeightMm)),
-  );
 
-  return { bleedXPx, bleedYPx, sourceStripXPx, sourceStripYPx };
+  return { bleedXPx, bleedYPx };
 }

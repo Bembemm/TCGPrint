@@ -85,93 +85,11 @@ Sol Ring
 
 ---
 
-# Frente B — Smart Scryfall Bleed / Auto Border Fill
+# Frente B — nota de supersessão
 
-Branch sugerida:
+Esta parte do plano inicial não está mais vigente. A fonte normativa da Fase 5.5 é a seção correspondente em `IMPLEMENTATION_PLAN.md`, com a decisão registrada em [ADR 0008](../../decisions/0008-edge-extension-rounded-corners.md).
 
-```text
-codex/scryfall-smart-bleed
-```
-
-Problema observado no PDF real:
-
-O `subtle-edge-stretch` atual usa a região periférica da imagem. Em scans Scryfall com moldura preta/escura, isso pode produzir bleed externo predominantemente preto.
-
-Objetivo: criar bleed visualmente mais natural para Scryfall SEM tocar no trim.
-
-Novo modo/política:
-
-```text
-smart-border-fill
-```
-
-Arquitetura:
-
-- manter `BleedEngine` como único engine;
-- não criar pipeline paralelo dentro do provider Scryfall;
-- provider apenas informa/sugere a política;
-- engine recebe política/mode e gera derivado;
-- original permanece imutável;
-- cache inclui algoritmo/version/policy.
-
-Algoritmo esperado:
-
-1. analisar cada lado separadamente;
-2. medir cor/luminância/variação da faixa periférica;
-3. se detectar moldura predominantemente escura e uniforme:
-   - avançar para dentro da carta somente para escolher a faixa FONTE do bleed;
-   - nunca recortar nem mover o trim;
-4. gerar bleed externo por extensão/mirror apropriado da faixa fonte;
-5. cantos tratados separadamente;
-6. se não houver confiança:
-   - fallback para `subtle-edge-stretch`;
-7. borderless/full-art não deve ser tratado como borda preta clássica;
-8. nenhuma IA/cloud/inpainting remoto.
-
-Guardrails:
-
-- trim pixels before == trim pixels after;
-- Magic continua 63.5 × 88.9 mm;
-- bleed continua 0–3 mm;
-- PDF não pode sofrer downsampling;
-- JPEG/PNG fidelity permanece;
-- SVG continua com regra atual até implementação específica;
-- preview = export em política efetiva.
-
-Provider defaults:
-
-```text
-Scryfall raster → smart-border-fill auto
-Upload local    → subtle-edge-stretch por padrão
-MPC             → respeitar metadata/bleed existente quando conhecida
-```
-
-Não assumir que todo MPC precisa de bleed gerado.
-
-Testes obrigatórios:
-
-- fixture com borda preta clássica;
-- full-art/borderless;
-- borda clara;
-- lados diferentes;
-- cantos;
-- 0 mm passthrough;
-- 0.625 / 1 / 2 / 3 mm;
-- pixel-integrity do trim;
-- determinismo;
-- cache-key/version;
-- fallback;
-- prova de que uma borda preta não domina o bleed quando a detecção encontra faixa interna válida.
-
-Gerar matriz visual de comparação:
-
-```text
-original edge
-subtle-edge-stretch
-smart-border-fill
-```
-
-para revisão humana antes de considerar concluído.
+Não usar critérios, modos, medições nem artefatos desta versão histórica para implementar ou aceitar o bleed atual. O histórico anterior permanece no ADR 0007 supersedido e no histórico Git.
 
 ---
 

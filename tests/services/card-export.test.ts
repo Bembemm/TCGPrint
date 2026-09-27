@@ -23,7 +23,7 @@ afterEach(async () => {
 });
 
 describe("decklist → identity → Scryfall artwork → PDF", () => {
-  it("does not de-duplicate identical bytes at the same bleed when effective modes differ", async () => {
+  it("shares an edge-extension derivative for identical bytes across sources and metadata", async () => {
     const samples = new Uint8Array(127 * 178 * 3);
     for (let y = 0; y < 178; y += 1) {
       for (let x = 0; x < 127; x += 1) {
@@ -79,18 +79,19 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     ], {
       bleedMm: 1,
       cutGuides: "none",
-      bleedMode: "auto",
     });
 
-    expect(generate).toHaveBeenCalledTimes(2);
-    expect(generate.mock.calls.map(([request]) => request.imageBytes)).toEqual([bytes, bytes]);
-    expect(generate.mock.calls.map(([request]) => request.bleedMm)).toEqual([1, 1]);
-    expect(generate.mock.calls.map(([request]) => request.mode)).toEqual(["smart-border-fill", "subtle-edge-stretch"]);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(generate.mock.calls.map(([request]) => request.imageBytes)).toEqual([bytes]);
+    expect(generate.mock.calls.map(([request]) => request.bleedMm)).toEqual([1]);
+    expect(generate.mock.calls[0][0].roundedCorners).toBe(false);
+    expect(generate.mock.calls[0][0].mode).toBe("edge-extension");
+    expect(result.bleedDiagnostics.map((diagnostic) => diagnostic.resolvedMode)).toEqual(Array(3).fill("edge-extension"));
     expect(result.bleedDiagnostics[2]).toMatchObject({
       requestedMode: "auto",
-      resolvedMode: "subtle-edge-stretch",
-      policyId: "scryfall-full-art-auto-subtle-v1",
-      algorithmVersion: "reflected-corners-v2-smart-border-fill-v3",
+      resolvedMode: "edge-extension",
+      policyId: "edge-extension-v1",
+      algorithmVersion: "edge-extension-v1",
     });
   });
 
@@ -138,7 +139,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
       card("scryfall-diagnostic", "scryfall", 0),
       card("upload-diagnostic", "upload", 1),
       card("mpc-diagnostic", "mpc", 2),
-    ], { bleedMm: 1, cutGuides: "none", bleedMode: "auto" });
+    ], { bleedMm: 1, cutGuides: "none", roundedCorners: true });
 
     expect(result.pdfBytes).toBeInstanceOf(Uint8Array);
     expect(result.bleedDiagnostics).toHaveLength(3);
@@ -146,27 +147,28 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
       workingCardId: "scryfall-diagnostic",
       source: "scryfall",
       requestedMode: "auto",
-      resolvedMode: "smart-border-fill",
-      effectiveMode: "subtle-edge-stretch",
-      algorithmVersion: expect.any(String),
-      sideDiagnostics: { top: expect.objectContaining({ effectiveMode: "subtle-edge-stretch", fallbackReason: "outer-band-not-dark-uniform" }) },
+      resolvedMode: "edge-extension",
+      effectiveMode: "edge-extension",
+      algorithmVersion: "edge-extension-v1",
+      roundedCorners: true,
+      cornerRadiusMm: 3.175,
+      sideDiagnostics: { top: { strategy: "nearest-edge-pixel" } },
     });
-    expect(result.bleedDiagnostics[1]).toMatchObject({ source: "upload", resolvedMode: "subtle-edge-stretch", effectiveMode: "subtle-edge-stretch" });
+    expect(result.bleedDiagnostics[1]).toMatchObject({ source: "upload", resolvedMode: "edge-extension", effectiveMode: "edge-extension" });
     expect(result.bleedDiagnostics[2]).toMatchObject({
       source: "mpc",
-      policyNotice: "MPC_BLEED_METADATA_UNKNOWN",
-      resolvedMode: "subtle-edge-stretch",
-      effectiveMode: "subtle-edge-stretch",
+      resolvedMode: "edge-extension",
+      effectiveMode: "edge-extension",
     });
     const pdfBleeds = pdfGenerate.mock.calls[0][0].bleedResults!;
     const generatedBleeds = await Promise.all(bleedGenerate.mock.results.map((result) => result.value));
     expect(pdfBleeds).toHaveLength(3);
-    expect(generatedBleeds).toHaveLength(2);
+    expect(generatedBleeds).toHaveLength(1);
+    expect(generatedBleeds[0].roundedCorners).toBe(true);
     for (const [index, bleed] of pdfBleeds.entries()) {
-      const generatedIndex = index === 2 ? 1 : index;
       expect(bleed).toBeDefined();
-      expect(bleed).toBe(generatedBleeds[generatedIndex]);
-      expect(bleed!.preview.bytes).toBe(generatedBleeds[generatedIndex].preview.bytes);
+      expect(bleed).toBe(generatedBleeds[0]);
+      expect(bleed!.preview.bytes).toBe(generatedBleeds[0].preview.bytes);
       expect(createHash("sha256").update(bleed!.preview.bytes).digest("hex")).toBe(result.bleedDiagnostics[index].previewSha256);
     }
   });

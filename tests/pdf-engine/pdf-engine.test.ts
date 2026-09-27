@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { inflateSync } from "node:zlib";
 import { join } from "node:path";
 import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, PDFRef } from "@pdfme/pdf-lib";
+import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { MAGIC_STANDARD_CARD, type CardFormat } from "../../core/geometry";
 import { mmToPoints, pointsToMm } from "../../core/units";
@@ -286,6 +287,61 @@ describe("LosslessPdfEngine", () => {
     expect(positionedMatrices[4][5] - positionedMatrices[0][5]).toBeCloseTo(bleedPoints, 8);
     expect(expanded![0] - trim![0]).toBeCloseTo(2 * bleedPoints, 8);
     expect(expanded![3] - trim![3]).toBeCloseTo(2 * bleedPoints, 8);
+  });
+
+  it("places a rounded-corner derivative inside the unchanged physical trim when bleed is zero", async () => {
+    const original = new Uint8Array(await sharp({
+      create: { width: 127, height: 178, channels: 4, background: { r: 25, g: 90, b: 155, alpha: 1 } },
+    }).png().toBuffer());
+    const rounded = await new BleedEngine().generate({
+      imageBytes: original,
+      bleedMm: 0,
+      roundedCorners: true,
+      cornerRadiusMm: 3.175,
+    });
+    const pdf = await engine.generate({ images: [original], bleedResults: [rounded] });
+    const parsed = await parsePdf(pdf);
+    const image = parsed.images.find((candidate) => candidate.dictionary.includes("/SMask"));
+    const draws = getImageDrawsWithClips(parsed.content);
+    const alpha = inflateSync(getPdfStreamBytes(getAlphaMask(parsed, image!)));
+
+    expect(rounded.status).toBe("derived");
+    expect(image).toMatchObject({ width: 127, height: 178 });
+    expect(alpha[0]).toBe(0);
+    expect(alpha[89 * 127 + 63]).toBe(255);
+    expect(draws).toHaveLength(1);
+    expect(draws[0].clip).toBeDefined();
+    assertMatrixContainsSize(parsed.content, MAGIC_CARD_WIDTH_POINTS, MAGIC_CARD_HEIGHT_POINTS);
+    expect(pointsToMm(MAGIC_CARD_WIDTH_POINTS)).toBe(63.5);
+    expect(pointsToMm(MAGIC_CARD_HEIGHT_POINTS)).toBeCloseTo(88.9, 12);
+  });
+
+  it("uses one rounded derivative for both exterior bleed and the rounded trim", async () => {
+    const original = new Uint8Array(await sharp({
+      create: { width: 127, height: 178, channels: 4, background: { r: 25, g: 90, b: 155, alpha: 1 } },
+    }).png().toBuffer());
+    const rounded = await new BleedEngine().generate({
+      imageBytes: original,
+      bleedMm: 0.625,
+      roundedCorners: true,
+      cornerRadiusMm: 3.175,
+    });
+    const pdf = await engine.generate({ images: [original], bleedResults: [rounded] });
+    const parsed = await parsePdf(pdf);
+    const draws = getImageDrawsWithClips(parsed.content);
+
+    expect(draws).toHaveLength(5);
+    expect(draws.every((draw) => draw.clip !== undefined)).toBe(true);
+    expect(new Set(draws.map((draw) => getImageResourceReference(parsed, draw.resourceName))).size).toBe(1);
+    expect(parsed.images.filter((image) => image.dictionary.includes("/SMask"))).toHaveLength(1);
+    const trimClip = draws.find((draw) =>
+      Math.abs(draw.clip!.width - MAGIC_CARD_WIDTH_POINTS) < 1e-8
+      && Math.abs(draw.clip!.height - MAGIC_CARD_HEIGHT_POINTS) < 1e-8,
+    )?.clip;
+    expect(trimClip).toBeDefined();
+    expect(pointsToMm(trimClip!.width)).toBe(63.5);
+    expect(pointsToMm(trimClip!.height)).toBeCloseTo(88.9, 12);
+    assertMatrixContainsSize(parsed.content, mmToPoints(63.5 + 2 * 0.625), mmToPoints(88.9 + 2 * 0.625));
   });
 
   it("draws bleed, one partial-alpha PNG trim, then vector guides", async () => {

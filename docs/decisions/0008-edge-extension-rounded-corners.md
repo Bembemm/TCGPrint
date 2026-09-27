@@ -3,7 +3,7 @@
 - Status: Aceito para implementação; auditoria da Fase 5.5 pendente
 - Date: 2026-09-27
 - Scope: Fase 5.5, bleed raster e geometria opcional dos cantos
-- Substitui: ADR 0007, cuja busca de conteúdo interior foi abandonada
+- Substitui: ADR 0007, cuja proposta anterior foi abandonada
 
 ## Contexto
 
@@ -31,9 +31,10 @@ Arredondar cantos é uma necessidade distinta e opcional. Não é uma operação
 
 - A configuração explícita `roundedCorners: boolean` controla o recurso; seu padrão é `false`.
 - Quando desligado, não há arredondamento automático e a comparação pixel a pixel do trim deve passar integralmente.
-- Quando ligado, o sistema pode completar os cantos até o raio físico definido por `CardFormat`, somente se a origem ainda não tiver cantos completos compatíveis.
+- Quando ligado, aplica uma máscara geométrica antialias limitada aos quatro cantos, usando o raio físico definido por `CardFormat`.
 - `Magic Standard` inicia com `cornerRadiusMm = 3.175`; é um valor interno configurável, não uma inferência sobre pixels da imagem. Outros formatos precisam declarar seu raio.
-- Uma origem que já tenha os cantos adequados não pode ser degradada nem arredondada duas vezes. Detecção e aplicação devem ser determinísticas; quando não houver evidência confiável ou raio configurado, preservar a origem.
+- O alpha de origem é combinado com a máscara usando o menor valor, portanto transparência arredondada já existente não é preenchida nem reduzida. Sem raio configurado, preservar a origem.
+- Não executar crop, zoom, scale, resize ou resampling; a carta mantém seu tamanho físico de trim (Magic Standard: `63.5 × 88.9 mm`).
 - O arredondamento é uma transformação geométrica separada do Edge Extension. Não escolhe pixels-fonte do bleed nem altera a identidade dos demais pixels da carta; a mídia original permanece imutável.
 - Preview e export obedecem ao mesmo valor da opção. A configuração e a versão da transformação entram na identidade/cache somente quando alterarem o derivado.
 
@@ -53,4 +54,4 @@ A aceitação deve demonstrar, com fixtures controladas:
 
 ## Decisão anterior abandonada
 
-A versão anterior deste ADR descrevia `smart-border-fill`: classificar molduras e buscar uma faixa mais interna para evitar bleed preto. Essa decisão está supersedida e permanece somente como histórico no ADR 0007/Git. Seus limiares, resultados visuais e diagnósticos de busca interna não são requisitos nem evidência de aceitação para a nova direção.
+O ADR 0007 registra uma proposta anterior que foi supersedida. Seus métodos, medições e resultados visuais são somente históricos; não são requisitos nem evidência de aceitação para esta direção.

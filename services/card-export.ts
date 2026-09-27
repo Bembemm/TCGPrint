@@ -5,12 +5,10 @@ import {
   BleedGenerationError,
   createBleedCacheKey,
   resolveBleedSourcePolicy,
-  resolveSmartBorderFillConfig,
-  SMART_BORDER_FILL_CONFIG,
+  type BleedMode,
   type BleedModePreference,
   type BleedDerivativeResult,
   type BleedResult,
-  type SmartBorderFillConfigOverrides,
 } from "../image-engine/bleed";
 import { MAGIC_STANDARD_CARD, PAPER_FORMATS, type CutGuideConfig } from "../core/geometry";
 import { LosslessPdfEngine, PdfExportError } from "../pdf-engine/document";
@@ -21,8 +19,7 @@ import type { CardWorkbench } from "./card-workbench";
 export interface CardExportOptions {
   readonly bleedMm: number;
   readonly cutGuides: "full" | "none";
-  readonly bleedMode?: BleedModePreference;
-  readonly smartBorderFillConfig?: SmartBorderFillConfigOverrides;
+  readonly roundedCorners?: boolean;
 }
 
 export interface CardExportBleedDiagnostic {
@@ -31,14 +28,14 @@ export interface CardExportBleedDiagnostic {
   readonly cardName: string;
   readonly source: ArtworkCandidate["source"];
   readonly requestedMode: BleedModePreference;
-  readonly resolvedMode: "smart-border-fill" | "subtle-edge-stretch";
+  readonly resolvedMode: BleedMode;
   readonly effectiveMode: BleedResult["effectiveMode"];
   readonly algorithmVersion: typeof BLEED_ALGORITHM_VERSION;
-  readonly smartBorderFillConfigVersion: string;
   readonly policyId: string;
-  readonly policyNotice?: string;
   readonly bleedMm: number;
   readonly trimSizeMm: BleedResult["trimSizeMm"];
+  readonly roundedCorners: boolean;
+  readonly cornerRadiusMm?: number;
   readonly sideDiagnostics: BleedDerivativeResult["sideDiagnostics"];
   readonly previewSha256: string;
 }
@@ -49,7 +46,7 @@ export interface CardExportResult {
 }
 
 export class CardExportServiceError extends Error {
-  constructor(readonly code: "ARTWORK_REQUIRED" | "ARTWORK_ORIGINAL_UNAVAILABLE" | "UNSUPPORTED_FORMAT" | "INVALID_BLEED" | "EXPORT_FAILED" | "EXPORT_TOO_LARGE", message: string, options?: ErrorOptions) {
+  constructor(readonly code: "ARTWORK_REQUIRED" | "ARTWORK_ORIGINAL_UNAVAILABLE" | "UNSUPPORTED_FORMAT" | "INVALID_BLEED" | "INVALID_ROUNDED_CORNERS" | "EXPORT_FAILED" | "EXPORT_TOO_LARGE", message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "CardExportServiceError";
   }
@@ -108,10 +105,11 @@ export async function exportWorkingCardsWithDiagnostics(
   if (!Number.isFinite(options.bleedMm) || options.bleedMm < 0 || options.bleedMm > 3) {
     throw new CardExportServiceError("INVALID_BLEED", "Bleed must be between 0 and 3 mm.");
   }
-  const bleedMode = options.bleedMode ?? "auto";
-  if (bleedMode !== "auto" && bleedMode !== "smart-border-fill" && bleedMode !== "subtle-edge-stretch") {
-    throw new CardExportServiceError("INVALID_BLEED", "Bleed mode must be auto, smart-border-fill, or subtle-edge-stretch.");
+  const roundedCorners = options.roundedCorners ?? false;
+  if (typeof roundedCorners !== "boolean") {
+    throw new CardExportServiceError("INVALID_ROUNDED_CORNERS", "Rounded corners must be enabled or disabled explicitly.");
   }
+
   const total = cards.reduce((sum, card) => sum + card.quantity, 0);
   if (total < 1) throw new CardExportServiceError("ARTWORK_REQUIRED", "Add at least one card to export.");
   if (total > 500) throw new CardExportServiceError("EXPORT_TOO_LARGE", "The first export is limited to 500 physical cards per PDF.");
@@ -121,8 +119,7 @@ export async function exportWorkingCardsWithDiagnostics(
   const composedImages: Uint8Array[] = [];
   const composedBleeds: Array<BleedResult | undefined> = [];
   const bleedDiagnostics: CardExportBleedDiagnostic[] = [];
-  const smartBorderFillConfig = resolveSmartBorderFillConfig(options.smartBorderFillConfig ?? SMART_BORDER_FILL_CONFIG);
-  const bleedEngine = new BleedEngine({ smartBorderFillConfig });
+  const bleedEngine = new BleedEngine();
   const pdfEngine = new LosslessPdfEngine();
 
   for (const card of [...cards].sort((a, b) => a.order - b.order)) {
@@ -156,26 +153,27 @@ export async function exportWorkingCardsWithDiagnostics(
     if (!["jpeg", "png", "svg"].includes(original.format)) {
       throw new CardExportServiceError("UNSUPPORTED_FORMAT", `The PDF engine does not currently support ${original.format.toUpperCase()} artwork.`);
     }
-    const hash = original.contentHash || digest(original.bytes);
+    const hash = digest(original.bytes);
     let image = uniqueImages.get(hash);
     if (!image) {
       image = original.bytes;
       uniqueImages.set(hash, image);
     }
     let bleed: BleedResult | undefined;
-    if (options.bleedMm > 0) {
-      if (original.format === "svg") throw new CardExportServiceError("UNSUPPORTED_FORMAT", "SVG artwork stays vector at zero bleed; the current BleedEngine does not generate SVG bleed.");
-      const policy = resolveBleedSourcePolicy({ source: candidate.source, format: original.format, override: bleedMode, metadata: candidate.metadata });
+    if (options.bleedMm > 0 || roundedCorners) {
+      if (original.format === "svg") {
+        throw new CardExportServiceError("UNSUPPORTED_FORMAT", "SVG artwork stays vector; raster bleed and rounded-corner derivatives are not supported for SVG.");
+      }
+      const policy = resolveBleedSourcePolicy({ source: candidate.source, format: original.format, metadata: candidate.metadata });
       const trimSizeMm = { widthMm: MAGIC_STANDARD_CARD.widthMm, heightMm: MAGIC_STANDARD_CARD.heightMm };
-      const sourceStrip = { mode: "auto" as const };
+      const cornerRadiusMm = MAGIC_STANDARD_CARD.cornerRadiusMm;
       const key = createBleedCacheKey({
         originalSha256: hash,
         bleedMm: options.bleedMm,
-        mode: policy.mode,
-        sourceStrip,
         trimWidthMm: trimSizeMm.widthMm,
         trimHeightMm: trimSizeMm.heightMm,
-        smartBorderFillConfig,
+        roundedCorners,
+        ...(roundedCorners ? { cornerRadiusMm } : {}),
       });
       bleed = uniqueBleeds.get(key);
       if (!bleed) {
@@ -184,9 +182,10 @@ export async function exportWorkingCardsWithDiagnostics(
             imageBytes: image,
             bleedMm: options.bleedMm,
             trimSizeMm,
-            sourceStrip,
             mode: policy.mode,
             policyId: policy.policyId,
+            roundedCorners,
+            ...(roundedCorners ? { cornerRadiusMm } : {}),
           });
           uniqueBleeds.set(key, bleed);
         } catch (error) {
@@ -204,11 +203,11 @@ export async function exportWorkingCardsWithDiagnostics(
         resolvedMode: policy.mode,
         effectiveMode: bleed.effectiveMode,
         algorithmVersion: bleed.algorithmVersion,
-        smartBorderFillConfigVersion: smartBorderFillConfig.version,
         policyId: policy.policyId,
-        ...(policy.notice ? { policyNotice: policy.notice } : {}),
         bleedMm: options.bleedMm,
         trimSizeMm: bleed.trimSizeMm,
+        roundedCorners,
+        ...(roundedCorners ? { cornerRadiusMm } : {}),
         sideDiagnostics: bleed.sideDiagnostics,
         previewSha256: digest(bleed.preview.bytes),
       });

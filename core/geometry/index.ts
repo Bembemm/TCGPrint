@@ -32,6 +32,7 @@ export const MAGIC_STANDARD_CARD: CardFormat = Object.freeze({
   name: "Magic Standard",
   widthMm: 63.5,
   heightMm: 88.9,
+  cornerRadiusMm: 3.175,
 });
 
 export const PAPER_FORMATS = Object.freeze({

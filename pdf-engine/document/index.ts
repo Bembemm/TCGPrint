@@ -757,8 +757,9 @@ export class LosslessPdfEngine {
     const bleedByImageMm = request.images.map((_image, index) => {
       const bleed = request.bleedResults?.[index];
       if (bleed?.status !== "derived") return 0;
-      if (!Number.isFinite(bleed.bleedMm) || bleed.bleedMm <= 0 || bleed.bleedMm > 3) {
-        throw new PdfExportError("PDF bleed amount must be greater than 0 mm and at most 3 mm.");
+      if (!Number.isFinite(bleed.bleedMm) || bleed.bleedMm < 0 || bleed.bleedMm > 3
+        || (bleed.bleedMm === 0 && !bleed.roundedCorners)) {
+        throw new PdfExportError("A PDF derivative must contain positive bleed or an enabled rounded-corner transform.");
       }
       return bleed.bleedMm;
     });
@@ -843,8 +844,9 @@ export class LosslessPdfEngine {
 
         const bleed = request.bleedResults?.[imageIndex];
         if (bleed?.status === "derived") {
-          if (!Number.isFinite(bleed.bleedMm) || bleed.bleedMm <= 0 || bleed.bleedMm > 3) {
-            throw new PdfExportError("PDF bleed amount must be greater than 0 mm and at most 3 mm.");
+          if (!Number.isFinite(bleed.bleedMm) || bleed.bleedMm < 0 || bleed.bleedMm > 3
+            || (bleed.bleedMm === 0 && !bleed.roundedCorners)) {
+            throw new PdfExportError("A PDF derivative must contain positive bleed or an enabled rounded-corner transform.");
           }
 
           const originalSha256 = createHash("sha256").update(exactBytes).digest("hex");
@@ -858,35 +860,42 @@ export class LosslessPdfEngine {
             throw new PdfExportError("PDF bleed derivatives must expose a lossless PNG preview and trim rectangle.");
           }
           const epsilonMm = 1e-9;
-          if (
+          if (bleed.bleedMm > 0 && (
             xMm - bleed.bleedMm < -epsilonMm
             || topMm - bleed.bleedMm < -epsilonMm
             || xMm + card.widthMm + bleed.bleedMm > paper.widthMm + epsilonMm
             || topMm + card.heightMm + bleed.bleedMm > paper.heightMm + epsilonMm
-          ) {
+          )) {
             throw new PdfExportError("The requested bleed would extend beyond the PDF page bounds.");
           }
 
           const bleedPoints = mmToPoints(bleed.bleedMm);
           const expandedWidthPoints = widthPoints + 2 * bleedPoints;
           const expandedHeightPoints = heightPoints + 2 * bleedPoints;
-          await drawClippedBleedRaster(
-            pdf,
-            page,
-            bleed.preview.bytes,
-            request.images.length + imageIndex,
-            xPoints - bleedPoints,
-            yPoints - bleedPoints,
-            expandedWidthPoints,
-            expandedHeightPoints,
-            makeBleedClipRegions(
+          const clipRegions = [
+            ...(bleed.bleedMm > 0 ? makeBleedClipRegions(
               xPoints,
               yPoints,
               widthPoints,
               heightPoints,
               bleedPoints,
-            ),
-          );
+            ) : []),
+            ...(bleed.roundedCorners ? [{ x: xPoints, y: yPoints, width: widthPoints, height: heightPoints }] : []),
+          ];
+          if (clipRegions.length > 0) {
+            await drawClippedBleedRaster(
+              pdf,
+              page,
+              bleed.preview.bytes,
+              request.images.length + imageIndex,
+              xPoints - bleedPoints,
+              yPoints - bleedPoints,
+              expandedWidthPoints,
+              expandedHeightPoints,
+              clipRegions,
+            );
+          }
+          if (bleed.roundedCorners) continue;
         }
 
         if (format === "jpeg") {

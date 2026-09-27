@@ -302,6 +302,7 @@ Exemplo:
 const magicStandard = {
   widthMm: 63.5,
   heightMm: 88.9,
+  cornerRadiusMm: 3.175,
 };
 ```
 
@@ -334,6 +335,7 @@ Primeiro formato:
 ```text
 Magic Standard
 63.5 × 88.9 mm
+corner radius: 3.175 mm
 ```
 
 A arquitetura deve suportar posteriormente:
@@ -1355,10 +1357,11 @@ Arredondar cantos não faz parte do algoritmo de bleed.
 Disponibilizar uma opção explícita `roundedCorners: boolean`, desligada por padrão:
 
 - `false`: não aplicar arredondamento automático;
-- `true`: completar o raio físico de canto do `CardFormat` quando a origem não tiver cantos arredondados completos;
+- `true`: aplicar a máscara geométrica antialias do raio físico do `CardFormat` somente nos quatro cantos;
 - `Magic Standard` usa raio inicial configurável de `3.175 mm`; outros formatos devem declarar seu próprio `cornerRadiusMm`;
-- se a origem já tiver os cantos compatíveis, a operação deve ser idempotente e não degradá-los;
-- se não houver raio físico configurado ou a detecção não for confiável, não inventar um valor nem alterar a origem;
+- combinar a máscara com alpha preexistente usando o menor alpha; cantos transparentes já completos nunca são preenchidos nem menos arredondados;
+- não executar crop, zoom, scale, resize ou resampling; as dimensões raster do trim e o tamanho físico da carta continuam iguais;
+- sem raio físico configurado, não inventar um valor nem alterar a origem;
 - a opção é aplicada como transformação geométrica separada, sem mudar a amostragem do bleed;
 - original permanece imutável; preview e export usam o mesmo resultado/configuração;
 - a configuração de arredondamento entra na identidade/cache de qualquer derivado que ela alterar.
@@ -3450,7 +3453,7 @@ Regras obrigatórias:
 - repetir para fora a linha/coluna de pixels da beirada correspondente;
 - analisar TOP, RIGHT, BOTTOM e LEFT independentemente;
 - fechar os quatro cantos com as amostras dos cantos do trim, deterministicamente;
-- não procurar source strip interna, não classificar bordas e não inferir conteúdo;
+- não amostrar pixels de outras regiões da imagem nem inferir conteúdo;
 - borda preta continua preta e full-art continua a partir da própria beirada;
 - suportar alpha e 16-bit sem alterar os pixels do trim;
 - bleed de 0 mm preserva o original;
@@ -3464,9 +3467,10 @@ Regras obrigatórias:
 Adicionar o controle explícito `roundedCorners: boolean`, default `false`, separado do bleed:
 
 - desligado: não aplicar cantos arredondados automáticos;
-- ligado: completar somente cantos que ainda não atendem ao raio de `CardFormat`;
-- cantos já completos não devem ser degradados nem arredondados duas vezes;
-- sem raio confiável, não inventar geometria;
+- ligado: aplicar máscara geométrica antialias somente nos cantos, usando o raio de `CardFormat`;
+- alpha preexistente é combinado por mínimo, preservando cantos já transparentes/redondos sem preenchê-los ou reduzir seu raio;
+- sem raio configurado, não inventar geometria;
+- sem crop/zoom/scale/resize/resampling: Magic Standard segue com trim físico 63.5 × 88.9 mm;
 - original imutável e política idêntica em preview/export;
 - alteração de arredondamento deve estar versionada/cacheada separadamente da amostragem do bleed.
 

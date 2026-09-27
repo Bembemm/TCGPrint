@@ -1,4 +1,4 @@
-import type { BleedModePreference } from "../../image-engine/bleed/policy";
+import type { BleedModePreference } from "../../image-engine/bleed";
 
 export interface BleedDiagnosticsReport {
   readonly version: 1;
@@ -11,26 +11,24 @@ export interface BleedDiagnosticsReport {
     readonly resolvedMode: string;
     readonly effectiveMode: string;
     readonly algorithmVersion: string;
-    readonly smartBorderFillConfigVersion: string;
     readonly policyId: string;
-    readonly policyNotice?: string;
     readonly bleedMm: number;
     readonly trimSizeMm: { readonly widthMm: number; readonly heightMm: number };
+    readonly roundedCorners?: boolean;
+    readonly cornerRadiusMm?: number;
     readonly previewSha256: string;
-    readonly sideDiagnostics: Readonly<Record<string, { readonly effectiveMode: string; readonly classification?: string; readonly sourceOffsetPx?: number; readonly sourceStripPx?: number; readonly fallbackReason?: string }>>;
+    readonly sideDiagnostics: Readonly<Record<string, { readonly strategy: string }>>;
   }[];
   readonly truncated?: boolean;
   readonly count?: number;
   readonly effectiveModeCounts?: Readonly<Record<string, number>>;
-  readonly fallbackCounts?: Readonly<Record<string, number>>;
-  readonly noticeCounts?: Readonly<Record<string, number>>;
 }
 
-export function buildBleedExportOptions(bleedMm: string, cutGuides: boolean, bleedMode: BleedModePreference) {
+export function buildBleedExportOptions(bleedMm: string, cutGuides: boolean, roundedCorners = false) {
   return {
     bleedMm: Number(bleedMm),
     cutGuides: cutGuides ? "full" as const : "none" as const,
-    bleedMode,
+    roundedCorners,
   };
 }
 

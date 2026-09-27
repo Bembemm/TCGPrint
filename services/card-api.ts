@@ -245,7 +245,7 @@ function respondError(error: unknown): Response {
   if (error instanceof ApiRequestError) return Response.json({ code: error.code, message: error.message }, { status: error.status });
   if (error instanceof ImportFailureError && error.code === "INVALID_SOURCE_PATH") return Response.json({ code: error.code, message: error.message }, { status: 400 });
   if (error instanceof CardExportServiceError) {
-    const status = error.code === "INVALID_BLEED" ? 400 : error.code === "ARTWORK_REQUIRED" ? 422 : error.code === "UNSUPPORTED_FORMAT" ? 415 : error.code === "ARTWORK_ORIGINAL_UNAVAILABLE" ? 422 : error.code === "EXPORT_TOO_LARGE" ? 413 : 500;
+    const status = error.code === "INVALID_BLEED" || error.code === "INVALID_ROUNDED_CORNERS" ? 400 : error.code === "ARTWORK_REQUIRED" ? 422 : error.code === "UNSUPPORTED_FORMAT" ? 415 : error.code === "ARTWORK_ORIGINAL_UNAVAILABLE" ? 422 : error.code === "EXPORT_TOO_LARGE" ? 413 : 500;
     return Response.json({ code: error.code, message: error.message }, { status });
   }
   if (error instanceof ScryfallError) {
@@ -505,31 +505,18 @@ export function encodeBleedDiagnostics(diagnostics: readonly CardExportBleedDiag
   const compactDiagnostics = diagnostics.map(({ sideDiagnostics, ...diagnostic }) => ({
     ...diagnostic,
     sideDiagnostics: Object.fromEntries(Object.entries(sideDiagnostics).map(([side, result]) => [side, {
-      effectiveMode: result.effectiveMode,
-      classification: result.classification,
-      sourceOffsetPx: result.sourceOffsetPx,
-      sourceStripPx: result.sourceStripPx,
-      ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
+      strategy: result.strategy,
     }])),
   }));
   const full = encode({ version: 1, mode: "full", diagnostics: compactDiagnostics });
   if (full.length <= maxHeaderLength) return { value: full, mode: "full" };
 
-  const fallbackCounts: Record<string, number> = {};
-  const noticeCounts: Record<string, number> = {};
   const effectiveModeCounts: Record<string, number> = {};
   for (const diagnostic of diagnostics) {
     effectiveModeCounts[diagnostic.effectiveMode] = (effectiveModeCounts[diagnostic.effectiveMode] ?? 0) + 1;
-    if (diagnostic.policyNotice) noticeCounts[diagnostic.policyNotice] = (noticeCounts[diagnostic.policyNotice] ?? 0) + 1;
-    for (const [side, sideResult] of Object.entries(diagnostic.sideDiagnostics)) {
-      if (sideResult.fallbackReason) {
-        const key = `${side}:${sideResult.fallbackReason}`;
-        fallbackCounts[key] = (fallbackCounts[key] ?? 0) + 1;
-      }
-    }
   }
   return {
-    value: encode({ version: 1, mode: "summary", truncated: true, count: diagnostics.length, effectiveModeCounts, fallbackCounts, noticeCounts }),
+    value: encode({ version: 1, mode: "summary", truncated: true, count: diagnostics.length, effectiveModeCounts }),
     mode: "summary",
   };
 }
@@ -542,11 +529,17 @@ export async function handleCardExport(request: Request, workbench: CardWorkbenc
     const bleedMm = options.bleedMm === undefined ? 0.625 : Number(options.bleedMm);
     const cutGuides = options.cutGuides === "none" ? "none" : options.cutGuides === undefined || options.cutGuides === "full" ? "full" : undefined;
     if (cutGuides === undefined) throw new ApiRequestError(400, "INVALID_CUT_GUIDES", "Cut guides mode must be full or none.");
-    const bleedMode = options.bleedMode === undefined ? "auto" : options.bleedMode;
-    if (bleedMode !== "auto" && bleedMode !== "smart-border-fill" && bleedMode !== "subtle-edge-stretch") {
-      throw new ApiRequestError(400, "INVALID_BLEED_MODE", "Bleed mode must be auto, smart-border-fill, or subtle-edge-stretch.");
+    if (options.bleedMode !== undefined && options.bleedMode !== "edge-extension") {
+      throw new ApiRequestError(400, "INVALID_BLEED_MODE", "Legacy bleed modes are retired; only immediate-edge extension is supported.");
     }
-    const result = await exportWorkingCardsWithDiagnostics(workbench, cards, { bleedMm, cutGuides, bleedMode }, request.signal);
+    if (options.roundedCorners !== undefined && typeof options.roundedCorners !== "boolean") {
+      throw new ApiRequestError(400, "INVALID_ROUNDED_CORNERS", "roundedCorners must be a boolean.");
+    }
+    const result = await exportWorkingCardsWithDiagnostics(workbench, cards, {
+      bleedMm,
+      cutGuides,
+      roundedCorners: options.roundedCorners ?? false,
+    }, request.signal);
     const bleedReport = encodeBleedDiagnostics(result.bleedDiagnostics);
     return new Response(new Uint8Array(result.pdfBytes), {
       headers: {

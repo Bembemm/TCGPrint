@@ -4,14 +4,12 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import {
-  BLEED_SOURCE_STRIP_SUGGESTIONS_MM,
   BleedEngine,
   BleedGenerationError,
   FileBleedCache,
   MemoryBleedCache,
   type BleedDerivativeResult,
   type BleedResult,
-  type BleedSourceStrip,
 } from "../../image-engine/bleed";
 
 const FIXTURES = join(process.cwd(), "tests", "fixtures");
@@ -19,10 +17,10 @@ const BLEED_FIXTURE = join(FIXTURES, "bleed", "synthetic-edge-card.png");
 const JPEG_FIXTURE = join(FIXTURES, "pdf", "synthetic-gradient.jpg");
 const SVG_FIXTURE = join(FIXTURES, "pdf", "simple-vector.svg");
 const CORNER_JOIN_CASES = [
-  [0.625, { mode: "auto" }, 3, 3],
-  [3, { mode: "auto" }, 12, 13],
-  [1.5, { mode: "custom", widthMm: 0.5 }, 6, 7],
-] as const satisfies readonly (readonly [number, BleedSourceStrip, number, number])[];
+  [0.625, 3, 3],
+  [3, 12, 13],
+  [1.5, 6, 7],
+] as const;
 
 interface DecodedRaster {
   readonly width: number;
@@ -149,7 +147,7 @@ describe("BleedEngine", () => {
     expect(Buffer.from(original)).toEqual(originalBefore);
   });
 
-  it("stretches TOP, BOTTOM, LEFT, and RIGHT independently and joins each corner without a seam", async () => {
+  it("extends each side from its immediate edge pixel and joins corners deterministically", async () => {
     const original = await readFixture(BLEED_FIXTURE);
     const source = await decodeRaster(original);
     const result = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
@@ -162,17 +160,17 @@ describe("BleedEngine", () => {
     expect(pixelsAlong(output, source.width, (x) => [bleedX + x, bleedY + source.height]))
       .toEqual(pixelsAlong(source, source.width, (x) => [x, source.height - 1]));
     expect(pixelsAlong(output, source.width, (x) => [bleedX + x, 0]))
-      .toEqual(pixelsAlong(source, source.width, (x) => [x, 2]));
+      .toEqual(pixelsAlong(source, source.width, (x) => [x, 0]));
     expect(pixelsAlong(output, source.width, (x) => [bleedX + x, output.height - 1]))
-      .toEqual(pixelsAlong(source, source.width, (x) => [x, source.height - 3]));
+      .toEqual(pixelsAlong(source, source.width, (x) => [x, source.height - 1]));
     expect(pixelsAlong(output, source.height, (y) => [bleedX - 1, bleedY + y]))
       .toEqual(pixelsAlong(source, source.height, (y) => [0, y]));
     expect(pixelsAlong(output, source.height, (y) => [bleedX + source.width, bleedY + y]))
       .toEqual(pixelsAlong(source, source.height, (y) => [source.width - 1, y]));
     expect(pixelsAlong(output, source.height, (y) => [0, bleedY + y]))
-      .toEqual(pixelsAlong(source, source.height, (y) => [2, y]));
+      .toEqual(pixelsAlong(source, source.height, (y) => [0, y]));
     expect(pixelsAlong(output, source.height, (y) => [output.width - 1, bleedY + y]))
-      .toEqual(pixelsAlong(source, source.height, (y) => [source.width - 3, y]));
+      .toEqual(pixelsAlong(source, source.height, (y) => [source.width - 1, y]));
 
     expect(pixelsAlong(output, bleedY, (depth) => [bleedX - 1, bleedY - 1 - depth]))
       .toEqual(pixelsAlong(output, bleedY, (depth) => [bleedX, bleedY - 1 - depth]));
@@ -191,19 +189,18 @@ describe("BleedEngine", () => {
     expect(pixelsAlong(output, bleedX, (depth) => [bleedX + source.width + depth, bleedY + source.height]))
       .toEqual(pixelsAlong(output, bleedX, (depth) => [bleedX + source.width + depth, bleedY + source.height - 1]));
 
-    expect(pixelAt(output, 0, 0)).toEqual(pixelAt(source, 2, 2));
-    expect(pixelAt(output, output.width - 1, 0)).toEqual(pixelAt(source, source.width - 3, 2));
-    expect(pixelAt(output, 0, output.height - 1)).toEqual(pixelAt(source, 2, source.height - 3));
+    expect(pixelAt(output, 0, 0)).toEqual(pixelAt(source, 0, 0));
+    expect(pixelAt(output, output.width - 1, 0)).toEqual(pixelAt(source, source.width - 1, 0));
+    expect(pixelAt(output, 0, output.height - 1)).toEqual(pixelAt(source, 0, source.height - 1));
     expect(pixelAt(output, output.width - 1, output.height - 1))
-      .toEqual(pixelAt(source, source.width - 3, source.height - 3));
+      .toEqual(pixelAt(source, source.width - 1, source.height - 1));
   });
 
-  it.each(CORNER_JOIN_CASES)("keeps all four corner joins continuous at %s mm with the selected source strip", async (bleedMm, sourceStrip, bleedX, bleedY) => {
+  it.each(CORNER_JOIN_CASES)("keeps all four corner joins continuous at %s mm", async (bleedMm, bleedX, bleedY) => {
     const source = await decodeRaster(await readFixture(BLEED_FIXTURE));
     const result = await new BleedEngine().generate({
       imageBytes: await readFixture(BLEED_FIXTURE),
       bleedMm,
-      sourceStrip,
     });
     const output = await decodeRaster(result.preview.bytes);
 
@@ -284,73 +281,25 @@ describe("BleedEngine", () => {
     },
   );
 
-  it.each([0.25, 0.5, 0.75, 1, 0.4])("accepts source-strip value %s mm as configurable input", async (widthMm) => {
-    const sourceStrip: BleedSourceStrip = { mode: "custom", widthMm };
-    const result = await new BleedEngine().generate({
-      imageBytes: await readFixture(BLEED_FIXTURE),
-      bleedMm: 1.5,
-      sourceStrip,
-    });
-    expectDerived(result);
-
-    expect(result.sourceStrip).toEqual(sourceStrip);
-    expect(result.resolvedSourceStripMm).toBe(widthMm);
-    expect(result.cacheKey).toMatch(/^[a-f0-9]{64}$/);
-  });
-
-  it("offers common source-strip values without restricting custom decimals", async () => {
-    expect(BLEED_SOURCE_STRIP_SUGGESTIONS_MM).toEqual([0.25, 0.5, 0.75, 1]);
-    const result = await new BleedEngine().generate({
-      imageBytes: await readFixture(BLEED_FIXTURE),
-      bleedMm: 1,
-      sourceStrip: { mode: "custom", widthMm: 0.333 },
-    });
-    expectDerived(result);
-
-    expect(result.sourceStrip).toEqual({ mode: "custom", widthMm: 0.333 });
-  });
-
-  it.each([0, -0.1, 3.001, Number.NaN, Number.POSITIVE_INFINITY])(
-    "rejects invalid custom source-strip width %s",
-    async (widthMm) => {
-      await expect(new BleedEngine().generate({
-        imageBytes: await readFixture(BLEED_FIXTURE),
-        bleedMm: 1,
-        sourceStrip: { mode: "custom", widthMm },
-      })).rejects.toThrow(RangeError);
-    },
-  );
-
-  it("chooses a deterministic small source strip in Auto mode", async () => {
-    const result = await new BleedEngine().generate({
-      imageBytes: await readFixture(BLEED_FIXTURE),
-      bleedMm: 0.625,
-      sourceStrip: { mode: "auto" },
-    });
-    expectDerived(result);
-
-    expect(result.sourceStrip).toEqual({ mode: "auto" });
-    expect(result.resolvedSourceStripMm).toBe(0.625);
-  });
-
-  it("caches a derived preview and changes the key when configuration changes", async () => {
+  it("keys cache by pixel-affecting geometry, not policy labels", async () => {
     const cache = new MemoryBleedCache();
     const engine = new BleedEngine({ cache });
     const imageBytes = await readFixture(BLEED_FIXTURE);
-    const request = { imageBytes, bleedMm: 1, sourceStrip: { mode: "auto" } as const };
+    const request = { imageBytes, bleedMm: 1, policyId: "scryfall-classic" };
     const first = await engine.generate(request);
-    const second = await engine.generate(request);
-    const changed = await engine.generate({ ...request, sourceStrip: { mode: "custom", widthMm: 0.5 } });
+    const samePixels = await engine.generate({ ...request, policyId: "scryfall-full-art" });
+    const changed = await engine.generate({ ...request, trimSizeMm: { widthMm: 70, heightMm: 88.9 } });
     expectDerived(first);
-    expectDerived(second);
+    expectDerived(samePixels);
     expectDerived(changed);
 
     expect(first.cacheStatus).toBe("miss");
-    expect(second.cacheStatus).toBe("hit");
-    expect(second.cacheKey).toBe(first.cacheKey);
-    expect(second.preview.bytes).toEqual(first.preview.bytes);
+    expect(samePixels.cacheStatus).toBe("hit");
+    expect(samePixels.cacheKey).toBe(first.cacheKey);
+    expect(samePixels.preview.bytes).toEqual(first.preview.bytes);
     expect(changed.cacheStatus).toBe("miss");
     expect(changed.cacheKey).not.toBe(first.cacheKey);
+    expect(first.algorithmVersion).toBe("edge-extension-v1");
   });
 
   it("persists deterministic derivatives in the file cache for later previews", async () => {

@@ -1,18 +1,10 @@
-export const BLEED_ALGORITHM_VERSION = "reflected-corners-v2-smart-border-fill-v3" as const;
+export const BLEED_ALGORITHM_VERSION = "edge-extension-v1" as const;
+export const ROUNDED_CORNERS_VERSION = "rounded-corners-v1" as const;
 
-export type BleedMode = "subtle-edge-stretch" | "smart-border-fill";
-export type BleedEffectiveMode = BleedMode | "mixed";
-
-export interface AutoSourceStrip {
-  readonly mode: "auto";
-}
-
-export interface CustomSourceStrip {
-  readonly mode: "custom";
-  readonly widthMm: number;
-}
-
-export type BleedSourceStrip = AutoSourceStrip | CustomSourceStrip;
+export type BleedMode = "edge-extension";
+export type BleedModePreference = "auto" | BleedMode;
+export type BleedEffectiveMode = BleedMode;
+export type BleedSide = "top" | "right" | "bottom" | "left";
 
 export interface PixelRect {
   readonly x: number;
@@ -38,14 +30,14 @@ export interface BleedPreview {
 
 interface BleedResultBase {
   readonly bleedMm: number;
-  /** Requested mode retained as the legacy `mode` field for callers. */
   readonly mode: BleedMode;
   readonly requestedMode: BleedMode;
   readonly effectiveMode: BleedEffectiveMode;
   readonly policyId: string;
-  readonly sourceStrip: BleedSourceStrip;
   readonly trimSizeMm: TrimSizeMm;
   readonly preview: BleedPreview;
+  readonly roundedCorners: boolean;
+  readonly cornerRadiusMm?: number;
 }
 
 export interface BleedPassthroughResult extends BleedResultBase {
@@ -61,8 +53,7 @@ export interface BleedDerivativeResult extends BleedResultBase {
   readonly algorithmVersion: typeof BLEED_ALGORITHM_VERSION;
   readonly cacheKey: string;
   readonly cacheStatus: "hit" | "miss";
-  readonly resolvedSourceStripMm: number;
-  readonly sideDiagnostics: Readonly<Record<"top" | "right" | "bottom" | "left", BleedSideDiagnostic>>;
+  readonly sideDiagnostics: Readonly<Record<BleedSide, BleedSideDiagnostic>>;
   readonly preview: BleedPreview & {
     readonly mimeType: "image/png";
     readonly widthPx: number;
@@ -72,12 +63,7 @@ export interface BleedDerivativeResult extends BleedResultBase {
 }
 
 export interface BleedSideDiagnostic {
-  readonly requestedMode: BleedMode;
-  readonly effectiveMode: BleedMode;
-  readonly classification: "not-analyzed" | "interior-strip-found" | "outer-band-not-dark-uniform" | "search-bound-exhausted";
-  readonly sourceOffsetPx: number;
-  readonly sourceStripPx: number;
-  readonly fallbackReason?: string;
+  readonly strategy: "nearest-edge-pixel";
 }
 
 export type BleedResult = BleedPassthroughResult | BleedDerivativeResult;
@@ -87,14 +73,12 @@ export interface BleedRequest {
   readonly bleedMm: number;
   readonly trimSizeMm?: TrimSizeMm;
   readonly mode?: BleedMode;
-  /** Identifies the source/default/override policy used for deterministic cache separation. */
   readonly policyId?: string;
-  readonly sourceStrip?: BleedSourceStrip;
+  readonly roundedCorners?: boolean;
+  readonly cornerRadiusMm?: number;
 }
 
 export interface BleedCache {
   get(key: string): Promise<Uint8Array | undefined>;
   set(key: string, bytes: Uint8Array): Promise<void>;
 }
-
-export const BLEED_SOURCE_STRIP_SUGGESTIONS_MM = Object.freeze([0.25, 0.5, 0.75, 1] as const);

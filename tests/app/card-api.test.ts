@@ -19,6 +19,7 @@ import type { ArtworkOriginal } from "../../artwork/storage/types";
 import { selectArtwork as selectWorkingCardArtwork } from "../../core/cards/working-set";
 import { postArtworkSelection } from "../../src/app/artwork-selection-request";
 import { BleedEngine } from "../../image-engine/bleed";
+import { LosslessPdfEngine } from "../../pdf-engine/document";
 
 const candidateId = `upload:${"a".repeat(64)}`;
 const identity: CardIdentity = { id: "scryfall:oracle:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", provider: "scryfall", name: "Sol Ring", oracleId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", resolutionMethod: "manual", confidence: 1 };
@@ -83,7 +84,7 @@ function jsonRequest(url: string, value: unknown): Request {
 }
 
 describe("card APIs", () => {
-  it("forwards an explicit bleed mode override to the shared BleedEngine", async () => {
+  it("uses immediate-edge extension for export diagnostics and rejects legacy modes", async () => {
     const bytes = new Uint8Array(await sharp({ create: { width: 127, height: 178, channels: 3, background: { r: 48, g: 126, b: 214 } } }).png().toBuffer());
     const workbench = testWorkbench({
       getArtworkCandidate: vi.fn(async () => candidate),
@@ -104,28 +105,76 @@ describe("card APIs", () => {
 
     const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
       cards: [card],
-      options: { bleedMm: 1, cutGuides: "none", bleedMode: "smart-border-fill" },
+      options: { bleedMm: 1, cutGuides: "none" },
     }), workbench);
 
     expect(response.status).toBe(200);
-    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ mode: "smart-border-fill" }));
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ mode: "edge-extension" }));
     const encodedDiagnostics = response.headers.get("x-tcgprint-bleed-diagnostics");
     expect(encodedDiagnostics).toBeTruthy();
     const diagnostics = JSON.parse(Buffer.from(encodedDiagnostics!, "base64url").toString("utf8")) as {
       version: number;
-      diagnostics: Array<{ source: string; requestedMode: string; resolvedMode: string; effectiveMode: string; sideDiagnostics: Record<string, { classification?: string; sourceOffsetPx?: number; sourceStripPx?: number; fallbackReason?: string }> }>;
+      diagnostics: Array<{ source: string; requestedMode: string; resolvedMode: string; effectiveMode: string; sideDiagnostics: Record<string, { strategy: string }> }>;
     };
     expect(diagnostics).toMatchObject({
       version: 1,
-      diagnostics: [{ source: "upload", requestedMode: "smart-border-fill", resolvedMode: "smart-border-fill", effectiveMode: "subtle-edge-stretch" }],
+      diagnostics: [{ source: "upload", requestedMode: "auto", resolvedMode: "edge-extension", effectiveMode: "edge-extension" }],
     });
-    expect(diagnostics.diagnostics[0].sideDiagnostics.top).toMatchObject({
-      classification: "outer-band-not-dark-uniform",
-      sourceOffsetPx: expect.any(Number),
-      sourceStripPx: expect.any(Number),
-      fallbackReason: "outer-band-not-dark-uniform",
-    });
+    expect(diagnostics.diagnostics[0].sideDiagnostics.top).toEqual({ strategy: "nearest-edge-pixel" });
     generate.mockRestore();
+  });
+
+  it("rejects retired bleed modes instead of silently changing their behavior", async () => {
+    const workbench = testWorkbench();
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: { bleedMm: 1, cutGuides: "none", bleedMode: "legacy-mode" },
+    }), workbench);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_BLEED_MODE" });
+  });
+
+  it("forwards rounded-corners ON to export even when bleed is zero", async () => {
+    const bytes = new Uint8Array(await sharp({ create: { width: 127, height: 178, channels: 3, background: { r: 48, g: 126, b: 214 } } }).png().toBuffer());
+    const workbench = testWorkbench({
+      getArtworkOriginal: vi.fn(async () => ({
+        artworkId: "a".repeat(64),
+        contentHash: "b".repeat(64),
+        extension: "png",
+        format: "png",
+        byteLength: bytes.byteLength,
+        widthPx: 127,
+        heightPx: 178,
+        createdAt: new Date(0).toISOString(),
+        provenance: [],
+        bytes,
+      })),
+    });
+    const generate = vi.spyOn(BleedEngine.prototype, "generate");
+    const generatePdf = vi.spyOn(LosslessPdfEngine.prototype, "generate");
+
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: { bleedMm: 0, cutGuides: "none", roundedCorners: true },
+    }), workbench);
+
+    expect(response.status).toBe(200);
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ bleedMm: 0, roundedCorners: true, cornerRadiusMm: 3.175 }));
+    const derivative = await generate.mock.results[0].value;
+    expect(derivative.status).toBe("derived");
+    expect(derivative.roundedCorners).toBe(true);
+    expect(generatePdf.mock.calls[0][0].bleedResults?.[0]).toBe(derivative);
+  });
+
+  it("rejects non-boolean rounded-corners export options", async () => {
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: { bleedMm: 0, cutGuides: "none", roundedCorners: "true" },
+    }), testWorkbench());
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_ROUNDED_CORNERS" });
   });
 
   it("accepts only DTO working cards and rejects byte/path fields from the client", () => {

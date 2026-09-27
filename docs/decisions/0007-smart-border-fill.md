@@ -138,14 +138,14 @@ border, asymmetric left frame, and high-contrast corners. No commercial card
 artwork is used. The red dashed rectangle marks the trim; the original column
 uses a neutral pad outside the source only to keep panel dimensions equal.
 
-![Synthetic original, subtle stretch, and smart border fill comparison](assets/smart-border-fill-comparison.png)
+The generated image comparison for this rejected proposal is not acceptance evidence and is not retained as a current project artifact.
 
 For the classic synthetic frame, `subtle-edge-stretch` extends the dark frame;
 `smart-border-fill` selects the inner color field on all four sides. The
 borderless, light-border, and high-contrast-corner fixtures fall back to subtle
 stretch; the asymmetric fixture uses smart fill on its dark left edge and
-subtle fallback on the other sides. The reproducible renderer is
-[`spikes/smart-border-fill/render-matrix.cjs`](../../spikes/smart-border-fill/render-matrix.cjs).
+subtle fallback on the other sides. The old renderer is not retained in the
+active tree; its contents remain recoverable from Git history.
 
 ## Real Scryfall diagnostic
 
@@ -178,9 +178,8 @@ band. Pixel-by-pixel comparison of every trim pixel passed for both modes on
 all three assets (331,840 trim pixels per image). The real-art matrix and full
 per-side report are local-only at
 `/home/agent/.hermes/cache/scratch/tcgprint-phase5-5-evidence/smart-border-real/`
-and are not committed. It compares original edge, `subtle-edge-stretch`, and
-`smart-border-fill`; the committed synthetic matrix remains the portable visual
-regression artifact.
+and are not committed. These measurements document the rejected approach only;
+the renderer and matrix are not active project requirements.
 
 ## Consequences
 
