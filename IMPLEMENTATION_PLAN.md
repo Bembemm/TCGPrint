@@ -3482,7 +3482,7 @@ Para uma carta identificada, o usuário pode:
 3. exportar arte Scryfall, MPC ou upload com bleed formado pela repetição imediata de cada beirada; preto pode continuar preto e full-art deve continuar a partir da própria arte;
 4. manter todos os pixels do trim idênticos quando arredondamento opcional estiver desligado;
 5. ativar/desativar rounded corners sem misturá-los à extensão do bleed;
-6. gerar PDF mantendo trim físico 63.5 × 88.9 mm e guias vetoriais corretas.
+6. gerar PDF mantendo trim físico 63.5 × 88.9 mm e suporte a guias vetoriais; o refinamento completo de geometria e configuração das guias pertence à Fase 5.6.
 
 Testes obrigatórios:
 
@@ -3498,6 +3498,92 @@ Testes obrigatórios:
 - rounded corners off não altera a imagem; on arredonda imagem quadrada e não degrada cantos já completos;
 - MPC online indisponível sem quebrar Scryfall/uploads;
 - seleção Scryfall ↔ MPC ↔ upload preserva WorkingCard.id e CardIdentity.id.
+
+---
+
+## Fase 5.6 — Trim & External Cut Guides
+
+Esta fase corrige exclusivamente os dois sistemas de guias de corte. A Fase 5.5 permanece concluída e histórica: não reabrir nem alterar `edge-extension-v1`, a geração de bleed ou `rounded-corners-v1`.
+
+### Modelo geométrico
+
+- `trimRect` é o tamanho físico final da carta. Magic Standard mede exatamente `63.5 × 88.9 mm`.
+- `bleedRect` é `trimRect` expandido pelo bleed configurado em cada lado; existe somente como margem gráfica de segurança e zona de exclusão.
+- `sheet` é a página/PDF que contém cartas, bleed e áreas livres.
+- A posição de corte é sempre a fronteira do trim. Bleed nunca é uma coordenada de corte.
+- As posições de cartas e os retângulos de trim são derivados do layout existente, sem mover ou redimensionar cartas.
+
+### Configuração independente
+
+O contrato explícito de exportação é:
+
+```ts
+interface TrimGuideConfig {
+  enabled: boolean;
+  extentMm: number | "full";
+}
+
+interface ExternalCutGuideConfig {
+  enabled: boolean;
+  strokeWidthPt: number;
+}
+
+interface CutGuideConfig {
+  trim: TrimGuideConfig;
+  external: ExternalCutGuideConfig;
+}
+```
+
+Os defaults seguros são ambos desabilitados; cada opção pode ser habilitada sem alterar a outra. O contrato antigo `cutGuides: "full" | "none"` não pode ser reinterpretado silenciosamente: migrar os chamadores ao novo objeto e rejeitar explicitamente valores legados no limite da API.
+
+### Trim Guide / Card Edge Guide
+
+- Desenha na fronteira física de `trimRect`, nunca na borda externa do bleed.
+- Para `extentMm` numérico, desenha em cada canto um segmento desse comprimento ao longo de cada uma das duas bordas adjacentes; não desenha perpendicularmente para dentro da carta.
+- O comprimento pode ser progressivo e em unidades físicas. Em cada aresta, unir/normalizar os intervalos dos cantos: quando se tocam ou se sobrepõem, desenhar uma única aresta contínua, sem duplicação.
+- `"full"` desenha um retângulo vetorial limpo com largura/altura iguais às dimensões físicas do trim (Magic Standard: `63.5 × 88.9 mm`).
+- Com `enabled: false`, nenhuma linha interna é desenhada sobre a imagem; isso não afeta imagem, bleed, trim ou layout.
+- Cor fixa distinta e leve, sem rasterização; a espessura interna é um default vetorial fino, não um novo controle de produto.
+
+### External Cut Guide
+
+- A linha central de cada guia externa usa a coordenada da respectiva borda de `trimRect`, não a borda do bleed.
+- O segmento visível começa somente em intervalos de folha fora de todas as regiões `bleedRect`; comprimento é derivado automaticamente até a borda útil da folha ou próximo obstáculo.
+- Subtrair/recortar intervalos obstruídos por qualquer bleed de carta, incluindo a própria carta. Considerar a meia espessura do traço ao evitar obstáculos, para que o traço vetorial não invada bleed nem arte.
+- Não atravessar cartas ou bleed de vizinhas. Guias colineares podem ser unidas apenas através de intervalos realmente livres; limites de página, gutters e bordas da folha devem ser tratados.
+- `strokeWidthPt` é a única configuração variável externa. Usar cor vetorial fixa distinta da Trim Guide, com tratamento visual discreto.
+
+### Rounded Corners
+
+`roundedCorners` não altera a geometria das guias. Tanto a guia externa quanto a Trim Guide usam o retângulo físico do trim. `Trim Guide = "full"` é um contorno retangular vetorial de `trimRect`; `rounded-corners-v1` afeta somente a representação visual/alpha da imagem, não curva nem reposiciona as guias. Nenhuma parte do algoritmo de bleed ou de cantos arredondados será modificada nesta fase.
+
+### UI e PDF
+
+- Expor checkboxes independentes para Trim Guide e External Cut Guide.
+- Controles de comprimento e espessura ficam visualmente desabilitados quando seu guia correspondente estiver OFF.
+- Comprimento interno oferece valores progressivos em mm e `full`; espessura externa é expressa em points. Não criar o Editor da Fase 6 nem controles de comprimento externo/cor.
+- As linhas são objetos vetoriais PDF, com cores distintas, e nunca são rasterizadas na artwork.
+- Inspecionar coordenadas dos paths no PDF em points/mm; provar trim Magic Standard de `63.5 × 88.9 mm`, segmentos internos com comprimento real em mm e coordenadas externas coincidentes com trim.
+
+### Testes de aceitação
+
+- Os quatro estados independentes: ambos OFF, somente trim ON, somente external ON, ambos ON.
+- Extensão interna 1 mm, intermediária, cobrindo exatamente metade/união de arestas e `full`; assegurar uma aresta sem duplicatas quando os intervalos se unem.
+- Espessura externa fina/maior; validar comprimento/posição em geometria real do PDF.
+- Bleed `0`, `0.625`, `1`, `2` e `3 mm`; posições do trim e alinhamento externo permanecem invariantes, enquanto o início visível externo respeita a nova zona de exclusão.
+- Rounded OFF/ON; uma carta e grid 3×3; primeira, central, última e cartas junto às bordas da folha; gutters e alinhamentos compartilhados.
+- Nenhuma guia externa cruza qualquer trim/arte/bleed. Guias permanecem vetoriais.
+- Alternar configurações de guia não altera bytes da artwork, bleed, dimensões do trim ou posição da carta.
+- Provar no PDF que `extentMm: 1` mede `1 mm`; `"full"` mede `63.5 × 88.9 mm` para Magic Standard; alinhamento externo usa trim e início visível fica além do bleed.
+- Gerar PDFs A–E com o deck da Fase 5.5 (1 Sol Ring, 1 Lightning Bolt, 1 Counterspell, 6 Island), A4, bleed 0.625 mm: ambos OFF; trim 1 mm; trim full; somente external; trim 1 mm + external. Gerar também pelo menos uma variante com bleed 3 mm.
+- Reutilizar as evidências/deck de teste da Fase 5.5 quando disponíveis; não mudar a geração de bleed para produzir os artefatos.
+
+### Workflow e gates
+
+- Desenvolver em worktree/branch isolado baseado na `main` confirmada, nunca diretamente em `main`.
+- Primeiro commit contém somente `IMPLEMENTATION_PLAN.md` e ADR 0009; implementação vem em commits posteriores.
+- Revisão independente antes dos gates finais. Rodar `npm test`, `npm run typecheck`, `npm run build`, `git diff --check` e smoke PDF real depois da revisão aprovada.
+- Publicar somente a branch `integration/fase-5-6` para auditoria. Não integrar em `main` sem autorização explícita.
 
 ---
 
