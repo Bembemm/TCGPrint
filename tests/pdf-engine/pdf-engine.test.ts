@@ -587,6 +587,51 @@ describe("LosslessPdfEngine", () => {
     expect(trimHeightPoints).toBeCloseTo(252, 10);
   });
 
+  it("serializes 1 mm trim corner segments at exact physical trim coordinates", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const pdf = await engine.generate({
+      images: [original],
+      cutGuides: {
+        trim: { enabled: true, extentMm: 1 },
+        external: { enabled: false, strokeWidthPt: 0.3 },
+      },
+    });
+    const parsed = await parsePdf(pdf);
+    const segments = getVectorSegments(parsed.content).map(([x1Pt, y1Pt, x2Pt, y2Pt]) => ({
+      x1Mm: pointsToMm(x1Pt),
+      y1Mm: 297 - pointsToMm(y1Pt),
+      x2Mm: pointsToMm(x2Pt),
+      y2Mm: 297 - pointsToMm(y2Pt),
+    }));
+    const horizontal = segments.filter(({ y1Mm, y2Mm }) => Math.abs(y1Mm - y2Mm) < 1e-8);
+    const vertical = segments.filter(({ x1Mm, x2Mm }) => Math.abs(x1Mm - x2Mm) < 1e-8);
+
+    expect(segments).toHaveLength(8);
+    expect(horizontal).toHaveLength(4);
+    expect(vertical).toHaveLength(4);
+    for (const { x1Mm, y1Mm, x2Mm, y2Mm } of segments) {
+      expect(Math.hypot(x2Mm - x1Mm, y2Mm - y1Mm)).toBeCloseTo(1, 8);
+    }
+    for (const { x1Mm, y1Mm, x2Mm } of horizontal) {
+      expect([104.05, 192.95].some((edge) => Math.abs(y1Mm - edge) < 1e-8)).toBe(true);
+      const start = Math.min(x1Mm, x2Mm);
+      const end = Math.max(x1Mm, x2Mm);
+      expect(
+        (Math.abs(start - 73.25) < 1e-8 && Math.abs(end - 74.25) < 1e-8)
+        || (Math.abs(start - 135.75) < 1e-8 && Math.abs(end - 136.75) < 1e-8),
+      ).toBe(true);
+    }
+    for (const { x1Mm, y1Mm, y2Mm } of vertical) {
+      expect([73.25, 136.75].some((edge) => Math.abs(x1Mm - edge) < 1e-8)).toBe(true);
+      const start = Math.min(y1Mm, y2Mm);
+      const end = Math.max(y1Mm, y2Mm);
+      expect(
+        (Math.abs(start - 104.05) < 1e-8 && Math.abs(end - 105.05) < 1e-8)
+        || (Math.abs(start - 191.95) < 1e-8 && Math.abs(end - 192.95) < 1e-8),
+      ).toBe(true);
+    }
+  });
+
   it.each([
     ["both OFF", { trim: { enabled: false, extentMm: 1 }, external: { enabled: false, strokeWidthPt: 0.3 } }, 0],
     ["trim only", { trim: { enabled: true, extentMm: "full" }, external: { enabled: false, strokeWidthPt: 0.3 } }, 4],
@@ -733,7 +778,7 @@ describe("LosslessPdfEngine", () => {
     expect(actualClips).toEqual(expectedClips);
   });
 
-  it("packs a mixed 0 mm and 3 mm bleed run on one Letter page with vector guides", async () => {
+  it.each([0.3, 2])("packs mixed 0 mm and 3 mm bleed on one Letter page with %s pt vector guides", async (strokeWidthPt) => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 3 });
     const paperFormat = { name: "Letter", widthMm: 215.9, heightMm: 279.4 } as const;
@@ -744,7 +789,7 @@ describe("LosslessPdfEngine", () => {
       paperFormat,
       cutGuides: {
         trim: { enabled: false, extentMm: 1 },
-        external: { enabled: true, strokeWidthPt: 0.3 },
+        external: { enabled: true, strokeWidthPt },
       },
     });
     const parsed = await parsePdf(pdf);
@@ -771,7 +816,8 @@ describe("LosslessPdfEngine", () => {
       bleedByCardMm,
     });
     const cards = placement.slots.map((slot, index) => ({ trim: slot.trim, bleedMm: bleedByCardMm[index] }));
-    expectExternalPdfSegmentsClear(guides, cards, paperFormat.heightMm, 0.3);
+    expect(/([\d.]+) w\b/.exec(parsed.content)?.[1]).toBe(String(strokeWidthPt));
+    expectExternalPdfSegmentsClear(guides, cards, paperFormat.heightMm, strokeWidthPt);
   });
 
   it("fails clearly when the physical trim plus bleed cannot fit on the selected paper", async () => {
