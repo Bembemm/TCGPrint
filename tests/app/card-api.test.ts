@@ -20,6 +20,7 @@ import { selectArtwork as selectWorkingCardArtwork } from "../../core/cards/work
 import { postArtworkSelection } from "../../src/app/artwork-selection-request";
 import { BleedEngine } from "../../image-engine/bleed";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
+import { FULL_TRIM_GUIDES, NO_CUT_GUIDES } from "../helpers/cut-guides";
 
 const candidateId = `upload:${"a".repeat(64)}`;
 const identity: CardIdentity = { id: "scryfall:oracle:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", provider: "scryfall", name: "Sol Ring", oracleId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", resolutionMethod: "manual", confidence: 1 };
@@ -84,6 +85,32 @@ function jsonRequest(url: string, value: unknown): Request {
 }
 
 describe("card APIs", () => {
+  it.each(["full", "none"])("rejects legacy cut guide mode %s at the export API boundary", async (cutGuides) => {
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: { bleedMm: 0, cutGuides },
+    }), testWorkbench());
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_CUT_GUIDES", message: expect.stringMatching(/legacy/i) });
+  });
+
+  it("rejects non-numeric external stroke widths in the export API config", async () => {
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: {
+        bleedMm: 0,
+        cutGuides: {
+          trim: { enabled: false, extentMm: 1 },
+          external: { enabled: true, strokeWidthPt: "0.3" },
+        },
+      },
+    }), testWorkbench());
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_CUT_GUIDES" });
+  });
+
   it("uses immediate-edge extension for export diagnostics and rejects legacy modes", async () => {
     const bytes = new Uint8Array(await sharp({ create: { width: 127, height: 178, channels: 3, background: { r: 48, g: 126, b: 214 } } }).png().toBuffer());
     const workbench = testWorkbench({
@@ -105,7 +132,7 @@ describe("card APIs", () => {
 
     const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
       cards: [card],
-      options: { bleedMm: 1, cutGuides: "none" },
+      options: { bleedMm: 1, cutGuides: NO_CUT_GUIDES },
     }), workbench);
 
     expect(response.status).toBe(200);
@@ -128,7 +155,7 @@ describe("card APIs", () => {
     const workbench = testWorkbench();
     const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
       cards: [card],
-      options: { bleedMm: 1, cutGuides: "none", bleedMode: "legacy-mode" },
+      options: { bleedMm: 1, cutGuides: NO_CUT_GUIDES, bleedMode: "legacy-mode" },
     }), workbench);
 
     expect(response.status).toBe(400);
@@ -156,7 +183,7 @@ describe("card APIs", () => {
 
     const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
       cards: [card],
-      options: { bleedMm: 0, cutGuides: "none", roundedCorners: true },
+      options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES, roundedCorners: true },
     }), workbench);
 
     expect(response.status).toBe(200);
@@ -170,7 +197,7 @@ describe("card APIs", () => {
   it("rejects non-boolean rounded-corners export options", async () => {
     const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
       cards: [card],
-      options: { bleedMm: 0, cutGuides: "none", roundedCorners: "true" },
+      options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES, roundedCorners: "true" },
     }), testWorkbench());
 
     expect(response.status).toBe(400);
@@ -304,7 +331,7 @@ describe("card APIs", () => {
 
     const many = { ...card, quantity: 501 };
     expect(parseWorkingCards([many])[0].quantity).toBe(501);
-    const exportResponse = await handleCardExport(jsonRequest("http://localhost/api/cards/export", { cards: [many], options: { bleedMm: 0.625, cutGuides: "full" } }), workbench);
+    const exportResponse = await handleCardExport(jsonRequest("http://localhost/api/cards/export", { cards: [many], options: { bleedMm: 0.625, cutGuides: FULL_TRIM_GUIDES } }), workbench);
     expect(exportResponse.status).toBe(413);
     expect(await exportResponse.json()).toMatchObject({ code: "EXPORT_TOO_LARGE" });
   });

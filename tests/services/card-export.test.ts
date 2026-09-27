@@ -13,6 +13,7 @@ import { PAPER_FORMATS } from "../../core/geometry";
 import { BleedEngine } from "../../image-engine/bleed";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 import type { ArtworkCandidate, WorkingCard } from "../../core/cards/types";
+import { FULL_TRIM_GUIDES, NO_CUT_GUIDES } from "../helpers/cut-guides";
 
 const roots: string[] = [];
 const workbenches: Array<{ close(): Promise<void> }> = [];
@@ -78,7 +79,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
       card("full-art-card", "scryfall", 2, "scryfall:synthetic-full-art"),
     ], {
       bleedMm: 1,
-      cutGuides: "none",
+      cutGuides: NO_CUT_GUIDES,
     });
 
     expect(generate).toHaveBeenCalledTimes(1);
@@ -139,7 +140,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
       card("scryfall-diagnostic", "scryfall", 0),
       card("upload-diagnostic", "upload", 1),
       card("mpc-diagnostic", "mpc", 2),
-    ], { bleedMm: 1, cutGuides: "none", roundedCorners: true });
+    ], { bleedMm: 1, cutGuides: NO_CUT_GUIDES, roundedCorners: true });
 
     expect(result.pdfBytes).toBeInstanceOf(Uint8Array);
     expect(result.bleedDiagnostics).toHaveLength(3);
@@ -207,7 +208,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     const exportWithQuantity = async (quantity: number) => handleCardExport(new Request("http://localhost/api/cards/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cards: [{ ...selected, quantity }], options: { bleedMm: 0.625, cutGuides: "full" } }),
+      body: JSON.stringify({ cards: [{ ...selected, quantity }], options: { bleedMm: 0.625, cutGuides: FULL_TRIM_GUIDES } }),
     }), workbench);
     const nine = await exportWithQuantity(9);
     expect(nine.status).toBe(200);
@@ -240,7 +241,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     const response = await handleCardExport(new Request("http://localhost/api/cards/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cards: imported.workingCards, options: { bleedMm: 0.625, cutGuides: "full" } }),
+      body: JSON.stringify({ cards: imported.workingCards, options: { bleedMm: 0.625, cutGuides: FULL_TRIM_GUIDES } }),
     }), workbench);
     expect(response.status).toBe(200);
     const pdf = await PDFDocument.load(await response.arrayBuffer());
@@ -279,7 +280,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
       getArtworkOriginal: vi.fn(),
     };
 
-    await expect(exportWorkingCards(catalog, [card], { bleedMm: 0, cutGuides: "none" })).rejects.toMatchObject({ code: "ARTWORK_ORIGINAL_UNAVAILABLE" });
+    await expect(exportWorkingCards(catalog, [card], { bleedMm: 0, cutGuides: NO_CUT_GUIDES })).rejects.toMatchObject({ code: "ARTWORK_ORIGINAL_UNAVAILABLE" });
     expect(catalog.getArtworkOriginal).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,7 @@ import { ImportFailureError } from "../import-engine/errors";
 import { ScryfallError } from "../providers/scryfall/errors";
 import { ArtworkStorageError } from "../artwork/storage/types";
 import { MpcArtworkProviderError } from "../artwork/mpc-provider";
+import { parseCutGuideConfig, type CutGuideConfig } from "../core/geometry";
 
 const FORBIDDEN_PROPERTIES = new Set(["originalBytes", "bytes", "sourcePath", "localOriginalPath", "originalUri", "previewUri", "filePaths", "absolutePath", "filesystemPath"]);
 const SOURCES = new Set(["scryfall", "upload", "mpc", "url", "custom"]);
@@ -527,8 +528,12 @@ export async function handleCardExport(request: Request, workbench: CardWorkbenc
     const cards = parseWorkingCards(body.cards);
     const options = record(body.options) ?? {};
     const bleedMm = options.bleedMm === undefined ? 0.625 : Number(options.bleedMm);
-    const cutGuides = options.cutGuides === "none" ? "none" : options.cutGuides === undefined || options.cutGuides === "full" ? "full" : undefined;
-    if (cutGuides === undefined) throw new ApiRequestError(400, "INVALID_CUT_GUIDES", "Cut guides mode must be full or none.");
+    let cutGuides: CutGuideConfig;
+    try {
+      cutGuides = parseCutGuideConfig(options.cutGuides);
+    } catch (error) {
+      throw new ApiRequestError(400, "INVALID_CUT_GUIDES", error instanceof Error ? error.message : "Cut guides configuration is invalid.");
+    }
     if (options.bleedMode !== undefined && options.bleedMode !== "edge-extension") {
       throw new ApiRequestError(400, "INVALID_BLEED_MODE", "Legacy bleed modes are retired; only immediate-edge extension is supported.");
     }

@@ -14,8 +14,6 @@ import {
   popGraphicsState,
   pushGraphicsState,
   rectangle,
-  setDashPattern,
-  setGraphicsState,
   setLineCap,
   setLineWidth,
   setStrokingRgbColor,
@@ -25,10 +23,15 @@ import { drawSvg } from "svg4pdf-lib";
 import type { BleedResult } from "../../image-engine/bleed";
 import {
   MAGIC_STANDARD_CARD,
+  EXTERNAL_CUT_GUIDE_COLOR,
+  TRIM_GUIDE_COLOR,
+  TRIM_GUIDE_STROKE_WIDTH_PT,
   PAPER_FORMATS,
   calculateGridPlacement,
   CutGuideEngine,
   type CutGuideConfig,
+  type CutGuideCardMm,
+  type CutGuideGeometry,
   type CardFormat,
   type PaperFormat,
 } from "../../core/geometry";
@@ -706,52 +709,41 @@ function normalizeSvgForPhysicalSize(svg: string, widthPoints: number, heightPoi
 }
 
 function drawCutGuides(
-  pdf: PDFDocument,
   page: ReturnType<PDFDocument["addPage"]>,
   pageSize: PaperFormat,
   config: CutGuideConfig,
-  trims: readonly { readonly xMm: number; readonly yMm: number; readonly widthMm: number; readonly heightMm: number }[],
+  cards: readonly CutGuideCardMm[],
 ): void {
   const geometry = new CutGuideEngine().generate({
-    trims,
+    cards,
     pageSizeMm: { widthMm: pageSize.widthMm, heightMm: pageSize.heightMm },
     config,
   });
-  if (geometry.segments.length === 0) return;
 
-  const color = geometry.style.color.slice(1);
-  const red = Number.parseInt(color.slice(0, 2), 16) / 255;
-  const green = Number.parseInt(color.slice(2, 4), 16) / 255;
-  const blue = Number.parseInt(color.slice(4, 6), 16) / 255;
-  const strokeWidthPoints = mmToPoints(geometry.style.strokeWidthMm);
-  const dashPatternPoints = geometry.style.lineStyle === "solid"
-    ? []
-    : geometry.style.lineStyle === "dashed"
-      ? [3 * strokeWidthPoints, 2 * strokeWidthPoints]
-      : [0, 2 * strokeWidthPoints];
-  const extGState = pdf.context.obj({
-    Type: "ExtGState",
-    CA: geometry.style.opacity,
-    ca: geometry.style.opacity,
-  });
-  const stateName = page.node.newExtGState("CutGuide", extGState);
-
-  page.pushOperators(
-    pushGraphicsState(),
-    setGraphicsState(stateName),
-    setStrokingRgbColor(red, green, blue),
-    setLineWidth(strokeWidthPoints),
-    setDashPattern(dashPatternPoints, 0),
-    setLineCap(geometry.style.lineStyle === "dotted" ? LineCapStyle.Round : LineCapStyle.Butt),
-  );
-  for (const segment of geometry.segments) {
+  const drawSegments = (segments: CutGuideGeometry["trimSegments"], colorHex: string, strokeWidthPoints: number) => {
+    if (segments.length === 0) return;
+    const color = colorHex.slice(1);
+    const red = Number.parseInt(color.slice(0, 2), 16) / 255;
+    const green = Number.parseInt(color.slice(2, 4), 16) / 255;
+    const blue = Number.parseInt(color.slice(4, 6), 16) / 255;
     page.pushOperators(
-      moveTo(mmToPoints(segment.x1Mm), mmToPoints(pageSize.heightMm - segment.y1Mm)),
-      lineTo(mmToPoints(segment.x2Mm), mmToPoints(pageSize.heightMm - segment.y2Mm)),
-      stroke(),
+      pushGraphicsState(),
+      setStrokingRgbColor(red, green, blue),
+      setLineWidth(strokeWidthPoints),
+      setLineCap(LineCapStyle.Butt),
     );
-  }
-  page.pushOperators(popGraphicsState());
+    for (const segment of segments) {
+      page.pushOperators(
+        moveTo(mmToPoints(segment.x1Mm), mmToPoints(pageSize.heightMm - segment.y1Mm)),
+        lineTo(mmToPoints(segment.x2Mm), mmToPoints(pageSize.heightMm - segment.y2Mm)),
+        stroke(),
+      );
+    }
+    page.pushOperators(popGraphicsState());
+  };
+
+  drawSegments(geometry.trimSegments, TRIM_GUIDE_COLOR, TRIM_GUIDE_STROKE_WIDTH_PT);
+  drawSegments(geometry.externalSegments, EXTERNAL_CUT_GUIDE_COLOR, config.external.strokeWidthPt);
 }
 
 export class LosslessPdfEngine {
@@ -992,7 +984,15 @@ export class LosslessPdfEngine {
       }
 
       if (request.cutGuides) {
-        drawCutGuides(pdf, page, paper, request.cutGuides, pagePlacement.slots.map(({ trim }) => trim));
+        drawCutGuides(
+          page,
+          paper,
+          request.cutGuides,
+          pagePlacement.slots.map((slot, localCardIndex) => ({
+            trim: slot.trim,
+            bleedMm: bleedByImageMm[startCardIndex + localCardIndex],
+          })),
+        );
       }
     }
 

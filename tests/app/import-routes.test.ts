@@ -10,6 +10,10 @@ import { mmToPoints, pointsToMm } from "../../core/units";
 
 const fixturePath = join(process.cwd(), "tests", "fixtures", "pdf");
 const svgBytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="140" viewBox="0 0 100 140"><rect width="100" height="140" fill="#123456"/></svg>');
+const fullTrimGuides = JSON.stringify({
+  trim: { enabled: true, extentMm: "full" },
+  external: { enabled: false, strokeWidthPt: 0.3 },
+});
 
 interface PdfClipRectangle {
   readonly x: number;
@@ -238,7 +242,7 @@ describe("minimal import workbench API", () => {
       ["sample.jpg", new Uint8Array(await readFile(join(fixturePath, "synthetic-gradient.jpg")))],
       ["sample.svg", svgBytes],
     ] as const) {
-      const response = await postFile(pdfPost, filename, bytes, { bleedMm: "0", cutGuides: "full" });
+      const response = await postFile(pdfPost, filename, bytes, { bleedMm: "0", cutGuides: fullTrimGuides });
       expect(response.status, filename).toBe(200);
       expect(response.headers.get("content-type")).toContain("application/pdf");
       const pdfBytes = new Uint8Array(await response.arrayBuffer());
@@ -262,7 +266,7 @@ describe("minimal import workbench API", () => {
 
   it("keeps JPEG bytes as a DCT stream and puts bleed outside trim with vector cut guides", async () => {
     const jpeg = new Uint8Array(await readFile(join(fixturePath, "synthetic-gradient.jpg")));
-    const response = await postFile(pdfPost, "source.jpg", jpeg, { bleedMm: "0.625", cutGuides: "full" });
+    const response = await postFile(pdfPost, "source.jpg", jpeg, { bleedMm: "0.625", cutGuides: fullTrimGuides });
     expect(response.status).toBe(200);
     const parsed = await imageStreams(new Uint8Array(await response.arrayBuffer()));
     const dct = parsed.images.find((image) => image.dictionary.includes("/DCTDecode"));
@@ -331,6 +335,14 @@ describe("minimal import workbench API", () => {
       .toEqual(expectedGuides.map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8)))));
     const lastImageDrawOffset = imageDraws.at(-1)!.offset;
     expect(guides.every((guide) => guide.strokeOffset > lastImageDrawOffset)).toBe(true);
+  });
+
+  it.each(["full", "none"])("rejects legacy cut guide form value %s", async (cutGuides) => {
+    const png = new Uint8Array(await readFile(join(fixturePath, "synthetic-rgb.png")));
+    const response = await postFile(pdfPost, "sample.png", png, { cutGuides });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_CUT_GUIDES", message: expect.stringMatching(/legacy/i) });
   });
 
   it("reports explicit export limits for WebP and TIFF and preserves SVG bleed limitations", async () => {

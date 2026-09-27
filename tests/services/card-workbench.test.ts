@@ -11,6 +11,7 @@ import type { ScryfallClient } from "../../providers/scryfall/client";
 import type { ScryfallCard } from "../../providers/scryfall/types";
 import { mapScryfallCard } from "../../providers/scryfall/mapper";
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
+import { NO_CUT_GUIDES } from "../helpers/cut-guides";
 
 const roots: string[] = [];
 const workbenches: Array<{ close(): Promise<void> }> = [];
@@ -397,7 +398,7 @@ describe("card workbench services", () => {
     const response = await handleCardExport(new Request("http://localhost/api/cards/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cards: imported.workingCards.slice(0, 1), options: { bleedMm: 0, cutGuides: "none" } }),
+      body: JSON.stringify({ cards: imported.workingCards.slice(0, 1), options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES } }),
     }), workbench);
 
     expect(response.status).toBe(200);
@@ -418,7 +419,7 @@ describe("card workbench services", () => {
     const offlineResponse = await handleCardExport(new Request("http://localhost/api/cards/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cards: offlineImport.workingCards.slice(0, 1), options: { bleedMm: 0, cutGuides: "none" } }),
+      body: JSON.stringify({ cards: offlineImport.workingCards.slice(0, 1), options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES } }),
     }), offlineWorkbench);
 
     expect(offlineResponse.status).toBe(200);
@@ -472,7 +473,7 @@ describe("card workbench services", () => {
       const response = await handleCardExport(new Request("http://localhost/api/cards/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cards: [selected], options: { bleedMm: 0, cutGuides: "none" } }),
+        body: JSON.stringify({ cards: [selected], options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES } }),
       }), workbench);
 
       expect(response.status, await response.clone().text()).toBe(200);
@@ -485,7 +486,7 @@ describe("card workbench services", () => {
       const missingResponse = await handleCardExport(new Request("http://localhost/api/cards/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cards: [selected], options: { bleedMm: 0, cutGuides: "none" } }),
+        body: JSON.stringify({ cards: [selected], options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES } }),
       }), workbench);
       const missingBody = await missingResponse.json() as { code: string; message: string };
       expect(missingResponse.status).toBe(422);
@@ -496,7 +497,7 @@ describe("card workbench services", () => {
       const corruptResponse = await handleCardExport(new Request("http://localhost/api/cards/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cards: [selected], options: { bleedMm: 0, cutGuides: "none" } }),
+        body: JSON.stringify({ cards: [selected], options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES } }),
       }), workbench);
       const corruptBody = await corruptResponse.json() as { code: string; message: string };
       expect(corruptResponse.status).toBe(422);

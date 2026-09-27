@@ -1,5 +1,5 @@
 import { BleedEngine, BleedGenerationError } from "../../../../../image-engine/bleed";
-import { MAGIC_STANDARD_CARD, PAPER_FORMATS, type CutGuideConfig } from "../../../../../core/geometry";
+import { MAGIC_STANDARD_CARD, PAPER_FORMATS, parseCutGuideConfig, type CutGuideConfig } from "../../../../../core/geometry";
 import { importImageSource, ImportFailureError } from "../../../../../import-engine";
 import type { ImportSource } from "../../../../../import-engine/types";
 import { LosslessPdfEngine, PdfExportError } from "../../../../../pdf-engine/document";
@@ -14,15 +14,28 @@ function errorResponse(code: string, message: string, status: number): Response 
 }
 
 function guideConfig(value: FormDataEntryValue | null): CutGuideConfig {
-  const mode = value === "none" ? "none" : "full";
-  const style = { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" as const };
-  return mode === "none" ? { mode, style } : { mode, style };
+  if (value === null) return parseCutGuideConfig(undefined);
+  if (typeof value !== "string") throw new TypeError("Cut guides must be a JSON configuration object.");
+  if (value === "full" || value === "none") return parseCutGuideConfig(value);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch {
+    throw new TypeError("Cut guides must be a JSON configuration object.");
+  }
+  return parseCutGuideConfig(parsed);
 }
 
 export async function POST(request: Request): Promise<Response> {
   let source: ImportSource | undefined;
   try {
     const form = await request.formData();
+    let cutGuides: CutGuideConfig;
+    try {
+      cutGuides = guideConfig(form.get("cutGuides"));
+    } catch (error) {
+      return errorResponse("INVALID_CUT_GUIDES", error instanceof Error ? error.message : "Cut guides configuration is invalid.", 400);
+    }
     const image = form.get("image");
     if (!(image instanceof File)) return errorResponse("IMAGE_REQUIRED", "Select one local PNG, JPEG or SVG image.", 400);
     const bytes = new Uint8Array(await image.arrayBuffer());
@@ -57,7 +70,6 @@ export async function POST(request: Request): Promise<Response> {
       bleedMm,
       trimSizeMm: { widthMm: MAGIC_STANDARD_CARD.widthMm, heightMm: MAGIC_STANDARD_CARD.heightMm },
     });
-    const cutGuides = guideConfig(form.get("cutGuides"));
     const pdf = await pdfEngine.generate({
       images: [bytes],
       bleedResults: [bleed],

@@ -88,19 +88,22 @@ export function createPageConfiguration(
 }
 
 export {
-  CUT_GUIDE_LINE_STYLES,
-  CUT_GUIDE_MODES,
+  DEFAULT_CUT_GUIDE_CONFIG,
+  EXTERNAL_CUT_GUIDE_COLOR,
+  TRIM_GUIDE_COLOR,
+  TRIM_GUIDE_STROKE_WIDTH_PT,
   CutGuideEngine,
+  parseCutGuideConfig,
 } from "./cut-guides";
 export type {
   CutGuideConfig,
+  CutGuideCardMm,
   CutGuideGeometry,
-  CutGuideLineStyle,
-  CutGuideMode,
   CutGuidePageSizeMm,
   CutGuideSegmentMm,
-  CutGuideStyle,
   CutGuideRequest,
+  ExternalCutGuideConfig,
+  TrimGuideConfig,
   TrimRectangleMm,
 } from "./cut-guides";
 export { calculateGridPlacement } from "./placement";

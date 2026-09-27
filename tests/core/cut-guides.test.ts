@@ -1,164 +1,215 @@
 import { describe, expect, it } from "vitest";
 import {
   CutGuideEngine,
+  parseCutGuideConfig,
   type CutGuideConfig,
-  type CutGuideStyle,
-  type TrimRectangleMm,
+  type CutGuideCardMm,
+  type CutGuideSegmentMm,
 } from "../../core/geometry/cut-guides";
-
-const STYLE: CutGuideStyle = {
-  color: "#123456",
-  strokeWidthMm: 0.2,
-  opacity: 0.75,
-  lineStyle: "dashed",
-};
-
-const TRIM: TrimRectangleMm = {
-  xMm: 10,
-  yMm: 20,
-  widthMm: 63.5,
-  heightMm: 88.9,
-};
+import { calculateGridPlacement, MAGIC_STANDARD_CARD, PAPER_FORMATS } from "../../core/geometry";
 
 const PAGE = { widthMm: 210, heightMm: 297 };
+const TRIM = { xMm: 10, yMm: 20, widthMm: 63.5, heightMm: 88.9 };
 
-function createGuides(config: CutGuideConfig, trims: readonly TrimRectangleMm[] = [TRIM]) {
-  return new CutGuideEngine().generate({ trims, pageSizeMm: PAGE, config });
+function guide(config: CutGuideConfig, cards = [{ trim: TRIM, bleedMm: 0 }]) {
+  return new CutGuideEngine().generate({ cards, pageSizeMm: PAGE, config });
+}
+
+function sorted(segments: readonly CutGuideSegmentMm[]) {
+  return [...segments].sort((a, b) => a.y1Mm - b.y1Mm || a.x1Mm - b.x1Mm || a.y2Mm - b.y2Mm || a.x2Mm - b.x2Mm);
+}
+
+function assertNoDuplicateSegments(segments: readonly CutGuideSegmentMm[]) {
+  const keys = segments.map(({ x1Mm, y1Mm, x2Mm, y2Mm }) => {
+    const first = `${x1Mm.toFixed(8)},${y1Mm.toFixed(8)}`;
+    const second = `${x2Mm.toFixed(8)},${y2Mm.toFixed(8)}`;
+    return first < second ? `${first}|${second}` : `${second}|${first}`;
+  });
+  expect(new Set(keys).size).toBe(keys.length);
+}
+
+function assertExternalStrokesClear(
+  segments: readonly CutGuideSegmentMm[],
+  cards: readonly CutGuideCardMm[],
+  strokeWidthPt: number,
+) {
+  const radiusMm = strokeWidthPt * 25.4 / 72 / 2;
+  for (const segment of segments) {
+    const horizontal = Math.abs(segment.y2Mm - segment.y1Mm) < 1e-8;
+    expect(horizontal || Math.abs(segment.x2Mm - segment.x1Mm) < 1e-8).toBe(true);
+    for (const { trim, bleedMm } of cards) {
+      const left = trim.xMm - bleedMm;
+      const right = trim.xMm + trim.widthMm + bleedMm;
+      const top = trim.yMm - bleedMm;
+      const bottom = trim.yMm + trim.heightMm + bleedMm;
+      const segmentLeft = Math.min(segment.x1Mm, segment.x2Mm) - (horizontal ? 0 : radiusMm);
+      const segmentRight = Math.max(segment.x1Mm, segment.x2Mm) + (horizontal ? 0 : radiusMm);
+      const segmentTop = Math.min(segment.y1Mm, segment.y2Mm) - (horizontal ? radiusMm : 0);
+      const segmentBottom = Math.max(segment.y1Mm, segment.y2Mm) + (horizontal ? radiusMm : 0);
+      const overlapX = Math.min(segmentRight, right) - Math.max(segmentLeft, left);
+      const overlapY = Math.min(segmentBottom, bottom) - Math.max(segmentTop, top);
+      expect(overlapX > 1e-8 && overlapY > 1e-8).toBe(false);
+    }
+  }
 }
 
 describe("CutGuideEngine physical geometry", () => {
-  it("none emits no vector segments", () => {
-    expect(createGuides({ mode: "none", style: STYLE }).segments).toEqual([]);
+  it("defaults both systems to OFF with safe physical control values", () => {
+    expect(parseCutGuideConfig(undefined)).toEqual({
+      trim: { enabled: false, extentMm: 1 },
+      external: { enabled: false, strokeWidthPt: 0.3 },
+    });
   });
 
-  it("corners emits two offset outside crop segments at each trim corner", () => {
-    const { segments } = createGuides({
-      mode: "corners",
-      style: STYLE,
-      externalLengthMm: 2,
-      internalLengthMm: 1,
-      offsetMm: 0.5,
+  it("emits no paths when both independent guide systems are disabled", () => {
+    expect(guide({ trim: { enabled: false, extentMm: 1 }, external: { enabled: false, strokeWidthPt: 0.3 } }))
+      .toEqual({ trimSegments: [], externalSegments: [] });
+  });
+
+  it.each([1, 5])("measures trim corner segments as %s mm along the physical trim edges", (extentMm) => {
+    const geometry = guide({
+      trim: { enabled: true, extentMm },
+      external: { enabled: false, strokeWidthPt: 0.3 },
     });
+    const segments = sorted(geometry.trimSegments);
 
     expect(segments).toHaveLength(8);
-    expect(segments).toContainEqual({ x1Mm: 8, y1Mm: 19.5, x2Mm: 11, y2Mm: 19.5 });
-    expect(segments).toContainEqual({ x1Mm: 9.5, y1Mm: 18, x2Mm: 9.5, y2Mm: 21 });
+    expect(segments[0]).toEqual({ x1Mm: 10, y1Mm: 20, x2Mm: 10 + extentMm, y2Mm: 20 });
+    expect(segments.some((segment) => segment.x1Mm === 10 && segment.y1Mm === 20 && segment.x2Mm === 10 && segment.y2Mm === 20 + extentMm)).toBe(true);
     for (const segment of segments) {
-      expect(
-        segment.x1Mm < TRIM.xMm
-        || segment.x1Mm > TRIM.xMm + TRIM.widthMm
-        || segment.y1Mm < TRIM.yMm
-        || segment.y1Mm > TRIM.yMm + TRIM.heightMm,
-      ).toBe(true);
+      expect(Math.hypot(segment.x2Mm - segment.x1Mm, segment.y2Mm - segment.y1Mm)).toBeCloseTo(extentMm, 12);
     }
   });
 
-  it("sides centers four independent marks on trim sides", () => {
-    const { segments } = createGuides({
-      mode: "sides",
-      style: STYLE,
-      externalLengthMm: 2,
-      internalLengthMm: 1,
-      offsetMm: 0.5,
+  it("unions opposite trim corner intervals when they meet at the half-edge point", () => {
+    const { trimSegments } = guide({
+      trim: { enabled: true, extentMm: 31.75 },
+      external: { enabled: false, strokeWidthPt: 0.3 },
+    });
+    const horizontal = trimSegments.filter(({ y1Mm, y2Mm }) => y1Mm === y2Mm);
+
+    expect(horizontal).toHaveLength(2);
+    expect(horizontal).toContainEqual({ x1Mm: 10, y1Mm: 20, x2Mm: 73.5, y2Mm: 20 });
+    expect(horizontal).toContainEqual({ x1Mm: 10, y1Mm: 108.9, x2Mm: 73.5, y2Mm: 108.9 });
+    assertNoDuplicateSegments(trimSegments);
+  });
+
+  it("draws exactly the four physical trim edges for full extent", () => {
+    const { trimSegments } = guide({
+      trim: { enabled: true, extentMm: "full" },
+      external: { enabled: false, strokeWidthPt: 0.3 },
     });
 
-    expect(segments).toHaveLength(8);
-    expect(segments).toContainEqual({ x1Mm: 41.75, y1Mm: 17.5, x2Mm: 41.75, y2Mm: 19.5 });
-    expect(segments).toContainEqual({ x1Mm: 41.75, y1Mm: 20, x2Mm: 41.75, y2Mm: 21 });
-    expect(segments).toContainEqual({ x1Mm: 7.5, y1Mm: 64.45, x2Mm: 9.5, y2Mm: 64.45 });
-  });
-
-  it("rejects an outside side mark that reaches a neighboring trim", () => {
-    const neighboringTrims: readonly TrimRectangleMm[] = [
-      { xMm: 8.5, yMm: 13.9, widthMm: 63.5, heightMm: 88.9 },
-      { xMm: 73.25, yMm: 13.9, widthMm: 63.5, heightMm: 88.9 },
-    ];
-
-    expect(() => createGuides({
-      mode: "sides",
-      style: STYLE,
-      externalLengthMm: 2,
-      internalLengthMm: 0.5,
-      offsetMm: 0.5,
-    }, neighboringTrims)).toThrow(/intersects trim/i);
-  });
-
-  it("cross centers a pair of vector arms on each trim vertex", () => {
-    const { segments } = createGuides({ mode: "cross", style: STYLE, armLengthMm: 1.25 });
-
-    expect(segments).toHaveLength(8);
-    expect(segments).toContainEqual({ x1Mm: 8.75, y1Mm: 20, x2Mm: 11.25, y2Mm: 20 });
-    expect(segments).toContainEqual({ x1Mm: 10, y1Mm: 18.75, x2Mm: 10, y2Mm: 21.25 });
-    expect(segments).toContainEqual({ x1Mm: 72.25, y1Mm: 108.9, x2Mm: 74.75, y2Mm: 108.9 });
-  });
-
-  it("full follows the four trim boundaries exactly", () => {
-    const { segments } = createGuides({ mode: "full", style: STYLE });
-
-    expect(segments).toEqual([
+    expect(sorted(trimSegments)).toEqual([
       { x1Mm: 10, y1Mm: 20, x2Mm: 73.5, y2Mm: 20 },
-      { x1Mm: 10, y1Mm: 108.9, x2Mm: 73.5, y2Mm: 108.9 },
       { x1Mm: 10, y1Mm: 20, x2Mm: 10, y2Mm: 108.9 },
       { x1Mm: 73.5, y1Mm: 20, x2Mm: 73.5, y2Mm: 108.9 },
+      { x1Mm: 10, y1Mm: 108.9, x2Mm: 73.5, y2Mm: 108.9 },
     ]);
-  });
-
-  it("guillotine spans the page at unique trim boundary coordinates", () => {
-    const trims: readonly TrimRectangleMm[] = [
-      { xMm: 10, yMm: 20, widthMm: 10, heightMm: 20 },
-      { xMm: 20, yMm: 20, widthMm: 10, heightMm: 20 },
-    ];
-    const { segments } = createGuides({ mode: "guillotine", style: STYLE }, trims);
-
-    expect(segments).toEqual([
-      { x1Mm: 10, y1Mm: 0, x2Mm: 10, y2Mm: 297 },
-      { x1Mm: 20, y1Mm: 0, x2Mm: 20, y2Mm: 297 },
-      { x1Mm: 30, y1Mm: 0, x2Mm: 30, y2Mm: 297 },
-      { x1Mm: 0, y1Mm: 20, x2Mm: 210, y2Mm: 20 },
-      { x1Mm: 0, y1Mm: 40, x2Mm: 210, y2Mm: 40 },
-    ]);
-  });
-
-  it("keeps the trim rectangle unchanged regardless of any external bleed extent", () => {
-    const { segments } = createGuides({ mode: "full", style: STYLE });
-    const xs = [...new Set(segments.flatMap(({ x1Mm, x2Mm }) => [x1Mm, x2Mm]))].sort((a, b) => a - b);
-    const ys = [...new Set(segments.flatMap(({ y1Mm, y2Mm }) => [y1Mm, y2Mm]))].sort((a, b) => a - b);
-
-    expect(xs).toEqual([10, 73.5]);
-    expect(ys).toEqual([20, 108.9]);
-    expect(xs[1] - xs[0]).toBe(63.5);
-    expect(ys[1] - ys[0]).toBeCloseTo(88.9, 12);
+    assertNoDuplicateSegments(trimSegments);
   });
 
   it.each([
-    ["NaN stroke", { ...STYLE, strokeWidthMm: Number.NaN }],
-    ["zero stroke", { ...STYLE, strokeWidthMm: 0 }],
-    ["negative stroke", { ...STYLE, strokeWidthMm: -0.2 }],
-    ["infinite opacity", { ...STYLE, opacity: Number.POSITIVE_INFINITY }],
-    ["opacity above one", { ...STYLE, opacity: 1.01 }],
-    ["invalid color", { ...STYLE, color: "black" }],
-    ["invalid line style", { ...STYLE, lineStyle: "wavy" }],
-  ])("rejects %s", (_name, style) => {
-    expect(() => createGuides({ mode: "full", style: style as CutGuideStyle })).toThrow(RangeError);
+    [0, 0.3],
+    [0.625, 0.3],
+    [1, 0.3],
+    [2, 0.3],
+    [3, 0.3],
+    [0.625, 2],
+  ])("clips external centerlines outside %s mm bleed with a %s pt stroke", (bleedMm, strokeWidthPt) => {
+    const card = { trim: TRIM, bleedMm };
+    const { externalSegments } = guide({
+      trim: { enabled: false, extentMm: 1 },
+      external: { enabled: true, strokeWidthPt },
+    }, [card]);
+    const radiusMm = strokeWidthPt * 25.4 / 72 / 2;
+    const horizontalTop = externalSegments.filter(({ y1Mm, y2Mm }) => y1Mm === TRIM.yMm && y2Mm === TRIM.yMm);
+
+    expect(horizontalTop).toHaveLength(2);
+    expect(horizontalTop).toContainEqual({ x1Mm: radiusMm, y1Mm: TRIM.yMm, x2Mm: TRIM.xMm - bleedMm - radiusMm, y2Mm: TRIM.yMm });
+    expect(horizontalTop).toContainEqual({ x1Mm: TRIM.xMm + TRIM.widthMm + bleedMm + radiusMm, y1Mm: TRIM.yMm, x2Mm: PAGE.widthMm - radiusMm, y2Mm: TRIM.yMm });
+    assertExternalStrokesClear(externalSegments, [card], strokeWidthPt);
   });
 
-  it.each([Number.NaN, Number.POSITIVE_INFINITY, -0.1])("rejects impossible corner geometry (%s)", (length) => {
-    expect(() => createGuides({
-      mode: "corners",
-      style: STYLE,
-      externalLengthMm: length,
-      internalLengthMm: 0,
-      offsetMm: 0.5,
-    })).toThrow(RangeError);
+  it.each([
+    { trim: { enabled: true, extentMm: 2 }, external: { enabled: false, strokeWidthPt: 0.3 } },
+    { trim: { enabled: false, extentMm: 2 }, external: { enabled: true, strokeWidthPt: 0.3 } },
+    { trim: { enabled: true, extentMm: 2 }, external: { enabled: true, strokeWidthPt: 0.3 } },
+  ] satisfies CutGuideConfig[])("keeps trim and external systems independent", (config) => {
+    const geometry = guide(config);
+    expect(geometry.trimSegments.length > 0).toBe(config.trim.enabled);
+    expect(geometry.externalSegments.length > 0).toBe(config.external.enabled);
   });
 
-  it("rejects marks that extend beyond the physical sheet", () => {
-    expect(() => createGuides({
-      mode: "corners",
-      style: STYLE,
-      externalLengthMm: 20,
-      internalLengthMm: 1,
-      offsetMm: 1,
-    })).toThrow(/outside page bounds/i);
+  it("keeps external lines aligned to trim while clipping around every card bleed in a 3x3 sheet", () => {
+    const bleedByCardMm = [0, 0.625, 1, 2, 3, 0.625, 1, 2, 3];
+    const placement = calculateGridPlacement({
+      paper: PAPER_FORMATS.A4,
+      card: MAGIC_STANDARD_CARD,
+      count: 9,
+      bleedMm: 0,
+      bleedByCardMm,
+    });
+    const cards: CutGuideCardMm[] = placement.slots.map((slot) => ({ trim: slot.trim, bleedMm: bleedByCardMm[slot.index] }));
+    const { externalSegments } = new CutGuideEngine().generate({
+      cards,
+      pageSizeMm: PAGE,
+      config: { trim: { enabled: false, extentMm: 1 }, external: { enabled: true, strokeWidthPt: 0.3 } },
+    });
+    const edgeCoordinates = new Set(cards.flatMap(({ trim }) => [
+      trim.xMm, trim.xMm + trim.widthMm, trim.yMm, trim.yMm + trim.heightMm,
+    ]));
+
+    expect(externalSegments.length).toBeGreaterThan(10);
+    for (const segment of externalSegments) {
+      expect(edgeCoordinates.has(segment.x1Mm) || edgeCoordinates.has(segment.y1Mm)).toBe(true);
+    }
+    for (const coordinate of edgeCoordinates) {
+      expect(externalSegments.some(({ x1Mm, y1Mm }) => x1Mm === coordinate || y1Mm === coordinate)).toBe(true);
+    }
+    assertNoDuplicateSegments(externalSegments);
+    assertExternalStrokesClear(externalSegments, cards, 0.3);
+    expect(externalSegments.some(({ x1Mm, x2Mm }) => Math.min(x1Mm, x2Mm) === 0)).toBe(false);
+    expect(externalSegments.some(({ y1Mm, y2Mm }) => Math.min(y1Mm, y2Mm) === 0)).toBe(false);
+  });
+
+  it("consolidates near-identical external edge coordinates into one shared line", () => {
+    const cards: CutGuideCardMm[] = [
+      { trim: { xMm: 10, yMm: 20, widthMm: 63.5, heightMm: 88.9 }, bleedMm: 0 },
+      { trim: { xMm: 73.5, yMm: 20 + 0.5e-9, widthMm: 63.5, heightMm: 88.9 }, bleedMm: 0 },
+    ];
+    const { externalSegments } = new CutGuideEngine().generate({
+      cards,
+      pageSizeMm: PAGE,
+      config: { trim: { enabled: false, extentMm: 1 }, external: { enabled: true, strokeWidthPt: 0.3 } },
+    });
+    const horizontalCoordinates = externalSegments
+      .filter(({ y1Mm, y2Mm }) => y1Mm === y2Mm)
+      .map(({ y1Mm }) => y1Mm)
+      .filter((coordinate, index, values) => values.indexOf(coordinate) === index)
+      .sort((a, b) => a - b);
+
+    for (let index = 1; index < horizontalCoordinates.length; index += 1) {
+      expect(horizontalCoordinates[index] - horizontalCoordinates[index - 1]).toBeGreaterThan(1e-9);
+    }
+  });
+
+  it.each([
+    { trim: { enabled: true, extentMm: 0 }, external: { enabled: false, strokeWidthPt: 0.3 } },
+    { trim: { enabled: true, extentMm: Number.NaN }, external: { enabled: false, strokeWidthPt: 0.3 } },
+    { trim: { enabled: false, extentMm: 1 }, external: { enabled: true, strokeWidthPt: 0 } },
+    { trim: { enabled: false, extentMm: 1 }, external: { enabled: true, strokeWidthPt: Number.POSITIVE_INFINITY } },
+  ] satisfies CutGuideConfig[])("rejects invalid physical guide dimensions", (config) => {
+    expect(() => guide(config)).toThrow(RangeError);
+  });
+
+  it("rejects overlapping physical trims before generating external paths", () => {
+    expect(() => guide({
+      trim: { enabled: true, extentMm: "full" },
+      external: { enabled: true, strokeWidthPt: 0.3 },
+    }, [
+      { trim: TRIM, bleedMm: 0 },
+      { trim: { xMm: 70, yMm: 20, widthMm: 63.5, heightMm: 88.9 }, bleedMm: 0 },
+    ])).toThrow(/trim rectangles .* overlap/i);
   });
 });

@@ -7,7 +7,8 @@ import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard } from "
 
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
 import { postArtworkSelection } from "./artwork-selection-request";
-import { buildBleedExportOptions, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
+import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
+import CutGuideControls from "./cut-guide-controls";
 
 type ArtworkFilter = "all" | "scryfall" | "mpc" | "upload";
 type CandidateDto = Omit<ArtworkCandidate, "originalUri" | "localOriginalPath" | "previewUri"> & {
@@ -79,7 +80,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [manualIdentities, setManualIdentities] = useState<CardIdentity[]>([]);
   const [bleedMm, setBleedMm] = useState("0.625");
   const [roundedCorners, setRoundedCorners] = useState(false);
-  const [cutGuides, setCutGuides] = useState(true);
+  const [trimGuideEnabled, setTrimGuideEnabled] = useState(false);
+  const [trimGuideExtentMm, setTrimGuideExtentMm] = useState("1");
+  const [externalGuideEnabled, setExternalGuideEnabled] = useState(false);
+  const [externalGuideStrokeWidthPt, setExternalGuideStrokeWidthPt] = useState("0.3");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
@@ -240,7 +244,11 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     try {
       const response = await fetch("/api/cards/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cards: workingCards, options: buildBleedExportOptions(bleedMm, cutGuides, roundedCorners) }),
+        body: JSON.stringify({ cards: workingCards, options: buildBleedExportOptions(
+          bleedMm,
+          buildCutGuideConfig(trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt),
+          roundedCorners,
+        ) }),
       });
       if (!response.ok) {
         const body = await response.json() as ApiErrorBody;
@@ -368,7 +376,16 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         <div className="pdf-controls">
           <label className="narrow-field">Bleed externo (mm)<input type="number" min="0" max="3" step="0.125" value={bleedMm} onChange={(event) => setBleedMm(event.currentTarget.value)} /></label>
           <label className="checkbox-field"><input type="checkbox" checked={roundedCorners} onChange={(event) => setRoundedCorners(event.currentTarget.checked)} /> Cantos arredondados (opcional; desligado por padrão)</label>
-          <label className="checkbox-field"><input type="checkbox" checked={cutGuides} onChange={(event) => setCutGuides(event.currentTarget.checked)} /> Guias vetoriais</label>
+          <CutGuideControls
+            trimEnabled={trimGuideEnabled}
+            trimExtentMm={trimGuideExtentMm}
+            externalEnabled={externalGuideEnabled}
+            externalStrokeWidthPt={externalGuideStrokeWidthPt}
+            onTrimEnabledChange={setTrimGuideEnabled}
+            onTrimExtentMmChange={setTrimGuideExtentMm}
+            onExternalEnabledChange={setExternalGuideEnabled}
+            onExternalStrokeWidthPtChange={setExternalGuideStrokeWidthPt}
+          />
           <button className="button primary" type="button" disabled={busy || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
           {pdfUrl && <a className="download-link" href={pdfUrl} download="tcgprint-cards.pdf">Baixar PDF</a>}
         </div>

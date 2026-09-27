@@ -18,7 +18,7 @@ import type { CardWorkbench } from "./card-workbench";
 
 export interface CardExportOptions {
   readonly bleedMm: number;
-  readonly cutGuides: "full" | "none";
+  readonly cutGuides: CutGuideConfig;
   readonly roundedCorners?: boolean;
 }
 
@@ -88,11 +88,6 @@ function mpcExportFailure(error: unknown): CardExportServiceError {
     `The selected MPC original is missing, corrupt, or not validated in local storage, and the provider could not revalidate it${error instanceof Error ? `: ${error.message}` : "."}`,
     { cause: error },
   );
-}
-
-function guides(mode: CardExportOptions["cutGuides"]): CutGuideConfig {
-  const style = { color: "#000000", strokeWidthMm: 0.2, opacity: 1, lineStyle: "solid" as const };
-  return mode === "none" ? { mode: "none", style } : { mode: "full", style };
 }
 
 /** Composes quantity copies only here, then delegates all geometry/raster/PDF work to the existing engines. */
@@ -222,7 +217,7 @@ export async function exportWorkingCardsWithDiagnostics(
     const pdfBytes = await pdfEngine.generate({
       images: composedImages,
       bleedResults: composedBleeds,
-      cutGuides: guides(options.cutGuides),
+      cutGuides: options.cutGuides,
       paperFormat: PAPER_FORMATS.A4,
       cardFormat: MAGIC_STANDARD_CARD,
     });

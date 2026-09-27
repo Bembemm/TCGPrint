@@ -1,4 +1,5 @@
 import type { BleedModePreference } from "../../image-engine/bleed";
+import type { CutGuideConfig } from "../../core/geometry";
 
 export interface BleedDiagnosticsReport {
   readonly version: 1;
@@ -24,10 +25,28 @@ export interface BleedDiagnosticsReport {
   readonly effectiveModeCounts?: Readonly<Record<string, number>>;
 }
 
-export function buildBleedExportOptions(bleedMm: string, cutGuides: boolean, roundedCorners = false) {
+export function buildCutGuideConfig(
+  trimEnabled: boolean,
+  trimExtentValue: string,
+  externalEnabled: boolean,
+  externalStrokeWidthValue: string,
+): CutGuideConfig {
+  return {
+    trim: {
+      enabled: trimEnabled,
+      extentMm: trimExtentValue === "full" ? "full" : Number(trimExtentValue),
+    },
+    external: {
+      enabled: externalEnabled,
+      strokeWidthPt: Number(externalStrokeWidthValue),
+    },
+  };
+}
+
+export function buildBleedExportOptions(bleedMm: string, cutGuides: CutGuideConfig, roundedCorners = false) {
   return {
     bleedMm: Number(bleedMm),
-    cutGuides: cutGuides ? "full" as const : "none" as const,
+    cutGuides,
     roundedCorners,
   };
 }

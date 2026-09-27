@@ -1,16 +1,26 @@
-export const CUT_GUIDE_MODES = ["none", "corners", "sides", "cross", "full", "guillotine"] as const;
-export type CutGuideMode = (typeof CUT_GUIDE_MODES)[number];
-
-export const CUT_GUIDE_LINE_STYLES = ["solid", "dashed", "dotted"] as const;
-export type CutGuideLineStyle = (typeof CUT_GUIDE_LINE_STYLES)[number];
-
-export interface CutGuideStyle {
-  /** Six-digit sRGB hex color, for example #202020. */
-  readonly color: string;
-  readonly strokeWidthMm: number;
-  readonly opacity: number;
-  readonly lineStyle: CutGuideLineStyle;
+export interface TrimGuideConfig {
+  readonly enabled: boolean;
+  readonly extentMm: number | "full";
 }
+
+export interface ExternalCutGuideConfig {
+  readonly enabled: boolean;
+  readonly strokeWidthPt: number;
+}
+
+export interface CutGuideConfig {
+  readonly trim: TrimGuideConfig;
+  readonly external: ExternalCutGuideConfig;
+}
+
+export const DEFAULT_CUT_GUIDE_CONFIG: CutGuideConfig = Object.freeze({
+  trim: Object.freeze({ enabled: false, extentMm: 1 }),
+  external: Object.freeze({ enabled: false, strokeWidthPt: 0.3 }),
+});
+
+export const TRIM_GUIDE_COLOR = "#00A6D6";
+export const TRIM_GUIDE_STROKE_WIDTH_PT = 0.2;
+export const EXTERNAL_CUT_GUIDE_COLOR = "#E87500";
 
 export interface TrimRectangleMm {
   /** Page coordinate from the upper-left corner, in millimeters. */
@@ -18,6 +28,11 @@ export interface TrimRectangleMm {
   readonly yMm: number;
   readonly widthMm: number;
   readonly heightMm: number;
+}
+
+export interface CutGuideCardMm {
+  readonly trim: TrimRectangleMm;
+  readonly bleedMm: number;
 }
 
 export interface CutGuideSegmentMm {
@@ -32,107 +47,92 @@ export interface CutGuidePageSizeMm {
   readonly heightMm: number;
 }
 
-interface CutGuideConfigBase {
-  readonly style: CutGuideStyle;
-}
-
-export type CutGuideConfig =
-  | (CutGuideConfigBase & { readonly mode: "none" })
-  | (CutGuideConfigBase & {
-    readonly mode: "corners";
-    readonly externalLengthMm: number;
-    readonly internalLengthMm: number;
-    readonly offsetMm: number;
-  })
-  | (CutGuideConfigBase & {
-    readonly mode: "sides";
-    readonly externalLengthMm: number;
-    readonly internalLengthMm: number;
-    readonly offsetMm: number;
-  })
-  | (CutGuideConfigBase & { readonly mode: "cross"; readonly armLengthMm: number })
-  | (CutGuideConfigBase & { readonly mode: "full" })
-  | (CutGuideConfigBase & { readonly mode: "guillotine" });
-
 export interface CutGuideRequest {
-  readonly trims: readonly TrimRectangleMm[];
+  readonly cards: readonly CutGuideCardMm[];
   readonly pageSizeMm: CutGuidePageSizeMm;
   readonly config: CutGuideConfig;
 }
 
 export interface CutGuideGeometry {
-  readonly mode: CutGuideMode;
-  readonly style: CutGuideStyle;
-  readonly segments: readonly CutGuideSegmentMm[];
+  readonly trimSegments: readonly CutGuideSegmentMm[];
+  readonly externalSegments: readonly CutGuideSegmentMm[];
 }
 
 const GEOMETRY_TOLERANCE_MM = 1e-9;
+const POINTS_PER_MM = 72 / 25.4;
 
-function assertFinite(value: number, name: string): void {
-  if (!Number.isFinite(value)) throw new RangeError(`${name} must be a finite number.`);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function assertNonNegative(value: number, name: string): void {
-  assertFinite(value, name);
-  if (value < 0) throw new RangeError(`${name} must be greater than or equal to zero.`);
+function assertFinite(value: number, label: string): void {
+  if (!Number.isFinite(value)) throw new RangeError(`${label} must be a finite number.`);
 }
 
-function assertPositive(value: number, name: string): void {
-  assertFinite(value, name);
-  if (value <= 0) throw new RangeError(`${name} must be greater than zero.`);
+function assertPositive(value: number, label: string): void {
+  assertFinite(value, label);
+  if (value <= 0) throw new RangeError(`${label} must be greater than zero.`);
 }
 
-function validateStyle(style: CutGuideStyle): CutGuideStyle {
-  if (!style || typeof style !== "object") throw new TypeError("Cut guide style is required.");
-  if (!/^#[\da-f]{6}$/i.test(style.color)) {
-    throw new RangeError("Cut guide color must use the #RRGGBB format.");
+function assertNonNegative(value: number, label: string): void {
+  assertFinite(value, label);
+  if (value < 0) throw new RangeError(`${label} must be greater than or equal to zero.`);
+}
+
+/** Validates public config payloads and supplies the safe both-disabled default. */
+export function parseCutGuideConfig(value: unknown): CutGuideConfig {
+  if (value === undefined) return DEFAULT_CUT_GUIDE_CONFIG;
+  if (typeof value === "string") {
+    throw new TypeError("Legacy cut guide modes are not supported; send trim and external guide settings.");
   }
-  assertPositive(style.strokeWidthMm, "Cut guide stroke width");
-  assertFinite(style.opacity, "Cut guide opacity");
-  if (style.opacity < 0 || style.opacity > 1) {
-    throw new RangeError("Cut guide opacity must be between 0 and 1.");
-  }
-  if (!(CUT_GUIDE_LINE_STYLES as readonly string[]).includes(style.lineStyle)) {
-    throw new RangeError(`Unsupported cut guide line style: ${String(style.lineStyle)}.`);
+  if (!isRecord(value) || !isRecord(value.trim) || !isRecord(value.external)) {
+    throw new TypeError("Cut guides must contain trim and external configuration objects.");
   }
 
-  return Object.freeze({ ...style, color: style.color.toUpperCase() });
+  const { trim, external } = value;
+  if (typeof trim.enabled !== "boolean") throw new TypeError("Trim guide enabled must be a boolean.");
+  if (trim.extentMm !== "full" && typeof trim.extentMm !== "number") {
+    throw new TypeError("Trim guide extent must be a positive number in millimeters or 'full'.");
+  }
+  if (trim.extentMm !== "full") assertPositive(trim.extentMm, "Trim guide extent");
+  if (typeof external.enabled !== "boolean") throw new TypeError("External guide enabled must be a boolean.");
+  if (typeof external.strokeWidthPt !== "number") throw new TypeError("External guide stroke width must be a number in points.");
+  assertPositive(external.strokeWidthPt, "External guide stroke width");
+
+  return Object.freeze({
+    trim: Object.freeze({ enabled: trim.enabled, extentMm: trim.extentMm as number | "full" }),
+    external: Object.freeze({ enabled: external.enabled, strokeWidthPt: external.strokeWidthPt }),
+  });
 }
 
-function validateRequest(request: CutGuideRequest): {
-  readonly style: CutGuideStyle;
-  readonly trims: readonly TrimRectangleMm[];
-} {
+function validateRequest(request: CutGuideRequest): { readonly config: CutGuideConfig; readonly cards: readonly CutGuideCardMm[] } {
   if (!request || typeof request !== "object") throw new TypeError("Cut guide request is required.");
-  const { pageSizeMm } = request;
-  assertPositive(pageSizeMm.widthMm, "Page width");
-  assertPositive(pageSizeMm.heightMm, "Page height");
-  if (!Array.isArray(request.trims)) throw new TypeError("Cut guide trims must be an array.");
-  if (!request.config || !(CUT_GUIDE_MODES as readonly string[]).includes(request.config.mode)) {
-    throw new RangeError(`Unsupported cut guide mode: ${String(request.config?.mode)}.`);
-  }
-
-  const style = validateStyle(request.config.style);
-  const trims = request.trims.map((trim, index) => {
-    assertFinite(trim.xMm, `Trim ${index + 1} X`);
-    assertFinite(trim.yMm, `Trim ${index + 1} Y`);
-    assertPositive(trim.widthMm, `Trim ${index + 1} width`);
-    assertPositive(trim.heightMm, `Trim ${index + 1} height`);
+  assertPositive(request.pageSizeMm.widthMm, "Page width");
+  assertPositive(request.pageSizeMm.heightMm, "Page height");
+  if (!Array.isArray(request.cards)) throw new TypeError("Cut guide cards must be an array.");
+  const config = parseCutGuideConfig(request.config);
+  const cards = request.cards.map(({ trim, bleedMm }, index) => {
+    if (!trim || typeof trim !== "object") throw new TypeError(`Card ${index + 1} trim rectangle is required.`);
+    assertFinite(trim.xMm, `Card ${index + 1} trim X`);
+    assertFinite(trim.yMm, `Card ${index + 1} trim Y`);
+    assertPositive(trim.widthMm, `Card ${index + 1} trim width`);
+    assertPositive(trim.heightMm, `Card ${index + 1} trim height`);
+    assertNonNegative(bleedMm, `Card ${index + 1} bleed`);
     if (
       trim.xMm < -GEOMETRY_TOLERANCE_MM
       || trim.yMm < -GEOMETRY_TOLERANCE_MM
-      || trim.xMm + trim.widthMm > pageSizeMm.widthMm + GEOMETRY_TOLERANCE_MM
-      || trim.yMm + trim.heightMm > pageSizeMm.heightMm + GEOMETRY_TOLERANCE_MM
+      || trim.xMm + trim.widthMm > request.pageSizeMm.widthMm + GEOMETRY_TOLERANCE_MM
+      || trim.yMm + trim.heightMm > request.pageSizeMm.heightMm + GEOMETRY_TOLERANCE_MM
     ) {
-      throw new RangeError(`Trim ${index + 1} is outside page bounds.`);
+      throw new RangeError(`Card ${index + 1} trim is outside page bounds.`);
     }
-    return Object.freeze({ ...trim });
+    return Object.freeze({ trim: Object.freeze({ ...trim }), bleedMm });
   });
 
-  for (let first = 0; first < trims.length; first += 1) {
-    for (let second = first + 1; second < trims.length; second += 1) {
-      const a = trims[first];
-      const b = trims[second];
+  for (let first = 0; first < cards.length; first += 1) {
+    for (let second = first + 1; second < cards.length; second += 1) {
+      const a = cards[first].trim;
+      const b = cards[second].trim;
       const overlapWidth = Math.min(a.xMm + a.widthMm, b.xMm + b.widthMm) - Math.max(a.xMm, b.xMm);
       const overlapHeight = Math.min(a.yMm + a.heightMm, b.yMm + b.heightMm) - Math.max(a.yMm, b.yMm);
       if (overlapWidth > GEOMETRY_TOLERANCE_MM && overlapHeight > GEOMETRY_TOLERANCE_MM) {
@@ -140,231 +140,170 @@ function validateRequest(request: CutGuideRequest): {
       }
     }
   }
+  return { config, cards };
+}
 
-  switch (request.config.mode) {
-    case "corners":
-    case "sides":
-      assertNonNegative(request.config.externalLengthMm, "External guide length");
-      assertNonNegative(request.config.internalLengthMm, "Internal guide length");
-      assertNonNegative(request.config.offsetMm, "Guide offset");
-      if (request.config.externalLengthMm === 0 && request.config.internalLengthMm === 0) {
-        throw new RangeError("Cut guide lengths cannot both be zero.");
+interface Interval {
+  readonly start: number;
+  readonly end: number;
+}
+
+interface AxisIntervals {
+  readonly coordinate: number;
+  readonly intervals: Interval[];
+}
+
+function addAxisInterval(groups: AxisIntervals[], coordinate: number, start: number, end: number): void {
+  if (end - start <= GEOMETRY_TOLERANCE_MM) return;
+  const group = groups.find((candidate) => Math.abs(candidate.coordinate - coordinate) <= GEOMETRY_TOLERANCE_MM);
+  if (group) group.intervals.push({ start, end });
+  else groups.push({ coordinate, intervals: [{ start, end }] });
+}
+
+function unionIntervals(intervals: readonly Interval[]): Interval[] {
+  const sorted = [...intervals].sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: Interval[] = [];
+  for (const interval of sorted) {
+    const previous = merged.at(-1);
+    if (previous && interval.start <= previous.end + GEOMETRY_TOLERANCE_MM) {
+      merged[merged.length - 1] = { start: previous.start, end: Math.max(previous.end, interval.end) };
+    } else merged.push({ ...interval });
+  }
+  return merged;
+}
+
+function makeHorizontalSegments(groups: readonly AxisIntervals[]): CutGuideSegmentMm[] {
+  return groups.flatMap(({ coordinate, intervals }) => unionIntervals(intervals).map(({ start, end }) => ({
+    x1Mm: start,
+    y1Mm: coordinate,
+    x2Mm: end,
+    y2Mm: coordinate,
+  })));
+}
+
+function makeVerticalSegments(groups: readonly AxisIntervals[]): CutGuideSegmentMm[] {
+  return groups.flatMap(({ coordinate, intervals }) => unionIntervals(intervals).map(({ start, end }) => ({
+    x1Mm: coordinate,
+    y1Mm: start,
+    x2Mm: coordinate,
+    y2Mm: end,
+  })));
+}
+
+function generateTrimSegments(cards: readonly CutGuideCardMm[], extent: number | "full"): CutGuideSegmentMm[] {
+  const horizontal: AxisIntervals[] = [];
+  const vertical: AxisIntervals[] = [];
+  for (const { trim } of cards) {
+    const left = trim.xMm;
+    const right = left + trim.widthMm;
+    const top = trim.yMm;
+    const bottom = top + trim.heightMm;
+    const horizontalLength = extent === "full" ? trim.widthMm : Math.min(extent, trim.widthMm);
+    const verticalLength = extent === "full" ? trim.heightMm : Math.min(extent, trim.heightMm);
+
+    if (extent === "full") {
+      addAxisInterval(horizontal, top, left, right);
+      addAxisInterval(horizontal, bottom, left, right);
+      addAxisInterval(vertical, left, top, bottom);
+      addAxisInterval(vertical, right, top, bottom);
+    } else {
+      addAxisInterval(horizontal, top, left, left + horizontalLength);
+      addAxisInterval(horizontal, top, right - horizontalLength, right);
+      addAxisInterval(horizontal, bottom, left, left + horizontalLength);
+      addAxisInterval(horizontal, bottom, right - horizontalLength, right);
+      addAxisInterval(vertical, left, top, top + verticalLength);
+      addAxisInterval(vertical, left, bottom - verticalLength, bottom);
+      addAxisInterval(vertical, right, top, top + verticalLength);
+      addAxisInterval(vertical, right, bottom - verticalLength, bottom);
+    }
+  }
+  return [...makeHorizontalSegments(horizontal), ...makeVerticalSegments(vertical)];
+}
+
+function subtractIntervals(source: Interval, obstructions: readonly Interval[]): Interval[] {
+  let remaining = [source];
+  for (const obstruction of unionIntervals(obstructions)) {
+    remaining = remaining.flatMap((interval) => {
+      if (obstruction.end <= interval.start + GEOMETRY_TOLERANCE_MM || obstruction.start >= interval.end - GEOMETRY_TOLERANCE_MM) {
+        return [interval];
       }
-      break;
-    case "cross":
-      assertPositive(request.config.armLengthMm, "Cross arm length");
-      break;
-    case "none":
-    case "full":
-    case "guillotine":
-      break;
+      const next: Interval[] = [];
+      if (obstruction.start > interval.start + GEOMETRY_TOLERANCE_MM) {
+        next.push({ start: interval.start, end: Math.min(obstruction.start, interval.end) });
+      }
+      if (obstruction.end < interval.end - GEOMETRY_TOLERANCE_MM) {
+        next.push({ start: Math.max(obstruction.end, interval.start), end: interval.end });
+      }
+      return next;
+    });
   }
-
-  return { style, trims };
+  return remaining.filter(({ start, end }) => end - start > GEOMETRY_TOLERANCE_MM);
 }
 
-function addSegment(
-  segments: CutGuideSegmentMm[],
-  x1Mm: number,
-  y1Mm: number,
-  x2Mm: number,
-  y2Mm: number,
-): void {
-  if (Math.hypot(x2Mm - x1Mm, y2Mm - y1Mm) <= GEOMETRY_TOLERANCE_MM) {
-    throw new RangeError("Cut guide configuration generated a zero-length segment.");
-  }
-  segments.push({ x1Mm, y1Mm, x2Mm, y2Mm });
-}
-
-function generateCornerSegments(
-  trim: TrimRectangleMm,
-  config: Extract<CutGuideConfig, { mode: "corners" }>,
-  segments: CutGuideSegmentMm[],
-): void {
-  const left = trim.xMm;
-  const right = left + trim.widthMm;
-  const top = trim.yMm;
-  const bottom = top + trim.heightMm;
-  const { externalLengthMm: outside, internalLengthMm: alongside, offsetMm: gap } = config;
-
-  addSegment(segments, left - outside, top - gap, left + alongside, top - gap);
-  addSegment(segments, left - gap, top - outside, left - gap, top + alongside);
-  addSegment(segments, right - alongside, top - gap, right + outside, top - gap);
-  addSegment(segments, right + gap, top - outside, right + gap, top + alongside);
-  addSegment(segments, left - outside, bottom + gap, left + alongside, bottom + gap);
-  addSegment(segments, left - gap, bottom - alongside, left - gap, bottom + outside);
-  addSegment(segments, right - alongside, bottom + gap, right + outside, bottom + gap);
-  addSegment(segments, right + gap, bottom - alongside, right + gap, bottom + outside);
-}
-
-function generateSideSegments(
-  trim: TrimRectangleMm,
-  config: Extract<CutGuideConfig, { mode: "sides" }>,
-  segments: CutGuideSegmentMm[],
-): void {
-  const { externalLengthMm: outside, internalLengthMm: inside, offsetMm: gap } = config;
-  const centerX = trim.xMm + trim.widthMm / 2;
-  const centerY = trim.yMm + trim.heightMm / 2;
-  const right = trim.xMm + trim.widthMm;
-  const bottom = trim.yMm + trim.heightMm;
-
-  if (outside > 0) {
-    addSegment(segments, centerX, trim.yMm - gap - outside, centerX, trim.yMm - gap);
-    addSegment(segments, centerX, bottom + gap, centerX, bottom + gap + outside);
-    addSegment(segments, trim.xMm - gap - outside, centerY, trim.xMm - gap, centerY);
-    addSegment(segments, right + gap, centerY, right + gap + outside, centerY);
-  }
-  if (inside > 0) {
-    addSegment(segments, centerX, trim.yMm, centerX, trim.yMm + inside);
-    addSegment(segments, centerX, bottom - inside, centerX, bottom);
-    addSegment(segments, trim.xMm, centerY, trim.xMm + inside, centerY);
-    addSegment(segments, right - inside, centerY, right, centerY);
-  }
-}
-
-function generateCrossSegments(
-  trim: TrimRectangleMm,
-  armLengthMm: number,
-  segments: CutGuideSegmentMm[],
-): void {
-  const left = trim.xMm;
-  const right = left + trim.widthMm;
-  const top = trim.yMm;
-  const bottom = top + trim.heightMm;
-
-  for (const [xMm, yMm] of [[left, top], [right, top], [left, bottom], [right, bottom]]) {
-    addSegment(segments, xMm - armLengthMm, yMm, xMm + armLengthMm, yMm);
-    addSegment(segments, xMm, yMm - armLengthMm, xMm, yMm + armLengthMm);
-  }
-}
-
-function generateFullSegments(trim: TrimRectangleMm, segments: CutGuideSegmentMm[]): void {
-  const right = trim.xMm + trim.widthMm;
-  const bottom = trim.yMm + trim.heightMm;
-  addSegment(segments, trim.xMm, trim.yMm, right, trim.yMm);
-  addSegment(segments, trim.xMm, bottom, right, bottom);
-  addSegment(segments, trim.xMm, trim.yMm, trim.xMm, bottom);
-  addSegment(segments, right, trim.yMm, right, bottom);
-}
-
-function collectUniqueCoordinates(values: readonly number[]): number[] {
-  const unique: number[] = [];
-  for (const value of values) {
-    if (!unique.some((candidate) => Math.abs(candidate - value) <= GEOMETRY_TOLERANCE_MM)) {
-      unique.push(value);
-    }
-  }
-  return unique.sort((a, b) => a - b);
-}
-
-function deduplicateSegments(segments: readonly CutGuideSegmentMm[]): CutGuideSegmentMm[] {
-  const keys = new Set<string>();
-  return segments.filter((segment) => {
-    const first = `${segment.x1Mm.toFixed(9)},${segment.y1Mm.toFixed(9)}`;
-    const second = `${segment.x2Mm.toFixed(9)},${segment.y2Mm.toFixed(9)}`;
-    const key = first < second ? `${first}|${second}` : `${second}|${first}`;
-    if (keys.has(key)) return false;
-    keys.add(key);
-    return true;
-  });
-}
-
-function segmentIntersectsTrimInterior(
-  segment: CutGuideSegmentMm,
-  trim: TrimRectangleMm,
+function externalIntervals(
+  cards: readonly CutGuideCardMm[],
+  coordinate: number,
   strokeRadiusMm: number,
-): boolean {
-  const trimRight = trim.xMm + trim.widthMm;
-  const trimBottom = trim.yMm + trim.heightMm;
-  const segmentLeft = Math.min(segment.x1Mm, segment.x2Mm) - strokeRadiusMm;
-  const segmentRight = Math.max(segment.x1Mm, segment.x2Mm) + strokeRadiusMm;
-  const segmentTop = Math.min(segment.y1Mm, segment.y2Mm) - strokeRadiusMm;
-  const segmentBottom = Math.max(segment.y1Mm, segment.y2Mm) + strokeRadiusMm;
-
-  return Math.min(segmentRight, trimRight) - Math.max(segmentLeft, trim.xMm) > GEOMETRY_TOLERANCE_MM
-    && Math.min(segmentBottom, trimBottom) - Math.max(segmentTop, trim.yMm) > GEOMETRY_TOLERANCE_MM;
+  pageLengthMm: number,
+  horizontal: boolean,
+): Interval[] {
+  const pageInterval = { start: strokeRadiusMm, end: pageLengthMm - strokeRadiusMm };
+  if (pageInterval.end - pageInterval.start <= GEOMETRY_TOLERANCE_MM) return [];
+  const obstructions: Interval[] = [];
+  for (const { trim, bleedMm } of cards) {
+    const left = trim.xMm - bleedMm;
+    const right = trim.xMm + trim.widthMm + bleedMm;
+    const top = trim.yMm - bleedMm;
+    const bottom = trim.yMm + trim.heightMm + bleedMm;
+    const lineBandStart = coordinate - strokeRadiusMm;
+    const lineBandEnd = coordinate + strokeRadiusMm;
+    const overlapsOnFixedAxis = horizontal
+      ? lineBandEnd > top + GEOMETRY_TOLERANCE_MM && lineBandStart < bottom - GEOMETRY_TOLERANCE_MM
+      : lineBandEnd > left + GEOMETRY_TOLERANCE_MM && lineBandStart < right - GEOMETRY_TOLERANCE_MM;
+    if (!overlapsOnFixedAxis) continue;
+    obstructions.push(horizontal
+      ? { start: left - strokeRadiusMm, end: right + strokeRadiusMm }
+      : { start: top - strokeRadiusMm, end: bottom + strokeRadiusMm });
+  }
+  return subtractIntervals(pageInterval, obstructions);
 }
 
-function assertSegmentsClearOfNeighborTrims(
-  segments: readonly CutGuideSegmentMm[],
-  sourceTrimIndex: number,
-  trims: readonly TrimRectangleMm[],
-  strokeWidthMm: number,
-): void {
-  for (let neighborIndex = 0; neighborIndex < trims.length; neighborIndex += 1) {
-    if (neighborIndex === sourceTrimIndex) continue;
-    if (segments.some((segment) => segmentIntersectsTrimInterior(segment, trims[neighborIndex], strokeWidthMm / 2))) {
-      throw new RangeError(`Cut guide geometry for trim ${sourceTrimIndex + 1} intersects trim ${neighborIndex + 1}.`);
+function generateExternalSegments(
+  cards: readonly CutGuideCardMm[],
+  pageSizeMm: CutGuidePageSizeMm,
+  strokeWidthPt: number,
+): CutGuideSegmentMm[] {
+  const strokeRadiusMm = strokeWidthPt / POINTS_PER_MM / 2;
+  const uniqueCoordinates = (values: readonly number[]) => [...values].sort((a, b) => a - b).filter((value, index, sorted) =>
+    index === 0 || Math.abs(value - sorted[index - 1]) > GEOMETRY_TOLERANCE_MM,
+  );
+  const horizontalCoordinates = uniqueCoordinates(cards.flatMap(({ trim }) => [trim.yMm, trim.yMm + trim.heightMm]));
+  const verticalCoordinates = uniqueCoordinates(cards.flatMap(({ trim }) => [trim.xMm, trim.xMm + trim.widthMm]));
+  const segments: CutGuideSegmentMm[] = [];
+
+  for (const yMm of horizontalCoordinates) {
+    for (const { start, end } of externalIntervals(cards, yMm, strokeRadiusMm, pageSizeMm.widthMm, true)) {
+      segments.push({ x1Mm: start, y1Mm: yMm, x2Mm: end, y2Mm: yMm });
     }
   }
+  for (const xMm of verticalCoordinates) {
+    for (const { start, end } of externalIntervals(cards, xMm, strokeRadiusMm, pageSizeMm.heightMm, false)) {
+      segments.push({ x1Mm: xMm, y1Mm: start, x2Mm: xMm, y2Mm: end });
+    }
+  }
+  return segments;
 }
 
 export class CutGuideEngine {
   generate(request: CutGuideRequest): CutGuideGeometry {
-    const { style, trims } = validateRequest(request);
-    const segments: CutGuideSegmentMm[] = [];
-
-    switch (request.config.mode) {
-      case "none":
-        break;
-      case "corners":
-        for (let index = 0; index < trims.length; index += 1) {
-          const trimSegments: CutGuideSegmentMm[] = [];
-          generateCornerSegments(trims[index], request.config, trimSegments);
-          assertSegmentsClearOfNeighborTrims(trimSegments, index, trims, style.strokeWidthMm);
-          segments.push(...trimSegments);
-        }
-        break;
-      case "sides":
-        for (let index = 0; index < trims.length; index += 1) {
-          const trimSegments: CutGuideSegmentMm[] = [];
-          generateSideSegments(trims[index], request.config, trimSegments);
-          assertSegmentsClearOfNeighborTrims(trimSegments, index, trims, style.strokeWidthMm);
-          segments.push(...trimSegments);
-        }
-        break;
-      case "cross":
-        for (let index = 0; index < trims.length; index += 1) {
-          const trimSegments: CutGuideSegmentMm[] = [];
-          generateCrossSegments(trims[index], request.config.armLengthMm, trimSegments);
-          assertSegmentsClearOfNeighborTrims(trimSegments, index, trims, style.strokeWidthMm);
-          segments.push(...trimSegments);
-        }
-        break;
-      case "full":
-        for (const trim of trims) generateFullSegments(trim, segments);
-        break;
-      case "guillotine": {
-        const xCoordinates = collectUniqueCoordinates(trims.flatMap(({ xMm, widthMm }) => [xMm, xMm + widthMm]));
-        const yCoordinates = collectUniqueCoordinates(trims.flatMap(({ yMm, heightMm }) => [yMm, yMm + heightMm]));
-        for (const xMm of xCoordinates) {
-          addSegment(segments, xMm, 0, xMm, request.pageSizeMm.heightMm);
-        }
-        for (const yMm of yCoordinates) {
-          addSegment(segments, 0, yMm, request.pageSizeMm.widthMm, yMm);
-        }
-        break;
-      }
-      default:
-        throw new RangeError(`Unsupported cut guide mode: ${String((request.config as { mode?: unknown }).mode)}.`);
-    }
-
-    const uniqueSegments = deduplicateSegments(segments);
-    for (const segment of uniqueSegments) {
-      if (
-        Math.min(segment.x1Mm, segment.x2Mm) < -GEOMETRY_TOLERANCE_MM
-        || Math.min(segment.y1Mm, segment.y2Mm) < -GEOMETRY_TOLERANCE_MM
-        || Math.max(segment.x1Mm, segment.x2Mm) > request.pageSizeMm.widthMm + GEOMETRY_TOLERANCE_MM
-        || Math.max(segment.y1Mm, segment.y2Mm) > request.pageSizeMm.heightMm + GEOMETRY_TOLERANCE_MM
-      ) {
-        throw new RangeError("Cut guide geometry extends outside page bounds.");
-      }
-    }
-
+    const { config, cards } = validateRequest(request);
+    const trimSegments = config.trim.enabled ? generateTrimSegments(cards, config.trim.extentMm) : [];
+    const externalSegments = config.external.enabled
+      ? generateExternalSegments(cards, request.pageSizeMm, config.external.strokeWidthPt)
+      : [];
     return Object.freeze({
-      mode: request.config.mode,
-      style,
-      segments: Object.freeze(uniqueSegments.map((segment) => Object.freeze(segment))),
+      trimSegments: Object.freeze(trimSegments.map((segment) => Object.freeze(segment))),
+      externalSegments: Object.freeze(externalSegments.map((segment) => Object.freeze(segment))),
     });
   }
 }

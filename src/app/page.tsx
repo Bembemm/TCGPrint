@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, DragEvent, InputHTMLAttributes } from "react";
 import type { ImportKind, ImportPreview } from "../../import-engine/types";
+import CutGuideControls from "./cut-guide-controls";
+import { buildCutGuideConfig } from "./bleed-export-options";
 import CardIdentityWorkbench from "./card-identity-workbench";
 
 function sourceId(index: number, filename: string): string {
@@ -25,7 +27,10 @@ export default function HomePage() {
   const [selectedPdfSource, setSelectedPdfSource] = useState("");
   const [imagePreviewUrl, setImagePreviewUrl] = useState("");
   const [bleedMm, setBleedMm] = useState("0.625");
-  const [cutGuides, setCutGuides] = useState(true);
+  const [trimGuideEnabled, setTrimGuideEnabled] = useState(false);
+  const [trimGuideExtentMm, setTrimGuideExtentMm] = useState("1");
+  const [externalGuideEnabled, setExternalGuideEnabled] = useState(false);
+  const [externalGuideStrokeWidthPt, setExternalGuideStrokeWidthPt] = useState("0.3");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
@@ -121,7 +126,12 @@ export default function HomePage() {
       const form = new FormData();
       form.set("image", directFile, directFile.name);
       form.set("bleedMm", bleedMm);
-      form.set("cutGuides", cutGuides ? "full" : "none");
+      form.set("cutGuides", JSON.stringify(buildCutGuideConfig(
+        trimGuideEnabled,
+        trimGuideExtentMm,
+        externalGuideEnabled,
+        externalGuideStrokeWidthPt,
+      )));
       const response = await fetch("/api/import/pdf", { method: "POST", body: form });
       if (!response.ok) {
         const body = await response.json();
@@ -335,7 +345,16 @@ export default function HomePage() {
               <label className="narrow-field">Bleed (mm)
                 <input type="number" min="0" max="3" step="0.125" value={bleedMm} onChange={(event) => setBleedMm(event.currentTarget.value)} />
               </label>
-              <label className="checkbox-field"><input type="checkbox" checked={cutGuides} onChange={(event) => setCutGuides(event.currentTarget.checked)} /> Guias vetoriais</label>
+              <CutGuideControls
+                trimEnabled={trimGuideEnabled}
+                trimExtentMm={trimGuideExtentMm}
+                externalEnabled={externalGuideEnabled}
+                externalStrokeWidthPt={externalGuideStrokeWidthPt}
+                onTrimEnabledChange={setTrimGuideEnabled}
+                onTrimExtentMmChange={setTrimGuideExtentMm}
+                onExternalEnabledChange={setExternalGuideEnabled}
+                onExternalStrokeWidthPtChange={setExternalGuideStrokeWidthPt}
+              />
               <button className="button primary" type="button" disabled={busy || !directFile || !previewImageKind(selectedFormat)} onClick={generatePdf}>Gerar PDF de teste</button>
             </div>}
             {selectedFormat && !previewImageKind(selectedFormat) && <p className="muted">Importado, export direto ainda não suportado para {selectedFormat.toUpperCase()}.</p>}
