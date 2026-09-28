@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { ImportResult, ImportedEntry } from "../../../import-engine/types";
 import { createWorkingSet } from "../../../core/cards/working-set";
 import { IdentityResolver, confirmIdentity, keepCustom, selectDefaultArtwork } from "../../../core/cards/identity-resolver";
-import type { CardIdentity } from "../../../core/cards/types";
+import * as identityResolver from "../../../core/cards/identity-resolver";
+import { DEFAULT_ARTWORK_POLICY_ID } from "../../../core/cards/identity-policy";
+import type { ArtworkCandidate, CardIdentity } from "../../../core/cards/types";
 import type { ScryfallCard } from "../../../providers/scryfall/types";
 import type { ScryfallClient } from "../../../providers/scryfall/client";
 import type { OcrRecognizer } from "../../../providers/ocr/types";
@@ -87,6 +89,105 @@ describe("identity resolver", () => {
     expect(rerun.localArtworkIds).toEqual(["upload:hash"]);
     const custom = keepCustom(confirmed);
     expect(await new IdentityResolver(fakeClient()).resolve(custom)).toMatchObject({ identity: null, identityResolution: { status: "custom", confirmed: true } });
+    expect(custom.selectedArtworkByFace).toEqual(confirmed.selectedArtworkByFace);
+  });
+
+  it("preserves user-selected faces but invalidates default artwork tied to the previous identity", () => {
+    const original = card({ name: "Sol Ring" });
+    const oldIdentity: CardIdentity = { id: `scryfall:oracle:${sol.oracleId}`, provider: "scryfall", name: sol.name, scryfallId: sol.id, oracleId: sol.oracleId, resolutionMethod: "name", confidence: 1 };
+    const nextIdentity: CardIdentity = { id: `scryfall:oracle:${island.oracleId}`, provider: "scryfall", name: island.name, scryfallId: island.id, oracleId: island.oracleId, resolutionMethod: "manual", confidence: 1 };
+    const userFront = { candidateId: `scryfall:${sol.id}:front`, source: "scryfall" as const, identityId: oldIdentity.id, faceId: "front" as const, selectionPolicy: "user-selected" };
+    const oldDefaultBack = { candidateId: `scryfall:${sol.id}:back`, source: "scryfall" as const, identityId: oldIdentity.id, faceId: "back" as const, selectionPolicy: DEFAULT_ARTWORK_POLICY_ID };
+    const previous = {
+      ...original,
+      localArtworkIds: ["upload:local-asset"],
+      mpcReferences: [{ faceId: "back", importedAssetId: "mpc:reference", slots: ["A1"], availableLocally: false }],
+      faceAssociations: [{ slot: "paired", frontAssetId: "upload:local-asset", backAssetId: "mpc:reference", confidence: 0.8, accepted: false }],
+      faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }],
+      identity: oldIdentity,
+      identityResolution: { status: "resolved" as const, method: "name" as const, candidates: [], confirmed: false },
+      selectedArtworkByFace: { front: userFront, back: oldDefaultBack },
+    };
+    const before = structuredClone(previous);
+
+    const changed = confirmIdentity(previous, nextIdentity);
+
+    expect(changed).toMatchObject({
+      id: previous.id,
+      quantity: previous.quantity,
+      order: previous.order,
+      importSource: previous.importSource,
+      identityHints: previous.identityHints,
+      localArtworkIds: previous.localArtworkIds,
+      mpcReferences: previous.mpcReferences,
+      faceAssociations: previous.faceAssociations,
+      identity: nextIdentity,
+      identityResolution: { status: "resolved", method: "manual", confirmed: true },
+      selectedArtworkByFace: { front: userFront },
+    });
+    expect(changed.selectedArtworkByFace.back).toBeUndefined();
+    expect(previous).toEqual(before);
+  });
+
+  it("restores only the requested face and leaves the prior selection intact when no default exists", () => {
+    const identity: CardIdentity = { id: "scryfall:oracle:delver", provider: "scryfall", name: "Delver of Secrets // Insectile Aberration", resolutionMethod: "name", confidence: 1 };
+    const original = {
+      ...card({ name: "Delver of Secrets // Insectile Aberration" }),
+      faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }],
+      identity,
+      identityResolution: { status: "resolved" as const, method: "name" as const, candidates: [], confirmed: false },
+      selectedArtworkByFace: {
+        front: { candidateId: "mpc:manual-front", source: "mpc" as const, identityId: identity.id, faceId: "front" as const, selectionPolicy: "user-selected" },
+        back: { candidateId: "mpc:manual-back", source: "mpc" as const, identityId: identity.id, faceId: "back" as const, selectionPolicy: "user-selected" },
+      },
+    };
+    const candidates = [
+      {
+        id: "scryfall:older-print:back",
+        source: "scryfall" as const,
+        identityId: identity.id,
+        faceId: "back" as const,
+        scryfallId: "older-print",
+        providerAssetId: "older-print",
+        originalAvailable: true,
+        language: "en",
+        releasedAt: "2023-01-01",
+        metadata: { digital: false, imageStatus: "highres_scan" },
+      },
+      {
+        id: "scryfall:newer-print:back",
+        source: "scryfall" as const,
+        identityId: identity.id,
+        faceId: "back" as const,
+        scryfallId: "newer-print",
+        providerAssetId: "newer-print",
+        originalAvailable: true,
+        language: "en",
+        releasedAt: "2025-01-01",
+        metadata: { digital: false, imageStatus: "highres_scan" },
+      },
+    ];
+    const selectForFace = (identityResolver as unknown as Record<string, unknown>).selectDefaultArtworkForFace as
+      ((workingCard: ReturnType<typeof card>, side: "front" | "back", artwork: readonly ArtworkCandidate[]) => ReturnType<typeof card> | undefined) | undefined;
+
+    expect(selectForFace).toBeTypeOf("function");
+    const restored = selectForFace!(original, "back", candidates);
+    const restoredWithReversedProviderOrder = selectForFace!(original, "back", [...candidates].reverse());
+
+    expect(restored?.selectedArtworkByFace.front).toEqual(original.selectedArtworkByFace.front);
+    expect(restored?.selectedArtworkByFace.back).toMatchObject({
+      candidateId: "scryfall:newer-print:back",
+      selectionPolicy: DEFAULT_ARTWORK_POLICY_ID,
+    });
+    expect(restoredWithReversedProviderOrder?.selectedArtworkByFace.back?.candidateId).toBe("scryfall:newer-print:back");
+    expect(selectForFace!(original, "back", [])).toBeUndefined();
+    expect(original.selectedArtworkByFace.back).toEqual({
+      candidateId: "mpc:manual-back",
+      source: "mpc",
+      identityId: identity.id,
+      faceId: "back",
+      selectionPolicy: "user-selected",
+    });
   });
 
   it("selects deterministic name defaults only after checking existing, Scryfall ID, and set/collector selections", () => {
@@ -109,6 +210,79 @@ describe("identity resolver", () => {
     expect(selectDefaultArtwork(explicitId, candidates).selectedArtworkByFace.front?.candidateId).toBe("old");
     const setCollector = { ...identified, identityHints: { setCode: "abc", collectorNumber: "1" } };
     expect(selectDefaultArtwork(setCollector, candidates).selectedArtworkByFace.front?.candidateId).toBe("old");
+  });
+
+  it("honors explicit printing hints when the editor resets a face", () => {
+    const identified = { ...card({ name: "Sol Ring" }), identity: { id: `scryfall:oracle:${sol.oracleId}`, provider: "scryfall", name: "Sol Ring", oracleId: sol.oracleId, resolutionMethod: "name", confidence: 1 } satisfies CardIdentity };
+    const candidates: ArtworkCandidate[] = [
+      { id: "old", source: "scryfall", identityId: identified.identity.id, faceId: "front", scryfallId: "old", originalAvailable: true, setCode: "abc", collectorNumber: "1", language: "en", releasedAt: "2020-01-01", metadata: { digital: false, imageStatus: "highres_scan" } },
+      { id: "new", source: "scryfall", identityId: identified.identity.id, faceId: "front", scryfallId: "new", originalAvailable: true, setCode: "def", collectorNumber: "4", language: "en", releasedAt: "2024-01-01", metadata: { digital: false, imageStatus: "highres_scan" } },
+    ];
+    const selectForFace = (identityResolver as unknown as Record<string, unknown>).selectDefaultArtworkForFace as
+      ((workingCard: ReturnType<typeof card>, side: "front" | "back", artwork: readonly ArtworkCandidate[]) => ReturnType<typeof card> | undefined) | undefined;
+    const byScryfallId = { ...identified, identityHints: { ...identified.identityHints, scryfallId: "old" } };
+    const bySetCollector = { ...identified, identityHints: { setCode: "abc", collectorNumber: "1" } };
+
+    expect(selectForFace).toBeTypeOf("function");
+    expect(selectForFace!(byScryfallId, "front", candidates)?.selectedArtworkByFace.front?.candidateId).toBe("old");
+    expect(selectForFace!(bySetCollector, "front", candidates)?.selectedArtworkByFace.front?.candidateId).toBe("old");
+  });
+
+  it("falls back deterministically when an explicit printing hint has no matching candidate", () => {
+    const identified = { ...card({ name: "Sol Ring" }), identity: { id: `scryfall:oracle:${sol.oracleId}`, provider: "scryfall", name: "Sol Ring", oracleId: sol.oracleId, resolutionMethod: "manual", confidence: 1 } satisfies CardIdentity };
+    const candidates: ArtworkCandidate[] = [
+      { id: "old", source: "scryfall", identityId: identified.identity.id, faceId: "front", scryfallId: "old", originalAvailable: true, setCode: "abc", collectorNumber: "1", language: "en", releasedAt: "2020-01-01", metadata: { digital: false, imageStatus: "highres_scan" } },
+      { id: "new", source: "scryfall", identityId: identified.identity.id, faceId: "front", scryfallId: "new", originalAvailable: true, setCode: "def", collectorNumber: "4", language: "en", releasedAt: "2024-01-01", metadata: { digital: false, imageStatus: "highres_scan" } },
+    ];
+    const selectForFace = (identityResolver as unknown as Record<string, unknown>).selectDefaultArtworkForFace as
+      ((workingCard: ReturnType<typeof card>, side: "front" | "back", artwork: readonly ArtworkCandidate[]) => ReturnType<typeof card> | undefined) | undefined;
+    const staleHint = { ...identified, identityHints: { ...identified.identityHints, scryfallId: "missing-printing" } };
+
+    expect(selectForFace).toBeTypeOf("function");
+    expect(selectForFace!(staleHint, "front", candidates)?.selectedArtworkByFace.front?.candidateId).toBe("new");
+    expect(selectForFace!(staleHint, "front", [...candidates].reverse())?.selectedArtworkByFace.front?.candidateId).toBe("new");
+  });
+
+  it("restores the newest eligible default for a confirmed manual identity", () => {
+    const identity: CardIdentity = { id: "scryfall:oracle:island", provider: "scryfall", name: "Island", scryfallId: "manual-print", resolutionMethod: "manual", confidence: 1 };
+    const manual = {
+      ...card({ name: "Island" }),
+      identity,
+      identityResolution: { status: "resolved" as const, method: "manual" as const, candidates: [], confirmed: true },
+    };
+    const candidates = [
+      { id: "scryfall:new-print:front", source: "scryfall" as const, identityId: identity.id, faceId: "front" as const, scryfallId: "new-print", originalAvailable: true, language: "en", releasedAt: "2025-01-01", metadata: { digital: false, imageStatus: "highres_scan" } },
+      { id: "scryfall:manual-print:front", source: "scryfall" as const, identityId: identity.id, faceId: "front" as const, scryfallId: "manual-print", originalAvailable: true, language: "en", releasedAt: "2020-01-01", metadata: { digital: false, imageStatus: "highres_scan" } },
+    ];
+    const selectForFace = (identityResolver as unknown as Record<string, unknown>).selectDefaultArtworkForFace as
+      ((workingCard: ReturnType<typeof card>, side: "front" | "back", artwork: readonly ArtworkCandidate[]) => ReturnType<typeof card> | undefined) | undefined;
+
+    expect(selectForFace).toBeTypeOf("function");
+    expect(selectForFace!(manual, "front", candidates)?.selectedArtworkByFace.front?.candidateId).toBe("scryfall:new-print:front");
+    expect(selectDefaultArtwork(manual, candidates).selectedArtworkByFace.front).toBeUndefined();
+  });
+
+  it("prefers the other DFC face's Scryfall printing when resetting a face", () => {
+    const identity: CardIdentity = { id: "scryfall:oracle:delver", provider: "scryfall", name: "Delver of Secrets // Insectile Aberration", resolutionMethod: "manual", confidence: 1 };
+    const identified = {
+      ...card({ name: identity.name }),
+      faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }],
+      identity,
+      identityResolution: { status: "resolved" as const, method: "manual" as const, candidates: [], confirmed: true },
+      selectedArtworkByFace: {
+        front: { candidateId: "scryfall:old-print:front", source: "scryfall" as const, identityId: identity.id, faceId: "front" as const, providerAssetId: "old-print", selectionPolicy: DEFAULT_ARTWORK_POLICY_ID },
+        back: undefined,
+      },
+    };
+    const candidates = [
+      { id: "scryfall:new-print:back", source: "scryfall" as const, identityId: identity.id, faceId: "back" as const, scryfallId: "new-print", providerAssetId: "new-print", originalAvailable: true, language: "en", releasedAt: "2025-01-01", metadata: { digital: false, imageStatus: "highres_scan" } },
+      { id: "scryfall:old-print:back", source: "scryfall" as const, identityId: identity.id, faceId: "back" as const, scryfallId: "old-print", providerAssetId: "old-print", originalAvailable: true, language: "en", releasedAt: "2023-01-01", metadata: { digital: false, imageStatus: "highres_scan" } },
+    ];
+    const selectForFace = (identityResolver as unknown as Record<string, unknown>).selectDefaultArtworkForFace as
+      ((workingCard: ReturnType<typeof card>, side: "front" | "back", artwork: readonly ArtworkCandidate[]) => ReturnType<typeof card> | undefined) | undefined;
+
+    expect(selectForFace).toBeTypeOf("function");
+    expect(selectForFace!(identified, "back", candidates)?.selectedArtworkByFace.back?.candidateId).toBe("scryfall:old-print:back");
   });
 
   it("chooses a single complete printing for automatic DFC faces instead of mixing an incomplete newest printing", () => {

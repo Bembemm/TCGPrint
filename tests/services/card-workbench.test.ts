@@ -5,6 +5,7 @@ import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCardWorkbench, type CardWorkbenchOptions, type WorkingSetImportResult } from "../../services/card-workbench";
 import { handleArtworkList, handleCardExport, handleCardImport, handleResolve, parseWorkingCards } from "../../services/card-api";
+import { ArtworkCatalog } from "../../artwork/catalog";
 import { appDataPaths, originalPathForHash } from "../../artwork/storage/paths";
 import { TesseractOcrRecognizer } from "../../providers/ocr/tesseract-recognizer";
 import type { ScryfallClient } from "../../providers/scryfall/client";
@@ -197,6 +198,256 @@ describe("card workbench services", () => {
     expect(first.workingCards[0]).toMatchObject({ quantity: 6, identity: { name: "Sol Ring", oracleId: solRing.oracle_id }, selectedArtworkByFace: { front: { source: "scryfall", candidateId: `scryfall:${solRing.id}:front` } } });
     expect(repeated.workingCards[0].id).toBe(first.workingCards[0].id);
     expect(fake.fetchMock).toHaveBeenCalledTimes(callCount);
+  });
+
+  it("re-resolves a confirmed card from its own hints while preserving user artwork and entry metadata", async () => {
+    const fake = fakeScryfallClient([resolvedDeckPrintings[0], resolvedDeckPrintings[3]]);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "3 Sol Ring" });
+    const automaticallyResolved = (await workbench.resolveWorkingCards(imported.workingCards)).workingCards[0];
+    const userArtwork = {
+      ...automaticallyResolved.selectedArtworkByFace.front!,
+      identityId: "scryfall:oracle:previous-manual-choice",
+      selectionPolicy: "user-selected",
+    };
+    const confirmed = await workbench.confirmWorkingCardIdentity({
+      ...automaticallyResolved,
+      selectedArtworkByFace: { front: userArtwork },
+    }, resolvedDeckPrintings[3].id);
+    const requestsBeforeReresolve = fake.lookupByName.mock.calls.length;
+    const reResolve = (workbench as unknown as { reresolveWorkingCard?: (card: typeof confirmed) => Promise<typeof confirmed> }).reresolveWorkingCard;
+
+    expect(reResolve).toBeTypeOf("function");
+    const reResolved = await reResolve!.call(workbench, confirmed);
+
+    expect(reResolved).toMatchObject({
+      id: imported.workingCards[0].id,
+      quantity: 3,
+      order: imported.workingCards[0].order,
+      importSource: imported.workingCards[0].importSource,
+      identityHints: imported.workingCards[0].identityHints,
+      identity: { name: "Sol Ring" },
+      identityResolution: { status: "resolved", confirmed: false },
+      selectedArtworkByFace: { front: userArtwork },
+      localArtworkIds: imported.workingCards[0].localArtworkIds,
+      mpcReferences: imported.workingCards[0].mpcReferences,
+      faceAssociations: imported.workingCards[0].faceAssociations,
+    });
+    expect(fake.lookupByName).toHaveBeenCalledTimes(requestsBeforeReresolve);
+  });
+
+  it("replaces an incompatible automatic artwork when a manual identity changes", async () => {
+    const fake = fakeScryfallClient([resolvedDeckPrintings[0], resolvedDeckPrintings[3]]);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "3 Sol Ring" });
+    const automaticallyResolved = (await workbench.resolveWorkingCards(imported.workingCards)).workingCards[0];
+    const oldArtwork = automaticallyResolved.selectedArtworkByFace.front;
+
+    const confirmed = await workbench.confirmWorkingCardIdentity(automaticallyResolved, resolvedDeckPrintings[3].id);
+
+    expect(confirmed).toMatchObject({
+      id: automaticallyResolved.id,
+      quantity: automaticallyResolved.quantity,
+      order: automaticallyResolved.order,
+      importSource: automaticallyResolved.importSource,
+      identityHints: automaticallyResolved.identityHints,
+      identity: { name: "Island" },
+      identityResolution: { status: "resolved", method: "manual", confirmed: true },
+      selectedArtworkByFace: {
+        front: {
+          candidateId: `scryfall:${resolvedDeckPrintings[3].id}:front`,
+          identityId: confirmed.identity?.id,
+          selectionPolicy: "newest-en-highres-nondigital-v1",
+        },
+      },
+    });
+    expect(confirmed.selectedArtworkByFace.front?.candidateId).not.toBe(oldArtwork?.candidateId);
+  });
+
+  it("confirms a manual identity without changing the entry or its imported asset references", async () => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
+    const imported = await workbench.importForWorkingSet({ files: [{ filename: "local.png", bytes }] });
+    const source = imported.workingCards[0];
+    const before = {
+      ...source,
+      quantity: 4,
+      order: 2,
+      mpcReferences: [{ faceId: "back" as const, importedAssetId: "mpc:reference", selectedArtworkId: "imported-back", slots: ["B1"], availableLocally: false }],
+      faceAssociations: [{ slot: "paired", frontAssetId: source.localArtworkIds[0], backAssetId: "mpc:imported-back", confidence: 0.8, accepted: false }],
+    };
+
+    const confirmed = await workbench.confirmWorkingCardIdentity(before, resolvedDeckPrintings[0].id);
+
+    expect(confirmed).toMatchObject({
+      id: before.id,
+      quantity: 4,
+      order: 2,
+      importSource: before.importSource,
+      identityHints: before.identityHints,
+      localArtworkIds: before.localArtworkIds,
+      mpcReferences: before.mpcReferences,
+      faceAssociations: before.faceAssociations,
+      identity: { name: "Sol Ring" },
+      identityResolution: { status: "resolved", method: "manual", confirmed: true },
+      selectedArtworkByFace: { front: { candidateId: before.localArtworkIds[0], source: "upload" } },
+    });
+    expect(confirmed.selectedArtworkByFace.front?.identityId).toBe(confirmed.identity?.id);
+    expect(before.identity).toBeNull();
+    expect(before.selectedArtworkByFace.front?.identityId).toBeNull();
+  });
+
+  it("keeps a confirmed card unchanged when re-resolution hits a real provider failure", async () => {
+    const fake = fakeScryfallClient([]);
+    fake.lookupByName.mockRejectedValue(new Error("Scryfall network unavailable"));
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
+    const identityId = "scryfall:oracle:previous-island";
+    const previous = {
+      ...imported.workingCards[0],
+      identity: { id: identityId, provider: "scryfall", name: "Island", scryfallId: "12121212-1212-4121-8121-121212121212", resolutionMethod: "manual" as const, confidence: 1 },
+      identityResolution: { status: "resolved" as const, method: "manual" as const, query: "Island", confidence: 1, confirmed: true, candidates: [] },
+      selectedArtworkByFace: { front: { candidateId: "mpc:explicit-choice", source: "mpc" as const, identityId, faceId: "front" as const, selectionPolicy: "user-selected" } },
+    };
+    const before = structuredClone(previous);
+
+    await expect(workbench.reresolveWorkingCard(previous)).rejects.toThrow("Scryfall network unavailable");
+
+    expect(previous).toEqual(before);
+  });
+
+  it("restores default artwork independently on each DFC face without replacing the opposite face", async () => {
+    const identityCard = mapScryfallCard(delverCard);
+    const fake = fakeScryfallClient([identityCard]);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
+    const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
+    const [frontCandidate] = await workbench.listArtworkCandidates(identified.identity!.id, "front", "scryfall");
+    const [backCandidate] = await workbench.listArtworkCandidates(identified.identity!.id, "back", "scryfall");
+    const frontSelected = workbench.selectArtwork(identified, "front", frontCandidate);
+    const bothSelected = workbench.selectArtwork(frontSelected, "back", backCandidate);
+    const lookupsBeforeReset = fake.lookupById.mock.calls.length;
+    const printingsBeforeReset = fake.listPrintings.mock.calls.length;
+
+    expect(bothSelected.selectedArtworkByFace.front?.selectionPolicy).toBe("user-selected");
+    expect(bothSelected.selectedArtworkByFace.back?.selectionPolicy).toBe("user-selected");
+
+    const frontReset = await workbench.restoreDefaultArtwork(bothSelected, "front");
+    const backReset = frontReset && await workbench.restoreDefaultArtwork(frontReset, "back");
+
+    expect(frontReset).toMatchObject({
+      id: identified.id,
+      quantity: identified.quantity,
+      order: identified.order,
+      selectedArtworkByFace: {
+        front: { candidateId: frontCandidate.id, selectionPolicy: "newest-en-highres-nondigital-v1" },
+        back: bothSelected.selectedArtworkByFace.back,
+      },
+    });
+    expect(backReset?.selectedArtworkByFace).toMatchObject({
+      front: frontReset?.selectedArtworkByFace.front,
+      back: { candidateId: backCandidate.id, selectionPolicy: "newest-en-highres-nondigital-v1" },
+    });
+    expect(fake.lookupById).toHaveBeenCalledTimes(lookupsBeforeReset);
+    expect(fake.listPrintings).toHaveBeenCalledTimes(printingsBeforeReset);
+  });
+
+  it("scopes a DFC default-artwork search to the requested face and retains its paired printing", async () => {
+    const identityCard = mapScryfallCard(delverCard);
+    const fake = fakeScryfallClient([identityCard]);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
+    const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
+    const searchSpy = vi.spyOn(ArtworkCatalog.prototype, "search");
+
+    try {
+      const restored = await workbench.restoreDefaultArtwork(identified, "back");
+      const searchOptions = searchSpy.mock.calls[0]?.[1];
+
+      expect(searchSpy).toHaveBeenCalledOnce();
+      expect(searchOptions).toMatchObject({ source: "scryfall", faceId: "back" });
+      expect(restored?.selectedArtworkByFace.back?.providerAssetId).toBe(identified.selectedArtworkByFace.front?.providerAssetId);
+      expect(fake.downloadAsset).not.toHaveBeenCalled();
+    } finally {
+      searchSpy.mockRestore();
+    }
+  });
+
+  it("restores the newest eligible printing for a manually confirmed identity", async () => {
+    const olderPrinting = resolvedCard("Sol Ring", "90909090-9090-4909-8909-909090909090", "20202020-2020-4202-8202-202020202020", "old", "1");
+    const newerPrinting = { ...olderPrinting, id: "91919191-9191-4919-8919-919191919191", setCode: "new", collectorNumber: "2", releasedAt: "2025-01-01" };
+    const fake = fakeScryfallClient([olderPrinting]);
+    fake.listPrintings.mockResolvedValue([olderPrinting, newerPrinting]);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
+    const confirmed = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], olderPrinting.id);
+    const candidates = await workbench.listArtworkCandidates(confirmed.identity!.id, "front", "scryfall");
+    const olderSelection = workbench.selectArtwork(confirmed, "front", candidates.find((candidate) => candidate.scryfallId === olderPrinting.id)!);
+
+    expect(confirmed.identityResolution.method).toBe("manual");
+    expect(olderSelection.selectedArtworkByFace.front?.selectionPolicy).toBe("user-selected");
+
+    const restored = await workbench.restoreDefaultArtwork(olderSelection, "front");
+
+    expect(restored?.selectedArtworkByFace.front).toMatchObject({
+      candidateId: `scryfall:${newerPrinting.id}:front`,
+      selectionPolicy: "newest-en-highres-nondigital-v1",
+    });
+    expect(fake.listPrintings).toHaveBeenCalledOnce();
+    expect(fake.downloadAsset).not.toHaveBeenCalled();
+  });
+
+  it("reports provider failure separately from an unavailable default and preserves the selected artwork", async () => {
+    const identityCard = resolvedDeckPrintings[0];
+    const fake = fakeScryfallClient([identityCard]);
+    fake.listPrintings.mockRejectedValue(new Error("Scryfall network unavailable"));
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
+    const confirmed = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
+    const before = {
+      ...confirmed,
+      selectedArtworkByFace: {
+        front: { candidateId: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", source: "scryfall" as const, identityId: confirmed.identity!.id, faceId: "front" as const, selectionPolicy: "user-selected" },
+      },
+    };
+    const snapshot = structuredClone(before);
+
+    await expect(workbench.restoreDefaultArtwork(before, "front")).rejects.toMatchObject({
+      kind: "network",
+      message: "Scryfall network unavailable",
+    });
+
+    expect(before).toEqual(snapshot);
+    expect(workbench.getProviderHealth().scryfall).toMatchObject({ available: false, degraded: true });
+  });
+
+  it("reports provider failure when degraded cached candidates cover only the opposite DFC face", async () => {
+    const identityCard = mapScryfallCard(delverCard);
+    const fake = fakeScryfallClient([identityCard]);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
+    const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
+    const [frontCandidate] = await workbench.listArtworkCandidates(identified.identity!.id, "front", "scryfall");
+    const [backCandidate] = await workbench.listArtworkCandidates(identified.identity!.id, "back", "scryfall");
+    if (!frontCandidate || !backCandidate) throw new Error("Expected both DFC face candidates in the fixture.");
+    const before = workbench.selectArtwork(identified, "back", backCandidate);
+    const snapshot = structuredClone(before);
+    const searchSpy = vi.spyOn(ArtworkCatalog.prototype, "search").mockResolvedValue([frontCandidate]);
+    const healthSpy = vi.spyOn(ArtworkCatalog.prototype, "getProviderHealth").mockReturnValue({
+      scryfall: { available: true, degraded: true, message: "Scryfall network unavailable" },
+    });
+
+    try {
+      await expect(workbench.restoreDefaultArtwork(before, "back")).rejects.toMatchObject({
+        kind: "network",
+        message: "Scryfall network unavailable",
+      });
+      expect(before).toEqual(snapshot);
+    } finally {
+      searchSpy.mockRestore();
+      healthSpy.mockRestore();
+    }
   });
 
   it("resolves four deck entries without listing printings or expanding quantities", async () => {

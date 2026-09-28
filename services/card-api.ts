@@ -394,6 +394,29 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
   try {
     const body = await parseJsonRequest(request);
     const action = typeof body.action === "string" ? body.action : "resolve";
+    if (action === "reresolve") {
+      const card = parseWorkingCards([body.card])[0];
+      const updated = await workbench.reresolveWorkingCard(card, { signal: request.signal });
+      return Response.json({ workingCards: [updated], providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
+    }
+    if (action === "restore-default-artwork") {
+      const card = parseWorkingCards([body.card])[0];
+      if (!card.identity) throw new ApiRequestError(409, "NO_RESOLVED_IDENTITY", "Não há identidade resolvida para determinar uma artwork padrão.");
+      const faceId = body.faceId === "back" ? "back" : body.faceId === "front" ? "front" : undefined;
+      if (!faceId) throw new ApiRequestError(400, "INVALID_FACE", "Face must be front or back.");
+      if (!card.faces.some((face) => face.side === faceId)) throw new ApiRequestError(409, "FACE_NOT_AVAILABLE", "A face solicitada não existe nesta carta.");
+      let updated: WorkingCard | undefined;
+      try {
+        updated = await workbench.restoreDefaultArtwork(card, faceId, { signal: request.signal });
+      } catch (error) {
+        if (!(error instanceof ScryfallError)) throw error;
+        const response = respondError(error);
+        const payload = await response.json() as Record<string, unknown>;
+        return Response.json({ ...payload, providerHealth: safeProviderHealth(workbench.getProviderHealth()) }, { status: response.status });
+      }
+      if (!updated) throw new ApiRequestError(409, "ARTWORK_DEFAULT_UNAVAILABLE", "Não há artwork padrão disponível para esta face; a seleção atual foi preservada.");
+      return Response.json({ workingCards: [updated], providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
+    }
     if (action === "confirm") {
       const card = parseWorkingCards([body.card])[0];
       const scryfallId = requiredString(body.scryfallId, "scryfallId", 80);
@@ -416,7 +439,7 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
     }
     const cards = parseWorkingCards(body.cards);
     if (action === "custom") return Response.json({ workingCards: cards.map((card) => workbench.keepWorkingCardCustom(card)), providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
-    if (action !== "resolve") throw new ApiRequestError(400, "INVALID_ACTION", "Action must be resolve, confirm, select or custom.");
+    if (action !== "resolve") throw new ApiRequestError(400, "INVALID_ACTION", "Action must be resolve, reresolve, confirm, select, restore-default-artwork or custom.");
     const result = await workbench.resolveWorkingCards(cards, { signal: request.signal });
     return Response.json({ ...result, providerHealth: safeProviderHealth(result.providerHealth) });
   } catch (error) { return respondError(error); }

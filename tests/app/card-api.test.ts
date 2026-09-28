@@ -20,6 +20,7 @@ import { selectArtwork as selectWorkingCardArtwork } from "../../core/cards/work
 import { postArtworkSelection } from "../../src/app/artwork-selection-request";
 import { BleedEngine } from "../../image-engine/bleed";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
+import { ScryfallError } from "../../providers/scryfall/errors";
 import { FULL_TRIM_GUIDES, NO_CUT_GUIDES } from "../helpers/cut-guides";
 
 const candidateId = `upload:${"a".repeat(64)}`;
@@ -67,6 +68,8 @@ function testWorkbench(overrides: Record<string, unknown> = {}): CardWorkbench {
     searchCardIdentities: vi.fn(async () => [identity]),
     getIdentityDetails: vi.fn(async () => ({ ...identity, layout: "normal", relatedCards: [] })),
     resolveWorkingCards: vi.fn(async (cards: readonly WorkingCard[]) => ({ workingCards: [...cards], providerHealth })),
+    reresolveWorkingCard: vi.fn(async (workingCard: WorkingCard) => workingCard),
+    restoreDefaultArtwork: vi.fn(async (workingCard: WorkingCard) => workingCard),
     confirmWorkingCardIdentity: vi.fn(async (workingCard: WorkingCard) => workingCard),
     keepWorkingCardCustom: vi.fn((workingCard: WorkingCard) => workingCard),
     listArtworkCandidates: vi.fn(async () => [candidate]),
@@ -217,6 +220,82 @@ describe("card APIs", () => {
     expect(invalidJson.status).toBe(400);
     const invalidId = await handleIdentityDetails(new Request("http://localhost"), "../etc/passwd", workbench);
     expect(invalidId.status).toBe(400);
+  });
+
+  it("re-resolves one WorkingCard through its dedicated mutation action", async () => {
+    const reResolved = { ...card, identity: null, identityResolution: { status: "unresolved" as const, candidates: [], confirmed: false } };
+    const reresolveWorkingCard = vi.fn(async () => reResolved);
+    const workbench = testWorkbench({ reresolveWorkingCard });
+
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", { action: "reresolve", card }), workbench);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ workingCards: [reResolved] });
+    expect(reresolveWorkingCard).toHaveBeenCalledWith(card, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it("restores the default artwork for exactly the requested face", async () => {
+    const restored = {
+      ...card,
+      faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }],
+      selectedArtworkByFace: {
+        front: { candidateId: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", source: "scryfall" as const, identityId: identity.id, faceId: "front" as const, selectionPolicy: "newest-en-highres-nondigital-v1" },
+        back: { candidateId: "mpc:back-reference", source: "mpc" as const, identityId: identity.id, faceId: "back" as const, selectionPolicy: "user-selected" },
+      },
+    };
+    const restoreDefaultArtwork = vi.fn(async () => restored);
+    const workbench = testWorkbench({ restoreDefaultArtwork });
+
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", { action: "restore-default-artwork", card, faceId: "front" }), workbench);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ workingCards: [restored] });
+    expect(restoreDefaultArtwork).toHaveBeenCalledWith(card, "front", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it("reports when a default artwork is unavailable without returning a mutated card", async () => {
+    const restoreDefaultArtwork = vi.fn(async () => undefined);
+    const workbench = testWorkbench({ restoreDefaultArtwork });
+
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", { action: "restore-default-artwork", card, faceId: "front" }), workbench);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "ARTWORK_DEFAULT_UNAVAILABLE" });
+  });
+
+  it("returns degraded provider health when default artwork lookup fails upstream", async () => {
+    const restoreDefaultArtwork = vi.fn(async () => { throw new ScryfallError("network", "Scryfall network unavailable"); });
+    const providerHealth = {
+      scryfall: { available: false, degraded: true, message: "Scryfall network unavailable" },
+      upload: { available: true, degraded: false },
+      mpc: { available: true, degraded: false },
+    };
+    const workbench = testWorkbench({ restoreDefaultArtwork, getProviderHealth: () => providerHealth });
+
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", { action: "restore-default-artwork", card, faceId: "front" }), workbench);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      code: "SCRYFALL_NETWORK",
+      message: "Scryfall network unavailable",
+      providerHealth: { scryfall: { available: false, degraded: true, message: "Scryfall network unavailable" } },
+    });
+  });
+
+  it("rejects default artwork for custom cards without consulting the provider", async () => {
+    const restoreDefaultArtwork = vi.fn(async () => card);
+    const workbench = testWorkbench({ restoreDefaultArtwork });
+    const custom = {
+      ...card,
+      identity: null,
+      identityResolution: { status: "custom" as const, candidates: [], confirmed: true },
+    };
+
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", { action: "restore-default-artwork", card: custom, faceId: "front" }), workbench);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "NO_RESOLVED_IDENTITY", message: expect.stringContaining("Não há identidade") });
+    expect(restoreDefaultArtwork).not.toHaveBeenCalled();
   });
 
   it("serves autocomplete, card search and normalized card details through workbench methods", async () => {

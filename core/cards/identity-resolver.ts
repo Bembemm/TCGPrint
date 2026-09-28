@@ -67,16 +67,22 @@ function candidateResolution(card: ScryfallCard, score: number, reason: string):
   return { identity: toIdentity(card, "fuzzy", score), score, reason };
 }
 
+function compareDefaultArtwork(a: ArtworkCandidate, b: ArtworkCandidate): number {
+  return (b.releasedAt ?? "").localeCompare(a.releasedAt ?? "")
+    || (a.setCode ?? "").localeCompare(b.setCode ?? "", "en")
+    || (a.collectorNumber ?? "").localeCompare(b.collectorNumber ?? "", "en", { numeric: true })
+    || (a.scryfallId ?? a.providerAssetId ?? a.id).localeCompare(b.scryfallId ?? b.providerAssetId ?? b.id);
+}
+
+function sortedByDefaultOrder(candidates: readonly ArtworkCandidate[]): readonly ArtworkCandidate[] {
+  return candidates.slice().sort(compareDefaultArtwork);
+}
+
 function sortedDefaultCandidates(candidates: readonly ArtworkCandidate[]): readonly ArtworkCandidate[] {
-  return candidates.filter((candidate) => candidate.source === "scryfall"
+  return sortedByDefaultOrder(candidates.filter((candidate) => candidate.source === "scryfall"
     && candidate.language === "en"
     && candidate.metadata?.digital !== true
-    && candidate.metadata?.imageStatus === "highres_scan")
-    .slice()
-    .sort((a, b) => (b.releasedAt ?? "").localeCompare(a.releasedAt ?? "")
-      || (a.setCode ?? "").localeCompare(b.setCode ?? "", "en")
-      || (a.collectorNumber ?? "").localeCompare(b.collectorNumber ?? "", "en", { numeric: true })
-      || (a.scryfallId ?? a.providerAssetId ?? a.id).localeCompare(b.scryfallId ?? b.providerAssetId ?? b.id));
+    && candidate.metadata?.imageStatus === "highres_scan"));
 }
 
 function selected(candidate: ArtworkCandidate): SelectedArtwork {
@@ -200,12 +206,63 @@ export function selectResolvedPrintingArtwork(workingCard: WorkingCard, candidat
   return changed ? { ...workingCard, selectedArtworkByFace } : workingCard;
 }
 
+export function reconcileArtworkAfterIdentityChange(workingCard: WorkingCard, identityId: string | null): WorkingCard {
+  let changed = false;
+  const selectedArtworkByFace: WorkingCard["selectedArtworkByFace"] = { ...workingCard.selectedArtworkByFace };
+  for (const side of ["front", "back"] as const) {
+    const selected = selectedArtworkByFace[side];
+    if (!selected || selected.source === "upload" || selected.selectionPolicy === "user-selected") continue;
+    if (selected.identityId !== null && selected.identityId !== identityId) {
+      delete selectedArtworkByFace[side];
+      changed = true;
+    }
+  }
+  return changed ? { ...workingCard, selectedArtworkByFace } : workingCard;
+}
+
+export function selectDefaultArtworkForFace(workingCard: WorkingCard, side: CardFaceSide, candidates: readonly ArtworkCandidate[]): WorkingCard | undefined {
+  if (!workingCard.identity || !workingCard.faces.some((face) => face.side === side)) return undefined;
+  const identityId = workingCard.identity.id;
+  const selectedArtworkByFace = { ...workingCard.selectedArtworkByFace };
+  const sideCandidates = candidates.filter((candidate) => candidate.source === "scryfall"
+    && candidate.identityId === identityId
+    && candidate.faceId === side
+    && candidate.originalAvailable);
+  let candidate: ArtworkCandidate | undefined;
+
+  if (workingCard.identityHints.scryfallId) {
+    candidate = sortedByDefaultOrder(sideCandidates.filter((item) =>
+      item.scryfallId === workingCard.identityHints.scryfallId || item.providerAssetId === workingCard.identityHints.scryfallId))[0];
+  } else if (workingCard.identityHints.setCode && workingCard.identityHints.collectorNumber) {
+    candidate = sortedByDefaultOrder(sideCandidates.filter((item) =>
+      item.setCode?.toLowerCase() === workingCard.identityHints.setCode?.toLowerCase()
+      && item.collectorNumber === workingCard.identityHints.collectorNumber))[0];
+  }
+
+  if (!candidate) {
+    const eligible = sortedDefaultCandidates(sideCandidates).filter((item) => item.originalAvailable);
+    const otherSide = side === "front" ? "back" : "front";
+    const otherSelection = workingCard.selectedArtworkByFace[otherSide];
+    const otherPrintingId = otherSelection?.source === "scryfall"
+      ? otherSelection.providerAssetId ?? otherSelection.candidateId.match(/^scryfall:([^:]+):/)?.[1]
+      : undefined;
+    candidate = (otherPrintingId
+      ? eligible.find((item) => (item.scryfallId ?? item.providerAssetId ?? item.id) === otherPrintingId)
+      : undefined) ?? eligible[0];
+  }
+
+  if (!candidate) return undefined;
+  selectedArtworkByFace[side] = selected(candidate);
+  return { ...workingCard, selectedArtworkByFace };
+}
+
 export function confirmIdentity(workingCard: WorkingCard, candidate: CardIdentity): WorkingCard {
-  return {
+  const confirmed: WorkingCard = {
     ...workingCard,
     identity: candidate,
     identityResolution: { status: "resolved", method: "manual", query: candidate.name, confidence: 1, confirmed: true, candidates: [{ identity: candidate, score: 1, reason: "human-confirmed" }] },
   };
+  return reconcileArtworkAfterIdentityChange(confirmed, candidate.id);
 }
 
 export function keepCustom(workingCard: WorkingCard): WorkingCard {

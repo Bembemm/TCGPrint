@@ -15,7 +15,7 @@ import { appDataPaths } from "../artwork/storage/paths";
 import { ArtworkRepository } from "../artwork/storage/repository";
 import { ArtworkThumbnailStore } from "../artwork/storage/thumbnail-store";
 import type { ArtworkCatalogSource, ArtworkPreview, ProviderHealth } from "../artwork/types";
-import { confirmIdentity, IdentityResolver, keepCustom, selectResolvedPrintingArtwork } from "../core/cards/identity-resolver";
+import { confirmIdentity, IdentityResolver, keepCustom, reconcileArtworkAfterIdentityChange, selectDefaultArtworkForFace, selectResolvedPrintingArtwork } from "../core/cards/identity-resolver";
 import { selectArtwork as updateSelectedArtwork, createWorkingSet } from "../core/cards/working-set";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
 import { ScryfallClient } from "../providers/scryfall/client";
@@ -78,8 +78,10 @@ export interface CardWorkbench {
   searchCardIdentities(query: string, options?: { signal?: AbortSignal }): Promise<readonly CardIdentity[]>;
   getIdentityDetails(identityId: string, options?: { signal?: AbortSignal }): Promise<CardIdentity & { readonly layout?: string; readonly relatedCards: ScryfallCard["relatedCards"] }>;
   resolveWorkingCards(cards: readonly WorkingCard[], options?: { signal?: AbortSignal }): Promise<ResolveWorkingCardsResult>;
+  reresolveWorkingCard(card: WorkingCard, options?: { signal?: AbortSignal }): Promise<WorkingCard>;
   confirmWorkingCardIdentity(card: WorkingCard, scryfallId: string, options?: { signal?: AbortSignal }): Promise<WorkingCard>;
   keepWorkingCardCustom(card: WorkingCard): WorkingCard;
+  restoreDefaultArtwork(card: WorkingCard, faceId: CardFaceSide, options?: { signal?: AbortSignal }): Promise<WorkingCard | undefined>;
   listArtworkCandidates(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
   getArtworkCandidate(candidateId: string, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; identity?: CardIdentity; signal?: AbortSignal }): Promise<ArtworkCandidate | undefined>;
   getArtworkPreview(candidateId: string, signal?: AbortSignal): Promise<ArtworkPreview | undefined>;
@@ -255,6 +257,57 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
   const resolutionCache = new Map<string, { identity: CardIdentity | null; resolution: WorkingCard["identityResolution"]; printing?: ScryfallCard }>();
   let closePromise: Promise<void> | undefined;
 
+  async function resolveFromHints(card: WorkingCard, signal?: AbortSignal): Promise<{ workingCard: WorkingCard; printing?: ScryfallCard }> {
+    const key = resolutionKey(card);
+    const cached = resolutionCache.get(key)
+      ?? metadata.getMetadata<{ identity: CardIdentity | null; resolution: WorkingCard["identityResolution"]; printing?: ScryfallCard }>(key);
+    if (cached) {
+      return {
+        workingCard: { ...card, identity: cached.identity, identityResolution: cached.resolution },
+        ...(cached.printing ? { printing: cached.printing } : {}),
+      };
+    }
+
+    const selected = card.selectedArtworkByFace.front;
+    const original = selected?.source === "upload" ? await local.getOriginal(selected.candidateId).then((item) => item.bytes).catch(() => undefined) : undefined;
+    const resolved = await resolver.resolveWithPrinting(card, {
+      filename: card.importSource.filename,
+      ...(original ? { imageBytes: original } : {}),
+      ...(signal ? { signal } : {}),
+      recognizer,
+    });
+    const resolution = {
+      identity: resolved.workingCard.identity,
+      resolution: resolved.workingCard.identityResolution,
+      ...(resolved.printing ? { printing: resolved.printing } : {}),
+    };
+    resolutionCache.set(key, resolution);
+    metadata.putMetadata(key, resolution, Date.now() + METADATA_TTL_MS);
+    return { workingCard: resolved.workingCard, ...(resolved.printing ? { printing: resolved.printing } : {}) };
+  }
+
+  function applyResolvedIdentityArtwork(card: WorkingCard, printing?: ScryfallCard): WorkingCard {
+    const identity = card.identity;
+    if (!identity) return card;
+    let next = reconcileArtworkAfterIdentityChange(card, identity.id);
+    next = applyIdentityFaces(next, identity);
+    storeIdentity(metadata, identity);
+    const resolvedPrinting = printing ?? metadata.getMetadata<ScryfallCard>(`scryfall:identity-card:${identity.id}`);
+    if (printing) metadata.putMetadata(`scryfall:identity-card:${identity.id}`, printing, Date.now() + METADATA_TTL_MS);
+    const candidates = resolvedPrinting ? scryfall.candidatesFromPrinting(identity, resolvedPrinting) : [];
+    for (const side of ["front", "back"] as const) {
+      const current = next.selectedArtworkByFace[side];
+      if (current?.source === "upload" && current.identityId !== identity.id) {
+        const linked = { ...current, identityId: identity.id } satisfies SelectedArtwork;
+        next = updateSelectedArtwork(next, side, linked);
+        local.linkUpload(identity.id, current.candidateId, side);
+      }
+      const importedFace = next.faces.find((face) => face.side === side);
+      if (importedFace?.importedAssetId?.startsWith("upload:")) local.linkUpload(identity.id, importedFace.importedAssetId, side);
+    }
+    return selectResolvedPrintingArtwork(next, candidates);
+  }
+
   return {
     async importForWorkingSet(request, callOptions = {}) {
       if ((request.files?.length ?? 0) > MAX_UPLOADS) throw new ImportFailureError(`At most ${MAX_UPLOADS} files may be imported at once.`, "INPUT_TOO_LARGE");
@@ -347,50 +400,9 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
       for (const card of cards) {
         if (callOptions.signal?.aborted) throw new ScryfallError("aborted", "The Scryfall request was cancelled.");
         if (card.identityResolution.confirmed) { resolved.push(card); continue; }
-        const key = resolutionKey(card);
-        let resolution = resolutionCache.get(key);
-        if (!resolution) {
-          resolution = metadata.getMetadata<{ identity: CardIdentity | null; resolution: WorkingCard["identityResolution"]; printing?: ScryfallCard }>(key);
-        }
-        let next: WorkingCard;
         try {
-          let printing = resolution?.printing;
-          if (resolution) next = { ...card, identity: resolution.identity, identityResolution: resolution.resolution };
-          else {
-            const selected = card.selectedArtworkByFace.front;
-            const original = selected?.source === "upload" ? await local.getOriginal(selected.candidateId).then((item) => item.bytes).catch(() => undefined) : undefined;
-            const resolved = await resolver.resolveWithPrinting(card, {
-              filename: card.importSource.filename,
-              ...(original ? { imageBytes: original } : {}),
-              signal: callOptions.signal,
-              recognizer,
-            });
-            next = resolved.workingCard;
-            printing = resolved.printing;
-            resolution = { identity: next.identity, resolution: next.identityResolution, ...(printing ? { printing } : {}) };
-            resolutionCache.set(key, resolution);
-            metadata.putMetadata(key, resolution, Date.now() + METADATA_TTL_MS);
-          }
-          const resolvedIdentity = next.identity;
-          if (resolvedIdentity) {
-            next = applyIdentityFaces(next, resolvedIdentity);
-            storeIdentity(metadata, resolvedIdentity);
-            const resolvedPrinting = printing ?? metadata.getMetadata<ScryfallCard>(`scryfall:identity-card:${resolvedIdentity.id}`);
-            if (printing) metadata.putMetadata(`scryfall:identity-card:${resolvedIdentity.id}`, printing, Date.now() + METADATA_TTL_MS);
-            const candidates = resolvedPrinting ? scryfall.candidatesFromPrinting(resolvedIdentity, resolvedPrinting) : [];
-            for (const side of ["front", "back"] as const) {
-              const current = next.selectedArtworkByFace[side];
-              if (current?.source === "upload" && current.identityId !== resolvedIdentity.id) {
-                const linked = { ...current, identityId: resolvedIdentity.id } satisfies SelectedArtwork;
-                next = updateSelectedArtwork(next, side, linked);
-                local.linkUpload(resolvedIdentity.id, current.candidateId, side);
-              }
-              const importedFace = next.faces.find((face) => face.side === side);
-              if (importedFace?.importedAssetId?.startsWith("upload:")) local.linkUpload(resolvedIdentity.id, importedFace.importedAssetId, side);
-            }
-            next = selectResolvedPrintingArtwork(next, candidates);
-          }
-          resolved.push(next);
+          const result = await resolveFromHints(card, callOptions.signal);
+          resolved.push(result.workingCard.identity ? applyResolvedIdentityArtwork(result.workingCard, result.printing) : result.workingCard);
         } catch (error) {
           if (error instanceof ScryfallError && error.kind === "aborted") throw error;
           if (error instanceof ScryfallError) catalog.markProviderDegraded("scryfall", error);
@@ -398,6 +410,24 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
         }
       }
       return { workingCards: resolved, providerHealth: catalog.getProviderHealth() };
+    },
+
+    async reresolveWorkingCard(card, callOptions = {}) {
+      if (callOptions.signal?.aborted) throw new ScryfallError("aborted", "The Scryfall request was cancelled.");
+      const unresolved: WorkingCard = {
+        ...card,
+        identity: null,
+        identityResolution: {
+          status: "unresolved",
+          ...(card.identityHints.name ? { query: card.identityHints.name } : {}),
+          candidates: [],
+          confirmed: false,
+        },
+      };
+      const result = await resolveFromHints(unresolved, callOptions.signal);
+      return result.workingCard.identity
+        ? applyResolvedIdentityArtwork(result.workingCard, result.printing)
+        : reconcileArtworkAfterIdentityChange(result.workingCard, null);
     },
 
     async confirmWorkingCardIdentity(card, scryfallId, callOptions = {}) {
@@ -422,6 +452,18 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     },
 
     keepWorkingCardCustom(card) { return keepCustom(card); },
+
+    async restoreDefaultArtwork(card, faceId, callOptions = {}) {
+      if (callOptions.signal?.aborted) throw new ScryfallError("aborted", "The Scryfall request was cancelled.");
+      if (!card.identity || !card.faces.some((face) => face.side === faceId)) return undefined;
+      const candidates = await catalog.search(card.identity, { source: "scryfall", faceId, signal: callOptions.signal });
+      const selected = selectDefaultArtworkForFace(card, faceId, candidates);
+      if (!selected) {
+        const health = catalog.getProviderHealth().scryfall;
+        if (health?.degraded) throw new ScryfallError("network", health.message ?? "Scryfall is unavailable; the default artwork could not be checked.");
+      }
+      return selected;
+    },
 
     async listArtworkCandidates(identityId, faceId, source, callOptions = {}) {
       const cachedIdentity = getIdentity(metadata, identityId);

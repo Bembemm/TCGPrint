@@ -1,9 +1,10 @@
-import { createElement } from "react";
+import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { WorkingCardList, workingCardEditorReducer, type EditorUiState } from "../../../src/app/card-identity-workbench";
+import * as workbenchModule from "../../../src/app/card-identity-workbench";
 import { createWorkingCardEditorState } from "../../../core/cards/working-card-editor";
-import type { WorkingCard } from "../../../core/cards/types";
+import type { ArtworkCandidate, WorkingCard } from "../../../core/cards/types";
 
 const card: WorkingCard = {
   id: "sol-ring-working-card",
@@ -21,6 +22,119 @@ const card: WorkingCard = {
 };
 
 describe("working card editor list UI", () => {
+  it("renders Card Details origin, imported hints, current identity, both artwork faces and manual mismatch text", () => {
+    const detailed: WorkingCard = {
+      ...card,
+      section: "Mainboard",
+      importSource: { sourceId: "decklist.txt", filename: "decklist.txt", importKind: "text", entryKind: "deck-card" },
+      identityHints: { name: "Imported Island", setCode: "m21", collectorNumber: "265", language: "en", scryfallId: "hint-id" },
+      identity: { id: "scryfall:oracle:island", provider: "scryfall", name: "Island", setCode: "khm", collectorNumber: "145", lang: "ja", resolutionMethod: "manual", confidence: 0.94 },
+      identityResolution: { status: "resolved", method: "manual", query: "Island", confidence: 0.94, confirmed: true, candidates: [] },
+      faces: [{ id: "front", side: "front", name: "Island" }, { id: "back", side: "back", name: "Island Back" }],
+      selectedArtworkByFace: {
+        front: { candidateId: "scryfall:front-choice", source: "scryfall", identityId: "scryfall:oracle:previous", faceId: "front", selectionPolicy: "user-selected" },
+        back: { candidateId: "mpc:back-choice", source: "mpc", identityId: "scryfall:oracle:island", faceId: "back", selectionPolicy: "newest-en-highres-nondigital-v1" },
+      },
+    };
+    const Details = (workbenchModule as unknown as Record<string, unknown>).WorkingCardDetailsSummary as ComponentType<{
+      card: WorkingCard;
+      identityLayout?: string;
+      artworkCandidates?: readonly ArtworkCandidate[];
+    }> | undefined;
+    expect(Details).toBeTypeOf("function");
+
+    const markup = renderToStaticMarkup(createElement(Details!, {
+      card: detailed,
+      identityLayout: "transform",
+      artworkCandidates: [{ id: "mpc:back-choice", source: "mpc", identityId: "scryfall:oracle:island", faceId: "back", originalAvailable: true, originalCached: true, effectiveDpi: 300 }],
+    }));
+
+    for (const text of ["Origem", "decklist.txt", "Tipo de import", "text", "Mainboard", "Hints importados", "Imported Island", "Set", "Collector", "Idioma", "EN", "M21", "Scryfall ID", "hint-id", "Identidade atual", "Island", "KHM", "145", "JA", "Provider", "scryfall", "Método de resolução", "manual", "Query", "Confiança", "94%", "Confirmada", "sim", "transform", "Artwork", "Front", "Back", "user-selected", "newest-en-highres-nondigital-v1", "Artwork escolhida manualmente para outra identidade.", "300 DPI", "Original validado no cache local"]) {
+      expect(markup).toContain(text);
+    }
+    expect(markup).toContain("scryfall:front-choice");
+    expect(markup).toContain("mpc:back-choice");
+
+    const unverifiedMarkup = renderToStaticMarkup(createElement(Details!, {
+      card: detailed,
+      artworkCandidates: [{ id: "mpc:back-choice", source: "mpc", identityId: "scryfall:oracle:island", faceId: "back", originalAvailable: true }],
+    }));
+    expect(unverifiedMarkup).toContain("Original disponível no provider; cache local não verificado");
+    expect(unverifiedMarkup).not.toContain("Original validado no cache local");
+  });
+
+  it("shows only the existing back face for a back-only WorkingCard", () => {
+    const backOnly: WorkingCard = {
+      ...card,
+      identity: { id: "scryfall:oracle:back-only", provider: "scryfall", name: "Back-only", resolutionMethod: "manual", confidence: 1 },
+      identityResolution: { status: "resolved", method: "manual", confirmed: true, candidates: [] },
+      faces: [{ id: "back", side: "back", name: "Back-only" }],
+      selectedArtworkByFace: { back: { candidateId: "scryfall:back-only", source: "scryfall", identityId: "scryfall:oracle:back-only", faceId: "back", selectionPolicy: "user-selected" } },
+    };
+    const Details = (workbenchModule as unknown as Record<string, unknown>).WorkingCardDetailsSummary as ComponentType<{
+      card: WorkingCard;
+    }> | undefined;
+    expect(Details).toBeTypeOf("function");
+
+    const markup = renderToStaticMarkup(createElement(Details!, { card: backOnly }));
+
+    expect(markup).toContain("Artwork");
+    expect(markup).toContain("Back-only");
+    expect(markup).not.toContain("Front");
+  });
+
+  it("applies each per-card editorial result as one immutable replacement", () => {
+    const doubleFaceCard: WorkingCard = {
+      ...card,
+      faces: [{ id: "front", side: "front", name: "Front" }, { id: "back", side: "back", name: "Back" }],
+      selectedArtworkByFace: {
+        front: { candidateId: "front-before", source: "scryfall", identityId: null, faceId: "front" },
+        back: { candidateId: "back-before", source: "mpc", identityId: null, faceId: "back" },
+      },
+    };
+    const otherCard = { ...card, id: "other-working-card", order: 1 };
+    const initial: EditorUiState = { ...createWorkingCardEditorState([doubleFaceCard, otherCard], doubleFaceCard.id), face: "back" };
+    const nextCard: WorkingCard = {
+      ...doubleFaceCard,
+      identity: { id: "manual:front", provider: "scryfall", name: "Chosen identity", resolutionMethod: "manual", confidence: 1 },
+      identityResolution: { status: "resolved", method: "manual", confirmed: true, candidates: [] },
+      selectedArtworkByFace: {
+        front: { candidateId: "front-after", source: "scryfall", identityId: "manual:front", faceId: "front", selectionPolicy: "user-selected" },
+        back: doubleFaceCard.selectedArtworkByFace.back,
+      },
+    };
+    const actions = [
+      { type: "apply-identity-result", cardId: doubleFaceCard.id, card: nextCard },
+      { type: "apply-custom-result", cardId: doubleFaceCard.id, card: nextCard },
+      { type: "apply-artwork-selection", cardId: doubleFaceCard.id, card: nextCard },
+      { type: "apply-artwork-default", cardId: doubleFaceCard.id, card: nextCard },
+      { type: "apply-reresolve-result", cardId: doubleFaceCard.id, card: nextCard },
+    ];
+
+    for (const action of actions) {
+      const next = workingCardEditorReducer(initial, action as unknown as Parameters<typeof workingCardEditorReducer>[1]);
+      expect(next).toMatchObject({ selectedCardId: doubleFaceCard.id, face: "back" });
+      expect(next.cards[0]).toBe(nextCard);
+      expect(next.cards[1]).toBe(otherCard);
+      expect(next.cards).not.toBe(initial.cards);
+    }
+  });
+
+  it("applies resolve-all as one grouped editorial result", () => {
+    const otherCard: WorkingCard = { ...card, id: "other-working-card", order: 1 };
+    const initial: EditorUiState = { ...createWorkingCardEditorState([card, otherCard]), face: "front" };
+    const nextCards = [
+      { ...card, identityResolution: { status: "resolved" as const, candidates: [], confirmed: false } },
+      { ...otherCard, identityResolution: { status: "custom" as const, candidates: [], confirmed: true } },
+    ];
+
+    const next = workingCardEditorReducer(initial, { type: "apply-resolve-all-result", cards: nextCards } as unknown as Parameters<typeof workingCardEditorReducer>[1]);
+
+    expect(next.cards).toEqual(nextCards);
+    expect(next.cards).not.toBe(initial.cards);
+    expect(next.selectedCardId).toBe(card.id);
+  });
+
   it("renders quantity, position, accessible reorder, duplicate, delete and drag controls", () => {
     const markup = renderToStaticMarkup(createElement(WorkingCardList, {
       cards: [card],

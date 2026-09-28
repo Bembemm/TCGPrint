@@ -166,6 +166,24 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .detail-title { align-items: flex-start; }
 .multiface-label { flex: none; border: 1px solid #725d9c; border-radius: 3px; padding: 4px 6px; color: #514077 !important; background: #f7f4fc; font-size: 10px !important; font-weight: 700 !important; }
 .identity-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 9px 10px; color: #495663; font-size: 11px; }
+.card-details-summary { margin: 0 10px 8px; border: 1px solid #d9e0e5; border-radius: 3px; padding: 9px; background: #fbfcfd; }
+.card-details-summary > h3 { margin: 0 0 4px; color: #293642; font-size: 12px; }
+.card-details-summary .identity-summary { padding: 0 0 7px; }
+.card-details-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.card-details-section { min-width: 0; border-top: 1px solid #e1e6ea; padding-top: 7px; }
+.card-details-section h4 { margin: 0 0 5px; color: #394653; font-size: 10px; }
+.card-details-section h4:not(:first-child) { margin-top: 8px; }
+.card-detail-fields { display: grid; grid-template-columns: minmax(75px, max-content) minmax(0, 1fr); gap: 3px 8px; margin: 0; }
+.card-detail-fields > div { display: contents; }
+.card-detail-fields dt { color: #687581; font-size: 9px; }
+.card-detail-fields dd { min-width: 0; overflow-wrap: anywhere; margin: 0; color: #364451; font-size: 9px; }
+.artwork-details { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
+.artwork-details > h4 { grid-column: 1 / -1; }
+.card-artwork-detail { min-width: 0; border: 1px solid #e1e6ea; border-radius: 3px; padding: 7px; background: #fff; }
+.card-artwork-detail h5 { margin: 0 0 5px; color: #293642; font-size: 10px; }
+.artwork-identity-mismatch { margin: 6px 0 0; border-left: 2px solid #b0802c; padding-left: 6px; color: #70531e; font-size: 9px; font-weight: 600; }
+.card-identity-actions { margin: 0 10px 10px; }
+.restore-artwork-default { margin: 0 0 7px; min-height: 29px; padding: 5px 8px; font-size: 10px; }
 .identity-suggestions, .manual-identity-search { margin: 0 10px 10px; padding: 9px; border: 1px solid #d9e0e5; border-radius: 3px; background: #f9fafb; }
 .identity-suggestions > strong { display: block; margin-bottom: 7px; font-size: 11px; }
 .identity-option { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; color: #3f4c59; font-size: 11px; }
@@ -210,7 +228,9 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
   .working-card-row { grid-template-columns: 18px minmax(0, 1fr); }
   .working-card-controls { grid-column: 2; justify-content: flex-start; }
   .provider-health { justify-content: flex-start; }
+  .card-details-grid { grid-template-columns: minmax(0, 1fr); }
   .artwork-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
   .panel { padding: 13px; }
+  .pdf-controls select { min-width: 0; }
   .action-row { align-items: flex-start; flex-direction: column; }
 }

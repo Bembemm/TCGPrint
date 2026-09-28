@@ -14,7 +14,8 @@ describe("import workbench page", () => {
     expect(markup).toContain("Criar preview");
     expect(markup).toMatch(/type=\"file\" multiple=\"\"[^>]*>/);
     expect(markup).toContain("webkitdirectory=\"\"");
-    expect(markup).toContain("CardIdentity permanece estável");
+    expect(markup).toContain("Fase 6B · Working Set da sessão");
+    expect(markup).toContain("Card Details separa origem/hints importados da identidade aplicada");
     expect(markup).toContain("Universal Import → Working Set");
     expect(markup).toContain("Scryfall online");
   });
