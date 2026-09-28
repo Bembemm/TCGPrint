@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearRequestCache, createRequestCache, getOrCreateCachedRequest } from "../../src/app/request-cache";
+import { clearRequestCache, createRequestCache, getOrCreateCachedRequest, updateResolvedRequestCache } from "../../src/app/request-cache";
 
 describe("getOrCreateCachedRequest", () => {
   it("reuses an in-flight request and its settled value for the same key", async () => {
@@ -103,6 +103,34 @@ describe("getOrCreateCachedRequest", () => {
     expect(calls).toBe(2);
     expect(cache.resolved.get("identity/front/all")).toBe("front");
     expect(cache.resolved.get("identity/back/all")).toBe("back");
+  });
+
+  it("updates one resolved artwork candidate without reloading or changing other cache keys", async () => {
+    const cache = createRequestCache<{ candidates: { id: string; effectiveDpi?: number; originalCached?: boolean }[] }>();
+    let calls = 0;
+    const loadCatalog = (ids: string[]) => () => {
+      calls += 1;
+      return Promise.resolve({ candidates: ids.map((id) => ({ id, effectiveDpi: 72, originalCached: false })) });
+    };
+    const key = "identity/front/all/references-a";
+    const otherKey = "identity/back/all/references-b";
+
+    const original = await getOrCreateCachedRequest(cache, key, loadCatalog(["candidate-prepared", "candidate-unchanged"]));
+    const other = await getOrCreateCachedRequest(cache, otherKey, loadCatalog(["candidate-other-key"]));
+    const preparedCandidate = { id: "candidate-prepared", effectiveDpi: 300, originalCached: true };
+
+    expect(updateResolvedRequestCache(cache, key, (cached) => ({
+      ...cached,
+      candidates: cached.candidates.map((candidate) => candidate.id === preparedCandidate.id ? preparedCandidate : candidate),
+    }))).toBe(true);
+
+    await expect(getOrCreateCachedRequest(cache, key, loadCatalog(["unexpected-reload"]))).resolves.toEqual({
+      candidates: [preparedCandidate, original.candidates[1]],
+    });
+    await expect(getOrCreateCachedRequest(cache, otherKey, loadCatalog(["unexpected-other-reload"]))).resolves.toBe(other);
+    expect(cache.resolved.get(key)?.candidates).toEqual([preparedCandidate, original.candidates[1]]);
+    expect(cache.resolved.get(otherKey)).toBe(other);
+    expect(calls).toBe(2);
   });
 
   it("invalidates resolved results when a new import changes the artwork catalog", async () => {

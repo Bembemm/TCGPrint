@@ -36,3 +36,14 @@ export function getOrCreateCachedRequest<T>(
   );
   return request;
 }
+
+export function updateResolvedRequestCache<T>(
+  requests: RequestCache<T>,
+  key: string,
+  update: (value: T) => T,
+): boolean {
+  if (!requests.resolved.has(key)) return false;
+  const value = requests.resolved.get(key) as T;
+  requests.resolved.set(key, update(value));
+  return true;
+}

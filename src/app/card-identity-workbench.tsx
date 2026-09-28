@@ -31,7 +31,7 @@ import {
 } from "../../core/cards/editor-history";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
 import { postArtworkSelection } from "./artwork-selection-request";
-import { clearRequestCache, createRequestCache, getOrCreateCachedRequest } from "./request-cache";
+import { clearRequestCache, createRequestCache, getOrCreateCachedRequest, updateResolvedRequestCache } from "./request-cache";
 import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
 import CutGuideControls from "./cut-guide-controls";
 import type { GuideColor } from "../../core/geometry";
@@ -652,6 +652,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       if (candidate.originalAvailable) {
         const prepareResponse = await fetch(`/api/cards/artworks/${encodeURIComponent(candidate.id)}/prepare`, { method: "POST" });
         const prepared = await jsonResponse<{ candidate: CandidateDto }>(prepareResponse);
+        updateResolvedRequestCache(artworkCatalogRequests.current, problemRequestKey, (cached) => ({
+          ...cached,
+          candidates: cached.candidates.map((item) => item.id === prepared.candidate.id ? prepared.candidate : item),
+        }));
         setArtworkCandidates((current) => current.map((item) => item.id === candidate.id ? prepared.candidate : item));
       }
       const response = await postArtworkSelection(activeCard, face, candidate.id);
