@@ -176,11 +176,12 @@ export function WorkingCardList({ cards, selectedCardId, physicalCardCount, disa
   </div>;
 }
 
-interface EditorUiState extends WorkingCardEditorState {
+export interface EditorUiState extends WorkingCardEditorState {
   readonly error?: string;
+  readonly face: CardFaceSide;
 }
 
-type EditorAction =
+export type EditorAction =
   | { readonly type: "load-cards"; readonly cards: readonly WorkingCard[] }
   | { readonly type: "replace-cards"; readonly cards: readonly WorkingCard[] }
   | { readonly type: "replace-card"; readonly cardId: string; readonly card: WorkingCard }
@@ -189,38 +190,56 @@ type EditorAction =
   | { readonly type: "adjust-quantity"; readonly cardId: string; readonly delta: -1 | 1 }
   | { readonly type: "move-card"; readonly cardId: string; readonly targetIndex: number }
   | { readonly type: "duplicate-card"; readonly cardId: string; readonly newCardId: string }
-  | { readonly type: "delete-card"; readonly cardId: string };
+  | { readonly type: "delete-card"; readonly cardId: string }
+  | { readonly type: "set-face"; readonly side: CardFaceSide };
 
-function workingCardEditorReducer(state: EditorUiState, action: EditorAction): EditorUiState {
+function activeFaceFor(card: WorkingCard | undefined, preferredFace: CardFaceSide): CardFaceSide {
+  if (!card) return "front";
+  if (card.faces.some((item) => item.side === preferredFace)) return preferredFace;
+  if (card.faces.some((item) => item.side === "front")) return "front";
+  return card.faces[0]?.side ?? "front";
+}
+
+function withActiveFace(state: WorkingCardEditorState, preferredFace: CardFaceSide): EditorUiState {
+  const activeCard = state.cards.find((card) => card.id === state.selectedCardId);
+  return { ...state, face: activeFaceFor(activeCard, preferredFace) };
+}
+
+function preserveActiveFace(state: EditorUiState, next: WorkingCardEditorState): EditorUiState {
+  return withActiveFace(next, state.face);
+}
+
+export function workingCardEditorReducer(state: EditorUiState, action: EditorAction): EditorUiState {
   try {
     switch (action.type) {
-      case "load-cards": return createWorkingCardEditorState(action.cards);
-      case "replace-cards": return replaceWorkingCards(state, action.cards);
-      case "replace-card": return replaceWorkingCard(state, action.cardId, action.card);
-      case "select-card": return selectWorkingCard(state, action.cardId);
-      case "set-quantity": return setWorkingCardQuantity(state, action.cardId, action.quantity);
+      case "load-cards": return withActiveFace(createWorkingCardEditorState(action.cards), "front");
+      case "replace-cards": return preserveActiveFace(state, replaceWorkingCards(state, action.cards));
+      case "replace-card": return preserveActiveFace(state, replaceWorkingCard(state, action.cardId, action.card));
+      case "select-card": return withActiveFace(selectWorkingCard(state, action.cardId), "front");
+      case "set-face": return withActiveFace(state, action.side);
+      case "set-quantity": return preserveActiveFace(state, setWorkingCardQuantity(state, action.cardId, action.quantity));
       case "adjust-quantity": {
         const card = state.cards.find((item) => item.id === action.cardId);
-        return setWorkingCardQuantity(state, action.cardId, (card?.quantity ?? 0) + action.delta);
+        return preserveActiveFace(state, setWorkingCardQuantity(state, action.cardId, (card?.quantity ?? 0) + action.delta));
       }
-      case "move-card": return moveWorkingCard(state, action.cardId, action.targetIndex);
-      case "duplicate-card": return duplicateWorkingCard(state, action.cardId, action.newCardId);
-      case "delete-card": return deleteWorkingCard(state, action.cardId);
+      case "move-card": return preserveActiveFace(state, moveWorkingCard(state, action.cardId, action.targetIndex));
+      case "duplicate-card": return preserveActiveFace(state, duplicateWorkingCard(state, action.cardId, action.newCardId));
+      case "delete-card": return preserveActiveFace(state, deleteWorkingCard(state, action.cardId));
     }
   } catch (error) {
     return { ...state, error: error instanceof Error ? error.message : "A operação do Editor falhou." };
   }
 }
 
-const initialEditorState: EditorUiState = createWorkingCardEditorState([]);
+const initialEditorState: EditorUiState = { ...createWorkingCardEditorState([]), face: "front" };
 
 export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [editorState, dispatchEditor] = useReducer(workingCardEditorReducer, initialEditorState);
   const workingCards = editorState.cards;
   const selectedCardId = editorState.selectedCardId;
+  const face = editorState.face;
   const [artworkCandidates, setArtworkCandidates] = useState<CandidateDto[]>([]);
   const [artworkFilter, setArtworkFilter] = useState<ArtworkFilter>("all");
-  const [face, setFace] = useState<CardFaceSide>("front");
   const [manualQuery, setManualQuery] = useState("");
   const [autocompleteNames, setAutocompleteNames] = useState<string[]>([]);
   const [manualIdentities, setManualIdentities] = useState<CardIdentity[]>([]);
@@ -313,7 +332,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       const response = await fetch("/api/cards/import", { method: "POST", body: form });
       const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth: typeof providerHealth }>(response);
       dispatchEditor({ type: "load-cards", cards: result.workingCards });
-      setArtworkFilter("all"); setFace("front"); setManualIdentities([]);
+      setArtworkFilter("all"); setManualIdentities([]);
       setProviderHealth(result.providerHealth);
       setStatus(`${result.workingCards.length} entradas no Working Set. Quantidades permanecem compactas.`);
     } catch (error) {
@@ -440,12 +459,12 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           selectedCardId={selectedCardId}
           physicalCardCount={physicalCardCount}
           disabled={busy}
-          onSelect={(cardId) => { dispatchEditor({ type: "select-card", cardId }); setFace("front"); }}
+          onSelect={(cardId) => dispatchEditor({ type: "select-card", cardId })}
           onQuantityCommit={(cardId, value) => dispatchEditor({ type: "set-quantity", cardId, quantity: Number(value) })}
           onQuantityAdjust={(cardId, delta) => dispatchEditor({ type: "adjust-quantity", cardId, delta })}
           onMove={(cardId, targetIndex) => dispatchEditor({ type: "move-card", cardId, targetIndex })}
           onDuplicate={(cardId) => dispatchEditor({ type: "duplicate-card", cardId, newCardId: globalThis.crypto.randomUUID() })}
-          onDelete={(cardId) => { if (cardId === selectedCardId) setFace("front"); dispatchEditor({ type: "delete-card", cardId }); }}
+          onDelete={(cardId) => dispatchEditor({ type: "delete-card", cardId })}
         />
 
         {activeCard && <div className="working-card-detail">
@@ -489,7 +508,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           {(identityDetails?.relatedCards.length || relatedCardNames(activeCard).length) > 0 && <div className="related-card-list"><strong>Related cards / tokens:</strong> {(identityDetails?.relatedCards ?? relatedCardNames(activeCard)).map((item) => `${item.name}${item.component === "token" ? " (token; não adicionado)" : ""}`).join(" · ")}</div>}
 
           {activeCard.faces.length > 1 && <div className="face-tabs" role="group" aria-label="Face da carta">
-            {activeCard.faces.map((item) => <button key={item.side} type="button" className={`button ${face === item.side ? "primary" : "secondary"}`} onClick={() => setFace(item.side)}>{item.side === "front" ? "Front" : "Back"}{item.name ? ` · ${item.name}` : ""}</button>)}
+            {activeCard.faces.map((item) => <button key={item.side} type="button" className={`button ${face === item.side ? "primary" : "secondary"}`} onClick={() => dispatchEditor({ type: "set-face", side: item.side })}>{item.side === "front" ? "Front" : "Back"}{item.name ? ` · ${item.name}` : ""}</button>)}
           </div>}
 
           <div className="artwork-section">
