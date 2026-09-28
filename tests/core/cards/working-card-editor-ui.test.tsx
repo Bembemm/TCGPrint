@@ -1,10 +1,12 @@
 import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { WorkingCardList, workingCardEditorReducer, type EditorUiState } from "../../../src/app/card-identity-workbench";
+import { editorHistoryReducer, WorkingCardList, workingCardEditorReducer, type EditorUiState } from "../../../src/app/card-identity-workbench";
 import * as workbenchModule from "../../../src/app/card-identity-workbench";
 import { createWorkingCardEditorState } from "../../../core/cards/working-card-editor";
+import { createEditorHistoryState } from "../../../core/cards/editor-history";
 import type { ArtworkCandidate, WorkingCard } from "../../../core/cards/types";
+import type { ImportKind } from "../../../import-engine/types";
 
 const card: WorkingCard = {
   id: "sol-ring-working-card",
@@ -158,6 +160,19 @@ describe("working card editor list UI", () => {
     expect(markup).toContain('aria-label="Duplicar Sol Ring"');
     expect(markup).toContain('aria-label="Excluir Sol Ring"');
     expect(markup).toContain('draggable="true"');
+  });
+
+  it("renders compact accessible Undo and Redo controls disabled when history is empty", () => {
+    const Workbench = workbenchModule.default as ComponentType<{
+      files: readonly File[];
+      text: string;
+      choices: Readonly<Record<string, ImportKind>>;
+    }>;
+    const markup = renderToStaticMarkup(createElement(Workbench, { files: [], text: "", choices: {} }));
+
+    expect(markup).toContain('role="group" aria-label="Histórico do editor"');
+    expect(markup).toContain('aria-label="Desfazer" aria-keyshortcuts="Control+Z Meta+Z" disabled=""');
+    expect(markup).toContain('aria-label="Refazer" aria-keyshortcuts="Control+Y Meta+Y Control+Shift+Z Meta+Shift+Z" disabled=""');
   });
 
   it("preserves the active face when a duplicate supports it and falls back when it does not", () => {
@@ -390,5 +405,303 @@ describe("working card editor list UI", () => {
 
     expect(updated.cards[0]?.quantity).toBe(3);
     expect(updated.face).toBe("back");
+  });
+
+  it("undoes and redoes a quantity edit as one step", () => {
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card]), face: "front" });
+    const edited = editorHistoryReducer(initial, { type: "set-quantity", cardId: card.id, quantity: 4 });
+
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    const redone = editorHistoryReducer(undone, { type: "redo" });
+
+    expect(edited.past).toHaveLength(1);
+    expect(undone.present.cards[0]?.quantity).toBe(card.quantity);
+    expect(redone.present.cards[0]?.quantity).toBe(4);
+  });
+
+  it("undoes and redoes a reorder through the same move-card command used by buttons and DnD", () => {
+    const second: WorkingCard = { ...card, id: "second-card", order: 1 };
+    const third: WorkingCard = { ...card, id: "third-card", order: 2 };
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card, second, third]), face: "front" });
+    const moved = editorHistoryReducer(initial, { type: "move-card", cardId: third.id, targetIndex: 0 });
+
+    const undone = editorHistoryReducer(moved, { type: "undo" });
+    const redone = editorHistoryReducer(undone, { type: "redo" });
+
+    expect(moved.present.cards.map(({ id, order }) => [id, order])).toEqual([[third.id, 0], [card.id, 1], [second.id, 2]]);
+    expect(undone.present.cards.map(({ id, order }) => [id, order])).toEqual([[card.id, 0], [second.id, 1], [third.id, 2]]);
+    expect(redone.present.cards.map(({ id, order }) => [id, order])).toEqual([[third.id, 0], [card.id, 1], [second.id, 2]]);
+  });
+
+  it("undoes and redoes duplicate while restoring the same clone ID and selection", () => {
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card]), face: "front" });
+    const duplicated = editorHistoryReducer(initial, { type: "duplicate-card", cardId: card.id, newCardId: "stable-clone-id" });
+
+    const undone = editorHistoryReducer(duplicated, { type: "undo" });
+    const redone = editorHistoryReducer(undone, { type: "redo" });
+
+    expect(undone.present.cards.map(({ id }) => id)).toEqual([card.id]);
+    expect(undone.present.selectedCardId).toBe(card.id);
+    expect(redone.present.cards.map(({ id }) => id)).toEqual([card.id, "stable-clone-id"]);
+    expect(redone.present.selectedCardId).toBe("stable-clone-id");
+  });
+
+  it("restores a deleted active WorkingCard and its selection on undo", () => {
+    const second: WorkingCard = { ...card, id: "second-card", order: 1 };
+    const initial = createEditorHistoryState({
+      ...createWorkingCardEditorState([card, second], second.id),
+      face: "front",
+    });
+    const deleted = editorHistoryReducer(initial, { type: "delete-card", cardId: second.id });
+
+    const undone = editorHistoryReducer(deleted, { type: "undo" });
+
+    expect(undone.present.cards.map(({ id, order }) => [id, order])).toEqual([[card.id, 0], [second.id, 1]]);
+    expect(undone.present.cards[1]).toBe(second);
+    expect(undone.present.selectedCardId).toBe(second.id);
+  });
+
+  it("records resolve-all as one grouped undo step", () => {
+    const second: WorkingCard = { ...card, id: "second-card", order: 1 };
+    const initial = createEditorHistoryState({
+      ...createWorkingCardEditorState([card, second]),
+      face: "front",
+    });
+    const resolved = [
+      { ...card, identityResolution: { status: "resolved" as const, candidates: [], confirmed: false } },
+      { ...second, identityResolution: { status: "custom" as const, candidates: [], confirmed: true } },
+    ];
+    const edited = editorHistoryReducer(initial, { type: "apply-resolve-all-result", cards: resolved });
+
+    expect(edited.past).toHaveLength(1);
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    expect(undone.present.cards).toEqual([card, second]);
+  });
+
+  it("undoes and redoes a manually confirmed identity without changing the WorkingCard ID", () => {
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card]), face: "front" });
+    const identity = { id: "manual:chosen", provider: "scryfall", name: "Chosen card", resolutionMethod: "manual" as const, confidence: 1 };
+    const selected: WorkingCard = {
+      ...card,
+      identity,
+      identityResolution: { status: "resolved", method: "manual", candidates: [], confirmed: true },
+    };
+    const confirmed = editorHistoryReducer(initial, { type: "apply-identity-result", cardId: card.id, card: selected });
+
+    const undone = editorHistoryReducer(confirmed, { type: "undo" });
+    const redone = editorHistoryReducer(undone, { type: "redo" });
+
+    expect(undone.present.cards[0]).toBe(card);
+    expect(redone.present.cards[0]).toEqual(selected);
+    expect(redone.present.cards[0].id).toBe(card.id);
+    expect(redone.present.cards[0].identity?.id).toBe(identity.id);
+  });
+
+  it("undoes and redoes Keep as custom as one editorial operation", () => {
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card]), face: "front" });
+    const custom: WorkingCard = {
+      ...card,
+      identity: null,
+      identityResolution: { status: "custom", method: "custom", candidates: [], confirmed: true },
+    };
+    const edited = editorHistoryReducer(initial, { type: "apply-custom-result", cardId: card.id, card: custom });
+
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    const redone = editorHistoryReducer(undone, { type: "redo" });
+
+    expect(undone.present.cards[0]).toBe(card);
+    expect(redone.present.cards[0]).toEqual(custom);
+    expect(edited.past).toHaveLength(1);
+  });
+
+  it("undoes and redoes a Front artwork choice without changing Back", () => {
+    const backArtwork = { candidateId: "back-original", source: "mpc" as const, identityId: null, faceId: "back" as const };
+    const doubleFace: WorkingCard = {
+      ...card,
+      faces: [{ id: "front", side: "front" }, { id: "back", side: "back" }],
+      selectedArtworkByFace: { front: card.selectedArtworkByFace.front, back: backArtwork },
+    };
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([doubleFace]), face: "front" });
+    const updated: WorkingCard = {
+      ...doubleFace,
+      selectedArtworkByFace: {
+        ...doubleFace.selectedArtworkByFace,
+        front: { candidateId: "front-new", source: "upload", identityId: null, faceId: "front", selectionPolicy: "user-selected" },
+      },
+    };
+    const edited = editorHistoryReducer(initial, { type: "apply-artwork-selection", cardId: doubleFace.id, card: updated });
+
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    const redone = editorHistoryReducer(undone, { type: "redo" });
+
+    expect(undone.present.cards[0].selectedArtworkByFace.front).toEqual(doubleFace.selectedArtworkByFace.front);
+    expect(undone.present.cards[0].selectedArtworkByFace.back).toBe(backArtwork);
+    expect(redone.present.cards[0].selectedArtworkByFace.front?.candidateId).toBe("front-new");
+    expect(redone.present.cards[0].selectedArtworkByFace.back).toBe(backArtwork);
+  });
+
+  it.each([
+    { layout: "transform", frontName: "Delver of Secrets", backName: "Insectile Aberration" },
+    { layout: "modal_dfc", frontName: "Bala Ged Recovery", backName: "Bala Ged Sanctuary" },
+  ])("keeps Back artwork, Front artwork, and active face valid through undo/redo for $layout", ({ layout, frontName, backName }) => {
+    const frontArtwork = { candidateId: "front-original", source: "scryfall" as const, identityId: "identity", faceId: "front" as const };
+    const backArtwork = { candidateId: "back-original", source: "scryfall" as const, identityId: "identity", faceId: "back" as const };
+    const doubleFace: WorkingCard = {
+      ...card,
+      identity: { id: "identity", provider: "scryfall", name: `${frontName} // ${backName}`, resolutionMethod: "manual", confidence: 1, metadata: { layout } },
+      faces: [{ id: "front", side: "front", name: frontName }, { id: "back", side: "back", name: backName }],
+      selectedArtworkByFace: { front: frontArtwork, back: backArtwork },
+    };
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([doubleFace]), face: "front" });
+    const onBack = editorHistoryReducer(initial, { type: "set-face", side: "back" });
+    const updated: WorkingCard = {
+      ...doubleFace,
+      selectedArtworkByFace: {
+        ...doubleFace.selectedArtworkByFace,
+        back: { candidateId: "back-updated", source: "upload", identityId: "identity", faceId: "back", selectionPolicy: "user-selected" },
+      },
+    };
+    const edited = editorHistoryReducer(onBack, { type: "apply-artwork-selection", cardId: doubleFace.id, card: updated });
+
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    expect(undone.present.face).toBe("back");
+    expect(undone.present.cards[0].selectedArtworkByFace.back).toBe(backArtwork);
+    expect(undone.present.cards[0].selectedArtworkByFace.front).toBe(frontArtwork);
+
+    const redone = editorHistoryReducer(undone, { type: "redo" });
+    expect(redone.present.face).toBe("back");
+    expect(redone.present.cards[0].selectedArtworkByFace.back?.candidateId).toBe("back-updated");
+    expect(redone.present.cards[0].selectedArtworkByFace.front).toBe(frontArtwork);
+    expect(redone.present.cards[0].faces.some((face) => face.side === redone.present.face)).toBe(true);
+  });
+
+  it("undoes and redoes an explicit default artwork reset without changing the other face", () => {
+    const selectedBack = { candidateId: "back-user-choice", source: "upload" as const, identityId: null, faceId: "back" as const, selectionPolicy: "user-selected" };
+    const doubleFace: WorkingCard = {
+      ...card,
+      faces: [{ id: "front", side: "front" }, { id: "back", side: "back" }],
+      selectedArtworkByFace: { front: card.selectedArtworkByFace.front, back: selectedBack },
+    };
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([doubleFace]), face: "back" });
+    const reset: WorkingCard = {
+      ...doubleFace,
+      selectedArtworkByFace: {
+        ...doubleFace.selectedArtworkByFace,
+        back: { candidateId: "back-default", source: "scryfall", identityId: null, faceId: "back", selectionPolicy: "newest-en-highres-nondigital-v1" },
+      },
+    };
+    const edited = editorHistoryReducer(initial, { type: "apply-artwork-default", cardId: doubleFace.id, card: reset });
+
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    const redone = editorHistoryReducer(undone, { type: "redo" });
+
+    expect(undone.present.cards[0].selectedArtworkByFace.back).toBe(selectedBack);
+    expect(undone.present.cards[0].selectedArtworkByFace.front).toBe(doubleFace.selectedArtworkByFace.front);
+    expect(redone.present.cards[0].selectedArtworkByFace.back?.candidateId).toBe("back-default");
+    expect(redone.present.cards[0].selectedArtworkByFace.front).toBe(doubleFace.selectedArtworkByFace.front);
+  });
+
+  it("undoes and redoes a single-card re-resolve without another identity request", () => {
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card]), face: "front" });
+    const resolved: WorkingCard = {
+      ...card,
+      identity: { id: "resolved:identity", provider: "scryfall", name: "Resolved", resolutionMethod: "name", confidence: 0.9 },
+      identityResolution: { status: "resolved", method: "name", candidates: [], confirmed: false },
+    };
+    const edited = editorHistoryReducer(initial, { type: "apply-reresolve-result", cardId: card.id, card: resolved });
+
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    const redone = editorHistoryReducer(undone, { type: "redo" });
+
+    expect(undone.present.cards[0]).toBe(card);
+    expect(redone.present.cards[0]).toEqual(resolved);
+    expect(edited.past).toHaveLength(1);
+  });
+
+  it("does not record a no-op editorial result or discard an available Redo", () => {
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card]), face: "front" });
+    const edited = editorHistoryReducer(initial, { type: "set-quantity", cardId: card.id, quantity: 4 });
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    const noOp = editorHistoryReducer(undone, { type: "set-quantity", cardId: card.id, quantity: card.quantity });
+
+    expect(noOp.past).toHaveLength(0);
+    expect(noOp.future).toHaveLength(1);
+    expect(editorHistoryReducer(noOp, { type: "redo" }).present.cards[0]?.quantity).toBe(4);
+  });
+
+  it("does not add history for selection or face navigation", () => {
+    const doubleFace: WorkingCard = {
+      ...card,
+      faces: [{ id: "front", side: "front" }, { id: "back", side: "back" }],
+    };
+    const second: WorkingCard = { ...doubleFace, id: "second-card", order: 1 };
+    const initial = createEditorHistoryState({
+      ...createWorkingCardEditorState([doubleFace, second]),
+      face: "front",
+    });
+
+    const selected = editorHistoryReducer(initial, { type: "select-card", cardId: second.id });
+    const back = editorHistoryReducer(selected, { type: "set-face", side: "back" });
+
+    expect(back.present).toMatchObject({ selectedCardId: second.id, face: "back" });
+    expect(back.past).toHaveLength(0);
+    expect(back.future).toHaveLength(0);
+  });
+
+  it("keeps Redo after a failed operation and clears it only after a new mutation", () => {
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card]), face: "front" });
+    const edited = editorHistoryReducer(initial, { type: "set-quantity", cardId: card.id, quantity: 3 });
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    const failed = editorHistoryReducer(undone, { type: "set-quantity", cardId: card.id, quantity: 0 });
+
+    expect(failed.present.cards[0]?.quantity).toBe(card.quantity);
+    expect(failed.future).toHaveLength(1);
+    expect(failed.error).toMatch(/quantity/i);
+
+    const changed = editorHistoryReducer(failed, { type: "set-quantity", cardId: card.id, quantity: 4 });
+    expect(changed.future).toHaveLength(0);
+    expect(editorHistoryReducer(changed, { type: "redo" })).toBe(changed);
+  });
+
+  it("allows face navigation after a failed edit without recording history", () => {
+    const doubleFace: WorkingCard = {
+      ...card,
+      faces: [{ id: "front", side: "front" }, { id: "back", side: "back" }],
+    };
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([doubleFace]), face: "front" });
+    const failed = editorHistoryReducer(initial, { type: "set-quantity", cardId: doubleFace.id, quantity: 0 });
+
+    expect(failed.error).toMatch(/quantity/i);
+    const navigated = editorHistoryReducer(failed, { type: "set-face", side: "back" });
+
+    expect(navigated.present.face).toBe("back");
+    expect(navigated.error).toBeUndefined();
+    expect(navigated.past).toHaveLength(0);
+  });
+
+  it("clears both history stacks when a new Working Set is loaded", () => {
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card]), face: "front" });
+    const edited = editorHistoryReducer(initial, { type: "set-quantity", cardId: card.id, quantity: 3 });
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    const imported: WorkingCard = { ...card, id: "new-import", order: 0 };
+
+    const loaded = editorHistoryReducer(undone, { type: "load-cards", cards: [imported] });
+
+    expect(loaded.present.cards.map(({ id }) => id)).toEqual([imported.id]);
+    expect(loaded.past).toEqual([]);
+    expect(loaded.future).toEqual([]);
+  });
+
+  it("preserves Undo and Redo state when loading invalid cards fails", () => {
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card]), face: "front" });
+    const edited = editorHistoryReducer(initial, { type: "set-quantity", cardId: card.id, quantity: 4 });
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+
+    const failed = editorHistoryReducer(undone, { type: "load-cards", cards: [undefined as unknown as WorkingCard] });
+
+    expect(failed.present).toBe(undone.present);
+    expect(failed.past).toBe(undone.past);
+    expect(failed.future).toBe(undone.future);
+    expect(failed.error).toBeTruthy();
   });
 });

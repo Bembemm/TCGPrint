@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import Image from "next/image";
 import type { ImportKind } from "../../import-engine/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard } from "../../core/cards/types";
@@ -17,8 +17,21 @@ import {
   setWorkingCardQuantity,
   type WorkingCardEditorState,
 } from "../../core/cards/working-card-editor";
+import {
+  commitEditorHistory,
+  createEditorHistoryState,
+  editorHistoryShortcut,
+  isEditorTextEditingTarget,
+  redoEditorHistory,
+  resetEditorHistory,
+  undoEditorHistory,
+  updateEditorHistoryPresent,
+  type EditorHistoryState,
+  type EditorSnapshot,
+} from "../../core/cards/editor-history";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
 import { postArtworkSelection } from "./artwork-selection-request";
+import { clearRequestCache, createRequestCache, getOrCreateCachedRequest } from "./request-cache";
 import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
 import CutGuideControls from "./cut-guide-controls";
 import type { GuideColor } from "../../core/geometry";
@@ -37,6 +50,8 @@ interface Props {
 
 interface ApiErrorBody { readonly code?: string; readonly message?: string; }
 interface IdentityDetails extends CardIdentity { readonly layout?: string; readonly relatedCards: readonly { readonly id: string; readonly component: string; readonly name: string; readonly typeLine?: string }[]; }
+type ProviderHealth = Record<string, { available: boolean; degraded: boolean; message?: string }>;
+interface ArtworkCatalogResult { readonly candidates: CandidateDto[]; readonly providerHealth: ProviderHealth; }
 
 async function jsonResponse<T>(response: Response): Promise<T> {
   let body: unknown;
@@ -270,7 +285,11 @@ export interface EditorUiState extends WorkingCardEditorState {
   readonly face: CardFaceSide;
 }
 
-export type EditorAction =
+export interface EditorHistoryUiState extends EditorHistoryState {
+  readonly error?: string;
+}
+
+export type EditorCommandAction =
   | { readonly type: "load-cards"; readonly cards: readonly WorkingCard[] }
   | { readonly type: "replace-cards"; readonly cards: readonly WorkingCard[] }
   | { readonly type: "replace-card"; readonly cardId: string; readonly card: WorkingCard }
@@ -288,6 +307,10 @@ export type EditorAction =
   | { readonly type: "delete-card"; readonly cardId: string }
   | { readonly type: "set-face"; readonly side: CardFaceSide };
 
+export type EditorAction = EditorCommandAction
+  | { readonly type: "undo" }
+  | { readonly type: "redo" };
+
 function activeFaceFor(card: WorkingCard | undefined, preferredFace: CardFaceSide): CardFaceSide {
   if (!card) return "front";
   if (card.faces.some((item) => item.side === preferredFace)) return preferredFace;
@@ -304,7 +327,7 @@ function preserveActiveFace(state: EditorUiState, next: WorkingCardEditorState):
   return withActiveFace(next, state.face);
 }
 
-export function workingCardEditorReducer(state: EditorUiState, action: EditorAction): EditorUiState {
+export function workingCardEditorReducer(state: EditorUiState, action: EditorCommandAction): EditorUiState {
   try {
     switch (action.type) {
       case "load-cards": return withActiveFace(createWorkingCardEditorState(action.cards), "front");
@@ -333,17 +356,78 @@ export function workingCardEditorReducer(state: EditorUiState, action: EditorAct
   }
 }
 
+function snapshotFromEditorState(state: EditorUiState): EditorSnapshot {
+  return { cards: state.cards, selectedCardId: state.selectedCardId, face: state.face };
+}
+
+function isEditorialAction(action: EditorCommandAction): boolean {
+  switch (action.type) {
+    case "replace-cards":
+    case "replace-card":
+    case "apply-identity-result":
+    case "apply-custom-result":
+    case "apply-artwork-selection":
+    case "apply-artwork-default":
+    case "apply-reresolve-result":
+    case "apply-resolve-all-result":
+    case "set-quantity":
+    case "adjust-quantity":
+    case "move-card":
+    case "duplicate-card":
+    case "delete-card":
+      return true;
+    case "load-cards":
+    case "select-card":
+    case "set-face":
+      return false;
+  }
+}
+
+export function editorHistoryReducer(state: EditorHistoryUiState, action: EditorAction): EditorHistoryUiState {
+  if (action.type === "undo") {
+    const next = undoEditorHistory(state);
+    return next === state ? state : { ...next, error: undefined };
+  }
+  if (action.type === "redo") {
+    const next = redoEditorHistory(state);
+    return next === state ? state : { ...next, error: undefined };
+  }
+
+  const current: EditorUiState = { ...state.present, error: undefined };
+  const next = workingCardEditorReducer(current, action);
+  const nextSnapshot = snapshotFromEditorState(next);
+
+  if (next.error) return { ...state, error: next.error };
+  if (action.type === "load-cards") {
+    return { ...resetEditorHistory(state, nextSnapshot), error: undefined };
+  }
+
+  const nextHistory = isEditorialAction(action)
+    ? commitEditorHistory(state, nextSnapshot)
+    : updateEditorHistoryPresent(state, nextSnapshot);
+  return { ...nextHistory, error: undefined };
+}
+
 const initialEditorState: EditorUiState = { ...createWorkingCardEditorState([]), face: "front" };
+const initialEditorHistoryState: EditorHistoryUiState = createEditorHistoryState(initialEditorState);
 
 export default function CardIdentityWorkbench({ files, text, choices }: Props) {
-  const [editorState, dispatchEditor] = useReducer(workingCardEditorReducer, initialEditorState);
+  const [editorHistory, dispatchEditor] = useReducer(editorHistoryReducer, initialEditorHistoryState);
+  const editorState: EditorUiState = { ...editorHistory.present, error: editorHistory.error };
   const workingCards = editorState.cards;
   const selectedCardId = editorState.selectedCardId;
   const face = editorState.face;
   const [artworkCandidates, setArtworkCandidates] = useState<CandidateDto[]>([]);
+  const [artworkCatalogRevision, setArtworkCatalogRevision] = useState(0);
   const [artworkFilter, setArtworkFilter] = useState<ArtworkFilter>("all");
   const [manualQuery, setManualQuery] = useState("");
-  const [autocompleteNames, setAutocompleteNames] = useState<string[]>([]);
+  const [autocompleteEnabled, setAutocompleteEnabled] = useState(true);
+  const [autocompleteResults, setAutocompleteResults] = useState<{ query: string; names: string[] } | null>(null);
+  const manualQueryRef = useRef(manualQuery);
+  manualQueryRef.current = manualQuery;
+  const autocompleteNames = autocompleteEnabled && autocompleteResults?.query === manualQuery.trim()
+    ? autocompleteResults.names
+    : [];
   const [manualIdentities, setManualIdentities] = useState<CardIdentity[]>([]);
   const [bleedMm, setBleedMm] = useState("0.625");
   const [roundedCorners, setRoundedCorners] = useState(false);
@@ -356,71 +440,126 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
-  const [artworkProblem, setArtworkProblem] = useState("");
-  const [providerHealth, setProviderHealth] = useState<Record<string, { available: boolean; degraded: boolean; message?: string }>>({});
+  const [problemCardId, setProblemCardId] = useState<string | null>(null);
+  const [artworkProblem, setArtworkProblem] = useState<{ message: string; cardId: string; requestKey: string } | null>(null);
+  const [providerHealth, setProviderHealth] = useState<ProviderHealth>({});
   const [identityDetails, setIdentityDetails] = useState<IdentityDetails | null>(null);
+  const artworkCatalogRequests = useRef(createRequestCache<ArtworkCatalogResult>());
+  const identityDetailsRequests = useRef(createRequestCache<IdentityDetails>());
   const [pdfUrl, setPdfUrl] = useState("");
   const [bleedDiagnostics, setBleedDiagnostics] = useState<BleedDiagnosticsReport | null>(null);
+
+  function clearProblem(cardId: string | null = null) {
+    setProblem("");
+    setProblemCardId(cardId);
+  }
+
 
   const activeCard = useMemo(() => workingCards.find((card) => card.id === selectedCardId), [workingCards, selectedCardId]);
   const physicalCardCount = useMemo(() => workingCards.reduce((sum, card) => sum + card.quantity, 0), [workingCards]);
   const filterCards = useMemo(() => artworkCandidates.filter((candidate) => artworkFilter === "all" || candidate.source === artworkFilter), [artworkCandidates, artworkFilter]);
   const activeFaceExists = Boolean(activeCard?.faces.some((item) => item.side === face));
+  const activeIdentityId = activeCard?.identity?.id ?? null;
+  const artworkRequest = activeCard && activeFaceExists
+    ? {
+      identityId: activeIdentityId ?? "custom:artwork-picker",
+      faceId: face,
+      source: artworkFilter,
+      mpcReferences: activeCard.mpcReferences,
+      cacheKey: JSON.stringify([activeIdentityId, face, artworkFilter, activeCard.mpcReferences, artworkCatalogRevision]),
+    }
+    : null;
+  const visibleProblem = problem && (problemCardId === null || problemCardId === selectedCardId) ? problem : "";
+  const visibleArtworkProblem = artworkProblem
+    && artworkProblem.cardId === activeCard?.id
+    && artworkProblem.requestKey === artworkRequest?.cacheKey
+    ? artworkProblem.message
+    : "";
 
   useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
 
   useEffect(() => {
-    if (manualQuery.trim().length < 2) { setAutocompleteNames([]); return; }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || busy) return;
+      const target = event.target;
+      const textEditingFocused = target instanceof HTMLElement && isEditorTextEditingTarget(target);
+      const command = editorHistoryShortcut(event, textEditingFocused);
+      if (!command) return;
+      event.preventDefault();
+      dispatchEditor({ type: command });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy]);
+
+  useEffect(() => {
+    const query = manualQuery.trim();
+    if (!autocompleteEnabled || query.length < 2) { setAutocompleteResults(null); return; }
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const response = await fetch(`/api/cards/autocomplete?q=${encodeURIComponent(manualQuery.trim())}`, { signal: controller.signal });
+        const response = await fetch(`/api/cards/autocomplete?q=${encodeURIComponent(query)}`, { signal: controller.signal });
         const result = await jsonResponse<{ names: string[] }>(response);
-        setAutocompleteNames(result.names.slice(0, 8));
+        if (controller.signal.aborted || manualQueryRef.current.trim() !== query) return;
+        setAutocompleteResults({ query, names: result.names.slice(0, 8) });
       } catch (error) {
-        if (!controller.signal.aborted) setAutocompleteNames([]);
+        if (!controller.signal.aborted && manualQueryRef.current.trim() === query) setAutocompleteResults(null);
       }
     }, 180);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [manualQuery]);
+  }, [manualQuery, autocompleteEnabled]);
 
   useEffect(() => {
-    if (!activeCard || !activeFaceExists) { setArtworkCandidates([]); return; }
-    const controller = new AbortController();
-    const identityId = activeCard.identity?.id ?? "custom:artwork-picker";
-    void fetch(`/api/cards/${encodeURIComponent(identityId)}/artworks`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({ faceId: face, source: artworkFilter, mpcReferences: activeCard.mpcReferences }),
-    }).then((response) => jsonResponse<{ candidates: CandidateDto[]; providerHealth: typeof providerHealth }>(response))
+    if (!artworkRequest || !activeCard) { setArtworkCandidates([]); setArtworkProblem(null); return; }
+    setArtworkProblem(null);
+    const requestKey = artworkRequest.cacheKey;
+    const cardId = activeCard.id;
+    let current = true;
+    const request = getOrCreateCachedRequest(artworkCatalogRequests.current, artworkRequest.cacheKey, async () => {
+      const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ faceId: artworkRequest.faceId, source: artworkRequest.source, mpcReferences: artworkRequest.mpcReferences }),
+      });
+      return jsonResponse<ArtworkCatalogResult>(response);
+    });
+    void request
       .then((result) => {
+        if (!current) return;
         setArtworkCandidates(result.candidates);
         setProviderHealth((current) => ({ ...current, ...result.providerHealth }));
-        setArtworkProblem("");
+        setArtworkProblem(null);
       })
       .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
+        if (current) {
           setArtworkCandidates([]);
-          setArtworkProblem(error instanceof Error ? error.message : "Não foi possível abrir o catálogo de artes.");
+          setArtworkProblem({
+            message: error instanceof Error ? error.message : "Não foi possível abrir o catálogo de artes.",
+            cardId,
+            requestKey,
+          });
         }
       });
-    return () => controller.abort();
-  }, [activeCard, activeFaceExists, face, artworkFilter]);
+    return () => { current = false; };
+  }, [artworkRequest?.cacheKey, activeCard?.id]);
 
   useEffect(() => {
-    if (!activeCard?.identity) { setIdentityDetails(null); return; }
-    const controller = new AbortController();
-    void fetch(`/api/cards/${encodeURIComponent(activeCard.identity.id)}`, { signal: controller.signal })
-      .then((response) => jsonResponse<{ identity: IdentityDetails }>(response))
-      .then((result) => setIdentityDetails(result.identity))
-      .catch(() => { if (!controller.signal.aborted) setIdentityDetails(null); });
-    return () => controller.abort();
-  }, [activeCard?.identity?.id]);
+    if (!activeIdentityId) { setIdentityDetails(null); return; }
+    let current = true;
+    const request = getOrCreateCachedRequest(identityDetailsRequests.current, activeIdentityId, async () => {
+      const response = await fetch(`/api/cards/${encodeURIComponent(activeIdentityId)}`);
+      const result = await jsonResponse<{ identity: IdentityDetails }>(response);
+      return result.identity;
+    });
+    void request
+      .then((identity) => { if (current) setIdentityDetails(identity); })
+      .catch(() => { if (current) setIdentityDetails(null); });
+    return () => { current = false; };
+  }, [activeIdentityId]);
 
   async function importToWorkingSet() {
-    if (!files.length && !text.trim()) { setProblem("Adicione arquivos ou cole uma decklist antes de importar."); return; }
-    setBusy(true); setProblem(""); setStatus("Universal Import → Working Set…"); setPdfUrl("");
+    if (!files.length && !text.trim()) { clearProblem(); setProblem("Adicione arquivos ou cole uma decklist antes de importar."); return; }
+    setBusy(true); clearProblem(); setStatus("Universal Import → Working Set…"); setPdfUrl("");
     try {
       const form = new FormData();
       files.forEach((file) => form.append("files", file, file.name));
@@ -429,6 +568,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       form.set("selections", JSON.stringify(choices));
       const response = await fetch("/api/cards/import", { method: "POST", body: form });
       const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth: typeof providerHealth }>(response);
+      clearRequestCache(artworkCatalogRequests.current);
+      setArtworkCatalogRevision((revision) => revision + 1);
+      setArtworkCandidates([]);
+      setArtworkProblem(null);
       dispatchEditor({ type: "load-cards", cards: result.workingCards });
       setArtworkFilter("all"); setManualIdentities([]);
       setProviderHealth(result.providerHealth);
@@ -440,7 +583,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
   async function resolveAll() {
     if (!workingCards.length) return;
-    setBusy(true); setProblem(""); setStatus("Resolvendo identidades pelo Scryfall…");
+    setBusy(true); clearProblem(); setStatus("Resolvendo identidades pelo Scryfall…");
     try {
       const response = await fetch("/api/cards/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resolve", cards: workingCards }) });
       const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth: typeof providerHealth }>(response);
@@ -451,7 +594,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   }
 
   async function reresolveCard(card: WorkingCard) {
-    setBusy(true); setProblem(""); setStatus("Re-resolvendo esta entrada pelos hints e origem importados…");
+    setBusy(true); clearProblem(card.id); setStatus("Re-resolvendo esta entrada pelos hints e origem importados…");
     try {
       const response = await fetch("/api/cards/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reresolve", card }) });
       const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth: typeof providerHealth }>(response);
@@ -463,8 +606,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   }
 
   async function confirmIdentity(card: WorkingCard, identity: CardIdentity) {
-    if (!identity.scryfallId) { setProblem("A identidade escolhida não tem Scryfall ID."); return; }
-    setBusy(true); setProblem("");
+    if (!identity.scryfallId) { clearProblem(card.id); setProblem("A identidade escolhida não tem Scryfall ID."); return; }
+    setBusy(true); clearProblem(card.id);
     try {
       const response = await fetch("/api/cards/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "confirm", card, scryfallId: identity.scryfallId }) });
       const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth: typeof providerHealth }>(response);
@@ -475,7 +618,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   }
 
   async function keepCustom(card: WorkingCard) {
-    setBusy(true); setProblem("");
+    setBusy(true); clearProblem(card.id);
     try {
       const response = await fetch("/api/cards/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "custom", cards: [card] }) });
       const result = await jsonResponse<{ workingCards: WorkingCard[] }>(response);
@@ -487,7 +630,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   async function searchIdentities(query = manualQuery) {
     const trimmed = query.trim();
     if (trimmed.length < 2) return;
-    setBusy(true); setProblem("");
+    const problemCardId = selectedCardId;
+    setAutocompleteEnabled(false);
+    setAutocompleteResults(null);
+    setBusy(true); clearProblem(problemCardId);
     try {
       const response = await fetch(`/api/cards/search?q=${encodeURIComponent(trimmed)}`);
       const result = await jsonResponse<{ identities: CardIdentity[] }>(response);
@@ -498,8 +644,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   }
 
   async function chooseArtwork(candidate: CandidateDto) {
-    if (!activeCard) return;
-    setBusy(true); setArtworkProblem(""); setProblem("");
+    if (!activeCard || !artworkRequest) return;
+    const problemCardId = activeCard.id;
+    const problemRequestKey = artworkRequest.cacheKey;
+    setBusy(true); setArtworkProblem(null); clearProblem(problemCardId);
     try {
       if (candidate.originalAvailable) {
         const prepareResponse = await fetch(`/api/cards/artworks/${encodeURIComponent(candidate.id)}/prepare`, { method: "POST" });
@@ -510,12 +658,20 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       const result = await jsonResponse<{ workingCards: WorkingCard[] }>(response);
       dispatchEditor({ type: "apply-artwork-selection", cardId: activeCard.id, card: result.workingCards[0] });
       setStatus(candidate.originalAvailable ? "Artwork selecionado; original validado e armazenado no cache." : "Referência MPC selecionada; nenhum original local está disponível.");
-    } catch (error) { setArtworkProblem(error instanceof Error ? error.message : "Não foi possível selecionar essa arte."); }
+    } catch (error) {
+      setArtworkProblem({
+        message: error instanceof Error ? error.message : "Não foi possível selecionar essa arte.",
+        cardId: problemCardId,
+        requestKey: problemRequestKey,
+      });
+    }
     finally { setBusy(false); }
   }
 
   async function restoreArtworkDefault(card: WorkingCard, side: CardFaceSide) {
-    setBusy(true); setArtworkProblem(""); setProblem("");
+    if (!artworkRequest) return;
+    const problemRequestKey = artworkRequest.cacheKey;
+    setBusy(true); setArtworkProblem(null); clearProblem(card.id);
     try {
       const response = await fetch("/api/cards/resolve", {
         method: "POST",
@@ -526,14 +682,20 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       dispatchEditor({ type: "apply-artwork-default", cardId: card.id, card: result.workingCards[0] });
       setProviderHealth(result.providerHealth);
       setStatus(`Artwork padrão restaurada em ${side === "front" ? "Front" : "Back"}.`);
-    } catch (error) { setArtworkProblem(error instanceof Error ? error.message : "Não foi possível restaurar a artwork padrão desta face."); }
+    } catch (error) {
+      setArtworkProblem({
+        message: error instanceof Error ? error.message : "Não foi possível restaurar a artwork padrão desta face.",
+        cardId: card.id,
+        requestKey: problemRequestKey,
+      });
+    }
     finally { setBusy(false); }
   }
 
   async function exportPdf() {
     if (!workingCards.length) return;
     setBleedDiagnostics(null);
-    setBusy(true); setProblem(""); setStatus("Compondo quantidade física e gerando PDF A4…");
+    setBusy(true); clearProblem(); setStatus("Compondo quantidade física e gerando PDF A4…");
     try {
       const response = await fetch("/api/cards/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -575,9 +737,13 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       <div className="action-row phase5-actions">
         <button className="button primary" type="button" onClick={importToWorkingSet} disabled={busy}>{busy ? "Processando…" : "Universal Import → Working Set"}</button>
         <button className="button secondary" type="button" onClick={resolveAll} disabled={busy || !workingCards.length}>Resolver identidades</button>
+        <div className="editor-history-controls" role="group" aria-label="Histórico do editor">
+          <button className="button secondary" type="button" aria-label="Desfazer" aria-keyshortcuts="Control+Z Meta+Z" disabled={busy || editorHistory.past.length === 0} onClick={() => dispatchEditor({ type: "undo" })}>Desfazer</button>
+          <button className="button secondary" type="button" aria-label="Refazer" aria-keyshortcuts="Control+Y Meta+Y Control+Shift+Z Meta+Shift+Z" disabled={busy || editorHistory.future.length === 0} onClick={() => dispatchEditor({ type: "redo" })}>Refazer</button>
+        </div>
         <span className="status" aria-live="polite">{status}</span>
       </div>
-      {(problem || editorState.error) && <p className="error-message" role="alert">{problem || editorState.error}</p>}
+      {(visibleProblem || editorState.error) && <p className="error-message" role="alert">{visibleProblem || editorState.error}</p>}
 
       {workingCards.length > 0 && <div className="card-workbench-layout">
         <WorkingCardList
@@ -585,7 +751,11 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           selectedCardId={selectedCardId}
           physicalCardCount={physicalCardCount}
           disabled={busy}
-          onSelect={(cardId) => dispatchEditor({ type: "select-card", cardId })}
+          onSelect={(cardId) => {
+            if (problemCardId !== null && problemCardId !== cardId) clearProblem();
+            setArtworkProblem(null);
+            dispatchEditor({ type: "select-card", cardId });
+          }}
           onQuantityCommit={(cardId, value) => dispatchEditor({ type: "set-quantity", cardId, quantity: Number(value) })}
           onQuantityAdjust={(cardId, delta) => dispatchEditor({ type: "adjust-quantity", cardId, delta })}
           onMove={(cardId, targetIndex) => dispatchEditor({ type: "move-card", cardId, targetIndex })}
@@ -617,10 +787,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           <div className="manual-identity-search">
             <label className="field-label" htmlFor="manual-card-search">Escolher outra identidade</label>
             <div className="manual-search-row">
-              <input id="manual-card-search" value={manualQuery} onChange={(event) => setManualQuery(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") void searchIdentities(); }} placeholder="Nome da carta" />
+              <input id="manual-card-search" value={manualQuery} onChange={(event) => { setAutocompleteEnabled(true); setManualQuery(event.currentTarget.value); }} onKeyDown={(event) => { if (event.key === "Enter") void searchIdentities(); }} placeholder="Nome da carta" />
               <button className="button secondary" type="button" disabled={busy || manualQuery.trim().length < 2} onClick={() => void searchIdentities()}>Buscar</button>
             </div>
-            {autocompleteNames.length > 0 && <div className="autocomplete-list" role="listbox" aria-label="Autocompletar carta">
+            {autocompleteEnabled && autocompleteNames.length > 0 && <div className="autocomplete-list" role="listbox" aria-label="Autocompletar carta">
               {autocompleteNames.map((name) => <button type="button" role="option" key={name} onClick={() => { setManualQuery(name); void searchIdentities(name); }}>{name}</button>)}
             </div>}
             {manualIdentities.map((identity) => <div className="identity-option manual-result" key={identity.id}>
@@ -650,8 +820,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
               onClick={() => void restoreArtworkDefault(activeCard, face)}
             >Restaurar artwork padrão desta face</button>
             {!activeCard.identity && <p className="muted">Não há identidade resolvida para determinar uma artwork padrão.</p>}
-            {artworkProblem && <p className="error-message" role="alert">{artworkProblem}</p>}
-            {filterCards.length === 0 && !artworkProblem && <p className="muted">Nenhuma arte disponível neste filtro. Referências MPC não possuem original se não foram importadas localmente.</p>}
+            {visibleArtworkProblem && <p className="error-message" role="alert">{visibleArtworkProblem}</p>}
+            {filterCards.length === 0 && !visibleArtworkProblem && <p className="muted">Nenhuma arte disponível neste filtro. Referências MPC não possuem original se não foram importadas localmente.</p>}
             <div className="artwork-grid">
               {filterCards.map((candidate) => {
                 const isSelected = selected?.candidateId === candidate.id;

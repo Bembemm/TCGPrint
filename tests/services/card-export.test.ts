@@ -10,7 +10,8 @@ import { createCardWorkbench } from "../../services/card-workbench";
 import { handleCardExport } from "../../services/card-api";
 import { exportWorkingCards, exportWorkingCardsWithDiagnostics } from "../../services/card-export";
 import { PAPER_FORMATS } from "../../core/geometry";
-import { createWorkingCardEditorState, deleteWorkingCard, duplicateWorkingCard, moveWorkingCard } from "../../core/cards/working-card-editor";
+import { createWorkingCardEditorState, deleteWorkingCard, duplicateWorkingCard, moveWorkingCard, setWorkingCardQuantity } from "../../core/cards/working-card-editor";
+import { commitEditorHistory, createEditorHistoryState, redoEditorHistory, undoEditorHistory } from "../../core/cards/editor-history";
 import { BleedEngine } from "../../image-engine/bleed";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 import type { ArtworkCandidate, WorkingCard } from "../../core/cards/types";
@@ -286,7 +287,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
   });
 
   it("exports edited order, keeps quantity compact until composition, and includes/removes duplicated entries", async () => {
-    const names = ["A", "B", "C", "B-back"] as const;
+    const names = ["A", "B", "C", "B-back", "B-after"] as const;
     const bytesByName = new Map<string, Uint8Array>();
     const candidates: Record<string, ArtworkCandidate> = {};
     for (const [index, name] of names.entries()) {
@@ -351,5 +352,41 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     expect(catalog.getArtworkCandidate.mock.calls.slice(6).map(([id]) => id)).toEqual([
       "scryfall:B", "scryfall:B",
     ]);
+
+    let history = commitEditorHistory(
+      createEditorHistoryState({ ...initial, face: "front" }),
+      { ...reordered, face: "front" },
+    );
+    const quantityUpdated = setWorkingCardQuantity({
+      cards: history.present.cards,
+      selectedCardId: history.present.selectedCardId,
+    }, "working-A", 3);
+    history = commitEditorHistory(history, { ...quantityUpdated, face: history.present.face });
+    const artworkUpdated = history.present.cards.map((item) => item.id === "working-B"
+      ? {
+        ...item,
+        selectedArtworkByFace: {
+          ...item.selectedArtworkByFace,
+          front: { ...item.selectedArtworkByFace.front!, candidateId: "scryfall:B-after" },
+        },
+      }
+      : item);
+    history = commitEditorHistory(history, { ...history.present, cards: artworkUpdated });
+
+    history = undoEditorHistory(undoEditorHistory(undoEditorHistory(history)));
+    expect(history.present.cards.map(({ id, quantity, order }) => [id, quantity, order])).toEqual([
+      ["working-A", 2, 0], ["working-B", 1, 1], ["working-C", 1, 2],
+    ]);
+    expect(history.present.cards[1].selectedArtworkByFace.front?.candidateId).toBe("scryfall:B");
+    await exportWorkingCardsWithDiagnostics(catalog, history.present.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
+    expect(exportedNames(pdfGenerate.mock.calls[3][0].images)).toEqual(["A", "A", "B", "C"]);
+
+    history = redoEditorHistory(redoEditorHistory(redoEditorHistory(history)));
+    expect(history.present.cards.map(({ id, quantity, order }) => [id, quantity, order])).toEqual([
+      ["working-C", 1, 0], ["working-A", 3, 1], ["working-B", 1, 2],
+    ]);
+    expect(history.present.cards[2].selectedArtworkByFace.front?.candidateId).toBe("scryfall:B-after");
+    await exportWorkingCardsWithDiagnostics(catalog, history.present.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
+    expect(exportedNames(pdfGenerate.mock.calls[4][0].images)).toEqual(["C", "A", "A", "A", "B-after"]);
   });
 });

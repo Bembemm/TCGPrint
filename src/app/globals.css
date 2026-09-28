@@ -140,6 +140,7 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .provider-health span { border: 1px solid #ccd4db; border-radius: 3px; padding: 4px 6px; background: #f8fafb; color: #40505e; font-size: 10px; white-space: nowrap; }
 .provider-health .health-degraded { border-color: #d6b47d; background: #fff8e9; color: #77561e; }
 .phase5-actions { margin: 0 0 13px; }
+.editor-history-controls { display: flex; align-items: center; gap: 8px; }
 .card-workbench-layout { display: grid; grid-template-columns: minmax(290px, 0.9fr) minmax(0, 1.8fr); gap: 14px; margin-top: 16px; align-items: start; }
 .working-card-list, .working-card-detail { min-width: 0; border: 1px solid #d4dbe1; border-radius: 4px; background: #fff; }
 .compact-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; border-bottom: 1px solid #e0e5e9; color: #263544; font-size: 12px; }
