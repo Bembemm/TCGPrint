@@ -24,7 +24,11 @@ export interface ProjectDto extends ProjectSummaryDto {
   readonly snapshot: ProjectSnapshotV1;
 }
 
-const MAX_PROJECT_SAVE_REQUEST_BYTES = MAX_PROJECT_SNAPSHOT_BYTES + 1_024;
+// Bound the transport allowance to the compact wrapper with the largest valid revision.
+const MAX_PROJECT_SAVE_ENVELOPE_BYTES = new TextEncoder().encode(
+  JSON.stringify({ expectedRevision: Number.MAX_SAFE_INTEGER, snapshot: null }),
+).byteLength - new TextEncoder().encode("null").byteLength;
+const MAX_PROJECT_SAVE_REQUEST_BYTES = MAX_PROJECT_SNAPSHOT_BYTES + MAX_PROJECT_SAVE_ENVELOPE_BYTES;
 
 class ProjectApiRequestError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {

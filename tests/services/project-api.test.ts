@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkingCard } from "../../core/cards/types";
 import { openProjectDatabase } from "../../persistence/projects/database";
 import { ProjectRepository } from "../../persistence/projects/repository";
@@ -278,6 +278,48 @@ describe("project API service", () => {
     expect(await response.json()).toMatchObject({ code: "FUTURE_PROJECT_SCHEMA_VERSION" });
     expect(opened.revision).toBe(1);
     expect(opened.snapshot.cards).toEqual([]);
+  });
+
+  it("rejects a chunked body beyond the snapshot and maximum envelope before parsing or mutating", async () => {
+    const projects = setup();
+    const created = projects.create(snapshot());
+    const compactBody = new TextEncoder().encode(JSON.stringify({ expectedRevision: 1, snapshot: snapshot() }));
+    const bytes = new Uint8Array(MAX_PROJECT_SNAPSHOT_BYTES + 50);
+    bytes.set(compactBody);
+    bytes.fill(0x20, compactBody.byteLength);
+    let offset = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset === bytes.byteLength) {
+          controller.close();
+          return;
+        }
+        const end = Math.min(offset + 64 * 1024, bytes.byteLength);
+        controller.enqueue(bytes.subarray(offset, end));
+        offset = end;
+      },
+    });
+    const streamedRequest = new Request("http://localhost/api/projects/project-1", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: stream,
+      duplex: "half",
+    } as RequestInit);
+    const parse = vi.spyOn(JSON, "parse");
+
+    expect(streamedRequest.headers.get("content-length")).toBeNull();
+    try {
+      const response = await handleProjectSave(streamedRequest, created.id, projects);
+
+      expect(response.status).toBe(413);
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
+
+    const unchanged = projects.open(created.id);
+    expect(unchanged.revision).toBe(1);
+    expect(unchanged.snapshot).toEqual(snapshot());
   });
 
   it("rejects oversized save bodies before parsing or mutating the project", async () => {
