@@ -34,6 +34,11 @@ export function migrateProjectDatabase(database: Database.Database): number {
   if (version === PROJECT_DATABASE_SCHEMA_VERSION) return version;
 
   const migrate = database.transaction(() => {
+    version = Number(database.pragma("user_version", { simple: true }));
+    if (version > PROJECT_DATABASE_SCHEMA_VERSION) {
+      throw new Error(`Project database schema ${version} is newer than this application supports (${PROJECT_DATABASE_SCHEMA_VERSION}).`);
+    }
+    if (version === PROJECT_DATABASE_SCHEMA_VERSION) return;
     if (version < 1) {
       migrateToV1(database);
       database.pragma("user_version = 1");

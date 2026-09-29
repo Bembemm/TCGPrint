@@ -236,7 +236,9 @@ function identityResolution(value: unknown, currentIdentity: CardIdentity | null
     };
   });
   const confirmed = boolean(source.confirmed, `${path}.confirmed`);
-  if (confirmed && currentIdentity === null) invalid(path, "cannot confirm an identity when identity is null.");
+  if (confirmed && currentIdentity === null && status !== "custom") {
+    invalid(path, "cannot confirm an identity without a current CardIdentity unless status is custom.");
+  }
   if (status === "custom" && currentIdentity !== null) invalid(path, "cannot have a custom status with a resolved identity.");
   return {
     status: status as IdentityResolution["status"],
@@ -359,6 +361,11 @@ function persistedCard(value: unknown, index: number): PersistedWorkingCard {
     selectedArtworkByFace[side] = selectedArtwork(selectionsSource[side], side, `${path}.selectedArtworkByFace.${side}`);
   }
   const localArtworkIds = stringArray(source.localArtworkIds, `${path}.localArtworkIds`, 200, 80);
+  localArtworkIds.forEach((artworkId, index) => {
+    if (!isSafeArtworkCandidateId(artworkId) || !artworkId.startsWith("upload:")) {
+      invalid(`${path}.localArtworkIds[${index}]`, "must be a valid local upload artwork ID.");
+    }
+  });
   const mpcReferences = array(source.mpcReferences, `${path}.mpcReferences`, 200)
     .map((reference, referenceIndex) => {
       const referencePath = `${path}.mpcReferences[${referenceIndex}]`;

@@ -116,13 +116,16 @@ export class ProjectRepository {
   }
 
   create(initialSnapshot: ProjectSnapshotV1 = emptySnapshot()): ProjectRecord {
-    const snapshot = deserializeProjectSnapshot(initialSnapshot);
-    return this.insertFreshProject(DEFAULT_PROJECT_NAME, snapshot);
+    return this.insertFreshProject(DEFAULT_PROJECT_NAME, initialSnapshot);
   }
 
   duplicate(projectId: string): ProjectRecord {
-    const original = this.open(projectId);
-    return this.insertFreshProject(`${original.name} (cópia)`, original.snapshot);
+    return this.database.transaction(() => {
+      const original = this.open(projectId);
+      const duplicate = this.freshProjectRecord(`${original.name} (cópia)`, original.snapshot);
+      this.insertProject(duplicate);
+      return duplicate;
+    }).immediate();
   }
 
   delete(projectId: string): void {
@@ -224,7 +227,7 @@ export class ProjectRepository {
         updatedAt: now,
         autosavedAt: now,
       };
-    })();
+    }).immediate();
   }
 
   discardRecovery(projectId: string): void {
@@ -239,26 +242,43 @@ export class ProjectRepository {
   }
 
   private insertFreshProject(name: string, snapshot: ProjectSnapshotV1): ProjectRecord {
-    const snapshotJson = serializeProjectSnapshot(snapshot.cards, snapshot.settings);
+    const project = this.freshProjectRecord(name, snapshot);
+    this.database.transaction(() => this.insertProject(project)).immediate();
+    return project;
+  }
+
+  private freshProjectRecord(name: string, snapshot: ProjectSnapshotV1): ProjectRecord {
+    const validatedSnapshot = deserializeProjectSnapshot(snapshot);
     const id = this.newProjectId();
     const now = this.timestamp();
-    this.database.transaction(() => {
-      this.database.prepare(`
-        INSERT INTO projects
-          (id, name, project_schema_version, revision, snapshot_json, created_at, updated_at, autosaved_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, name, snapshot.projectSchemaVersion, INITIAL_PROJECT_REVISION, snapshotJson, now, now, now);
-    }).immediate();
     return {
       id,
       name,
-      projectSchemaVersion: snapshot.projectSchemaVersion,
+      projectSchemaVersion: validatedSnapshot.projectSchemaVersion,
       revision: INITIAL_PROJECT_REVISION,
-      snapshot,
+      snapshot: validatedSnapshot,
       createdAt: now,
       updatedAt: now,
       autosavedAt: now,
     };
+  }
+
+  private insertProject(project: ProjectRecord): void {
+    const snapshotJson = serializeProjectSnapshot(project.snapshot.cards, project.snapshot.settings);
+    this.database.prepare(`
+      INSERT INTO projects
+        (id, name, project_schema_version, revision, snapshot_json, created_at, updated_at, autosaved_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      project.id,
+      project.name,
+      project.projectSchemaVersion,
+      project.revision,
+      snapshotJson,
+      project.createdAt,
+      project.updatedAt,
+      project.autosavedAt,
+    );
   }
 
   save(projectId: string, expectedRevision: number, nextSnapshot: ProjectSnapshotV1): ProjectRecord {

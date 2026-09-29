@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { chmodSync, mkdirSync, statSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
-import { openProjectDatabase } from "../../persistence/projects/database";
+import { openProjectDatabase, projectDatabasePath } from "../../persistence/projects/database";
 import { migrateProjectDatabase } from "../../persistence/projects/migrations";
 
 describe("project database", () => {
@@ -25,6 +26,35 @@ describe("project database", () => {
     expect(database.pragma("user_version", { simple: true })).toBe(1);
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
       .toEqual([{ name: "project_recovery" }, { name: "projects" }]);
+  });
+
+  it("resolves the projects database beneath an explicit application data directory", () => {
+    const dataDirectory = join(tmpdir(), "tcgprint-custom-data-root");
+
+    expect(projectDatabasePath(dataDirectory)).toBe(join(dataDirectory, ".tcgprint", "projects.sqlite"));
+  });
+
+  it.skipIf(process.platform === "win32")("restricts the projects database directory to owner-only access", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "tcgprint-project-private-dir-"));
+    temporaryDirectories.push(dataDirectory);
+    const databasePath = projectDatabasePath(dataDirectory);
+    const databaseDirectory = dirname(databasePath);
+    mkdirSync(databaseDirectory, { recursive: true });
+    chmodSync(databaseDirectory, 0o755);
+
+    database = openProjectDatabase(databasePath);
+
+    expect(statSync(databaseDirectory).mode & 0o777).toBe(0o700);
+  });
+
+  it.skipIf(process.platform === "win32")("does not change permissions on an explicitly supplied external database directory", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tcgprint-project-external-dir-"));
+    temporaryDirectories.push(directory);
+    chmodSync(directory, 0o755);
+
+    database = openProjectDatabase(join(directory, "projects.sqlite"));
+
+    expect(statSync(directory).mode & 0o777).toBe(0o755);
   });
 
   it("rejects a future database schema without modifying its contents", async () => {
@@ -54,6 +84,30 @@ describe("project database", () => {
     database.prepare("DELETE FROM projects WHERE id = ?").run("project-1");
 
     expect(database.prepare("SELECT project_id FROM project_recovery").all()).toEqual([]);
+  });
+
+  it("rechecks the schema version after another connection migrates before the write lock is acquired", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tcgprint-project-migration-race-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "projects.sqlite");
+    const competingDatabase = new Database(path);
+    const migratingDatabase = new Database(path);
+    const originalTransaction = migratingDatabase.transaction.bind(migratingDatabase);
+    const transactionSpy = vi.spyOn(migratingDatabase, "transaction").mockImplementation((callback) => {
+      migrateProjectDatabase(competingDatabase);
+      return originalTransaction(callback);
+    });
+
+    try {
+      expect(migrateProjectDatabase(migratingDatabase)).toBe(1);
+      expect(migratingDatabase.pragma("user_version", { simple: true })).toBe(1);
+      expect(migratingDatabase.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
+        .toEqual([{ name: "project_recovery" }, { name: "projects" }]);
+    } finally {
+      transactionSpy.mockRestore();
+      migratingDatabase.close();
+      competingDatabase.close();
+    }
   });
 
   it("rolls back partial DDL and user_version when a migration fails", () => {

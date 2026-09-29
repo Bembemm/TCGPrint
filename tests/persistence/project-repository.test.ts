@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import type { WorkingCard } from "../../core/cards/types";
 import { openProjectDatabase } from "../../persistence/projects/database";
 import { ProjectRepository } from "../../persistence/projects/repository";
@@ -73,6 +74,37 @@ describe("project repository", () => {
     }]);
     expect(projects.open("project-1")).toEqual(created);
     expect(projects.get("missing-project")).toBeUndefined();
+  });
+
+  it("creates and saves a project with a confirmed custom card identity", async () => {
+    const projects = await setup();
+    const customCard: WorkingCard = {
+      id: "working-card-custom",
+      quantity: 1,
+      order: 0,
+      importSource: { sourceId: "source-custom", importKind: "text", entryKind: "card" },
+      identityHints: { name: "Custom card" },
+      identity: null,
+      identityResolution: { status: "custom", method: "custom", candidates: [], confirmed: true },
+      faces: [{ id: "front", side: "front", name: "Custom card" }],
+      selectedArtworkByFace: {},
+      localArtworkIds: [],
+      mpcReferences: [],
+      faceAssociations: [],
+    };
+    const initialSnapshot = {
+      projectSchemaVersion: 1 as const,
+      cards: [customCard],
+      settings: DEFAULT_PROJECT_SETTINGS,
+    };
+
+    const created = projects.create(initialSnapshot);
+    const saved = projects.save(created.id, created.revision, created.snapshot);
+
+    expect(created.snapshot.cards[0].identity).toBeNull();
+    expect(created.snapshot.cards[0].identityResolution).toEqual(customCard.identityResolution);
+    expect(saved.revision).toBe(2);
+    expect(saved.snapshot.cards[0].identityResolution).toEqual(customCard.identityResolution);
   });
 
   it("increments revisions with compare-and-swap and rejects stale writes", async () => {
@@ -152,6 +184,53 @@ describe("project repository", () => {
     expect(duplicate.snapshot.cards.map(({ id }) => id)).toEqual(["working-card-stable-id"]);
     expect(duplicate.snapshot).toEqual(original.snapshot);
     expect(duplicate.snapshot).not.toBe(original.snapshot);
+    expect(projects.open(original.id)).toEqual(original);
+  });
+
+  it("duplicates under one write transaction so another connection cannot delete the source between read and insert", async () => {
+    const projects = await setup();
+    const original = projects.create();
+    const competingDatabase = new Database(join(directory!, "projects.sqlite"), { timeout: 0 });
+    let competingError: unknown;
+    const duplicateRepository = new ProjectRepository(database!, {
+      idFactory: () => {
+        try {
+          competingDatabase.prepare("DELETE FROM projects WHERE id = ?").run(original.id);
+        } catch (error) {
+          competingError = error;
+        }
+        return "project-copy";
+      },
+      now: () => "2026-01-01T00:00:10.000Z",
+    });
+
+    try {
+      const duplicate = duplicateRepository.duplicate(original.id);
+
+      expect(competingError).toMatchObject({ code: "SQLITE_BUSY" });
+      expect(duplicate.name).toBe("Novo projeto (cópia)");
+      expect(duplicate.revision).toBe(1);
+      expect(duplicate.snapshot).toEqual(original.snapshot);
+      expect(projects.open(original.id)).toEqual(original);
+      expect(projects.open(duplicate.id)).toEqual(duplicate);
+    } finally {
+      competingDatabase.close();
+    }
+  });
+
+  it("leaves no duplicate when insertion fails", async () => {
+    const projects = await setup();
+    const original = projects.create();
+    database!.exec(`
+      CREATE TRIGGER reject_project_copy
+      BEFORE INSERT ON projects
+      WHEN NEW.name = 'Novo projeto (cópia)'
+      BEGIN SELECT RAISE(ABORT, 'project copy insert blocked'); END
+    `);
+
+    expect(() => projects.duplicate(original.id)).toThrow(/project copy insert blocked/);
+
+    expect(projects.list().map(({ id }) => id)).toEqual([original.id]);
     expect(projects.open(original.id)).toEqual(original);
   });
 

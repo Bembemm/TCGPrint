@@ -134,11 +134,58 @@ describe("project snapshot serializer", () => {
       .toThrowError(expect.objectContaining({ code: "INVALID_PROJECT_SNAPSHOT" }));
   });
 
-  it("rejects confirmed resolution without a current identity", () => {
+  it("round-trips a confirmed custom identity resolution without a CardIdentity", () => {
     const card: WorkingCard = {
       ...singleFaceCard(),
-      identityResolution: { status: "suggested", candidates: [], confirmed: true },
+      identity: null,
+      identityResolution: { status: "custom", method: "custom", candidates: [], confirmed: true },
     };
+
+    const snapshot = deserializeProjectSnapshot(serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS));
+
+    expect(snapshot.cards[0].identity).toBeNull();
+    expect(snapshot.cards[0].identityResolution).toEqual({
+      status: "custom",
+      method: "custom",
+      candidates: [],
+      confirmed: true,
+    });
+  });
+
+  it("round-trips an unconfirmed custom identity resolution from import", () => {
+    const card: WorkingCard = {
+      ...singleFaceCard(),
+      identity: null,
+      identityResolution: { status: "custom", candidates: [], confirmed: false },
+    };
+
+    const snapshot = deserializeProjectSnapshot(serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS));
+
+    expect(snapshot.cards[0].identity).toBeNull();
+    expect(snapshot.cards[0].identityResolution).toEqual({ status: "custom", candidates: [], confirmed: false });
+  });
+
+  it.each(["unresolved", "suggested", "ambiguous", "resolved"] as const)(
+    "rejects confirmed %s resolution without a current identity",
+    (status) => {
+      const card: WorkingCard = {
+        ...singleFaceCard(),
+        identity: null,
+        identityResolution: { status, candidates: [], confirmed: true },
+      };
+
+      expect(() => serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS))
+        .toThrowError(expect.objectContaining({ code: "INVALID_PROJECT_SNAPSHOT" }));
+    },
+  );
+
+  it.each([
+    ["malformed upload ID", "upload:abc"],
+    ["uppercase upload hash", `upload:${"A".repeat(64)}`],
+    ["Scryfall candidate ID", `scryfall:${"a".repeat(36)}:front`],
+    ["MPC candidate ID", `mpc:${"a".repeat(64)}`],
+  ])("rejects %s in localArtworkIds", (_description, localArtworkId) => {
+    const card: WorkingCard = { ...singleFaceCard(), localArtworkIds: [localArtworkId] };
 
     expect(() => serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS))
       .toThrowError(expect.objectContaining({ code: "INVALID_PROJECT_SNAPSHOT" }));
