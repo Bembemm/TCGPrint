@@ -177,7 +177,7 @@ outside bleed sampled the interior rather than extending a dominant black
 band. Pixel-by-pixel comparison of every trim pixel passed for both modes on
 all three assets (331,840 trim pixels per image). The real-art matrix and full
 per-side report are local-only at
-`/home/agent/.hermes/cache/scratch/tcgprint-phase5-5-evidence/smart-border-real/`
+evidência histórica gerada fora do repositório
 and are not committed. These measurements document the rejected approach only;
 the renderer and matrix are not active project requirements.
 
