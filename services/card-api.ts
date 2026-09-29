@@ -2,6 +2,8 @@ import { artworkQualityFromCandidate, type CardWorkbench } from "./card-workbenc
 import { CardExportServiceError, exportWorkingCardsWithDiagnostics, type CardExportBleedDiagnostic } from "./card-export";
 import type { ArtworkCatalogSource } from "../artwork/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
+import { isSafeArtworkCandidateId } from "../core/cards/ids";
+import { sanitizeCardIdentityMetadata } from "../core/cards/safe-identity-metadata";
 import type { UniversalImportRequest } from "../import-engine/types";
 import { sanitizeRelativeImportPath } from "../import-engine/source-path";
 import { ImportFailureError } from "../import-engine/errors";
@@ -52,25 +54,7 @@ function safeIdentity(value: unknown): CardIdentity | null {
   if (!RESOLUTION_METHODS.has(method)) throw new ApiRequestError(400, "INVALID_REQUEST", "identity resolution method is invalid.");
   const confidence = Number(input.confidence);
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) throw new ApiRequestError(400, "INVALID_REQUEST", "identity confidence must be between 0 and 1.");
-  const rawMetadata = record(input.metadata) ?? {};
-  const metadata: Record<string, unknown> = {};
-  for (const key of ["layout", "digital", "promo", "fullArt", "imageStatus"]) {
-    const item = rawMetadata[key];
-    if (typeof item === "string" || typeof item === "boolean") metadata[key] = item;
-  }
-  if (Array.isArray(rawMetadata.faces)) {
-    metadata.faces = rawMetadata.faces.slice(0, 2).flatMap((face) => {
-      const item = record(face);
-      return item && typeof item.name === "string" ? [{ name: item.name.slice(0, 200) }] : [];
-    });
-  }
-  if (Array.isArray(rawMetadata.relatedCards)) {
-    metadata.relatedCards = rawMetadata.relatedCards.slice(0, 50).flatMap((related) => {
-      const item = record(related);
-      if (!item || typeof item.id !== "string" || typeof item.name !== "string" || typeof item.component !== "string") return [];
-      return [{ id: item.id.slice(0, 80), name: item.name.slice(0, 200), component: item.component.slice(0, 40), ...(typeof item.typeLine === "string" ? { typeLine: item.typeLine.slice(0, 200) } : {}) }];
-    });
-  }
+  const metadata = sanitizeCardIdentityMetadata(input.metadata);
   return {
     id: requiredString(input.id, "identity.id", 180),
     provider: requiredString(input.provider, "identity.provider", 40),
@@ -82,7 +66,7 @@ function safeIdentity(value: unknown): CardIdentity | null {
     ...(optionalString(input.lang, "identity.lang", 12) ? { lang: input.lang as string } : {}),
     resolutionMethod: method as CardIdentity["resolutionMethod"],
     confidence,
-    ...(Object.keys(metadata).length ? { metadata } : {}),
+    ...(metadata ? { metadata } : {}),
   };
 }
 
@@ -93,7 +77,7 @@ function safeSelection(value: unknown, side: CardFaceSide): SelectedArtwork | un
   const source = requiredString(input.source, "selected artwork source", 16);
   const faceId = requiredString(input.faceId, "selected artwork face", 8);
   const candidateId = requiredString(input.candidateId, "selected artwork candidate", 128);
-  if (!SOURCES.has(source) || faceId !== side || !/^(upload:[a-f0-9]{64}|scryfall:[a-f0-9-]{36}:(front|back)|mpc:[a-f0-9]{64})$/.test(candidateId)) {
+  if (!SOURCES.has(source) || faceId !== side || !isSafeArtworkCandidateId(candidateId)) {
     throw new ApiRequestError(400, "INVALID_REQUEST", "selected artwork reference is invalid.");
   }
   return {

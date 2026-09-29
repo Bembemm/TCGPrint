@@ -214,6 +214,29 @@ describe("card APIs", () => {
     expect(() => parseWorkingCards([{ ...card, selectedArtworkByFace: { front: { ...card.selectedArtworkByFace.front, candidateId: "https://evil.test/a.jpg" } } }])).toThrow(/selected artwork reference/);
   });
 
+  it("keeps the API CardIdentity metadata allowlist and sanitization behavior", () => {
+    const withMetadata: WorkingCard = {
+      ...card,
+      identity: {
+        ...identity,
+        metadata: {
+          layout: "transform",
+          digital: false,
+          faces: [{ name: "Front", extra: "drop" }, { name: "Back" }, { name: "Ignored" }],
+          relatedCards: [{ id: "token-1", name: "Token", component: "token", extra: "drop" }],
+          unsupportedMetadata: "drop",
+        },
+      },
+    };
+
+    expect(parseWorkingCards([withMetadata])[0].identity?.metadata).toEqual({
+      layout: "transform",
+      digital: false,
+      faces: [{ name: "Front" }, { name: "Back" }],
+      relatedCards: [{ id: "token-1", name: "Token", component: "token" }],
+    });
+  });
+
   it("rejects invalid JSON and path-like identity IDs", async () => {
     const workbench = testWorkbench();
     const invalidJson = await handleResolve(new Request("http://localhost/api/cards/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{" }), workbench);
