@@ -9,7 +9,7 @@ import type {
   WorkingCardSharedMpcCardback,
 } from "../../core/cards/types";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
-import { isSafeArtworkCandidateId } from "../../core/cards/ids";
+import { isSafeArtworkCandidateId } from "../../core/cards/artwork-candidate-id";
 import { validateCardIdentityMetadata } from "../../core/cards/safe-identity-metadata";
 import { DEFAULT_CUT_GUIDE_CONFIG, GUIDE_COLOR_OPTIONS, type CutGuideConfig, type GuideColor } from "../../core/geometry";
 
