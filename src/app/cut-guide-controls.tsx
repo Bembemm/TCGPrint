@@ -33,6 +33,8 @@ export default function CutGuideControls({
   onExternalStrokeWidthPtChange,
   onExternalColorChange,
 }: CutGuideControlsProps) {
+  const hasPresetTrimExtent = (TRIM_EXTENTS_MM as readonly string[]).includes(trimExtentMm);
+
   return (
     <>
       <label className="checkbox-field">
@@ -42,6 +44,7 @@ export default function CutGuideControls({
       <label className="narrow-field">
         Comprimento da guia no trim (mm)
         <select value={trimExtentMm} disabled={!trimEnabled} onChange={(event) => onTrimExtentMmChange(event.currentTarget.value)}>
+          {!hasPresetTrimExtent && trimExtentMm !== "" && <option value={trimExtentMm}>{trimExtentMm} mm</option>}
           {TRIM_EXTENTS_MM.map((value) => <option key={value} value={value}>{value === "full" ? "full" : `${value} mm`}</option>)}
         </select>
       </label>

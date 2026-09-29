@@ -89,4 +89,25 @@ describe("CutGuideControls", () => {
       expect(options).toContain("value=\"white\"");
     }
   });
+
+  it("renders a persisted custom trim extent without changing its value", () => {
+    const markup = renderToStaticMarkup(createElement(CutGuideControls, {
+      trimEnabled: true,
+      trimExtentMm: "2.5",
+      trimColor: "green",
+      externalEnabled: true,
+      externalStrokeWidthPt: "0.7",
+      externalColor: "white",
+      onTrimEnabledChange: inert,
+      onTrimExtentMmChange: inert,
+      onTrimColorChange: inert,
+      onExternalEnabledChange: inert,
+      onExternalStrokeWidthPtChange: inert,
+      onExternalColorChange: inert,
+    }));
+
+    expect(markup).toContain('<option value="2.5" selected="">2.5 mm</option>');
+    expect(markup).toContain('<option value="green" selected="">Verde</option>');
+    expect(markup).toContain('<option value="white" selected="">Branco</option>');
+  });
 });

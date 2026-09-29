@@ -139,6 +139,17 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .provider-health { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
 .provider-health span { border: 1px solid #ccd4db; border-radius: 3px; padding: 4px 6px; background: #f8fafb; color: #40505e; font-size: 10px; white-space: nowrap; }
 .provider-health .health-degraded { border-color: #d6b47d; background: #fff8e9; color: #77561e; }
+.projects-panel { margin: 0 0 14px; padding: 13px; background: #f8fafb; }
+.projects-panel .panel-heading { align-items: center; margin-bottom: 10px; }
+.project-save-controls, .project-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.project-active-label { margin: 0 0 8px; color: #40505e; font-size: 11px; }
+.project-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.project-list-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid #d8dee4; border-radius: 3px; padding: 7px 8px; background: #fff; }
+.project-list-row > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.project-list-row strong { overflow-wrap: anywhere; font-size: 11px; }
+.project-list-row span { color: #65717d; font-size: 10px; }
+.project-row-actions { flex: none; }
+.project-list-row .button { min-height: 28px; padding: 4px 7px; font-size: 10px; }
 .phase5-actions { margin: 0 0 13px; }
 .editor-history-controls { display: flex; align-items: center; gap: 8px; }
 .card-workbench-layout { display: grid; grid-template-columns: minmax(290px, 0.9fr) minmax(0, 1.8fr); gap: 14px; margin-top: 16px; align-items: start; }
@@ -229,6 +240,10 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
   .working-card-row { grid-template-columns: 18px minmax(0, 1fr); }
   .working-card-controls { grid-column: 2; justify-content: flex-start; }
   .provider-health { justify-content: flex-start; }
+  .projects-panel .panel-heading { align-items: flex-start; flex-direction: column; }
+  .project-save-controls { width: 100%; }
+  .project-list-row { align-items: flex-start; flex-direction: column; }
+  .project-row-actions { width: 100%; justify-content: flex-end; }
   .card-details-grid { grid-template-columns: minmax(0, 1fr); }
   .artwork-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
   .panel { padding: 13px; }

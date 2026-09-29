@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { WorkingCard } from "../../core/cards/types";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
 import {
@@ -27,6 +27,17 @@ function singleFaceCard(): WorkingCard {
 }
 
 describe("project snapshot serializer", () => {
+  it("serializes and validates snapshots without relying on Node Buffer", () => {
+    vi.stubGlobal("Buffer", undefined);
+
+    try {
+      const encoded = serializeProjectSnapshot([singleFaceCard()], DEFAULT_PROJECT_SETTINGS);
+      expect(deserializeProjectSnapshot(encoded).cards[0]?.id).toBe("working-card-1");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("round-trips a single-face v1 project and omits transient WorkingCard metadata", () => {
     const card = singleFaceCard();
 

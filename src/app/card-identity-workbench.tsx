@@ -13,8 +13,8 @@ import {
   moveWorkingCard,
   replaceWorkingCard,
   replaceWorkingCards,
-  selectWorkingCard,
   setWorkingCardQuantity,
+  WorkingCardEditorError,
   type WorkingCardEditorState,
 } from "../../core/cards/working-card-editor";
 import {
@@ -35,6 +35,10 @@ import { clearRequestCache, createRequestCache, getOrCreateCachedRequest, update
 import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
 import CutGuideControls from "./cut-guide-controls";
 import type { GuideColor } from "../../core/geometry";
+import type { ProjectDto } from "../../services/project-api";
+import type { ProjectSettingsV1 } from "../../persistence/projects/serializer";
+import ProjectsPanel from "./projects-panel";
+import { createProjectRestoreLookupGate, runProjectRestoreProviderLookup } from "./project-restore-provider-gate";
 
 type ArtworkFilter = "all" | "scryfall" | "mpc" | "upload";
 type CandidateDto = Omit<ArtworkCandidate, "originalUri" | "localOriginalPath" | "previewUri"> & {
@@ -291,6 +295,7 @@ export interface EditorHistoryUiState extends EditorHistoryState {
 
 export type EditorCommandAction =
   | { readonly type: "load-cards"; readonly cards: readonly WorkingCard[] }
+  | { readonly type: "load-project"; readonly cards: readonly WorkingCard[] }
   | { readonly type: "replace-cards"; readonly cards: readonly WorkingCard[] }
   | { readonly type: "replace-card"; readonly cardId: string; readonly card: WorkingCard }
   | { readonly type: "apply-identity-result"; readonly cardId: string; readonly card: WorkingCard }
@@ -331,6 +336,10 @@ export function workingCardEditorReducer(state: EditorUiState, action: EditorCom
   try {
     switch (action.type) {
       case "load-cards": return withActiveFace(createWorkingCardEditorState(action.cards), "front");
+      case "load-project": return withActiveFace({
+        cards: [...action.cards],
+        selectedCardId: action.cards[0]?.id ?? null,
+      }, "front");
       case "replace-cards": return preserveActiveFace(state, replaceWorkingCards(state, action.cards));
       case "replace-card": return preserveActiveFace(state, replaceWorkingCard(state, action.cardId, action.card));
       case "apply-identity-result":
@@ -340,7 +349,12 @@ export function workingCardEditorReducer(state: EditorUiState, action: EditorCom
       case "apply-reresolve-result":
         return preserveActiveFace(state, replaceWorkingCard(state, action.cardId, action.card));
       case "apply-resolve-all-result": return preserveActiveFace(state, replaceWorkingCards(state, action.cards));
-      case "select-card": return withActiveFace(selectWorkingCard(state, action.cardId), "front");
+      case "select-card": {
+        if (!state.cards.some((card) => card.id === action.cardId)) {
+          throw new WorkingCardEditorError("CARD_NOT_FOUND", `WorkingCard ${action.cardId} was not found.`);
+        }
+        return withActiveFace({ cards: state.cards, selectedCardId: action.cardId }, "front");
+      }
       case "set-face": return withActiveFace(state, action.side);
       case "set-quantity": return preserveActiveFace(state, setWorkingCardQuantity(state, action.cardId, action.quantity));
       case "adjust-quantity": {
@@ -377,6 +391,7 @@ function isEditorialAction(action: EditorCommandAction): boolean {
     case "delete-card":
       return true;
     case "load-cards":
+    case "load-project":
     case "select-card":
     case "set-face":
       return false;
@@ -398,7 +413,7 @@ export function editorHistoryReducer(state: EditorHistoryUiState, action: Editor
   const nextSnapshot = snapshotFromEditorState(next);
 
   if (next.error) return { ...state, error: next.error };
-  if (action.type === "load-cards") {
+  if (action.type === "load-cards" || action.type === "load-project") {
     return { ...resetEditorHistory(state, nextSnapshot), error: undefined };
   }
 
@@ -438,6 +453,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [externalGuideStrokeWidthPt, setExternalGuideStrokeWidthPt] = useState("0.3");
   const [externalGuideColor, setExternalGuideColor] = useState<GuideColor>("black");
   const [busy, setBusy] = useState(false);
+  const [projectOpenPending, setProjectOpenPending] = useState(false);
+  const [projectRestoreVersion, setProjectRestoreVersion] = useState(0);
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
   const [problemCardId, setProblemCardId] = useState<string | null>(null);
@@ -446,8 +463,22 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [identityDetails, setIdentityDetails] = useState<IdentityDetails | null>(null);
   const artworkCatalogRequests = useRef(createRequestCache<ArtworkCatalogResult>());
   const identityDetailsRequests = useRef(createRequestCache<IdentityDetails>());
+  const projectRestoreLookupGate = useRef(createProjectRestoreLookupGate(-1));
   const [pdfUrl, setPdfUrl] = useState("");
   const [bleedDiagnostics, setBleedDiagnostics] = useState<BleedDiagnosticsReport | null>(null);
+  const interactionBusy = busy || projectOpenPending;
+  const projectSettings = useMemo<ProjectSettingsV1>(() => ({
+    bleedMm: Number(bleedMm),
+    roundedCorners,
+    cutGuides: buildCutGuideConfig(
+      trimGuideEnabled,
+      trimGuideExtentMm,
+      externalGuideEnabled,
+      externalGuideStrokeWidthPt,
+      trimGuideColor,
+      externalGuideColor,
+    ),
+  }), [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor]);
 
   function clearProblem(cardId: string | null = null) {
     setProblem("");
@@ -480,7 +511,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || busy) return;
+      if (event.defaultPrevented || interactionBusy) return;
       const target = event.target;
       const textEditingFocused = target instanceof HTMLElement && isEditorTextEditingTarget(target);
       const command = editorHistoryShortcut(event, textEditingFocused);
@@ -490,7 +521,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy]);
+  }, [interactionBusy]);
 
   useEffect(() => {
     const query = manualQuery.trim();
@@ -510,52 +541,70 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   }, [manualQuery, autocompleteEnabled]);
 
   useEffect(() => {
-    if (!artworkRequest || !activeCard) { setArtworkCandidates([]); setArtworkProblem(null); return; }
-    setArtworkProblem(null);
-    const requestKey = artworkRequest.cacheKey;
-    const cardId = activeCard.id;
     let current = true;
-    const request = getOrCreateCachedRequest(artworkCatalogRequests.current, artworkRequest.cacheKey, async () => {
-      const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ faceId: artworkRequest.faceId, source: artworkRequest.source, mpcReferences: artworkRequest.mpcReferences }),
+    const request = runProjectRestoreProviderLookup(
+      projectRestoreLookupGate.current,
+      projectRestoreVersion,
+      "artwork",
+      async () => {
+        if (!artworkRequest || !activeCard) return null;
+        return getOrCreateCachedRequest(artworkCatalogRequests.current, artworkRequest.cacheKey, async () => {
+          const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ faceId: artworkRequest.faceId, source: artworkRequest.source, mpcReferences: artworkRequest.mpcReferences }),
+          });
+          return jsonResponse<ArtworkCatalogResult>(response);
+        });
       });
-      return jsonResponse<ArtworkCatalogResult>(response);
-    });
     void request
-      .then((result) => {
+      .then((outcome) => {
         if (!current) return;
+        if (outcome.skipped || outcome.value === null) {
+          setArtworkCandidates([]);
+          setArtworkProblem(null);
+          return;
+        }
+        const result = outcome.value;
+        setArtworkProblem(null);
         setArtworkCandidates(result.candidates);
         setProviderHealth((current) => ({ ...current, ...result.providerHealth }));
-        setArtworkProblem(null);
       })
       .catch((error: unknown) => {
-        if (current) {
+        if (current && activeCard && artworkRequest) {
           setArtworkCandidates([]);
           setArtworkProblem({
             message: error instanceof Error ? error.message : "Não foi possível abrir o catálogo de artes.",
-            cardId,
-            requestKey,
+            cardId: activeCard.id,
+            requestKey: artworkRequest.cacheKey,
           });
         }
       });
     return () => { current = false; };
-  }, [artworkRequest?.cacheKey, activeCard?.id]);
+  }, [artworkRequest?.cacheKey, activeCard?.id, projectRestoreVersion]);
 
   useEffect(() => {
-    if (!activeIdentityId) { setIdentityDetails(null); return; }
     let current = true;
-    const request = getOrCreateCachedRequest(identityDetailsRequests.current, activeIdentityId, async () => {
-      const response = await fetch(`/api/cards/${encodeURIComponent(activeIdentityId)}`);
-      const result = await jsonResponse<{ identity: IdentityDetails }>(response);
-      return result.identity;
-    });
+    const request = runProjectRestoreProviderLookup(
+      projectRestoreLookupGate.current,
+      projectRestoreVersion,
+      "identity",
+      async () => {
+        if (!activeIdentityId) return null;
+        return getOrCreateCachedRequest(identityDetailsRequests.current, activeIdentityId, async () => {
+          const response = await fetch(`/api/cards/${encodeURIComponent(activeIdentityId)}`);
+          const result = await jsonResponse<{ identity: IdentityDetails }>(response);
+          return result.identity;
+        });
+      });
     void request
-      .then((identity) => { if (current) setIdentityDetails(identity); })
+      .then((outcome) => {
+        if (!current) return;
+        setIdentityDetails(outcome.skipped ? null : outcome.value);
+      })
       .catch(() => { if (current) setIdentityDetails(null); });
     return () => { current = false; };
-  }, [activeIdentityId]);
+  }, [activeIdentityId, projectRestoreVersion]);
 
   async function importToWorkingSet() {
     if (!files.length && !text.trim()) { clearProblem(); setProblem("Adicione arquivos ou cole uma decklist antes de importar."); return; }
@@ -720,13 +769,48 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     finally { setBusy(false); }
   }
 
+  function restoreProject(project: ProjectDto) {
+    const { settings, cards } = project.snapshot;
+    const nextRestoreVersion = projectRestoreVersion + 1;
+    projectRestoreLookupGate.current = createProjectRestoreLookupGate(nextRestoreVersion);
+    setProjectRestoreVersion(nextRestoreVersion);
+
+    clearRequestCache(artworkCatalogRequests.current);
+    clearRequestCache(identityDetailsRequests.current);
+    dispatchEditor({ type: "load-project", cards });
+    setBleedMm(String(settings.bleedMm));
+    setRoundedCorners(settings.roundedCorners);
+    setTrimGuideEnabled(settings.cutGuides.trim.enabled);
+    setTrimGuideExtentMm(settings.cutGuides.trim.extentMm === "full" ? "full" : String(settings.cutGuides.trim.extentMm));
+    setTrimGuideColor(settings.cutGuides.trim.color);
+    setExternalGuideEnabled(settings.cutGuides.external.enabled);
+    setExternalGuideStrokeWidthPt(String(settings.cutGuides.external.strokeWidthPt));
+    setExternalGuideColor(settings.cutGuides.external.color);
+
+    setArtworkCandidates([]);
+    setArtworkProblem(null);
+    setArtworkFilter("all");
+    setManualQuery("");
+    manualQueryRef.current = "";
+    setAutocompleteEnabled(true);
+    setAutocompleteResults(null);
+    setManualIdentities([]);
+    setIdentityDetails(null);
+    setProviderHealth({});
+    clearProblem();
+    setPdfUrl("");
+    setBleedDiagnostics(null);
+    setBusy(false);
+    setStatus(`${project.name} aberto · revisão ${project.revision}.`);
+  }
+
   const selected = activeCard ? selectedFor(activeCard, face) : undefined;
 
   return (
     <section className="panel card-identity-workbench" aria-labelledby="identity-workbench-heading">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">Fase 6B · Working Set da sessão</p>
+          <p className="eyebrow">Fase 7B · Projects e Working Set</p>
           <h2 id="identity-workbench-heading">Identidade da carta e artwork</h2>
           <p>Card Details separa origem/hints importados da identidade aplicada; artwork e escolhas permanecem por face nesta sessão.</p>
         </div>
@@ -738,12 +822,21 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         </div>
       </div>
 
+      <ProjectsPanel
+        cards={workingCards}
+        settings={projectSettings}
+        onProjectOpen={restoreProject}
+        onProjectOpenStart={() => setProjectOpenPending(true)}
+        onProjectOpenEnd={() => setProjectOpenPending(false)}
+        disabled={interactionBusy}
+      />
+
       <div className="action-row phase5-actions">
-        <button className="button primary" type="button" onClick={importToWorkingSet} disabled={busy}>{busy ? "Processando…" : "Universal Import → Working Set"}</button>
-        <button className="button secondary" type="button" onClick={resolveAll} disabled={busy || !workingCards.length}>Resolver identidades</button>
+        <button className="button primary" type="button" onClick={importToWorkingSet} disabled={interactionBusy}>{busy ? "Processando…" : "Universal Import → Working Set"}</button>
+        <button className="button secondary" type="button" onClick={resolveAll} disabled={interactionBusy || !workingCards.length}>Resolver identidades</button>
         <div className="editor-history-controls" role="group" aria-label="Histórico do editor">
-          <button className="button secondary" type="button" aria-label="Desfazer" aria-keyshortcuts="Control+Z Meta+Z" disabled={busy || editorHistory.past.length === 0} onClick={() => dispatchEditor({ type: "undo" })}>Desfazer</button>
-          <button className="button secondary" type="button" aria-label="Refazer" aria-keyshortcuts="Control+Y Meta+Y Control+Shift+Z Meta+Shift+Z" disabled={busy || editorHistory.future.length === 0} onClick={() => dispatchEditor({ type: "redo" })}>Refazer</button>
+          <button className="button secondary" type="button" aria-label="Desfazer" aria-keyshortcuts="Control+Z Meta+Z" disabled={interactionBusy || editorHistory.past.length === 0} onClick={() => dispatchEditor({ type: "undo" })}>Desfazer</button>
+          <button className="button secondary" type="button" aria-label="Refazer" aria-keyshortcuts="Control+Y Meta+Y Control+Shift+Z Meta+Shift+Z" disabled={interactionBusy || editorHistory.future.length === 0} onClick={() => dispatchEditor({ type: "redo" })}>Refazer</button>
         </div>
         <span className="status" aria-live="polite">{status}</span>
       </div>
@@ -754,7 +847,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           cards={workingCards}
           selectedCardId={selectedCardId}
           physicalCardCount={physicalCardCount}
-          disabled={busy}
+          disabled={interactionBusy}
           onSelect={(cardId) => {
             if (problemCardId !== null && problemCardId !== cardId) clearProblem();
             setArtworkProblem(null);
@@ -775,7 +868,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
           <WorkingCardDetailsSummary card={activeCard} identityLayout={identityDetails?.layout} artworkCandidates={artworkCandidates} />
           <div className="card-identity-actions">
-            <button className="button secondary" type="button" disabled={busy} onClick={() => void reresolveCard(activeCard)}>Re-resolver esta carta</button>
+            <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void reresolveCard(activeCard)}>Re-resolver esta carta</button>
           </div>
 
           {(activeCard.identityResolution.candidates.length > 0 || activeCard.identityResolution.status === "suggested" || activeCard.identityResolution.status === "ambiguous") && <div className="identity-suggestions">
@@ -783,7 +876,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             {activeCard.identityResolution.candidates.map(({ identity: candidateIdentity, score, reason }) => (
               <div className="identity-option" key={candidateIdentity.id}>
                 <span>{candidateIdentity.name} · {(score * 100).toFixed(0)}% · {reason}</span>
-                <button className="button secondary" type="button" disabled={busy} onClick={() => void confirmIdentity(activeCard, candidateIdentity)}>Usar esta identidade</button>
+                <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void confirmIdentity(activeCard, candidateIdentity)}>Usar esta identidade</button>
               </div>
             ))}
           </div>}
@@ -791,35 +884,35 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           <div className="manual-identity-search">
             <label className="field-label" htmlFor="manual-card-search">Escolher outra identidade</label>
             <div className="manual-search-row">
-              <input id="manual-card-search" value={manualQuery} onChange={(event) => { setAutocompleteEnabled(true); setManualQuery(event.currentTarget.value); }} onKeyDown={(event) => { if (event.key === "Enter") void searchIdentities(); }} placeholder="Nome da carta" />
-              <button className="button secondary" type="button" disabled={busy || manualQuery.trim().length < 2} onClick={() => void searchIdentities()}>Buscar</button>
+              <input id="manual-card-search" value={manualQuery} disabled={interactionBusy} onChange={(event) => { setAutocompleteEnabled(true); setManualQuery(event.currentTarget.value); }} onKeyDown={(event) => { if (event.key === "Enter") void searchIdentities(); }} placeholder="Nome da carta" />
+              <button className="button secondary" type="button" disabled={interactionBusy || manualQuery.trim().length < 2} onClick={() => void searchIdentities()}>Buscar</button>
             </div>
             {autocompleteEnabled && autocompleteNames.length > 0 && <div className="autocomplete-list" role="listbox" aria-label="Autocompletar carta">
-              {autocompleteNames.map((name) => <button type="button" role="option" key={name} onClick={() => { setManualQuery(name); void searchIdentities(name); }}>{name}</button>)}
+              {autocompleteNames.map((name) => <button type="button" role="option" key={name} disabled={interactionBusy} onClick={() => { setManualQuery(name); void searchIdentities(name); }}>{name}</button>)}
             </div>}
             {manualIdentities.map((identity) => <div className="identity-option manual-result" key={identity.id}>
               <span>{identity.name}{identity.setCode ? ` · ${identity.setCode.toUpperCase()} #${identity.collectorNumber ?? "?"}` : ""}</span>
-              <button className="button secondary" type="button" disabled={busy} onClick={() => void confirmIdentity(activeCard, identity)}>Usar esta identidade</button>
+              <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void confirmIdentity(activeCard, identity)}>Usar esta identidade</button>
             </div>)}
-            <button className="button secondary custom-button" type="button" disabled={busy} onClick={() => void keepCustom(activeCard)}>Manter como custom</button>
+            <button className="button secondary custom-button" type="button" disabled={interactionBusy} onClick={() => void keepCustom(activeCard)}>Manter como custom</button>
           </div>
 
           {(identityDetails?.relatedCards.length || relatedCardNames(activeCard).length) > 0 && <div className="related-card-list"><strong>Related cards / tokens:</strong> {(identityDetails?.relatedCards ?? relatedCardNames(activeCard)).map((item) => `${item.name}${item.component === "token" ? " (token; não adicionado)" : ""}`).join(" · ")}</div>}
 
           {activeCard.faces.length > 1 && <div className="face-tabs" role="group" aria-label="Face da carta">
-            {activeCard.faces.map((item) => <button key={item.side} type="button" className={`button ${face === item.side ? "primary" : "secondary"}`} onClick={() => dispatchEditor({ type: "set-face", side: item.side })}>{item.side === "front" ? "Front" : "Back"}{item.name ? ` · ${item.name}` : ""}</button>)}
+            {activeCard.faces.map((item) => <button key={item.side} type="button" disabled={interactionBusy} className={`button ${face === item.side ? "primary" : "secondary"}`} onClick={() => dispatchEditor({ type: "set-face", side: item.side })}>{item.side === "front" ? "Front" : "Back"}{item.name ? ` · ${item.name}` : ""}</button>)}
           </div>}
 
           <div className="artwork-section">
             <div className="compact-heading"><div><strong>Artwork Picker · {face === "front" ? "Front" : "Back"}</strong><span>Seleção atual é preservada durante a atualização do catálogo.</span></div></div>
             <div className="artwork-filter-row" role="group" aria-label="Filtrar origem das artes">
-              {([ ["all", "Todas"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"], ["upload", "Meus uploads"] ] as const).map(([value, label]) => <button key={value} type="button" className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => setArtworkFilter(value)}>{label}</button>)}
+              {([ ["all", "Todas"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"], ["upload", "Meus uploads"] ] as const).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => setArtworkFilter(value)}>{label}</button>)}
             </div>
             {selected && <p className="selected-artwork-line">Selecionada: {labelSource(selected.source)} · {selected.candidateId} · {artworkPolicyLabel(selected)}</p>}
             <button
               className="button secondary restore-artwork-default"
               type="button"
-              disabled={busy || !activeCard.identity || !activeFaceExists}
+              disabled={interactionBusy || !activeCard.identity || !activeFaceExists}
               title={!activeCard.identity ? "Não há identidade resolvida para determinar uma artwork padrão." : undefined}
               onClick={() => void restoreArtworkDefault(activeCard, face)}
             >Restaurar artwork padrão desta face</button>
@@ -838,7 +931,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
                     {candidate.source === "mpc" && <span className="reference-status">{candidate.originalCached ? "original em cache local" : candidate.originalAvailable ? "original remoto informado · validação no download" : "referência sem original disponível"}</span>}
                     {candidate.source === "mpc" && candidate.metadata?.localAvailabilityHint === true && !candidate.originalCached && <span className="reference-status">XML relata disponibilidade local; bytes ainda não verificados no cache</span>}
                   </div>
-                  <button className={`button ${isSelected ? "primary" : "secondary"}`} type="button" disabled={busy} onClick={() => void chooseArtwork(candidate)}>{isSelected && candidate.originalAvailable && !candidate.effectiveDpi ? "Validar original e calcular DPI" : isSelected ? "Selecionada" : candidate.originalAvailable ? "Selecionar arte" : "Selecionar referência"}</button>
+                  <button className={`button ${isSelected ? "primary" : "secondary"}`} type="button" disabled={interactionBusy} onClick={() => void chooseArtwork(candidate)}>{isSelected && candidate.originalAvailable && !candidate.effectiveDpi ? "Validar original e calcular DPI" : isSelected ? "Selecionada" : candidate.originalAvailable ? "Selecionar arte" : "Selecionar referência"}</button>
                 </article>;
               })}
             </div>
@@ -865,7 +958,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             onExternalStrokeWidthPtChange={setExternalGuideStrokeWidthPt}
             onExternalColorChange={setExternalGuideColor}
           />
-          <button className="button primary" type="button" disabled={busy || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
+          <button className="button primary" type="button" disabled={interactionBusy || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
           {pdfUrl && <a className="download-link" href={pdfUrl} download="tcgprint-cards.pdf">Baixar PDF</a>}
         </div>
         <p className="muted">Bleed estende somente os pixels da borda imediata de cada lado. Moldura preta continua preta; full-art continua a própria arte. O trim da carta permanece intacto. Cantos arredondados são uma opção separada.</p>

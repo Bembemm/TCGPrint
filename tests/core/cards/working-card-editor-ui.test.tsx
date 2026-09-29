@@ -5,6 +5,8 @@ import { editorHistoryReducer, WorkingCardList, workingCardEditorReducer, type E
 import * as workbenchModule from "../../../src/app/card-identity-workbench";
 import { createWorkingCardEditorState } from "../../../core/cards/working-card-editor";
 import { createEditorHistoryState } from "../../../core/cards/editor-history";
+import { projectSnapshotKey } from "../../../src/app/project-session";
+import { DEFAULT_PROJECT_SETTINGS } from "../../../persistence/projects/serializer";
 import type { ArtworkCandidate, WorkingCard } from "../../../core/cards/types";
 import type { ImportKind } from "../../../import-engine/types";
 
@@ -690,6 +692,52 @@ describe("working card editor list UI", () => {
     expect(loaded.present.cards.map(({ id }) => id)).toEqual([imported.id]);
     expect(loaded.past).toEqual([]);
     expect(loaded.future).toEqual([]);
+  });
+
+  it("opens persisted cards without sorting or rebasing order and resets selection and history", () => {
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card]), face: "front" });
+    const edited = editorHistoryReducer(initial, { type: "set-quantity", cardId: card.id, quantity: 3 });
+    const editedAgain = editorHistoryReducer(edited, { type: "set-quantity", cardId: card.id, quantity: 4 });
+    const withUndo = editorHistoryReducer(editedAgain, { type: "undo" });
+    const persistedCards = [
+      { ...card, id: "saved-second-in-array", order: 9, quantity: 2 },
+      { ...card, id: "saved-first-by-order", order: 3, quantity: 1 },
+    ];
+
+    const loaded = editorHistoryReducer(withUndo, { type: "load-project", cards: persistedCards } as never);
+
+    expect(loaded.present.cards).toEqual(persistedCards);
+    expect(loaded.present.cards[0]).toBe(persistedCards[0]);
+    expect(loaded.present.cards.map(({ id, order }) => [id, order])).toEqual([
+      ["saved-second-in-array", 9],
+      ["saved-first-by-order", 3],
+    ]);
+    expect(loaded.present.selectedCardId).toBe("saved-second-in-array");
+    expect(loaded.present.face).toBe("front");
+    expect(loaded.past).toEqual([]);
+    expect(loaded.future).toEqual([]);
+  });
+
+  it("does not change persisted card values when only card selection and visible face change", () => {
+    const persistedCards = [
+      { ...card, id: "saved-first", order: 9, faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }], selectedArtworkByFace: {} },
+      { ...card, id: "saved-second", order: 3, faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }], selectedArtworkByFace: {} },
+    ];
+    const loaded = editorHistoryReducer(
+      createEditorHistoryState({ ...createWorkingCardEditorState([]), face: "front" }),
+      { type: "load-project", cards: persistedCards } as never,
+    );
+    const selected = editorHistoryReducer(loaded, { type: "select-card", cardId: "saved-second" });
+    const back = editorHistoryReducer(selected, { type: "set-face", side: "back" });
+
+    expect(back.present.cards.map(({ id, order }) => [id, order])).toEqual([
+      ["saved-first", 9],
+      ["saved-second", 3],
+    ]);
+    expect(projectSnapshotKey(back.present.cards, DEFAULT_PROJECT_SETTINGS))
+      .toBe(projectSnapshotKey(persistedCards, DEFAULT_PROJECT_SETTINGS));
+    expect(back.present.selectedCardId).toBe("saved-second");
+    expect(back.present.face).toBe("back");
   });
 
   it("preserves Undo and Redo state when loading invalid cards fails", () => {

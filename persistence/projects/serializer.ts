@@ -437,7 +437,7 @@ function validateSnapshot(value: unknown): ProjectSnapshotV1 {
 }
 
 function checkSnapshotSize(serialized: string): void {
-  if (Buffer.byteLength(serialized, "utf8") > MAX_PROJECT_SNAPSHOT_BYTES) {
+  if (new TextEncoder().encode(serialized).byteLength > MAX_PROJECT_SNAPSHOT_BYTES) {
     throw new ProjectSnapshotError("PROJECT_SNAPSHOT_TOO_LARGE", `Project snapshot exceeds the ${MAX_PROJECT_SNAPSHOT_BYTES}-byte limit.`);
   }
 }
