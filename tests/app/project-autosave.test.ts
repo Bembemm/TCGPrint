@@ -122,6 +122,32 @@ describe("ProjectAutosaveQueue", () => {
     queue.dispose();
   });
 
+  it("stops after the configured retry count and keeps the failed snapshot available for manual retry", async () => {
+    vi.useFakeTimers();
+    const failure = new Error("persistent network failure");
+    const save = vi.fn().mockRejectedValue(failure);
+    const onSaveFailed = vi.fn();
+    const queue = new ProjectAutosaveQueue<Snapshot>(queueOptions(save, { onSaveFailed }));
+    queue.activate({ projectId: "project-1", revision: 2, savedSnapshotKey: "saved" });
+    queue.observe("snapshot-1", { value: 1 });
+
+    await vi.advanceTimersByTimeAsync(600);
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(save).toHaveBeenCalledTimes(4);
+    expect(onSaveFailed).toHaveBeenCalledWith(expect.objectContaining({ snapshotKey: "snapshot-1" }), failure, "error");
+    expect(queue.getContext()).toMatchObject({ revision: 2, savedSnapshotKey: "saved" });
+
+    save.mockResolvedValue({ revision: 3 });
+    const retried = queue.flushNow();
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(retried).resolves.toBe("saved");
+    expect(save).toHaveBeenCalledTimes(5);
+    queue.dispose();
+  });
+
   it("does not retry a CAS conflict automatically", async () => {
     vi.useFakeTimers();
     const conflict = Object.assign(new Error("revision conflict"), { status: 409 });
@@ -185,5 +211,24 @@ describe("ProjectAutosaveQueue", () => {
     oldRequest.resolve({ revision: 2 });
     await vi.advanceTimersByTimeAsync(0);
     queue.dispose();
+  });
+
+  it("does not apply a late save response after the active Project is deleted", async () => {
+    vi.useFakeTimers();
+    const request = deferred<{ revision: number }>();
+    const save = vi.fn(() => request.promise);
+    const onSaveSucceeded = vi.fn();
+    const queue = new ProjectAutosaveQueue<Snapshot>(queueOptions(save, { onSaveSucceeded }));
+    queue.activate({ projectId: "deleted-project", revision: 1, savedSnapshotKey: "saved" });
+    queue.observe("pending", { value: 1 });
+    void queue.flushNow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    queue.dispose();
+    request.resolve({ revision: 2 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onSaveSucceeded).not.toHaveBeenCalled();
+    expect(queue.getContext()).toBeNull();
   });
 });

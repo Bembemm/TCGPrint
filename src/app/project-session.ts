@@ -31,6 +31,7 @@ export type ProjectSessionAction =
   | { readonly type: "save-started"; readonly projectId: string; readonly expectedRevision: number; readonly snapshotKey: string | null }
   | { readonly type: "save-succeeded"; readonly projectId: string; readonly expectedRevision: number; readonly project: ProjectDto; readonly snapshotKey: string }
   | { readonly type: "save-failed"; readonly projectId: string; readonly expectedRevision: number; readonly snapshotKey: string | null; readonly message: string; readonly conflict?: boolean }
+  | { readonly type: "revision-conflict"; readonly project: ProjectDto; readonly currentSnapshotKey: string | null; readonly message: string }
   | { readonly type: "project-duplicated"; readonly project: ProjectDto }
   | { readonly type: "project-deleted"; readonly projectId: string }
   | { readonly type: "request-failed"; readonly message: string };
@@ -132,6 +133,22 @@ export function projectSessionReducer(state: ProjectSessionState, action: Projec
         ...state,
         saving: null,
         saveError: { projectId: action.projectId, snapshotKey: action.snapshotKey, message: action.message, conflict: action.conflict === true },
+        error: action.message,
+      });
+    case "revision-conflict":
+      return withStatus({
+        ...state,
+        projects: withProjectSummary(state.projects, action.project),
+        activeProject: action.project,
+        currentSnapshotKey: action.currentSnapshotKey,
+        savedSnapshotKey: projectSnapshotValue(action.project.snapshot),
+        saving: null,
+        saveError: {
+          projectId: action.project.id,
+          snapshotKey: action.currentSnapshotKey,
+          message: action.message,
+          conflict: true,
+        },
         error: action.message,
       });
     case "project-duplicated":

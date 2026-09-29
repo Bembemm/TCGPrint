@@ -169,6 +169,25 @@ describe("project session", () => {
     expect(edited.error).toBe("Project revision conflict.");
   });
 
+  it("keeps the local snapshot marked conflicted when a failed operation discovers a newer canonical Project", () => {
+    const local = projectSessionReducer(createProjectSessionState("local-snapshot"), {
+      type: "activate-project",
+      project: project("project-1", 7),
+      currentSnapshotKey: "local-snapshot",
+    });
+    const conflicted = projectSessionReducer(local, {
+      type: "revision-conflict",
+      project: project("project-1", 8, { ...emptySnapshot(), settings: { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 2 } }),
+      currentSnapshotKey: "local-snapshot",
+      message: "The canonical Project changed while the local copy was open.",
+    });
+
+    expect(conflicted.status).toBe("Conflito");
+    expect(conflicted.activeProject?.revision).toBe(8);
+    expect(conflicted.currentSnapshotKey).toBe("local-snapshot");
+    expect(conflicted.savedSnapshotKey).toBe(projectSnapshotKey([], { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 2 }));
+  });
+
   it("keeps an inactive delete away from the active session and leaves no invented project after active delete", () => {
     const active = project("active");
     const inactive = project("inactive");

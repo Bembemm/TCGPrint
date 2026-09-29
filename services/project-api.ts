@@ -89,6 +89,9 @@ function errorResponse(error: unknown): Response {
         actualRevision: error.actualRevision,
       }, { status: 409 });
     }
+    if (error.code === "PROJECT_RECOVERY_EXISTS") {
+      return Response.json({ code: error.code, message: error.message }, { status: 409 });
+    }
     if (error.code === "PROJECT_NOT_FOUND") {
       return Response.json({ code: error.code, message: "Project was not found." }, { status: 404 });
     }
@@ -99,7 +102,7 @@ function errorResponse(error: unknown): Response {
   return Response.json({ code: "PROJECT_API_FAILED", message: "The project request failed." }, { status: 500 });
 }
 
-async function parseProjectSaveBody(request: Request): Promise<unknown> {
+async function parseProjectSaveBody(request: Request, allowEmpty = false): Promise<unknown> {
   const contentLengthHeader = request.headers.get("content-length");
   if (contentLengthHeader !== null) {
     const contentLength = Number(contentLengthHeader);
@@ -142,6 +145,8 @@ async function parseProjectSaveBody(request: Request): Promise<unknown> {
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
+
+  if (allowEmpty && byteLength === 0) return undefined;
 
   let text: string;
   try {
@@ -186,9 +191,17 @@ export async function handleProjectList(_request: Request, projects: ProjectRepo
   }
 }
 
-export async function handleProjectCreate(_request: Request, projects: ProjectRepository): Promise<Response> {
+export async function handleProjectCreate(request: Request, projects: ProjectRepository): Promise<Response> {
   try {
-    return Response.json(projectDto(projects.create()), { status: 201 });
+    if (!request.body) return Response.json(projectDto(projects.create()), { status: 201 });
+    const body = await parseProjectSaveBody(request, true);
+    if (body === undefined) return Response.json(projectDto(projects.create()), { status: 201 });
+    if (!body || typeof body !== "object" || Array.isArray(body)
+      || Object.keys(body).length !== 1 || !("snapshot" in body)) {
+      throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "Project creation accepts only a snapshot field.");
+    }
+    const snapshot = deserializeProjectSnapshot((body as { readonly snapshot: unknown }).snapshot);
+    return Response.json(projectDto(projects.create(snapshot)), { status: 201 });
   } catch (error) {
     return errorResponse(error);
   }

@@ -142,6 +142,9 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .projects-panel { margin: 0 0 14px; padding: 13px; background: #f8fafb; }
 .projects-panel .panel-heading { align-items: center; margin-bottom: 10px; }
 .project-save-controls, .project-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.project-recovery-choice, .project-conflict { margin: 12px 0; padding: 12px; border: 1px solid #e7a743; border-radius: 8px; background: #fff8e8; }
+.project-recovery-choice h3 { margin: 0 0 6px; }
+.project-recovery-choice p, .project-conflict p { margin: 0 0 10px; }
 .project-active-label { margin: 0 0 8px; color: #40505e; font-size: 11px; }
 .project-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .project-list-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid #d8dee4; border-radius: 3px; padding: 7px 8px; background: #fff; }

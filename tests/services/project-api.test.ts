@@ -200,6 +200,36 @@ describe("project API service", () => {
     }] });
   });
 
+  it("creates a new revision-one Project from a validated local conflict snapshot", async () => {
+    const projects = setup();
+    const localSnapshot = snapshot();
+
+    const response = await handleProjectCreate(request("POST", { snapshot: localSnapshot }), projects);
+    const created = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(created).toMatchObject({ id: "project-1", revision: 1, snapshot: localSnapshot });
+  });
+
+  it("treats a streamed empty POST body as an empty Project create", async () => {
+    const projects = setup();
+    const emptyBodyRequest = new Request("http://localhost/api/projects", { method: "POST", body: "" });
+
+    const response = await handleProjectCreate(emptyBodyRequest, projects);
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ id: "project-1", revision: 1, snapshot: { cards: [] } });
+  });
+
+  it("rejects extra fields when creating a Project from a snapshot", async () => {
+    const projects = setup();
+    const response = await handleProjectCreate(request("POST", { snapshot: snapshot(), name: "Injected name" }), projects);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_PROJECT_REQUEST" });
+    expect(projects.list()).toEqual([]);
+  });
+
   it("saves a validated snapshot, advances revision, and opens the exact persisted content", async () => {
     const projects = setup();
     await handleProjectCreate(request("POST"), projects);
@@ -253,6 +283,10 @@ describe("project API service", () => {
     const firstStage = await staged.json();
     expect(staged.status).toBe(200);
     expect(firstStage).toMatchObject({ recovery: { baseRevision: 1, snapshot: candidate } });
+    const competingCandidate = { ...candidate, settings: { ...candidate.settings, bleedMm: 3 } };
+    const competingStage = await handleProjectStageRecovery(request("POST", { expectedRevision: 1, snapshot: competingCandidate }), canonical.id, projects);
+    expect(competingStage.status).toBe(409);
+    expect(await competingStage.json()).toMatchObject({ code: "PROJECT_RECOVERY_EXISTS" });
     const repeatedStage = await handleProjectStageRecovery(request("POST", { expectedRevision: 1, snapshot: candidate }), canonical.id, projects);
     expect(repeatedStage.status).toBe(200);
     expect(await repeatedStage.json()).toEqual(firstStage);

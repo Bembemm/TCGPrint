@@ -810,7 +810,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     <section className="panel card-identity-workbench" aria-labelledby="identity-workbench-heading">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">Fase 7B · Projects e Working Set</p>
+          <p className="eyebrow">Fase 7 · Projects e Working Set</p>
           <h2 id="identity-workbench-heading">Identidade da carta e artwork</h2>
           <p>Card Details separa origem/hints importados da identidade aplicada; artwork e escolhas permanecem por face nesta sessão.</p>
         </div>
@@ -828,6 +828,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         onProjectOpen={restoreProject}
         onProjectOpenStart={() => setProjectOpenPending(true)}
         onProjectOpenEnd={() => setProjectOpenPending(false)}
+        onProjectInteractionStart={() => setProjectOpenPending(true)}
+        onProjectInteractionEnd={() => setProjectOpenPending(false)}
         disabled={interactionBusy}
       />
 

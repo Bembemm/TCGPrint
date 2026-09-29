@@ -2,6 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 import { createProjectApiClient, ProjectApiClientError } from "../../src/app/project-api-client";
 
 describe("project API client", () => {
+  it("creates a Project from a local snapshot without changing the empty-create call", async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ id: "project-1", revision: 1 }));
+    const client = createProjectApiClient(fetcher as typeof fetch);
+    const snapshot = { projectSchemaVersion: 1, cards: [], settings: {} } as never;
+
+    await client.create(snapshot);
+
+    expect(fetcher).toHaveBeenCalledWith("/api/projects", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ snapshot }),
+    }));
+  });
+
   it("opens a Project through its GET endpoint only", async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ id: "project/one", revision: 1 }));
     const client = createProjectApiClient(fetcher as typeof fetch);

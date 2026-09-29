@@ -55,7 +55,7 @@
 - [x] Run the targeted tests and confirm expected failures before implementation.
 - [x] Implement only the recovery API/repository boundary; retain schema v1 and the existing serializer.
 - [x] Run recovery, repository, API, serializer, and SQLite tests.
-- [ ] Commit: `feat(projects): expose recovery operations`.
+- [x] Commit: `feat(projects): expose recovery operations` (`71c6342`).
 
 ### Task 2: Add a debounced, serialized autosave queue
 
@@ -70,12 +70,12 @@
 - Produces: an injectable `ProjectAutosaveQueue` that accepts the latest snapshot, schedules a 600 ms trailing debounce with a 2,000 ms maximum wait, allows one save operation in flight, and drains the newest queued snapshot after each successful revision advance.
 - Transient failures retry with bounded exponential backoff; HTTP 409 is terminal for that queue generation and requires an explicit conflict decision.
 
-- [ ] Test trailing debounce, maxWait, one in-flight save, edits during save, stale response suppression, retry, and terminal CAS conflict using fake timers/deferred promises.
-- [ ] Run the queue tests and confirm expected failures before implementation.
-- [ ] Implement the queue with injected timers and save callbacks so timing and serialization are deterministic in tests.
-- [ ] Add reducer actions/status needed to represent retryable failure and conflict without advancing the revision.
-- [ ] Run the queue and session tests.
-- [ ] Commit: `feat(projects): add serialized autosave queue`.
+- [x] Test trailing debounce, maxWait, one in-flight save, edits during save, stale response suppression, retry, and terminal CAS conflict using fake timers/deferred promises.
+- [x] Run the queue tests and confirm expected failures before implementation.
+- [x] Implement the queue with injected timers and save callbacks so timing and serialization are deterministic in tests.
+- [x] Add reducer actions/status needed to represent retryable failure and conflict without advancing the revision.
+- [x] Run the queue and session tests.
+- [x] Commit: `feat(projects): add serialized autosave queue` (`700d1d7`).
 
 ### Task 3: Integrate autosave and recovery/conflict UX
 
@@ -91,12 +91,12 @@
 - Consumes: `ProjectAutosaveQueue`, `ProjectOpenDto`, and recovery API operations from Tasks 1–2.
 - Produces: autosave status, a manual “Salvar agora/Tentar novamente” action, and explicit recovery actions before replacing the active Working Set.
 
-- [ ] Add tests for opening with a current recovery (promote or discard), stale recovery conflict (copy or discard/open canonical), and server-write conflict preserving local state.
-- [ ] Add a regression test that project restore does not trigger artwork/identity provider lookups, downloads, or prepare requests.
-- [ ] Run the UI/session/provider-gate tests and confirm expected failures before implementation.
-- [ ] Integrate queue lifecycle with project activation/deletion and use snapshots from the existing serializer.
-- [ ] Present recovery choice before loading project cards/settings; use the existing restore gate after the user chooses.
-- [ ] Run all focused Project tests, including API client, repository, service, session, panel, and restore gate.
+- [x] Add tests for opening with a current recovery (promote or discard), stale recovery conflict (copy or discard/open canonical), and server-write conflict preserving local state.
+- [x] Run the provider-gate regression for artwork/identity lookups; verify that reload/open/recovery smoke sends no card, download, or prepare requests.
+- [x] Run the UI/session/provider-gate tests and confirm expected failures before implementation.
+- [x] Integrate queue lifecycle with project activation/deletion and use snapshots from the existing serializer.
+- [x] Present recovery choice before loading project cards/settings; use the existing restore gate after the user chooses.
+- [x] Run all focused Project tests, including API client, repository, service, session, panel, and restore gate.
 - [ ] Commit: `feat(projects): integrate autosave and recovery UX`.
 
 ### Task 4: Full validation and branch audit

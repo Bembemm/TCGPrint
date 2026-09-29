@@ -46,8 +46,8 @@ export function createProjectApiClient(fetcher: typeof fetch = fetch) {
       const result = await responseJson<{ projects: ProjectSummaryDto[] }>(await fetcher("/api/projects", { cache: "no-store" }));
       return result.projects;
     },
-    async create(): Promise<ProjectDto> {
-      return responseJson<ProjectDto>(await fetcher("/api/projects", json("POST")));
+    async create(snapshot?: ProjectSnapshotV1): Promise<ProjectDto> {
+      return responseJson<ProjectDto>(await fetcher("/api/projects", json("POST", snapshot === undefined ? undefined : { snapshot })));
     },
     async open(projectId: string): Promise<ProjectOpenDto> {
       return responseJson<ProjectOpenDto>(await fetcher(projectUrl(projectId), { cache: "no-store" }));
