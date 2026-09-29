@@ -144,6 +144,31 @@ describe("project session", () => {
     expect(failed.savedSnapshotKey).toBe(activated.savedSnapshotKey);
   });
 
+  it("shows Conflito after a stale revision and keeps the conflict visible while local edits continue", () => {
+    const activated = projectSessionReducer(createProjectSessionState("saved"), {
+      type: "activate-project",
+      project: project("project-1", 7),
+      currentSnapshotKey: "saved",
+    });
+    const saving = projectSessionReducer(activated, { type: "save-started", projectId: "project-1", expectedRevision: 7, snapshotKey: "local-copy" });
+    const conflict = projectSessionReducer(saving, {
+      type: "save-failed",
+      projectId: "project-1",
+      expectedRevision: 7,
+      snapshotKey: "local-copy",
+      message: "Project revision conflict.",
+      conflict: true,
+    });
+
+    const edited = projectSessionReducer(conflict, { type: "content-changed", snapshotKey: "newer-local-copy" });
+
+    expect(conflict.status).toBe("Conflito");
+    expect(conflict.activeProject?.revision).toBe(7);
+    expect(edited.status).toBe("Conflito");
+    expect(edited.activeProject?.revision).toBe(7);
+    expect(edited.error).toBe("Project revision conflict.");
+  });
+
   it("keeps an inactive delete away from the active session and leaves no invented project after active delete", () => {
     const active = project("active");
     const inactive = project("inactive");

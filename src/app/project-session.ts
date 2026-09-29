@@ -2,7 +2,7 @@ import type { WorkingCard } from "../../core/cards/types";
 import type { ProjectDto, ProjectSummaryDto } from "../../services/project-api";
 import { serializeProjectSnapshot, type ProjectSettingsV1, type ProjectSnapshotV1 } from "../../persistence/projects/serializer";
 
-export type ProjectSaveStatus = "Dirty" | "Salvando" | "Salvo" | "Erro";
+export type ProjectSaveStatus = "Dirty" | "Salvando" | "Salvo" | "Erro" | "Conflito";
 
 export interface ProjectSessionState {
   readonly projects: readonly ProjectSummaryDto[];
@@ -18,6 +18,7 @@ export interface ProjectSessionState {
     readonly projectId: string;
     readonly snapshotKey: string | null;
     readonly message: string;
+    readonly conflict: boolean;
   } | null;
   readonly status: ProjectSaveStatus;
   readonly error?: string;
@@ -29,7 +30,7 @@ export type ProjectSessionAction =
   | { readonly type: "content-changed"; readonly snapshotKey: string | null }
   | { readonly type: "save-started"; readonly projectId: string; readonly expectedRevision: number; readonly snapshotKey: string | null }
   | { readonly type: "save-succeeded"; readonly projectId: string; readonly expectedRevision: number; readonly project: ProjectDto; readonly snapshotKey: string }
-  | { readonly type: "save-failed"; readonly projectId: string; readonly expectedRevision: number; readonly snapshotKey: string | null; readonly message: string }
+  | { readonly type: "save-failed"; readonly projectId: string; readonly expectedRevision: number; readonly snapshotKey: string | null; readonly message: string; readonly conflict?: boolean }
   | { readonly type: "project-duplicated"; readonly project: ProjectDto }
   | { readonly type: "project-deleted"; readonly projectId: string }
   | { readonly type: "request-failed"; readonly message: string };
@@ -49,7 +50,7 @@ function withStatus(state: Omit<ProjectSessionState, "status">): ProjectSessionS
   const status: ProjectSaveStatus = saving
     ? "Salvando"
     : saveError !== null && saveError.projectId === activeProject?.id
-      ? "Erro"
+      ? saveError.conflict ? "Conflito" : "Erro"
       : savedSnapshotKey !== null && currentSnapshotKey === savedSnapshotKey
         ? "Salvo"
         : "Dirty";
@@ -96,7 +97,7 @@ export function projectSessionReducer(state: ProjectSessionState, action: Projec
       return withStatus({
         ...state,
         currentSnapshotKey: action.snapshotKey,
-        ...(state.saveError && state.saveError.snapshotKey !== action.snapshotKey
+        ...(state.saveError && !state.saveError.conflict && state.saveError.snapshotKey !== action.snapshotKey
           ? { saveError: null, error: undefined }
           : {}),
       });
@@ -130,7 +131,7 @@ export function projectSessionReducer(state: ProjectSessionState, action: Projec
       return withStatus({
         ...state,
         saving: null,
-        saveError: { projectId: action.projectId, snapshotKey: action.snapshotKey, message: action.message },
+        saveError: { projectId: action.projectId, snapshotKey: action.snapshotKey, message: action.message, conflict: action.conflict === true },
         error: action.message,
       });
     case "project-duplicated":
