@@ -2,6 +2,7 @@ import {
   ProjectRepository,
   ProjectRepositoryError,
   type ProjectMetadata,
+  type ProjectRecoveryRecord,
   type ProjectRecord,
 } from "../persistence/projects/repository";
 import {
@@ -22,6 +23,17 @@ export interface ProjectSummaryDto {
 
 export interface ProjectDto extends ProjectSummaryDto {
   readonly snapshot: ProjectSnapshotV1;
+}
+
+export interface ProjectRecoveryDto {
+  readonly baseRevision: number;
+  readonly projectSchemaVersion: number;
+  readonly snapshot: ProjectSnapshotV1;
+  readonly createdAt: string;
+}
+
+export interface ProjectOpenDto extends ProjectDto {
+  readonly recovery: ProjectRecoveryDto | null;
 }
 
 // Bound the transport allowance to the compact wrapper with the largest valid revision.
@@ -50,6 +62,15 @@ function projectSummaryDto(project: ProjectMetadata): ProjectSummaryDto {
 
 function projectDto(project: ProjectRecord): ProjectDto {
   return { ...projectSummaryDto(project), snapshot: project.snapshot };
+}
+
+function projectRecoveryDto(recovery: ProjectRecoveryRecord): ProjectRecoveryDto {
+  return {
+    baseRevision: recovery.baseRevision,
+    projectSchemaVersion: recovery.projectSchemaVersion,
+    snapshot: recovery.snapshot,
+    createdAt: recovery.createdAt,
+  };
 }
 
 function errorResponse(error: unknown): Response {
@@ -143,6 +164,20 @@ function invalidRequest(message = "The project request is invalid."): Response {
   return Response.json({ code: "INVALID_PROJECT_REQUEST", message }, { status: 400 });
 }
 
+function expectedRevisionSnapshotFields(body: unknown): { readonly expectedRevision: number; readonly snapshot: unknown } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "Project snapshot request body must be an object.");
+  }
+  const fields = body as Record<string, unknown>;
+  if (Object.keys(fields).some((key) => key !== "expectedRevision" && key !== "snapshot")) {
+    throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "Project snapshot request accepts only expectedRevision and snapshot.");
+  }
+  if (!Number.isSafeInteger(fields.expectedRevision) || (fields.expectedRevision as number) < 1) {
+    throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "expectedRevision must be a positive integer.");
+  }
+  return { expectedRevision: fields.expectedRevision as number, snapshot: fields.snapshot };
+}
+
 export async function handleProjectList(_request: Request, projects: ProjectRepository): Promise<Response> {
   try {
     return Response.json({ projects: projects.list().map(projectSummaryDto) });
@@ -162,7 +197,13 @@ export async function handleProjectCreate(_request: Request, projects: ProjectRe
 export async function handleProjectOpen(_request: Request, projectId: string, projects: ProjectRepository): Promise<Response> {
   if (!validProjectId(projectId)) return invalidRequest("Project ID is invalid.");
   try {
-    return Response.json(projectDto(projects.open(projectId)));
+    const project = projects.open(projectId);
+    const recovery = projects.readRecovery(projectId);
+    const response: ProjectOpenDto = {
+      ...projectDto(project),
+      recovery: recovery ? projectRecoveryDto(recovery) : null,
+    };
+    return Response.json(response);
   } catch (error) {
     return errorResponse(error);
   }
@@ -176,18 +217,56 @@ export async function handleProjectSave(request: Request, projectId: string, pro
   } catch (error) {
     return errorResponse(error);
   }
-  if (!body || typeof body !== "object" || Array.isArray(body)) return invalidRequest("Project save body must be an object.");
-  const fields = body as Record<string, unknown>;
-  if (Object.keys(fields).some((key) => key !== "expectedRevision" && key !== "snapshot")) {
-    return invalidRequest("Project save accepts only expectedRevision and snapshot.");
-  }
-  if (!Number.isSafeInteger(fields.expectedRevision) || (fields.expectedRevision as number) < 1) {
-    return invalidRequest("expectedRevision must be a positive integer.");
-  }
-
   try {
+    const fields = expectedRevisionSnapshotFields(body);
     const snapshot = deserializeProjectSnapshot(fields.snapshot);
-    return Response.json(projectDto(projects.save(projectId, fields.expectedRevision as number, snapshot)));
+    return Response.json(projectDto(projects.save(projectId, fields.expectedRevision, snapshot)));
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function handleProjectStageRecovery(request: Request, projectId: string, projects: ProjectRepository): Promise<Response> {
+  if (!validProjectId(projectId)) return invalidRequest("Project ID is invalid.");
+  let body: unknown;
+  try {
+    body = await parseProjectSaveBody(request);
+  } catch (error) {
+    return errorResponse(error);
+  }
+  try {
+    const fields = expectedRevisionSnapshotFields(body);
+    const snapshot = deserializeProjectSnapshot(fields.snapshot);
+    const recovery = projects.stageRecovery(projectId, fields.expectedRevision, snapshot);
+    return Response.json({ recovery: projectRecoveryDto(recovery) });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function handleProjectPromoteRecovery(_request: Request, projectId: string, projects: ProjectRepository): Promise<Response> {
+  if (!validProjectId(projectId)) return invalidRequest("Project ID is invalid.");
+  try {
+    return Response.json(projectDto(projects.promoteRecovery(projectId)));
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function handleProjectDiscardRecovery(_request: Request, projectId: string, projects: ProjectRepository): Promise<Response> {
+  if (!validProjectId(projectId)) return invalidRequest("Project ID is invalid.");
+  try {
+    projects.discardRecovery(projectId);
+    return Response.json({ discarded: true, id: projectId });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function handleProjectCopyRecovery(_request: Request, projectId: string, projects: ProjectRepository): Promise<Response> {
+  if (!validProjectId(projectId)) return invalidRequest("Project ID is invalid.");
+  try {
+    return Response.json(projectDto(projects.copyRecovery(projectId)), { status: 201 });
   } catch (error) {
     return errorResponse(error);
   }

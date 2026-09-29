@@ -15,6 +15,10 @@ import {
   handleProjectList,
   handleProjectOpen,
   handleProjectSave,
+  handleProjectStageRecovery,
+  handleProjectPromoteRecovery,
+  handleProjectDiscardRecovery,
+  handleProjectCopyRecovery,
 } from "../../services/project-api";
 import { openArtworkDatabase } from "../../persistence/sqlite";
 
@@ -220,6 +224,74 @@ describe("project API service", () => {
     expect(opened).not.toHaveProperty("future");
     expect(opened).not.toHaveProperty("snapshot_json");
     expect(opened).not.toHaveProperty("databasePath");
+  });
+
+  it("returns a staged recovery alongside the unchanged canonical snapshot when opening", async () => {
+    const projects = setup();
+    const canonical = projects.create();
+    const candidate = { ...canonical.snapshot, settings: { ...canonical.snapshot.settings, bleedMm: 2 } };
+    projects.stageRecovery(canonical.id, canonical.revision, candidate);
+
+    const response = await handleProjectOpen(request("GET"), canonical.id, projects);
+    const opened = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(opened.snapshot).toEqual(canonical.snapshot);
+    expect(opened.recovery).toMatchObject({
+      baseRevision: 1,
+      projectSchemaVersion: 1,
+      snapshot: candidate,
+    });
+  });
+
+  it("stages, promotes, and discards recovery through explicit API operations", async () => {
+    const projects = setup();
+    const canonical = projects.create();
+    const candidate = { ...canonical.snapshot, settings: { ...canonical.snapshot.settings, bleedMm: 2 } };
+
+    const staged = await handleProjectStageRecovery(request("POST", { expectedRevision: 1, snapshot: candidate }), canonical.id, projects);
+    const firstStage = await staged.json();
+    expect(staged.status).toBe(200);
+    expect(firstStage).toMatchObject({ recovery: { baseRevision: 1, snapshot: candidate } });
+    const repeatedStage = await handleProjectStageRecovery(request("POST", { expectedRevision: 1, snapshot: candidate }), canonical.id, projects);
+    expect(repeatedStage.status).toBe(200);
+    expect(await repeatedStage.json()).toEqual(firstStage);
+    expect(projects.open(canonical.id)).toEqual(canonical);
+
+    const promoted = await handleProjectPromoteRecovery(request("POST"), canonical.id, projects);
+    expect(promoted.status).toBe(200);
+    expect(await promoted.json()).toMatchObject({ revision: 2, snapshot: candidate });
+    expect(projects.readRecovery(canonical.id)).toBeUndefined();
+
+    const nextCandidate = { ...candidate, settings: { ...candidate.settings, bleedMm: 2.5 } };
+    await handleProjectStageRecovery(request("POST", { expectedRevision: 2, snapshot: nextCandidate }), canonical.id, projects);
+    const discarded = await handleProjectDiscardRecovery(request("DELETE"), canonical.id, projects);
+
+    expect(discarded.status).toBe(200);
+    expect(await discarded.json()).toEqual({ discarded: true, id: canonical.id });
+    expect(projects.open(canonical.id).snapshot).toEqual(candidate);
+    expect(projects.readRecovery(canonical.id)).toBeUndefined();
+  });
+
+  it("copies an obsolete recovery into a new project without overwriting the concurrent canonical save", async () => {
+    const projects = setup();
+    const canonical = projects.create();
+    const recoverySnapshot = { ...canonical.snapshot, settings: { ...canonical.snapshot.settings, bleedMm: 2 } };
+    projects.stageRecovery(canonical.id, 1, recoverySnapshot);
+    const concurrentSnapshot = { ...canonical.snapshot, settings: { ...canonical.snapshot.settings, bleedMm: 1 } };
+    const concurrentSave = projects.save(canonical.id, 1, concurrentSnapshot);
+
+    const copied = await handleProjectCopyRecovery(request("POST"), canonical.id, projects);
+    const recoveredProject = await copied.json();
+
+    expect(copied.status).toBe(201);
+    expect(recoveredProject).toMatchObject({
+      id: "project-2",
+      revision: 1,
+      snapshot: recoverySnapshot,
+    });
+    expect(projects.open(canonical.id)).toEqual(concurrentSave);
+    expect(projects.readRecovery(canonical.id)).toBeUndefined();
   });
 
   it("returns a typed conflict for a stale CAS save without overwriting the saved snapshot", async () => {

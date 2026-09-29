@@ -1,4 +1,4 @@
-import type { ProjectDto, ProjectSummaryDto } from "../../services/project-api";
+import type { ProjectDto, ProjectOpenDto, ProjectRecoveryDto, ProjectSummaryDto } from "../../services/project-api";
 import type { ProjectSnapshotV1 } from "../../persistence/projects/serializer";
 
 interface ProjectApiErrorBody {
@@ -49,11 +49,23 @@ export function createProjectApiClient(fetcher: typeof fetch = fetch) {
     async create(): Promise<ProjectDto> {
       return responseJson<ProjectDto>(await fetcher("/api/projects", json("POST")));
     },
-    async open(projectId: string): Promise<ProjectDto> {
-      return responseJson<ProjectDto>(await fetcher(projectUrl(projectId), { cache: "no-store" }));
+    async open(projectId: string): Promise<ProjectOpenDto> {
+      return responseJson<ProjectOpenDto>(await fetcher(projectUrl(projectId), { cache: "no-store" }));
     },
     async save(projectId: string, expectedRevision: number, snapshot: ProjectSnapshotV1): Promise<ProjectDto> {
       return responseJson<ProjectDto>(await fetcher(projectUrl(projectId), json("PUT", { expectedRevision, snapshot })));
+    },
+    async stageRecovery(projectId: string, expectedRevision: number, snapshot: ProjectSnapshotV1): Promise<{ readonly recovery: ProjectRecoveryDto }> {
+      return responseJson<{ recovery: ProjectRecoveryDto }>(await fetcher(`${projectUrl(projectId)}/recovery`, json("POST", { expectedRevision, snapshot })));
+    },
+    async promoteRecovery(projectId: string): Promise<ProjectDto> {
+      return responseJson<ProjectDto>(await fetcher(`${projectUrl(projectId)}/recovery/promote`, json("POST")));
+    },
+    async discardRecovery(projectId: string): Promise<{ readonly discarded: true; readonly id: string }> {
+      return responseJson<{ readonly discarded: true; readonly id: string }>(await fetcher(`${projectUrl(projectId)}/recovery`, json("DELETE")));
+    },
+    async copyRecovery(projectId: string): Promise<ProjectDto> {
+      return responseJson<ProjectDto>(await fetcher(`${projectUrl(projectId)}/recovery/copy`, json("POST")));
     },
     async duplicate(projectId: string): Promise<ProjectDto> {
       return responseJson<ProjectDto>(await fetcher(`${projectUrl(projectId)}/duplicate`, json("POST")));

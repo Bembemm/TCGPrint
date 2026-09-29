@@ -30,4 +30,23 @@ describe("project API client", () => {
         status: 409,
       });
   });
+
+  it("uses the Project recovery endpoints for stage, promote, discard, and copy", async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ id: "project-1" }));
+    const client = createProjectApiClient(fetcher as typeof fetch);
+    const snapshot = { projectSchemaVersion: 1, cards: [], settings: {} } as never;
+
+    await client.stageRecovery("project/one", 4, snapshot);
+    await client.promoteRecovery("project/one");
+    await client.discardRecovery("project/one");
+    await client.copyRecovery("project/one");
+
+    expect(fetcher.mock.calls.map(([input, init]) => [String(input), init?.method])).toEqual([
+      ["/api/projects/project%2Fone/recovery", "POST"],
+      ["/api/projects/project%2Fone/recovery/promote", "POST"],
+      ["/api/projects/project%2Fone/recovery", "DELETE"],
+      ["/api/projects/project%2Fone/recovery/copy", "POST"],
+    ]);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ expectedRevision: 4, snapshot });
+  });
 });

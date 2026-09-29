@@ -156,8 +156,13 @@ export class ProjectRepository {
           project.revision,
         );
       }
-      const existing = this.database.prepare("SELECT project_id FROM project_recovery WHERE project_id = ?").get(projectId);
+      const existing = this.database.prepare(`
+        SELECT project_id, base_revision, project_schema_version, snapshot_json, created_at
+        FROM project_recovery WHERE project_id = ?
+      `).get(projectId) as ProjectRecoveryRow | undefined;
       if (existing) {
+        const recovery = this.recoveryFromRow(existing);
+        if (recovery.baseRevision === baseRevision && existing.snapshot_json === snapshotJson) return recovery;
         throw new ProjectRepositoryError("PROJECT_RECOVERY_EXISTS", `Project ${projectId} already has a staged recovery candidate.`);
       }
       const createdAt = this.timestamp();
@@ -238,6 +243,36 @@ export class ProjectRepository {
       if (result.changes !== 1) {
         throw new ProjectRepositoryError("PROJECT_RECOVERY_NOT_FOUND", `Project ${projectId} has no staged recovery candidate.`);
       }
+    }).immediate();
+  }
+
+  /** Copies a staged candidate to a new Project when its canonical base is no longer current. */
+  copyRecovery(projectId: string): ProjectRecord {
+    return this.database.transaction(() => {
+      const source = this.database.prepare(`
+        SELECT id, name, project_schema_version, revision, snapshot_json, created_at, updated_at, autosaved_at
+        FROM projects WHERE id = ?
+      `).get(projectId) as ProjectRow | undefined;
+      if (!source) throw this.notFound(projectId);
+      this.recordFromRow(source);
+
+      const staged = this.database.prepare(`
+        SELECT project_id, base_revision, project_schema_version, snapshot_json, created_at
+        FROM project_recovery WHERE project_id = ?
+      `).get(projectId) as ProjectRecoveryRow | undefined;
+      if (!staged) {
+        throw new ProjectRepositoryError("PROJECT_RECOVERY_NOT_FOUND", `Project ${projectId} has no staged recovery candidate.`);
+      }
+      const recovery = this.recoveryFromRow(staged);
+      const copy = this.freshProjectRecord(`${source.name} (recuperado)`, recovery.snapshot);
+      this.insertProject(copy);
+      const removed = this.database.prepare(`
+        DELETE FROM project_recovery WHERE project_id = ? AND base_revision = ?
+      `).run(projectId, recovery.baseRevision);
+      if (removed.changes !== 1) {
+        throw new ProjectRepositoryError("PROJECT_RECOVERY_NOT_FOUND", `Project ${projectId} recovery candidate changed during copy.`);
+      }
+      return copy;
     }).immediate();
   }
 

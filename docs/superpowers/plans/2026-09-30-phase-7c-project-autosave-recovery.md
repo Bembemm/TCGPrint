@@ -48,13 +48,13 @@
 
 **Interfaces:**
 - Consumes: existing `ProjectRepository.stageRecovery`, `readRecovery`, `promoteRecovery`, `discardRecovery`, `save`, and existing snapshot serializer.
-- Produces: `ProjectOpenDto` with optional recovery metadata/snapshot; client methods `stageRecovery(projectId, expectedRevision, snapshot)`, `promoteRecovery(projectId)`, `discardRecovery(projectId)`, and `copyRecovery(projectId)`.
+- Produces: `ProjectOpenDto` with nullable recovery metadata/snapshot; client methods `stageRecovery(projectId, expectedRevision, snapshot)`, `promoteRecovery(projectId)`, `discardRecovery(projectId)`, and `copyRecovery(projectId)`.
 - `copyRecovery` creates a new Project from the staged snapshot and deletes the old recovery row in one transaction, preserving `WorkingCard.id`s and leaving the source canonical snapshot unchanged.
 
-- [ ] Add service/repository tests for staging without changing the canonical snapshot, CAS promotion, discard, idempotent response reconciliation, and copying a stale recovery into a new Project.
-- [ ] Run the targeted tests and confirm expected failures before implementation.
-- [ ] Implement only the recovery API/repository boundary; retain schema v1 and the existing serializer.
-- [ ] Run recovery, repository, API, serializer, and SQLite tests.
+- [x] Add service/repository tests for staging without changing the canonical snapshot, CAS promotion, discard, idempotent recovery staging, and copying a stale recovery into a new Project.
+- [x] Run the targeted tests and confirm expected failures before implementation.
+- [x] Implement only the recovery API/repository boundary; retain schema v1 and the existing serializer.
+- [x] Run recovery, repository, API, serializer, and SQLite tests.
 - [ ] Commit: `feat(projects): expose recovery operations`.
 
 ### Task 2: Add a debounced, serialized autosave queue

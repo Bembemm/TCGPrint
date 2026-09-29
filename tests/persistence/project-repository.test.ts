@@ -272,6 +272,18 @@ describe("project repository", () => {
     expect(projects.readRecovery(canonical.id)).toEqual(staged);
   });
 
+  it("acknowledges a repeated identical recovery stage without replacing its timestamp", async () => {
+    const projects = await setup();
+    const canonical = projects.create();
+    const candidate = { ...canonical.snapshot, settings: { ...canonical.snapshot.settings, bleedMm: 2 } };
+    const first = projects.stageRecovery(canonical.id, canonical.revision, candidate);
+
+    const repeated = projects.stageRecovery(canonical.id, canonical.revision, candidate);
+
+    expect(repeated).toEqual(first);
+    expect(projects.readRecovery(canonical.id)).toEqual(first);
+  });
+
   it("promotes a recovery candidate by compare-and-swap and removes it atomically", async () => {
     const projects = await setup();
     const canonical = projects.create();
@@ -337,6 +349,57 @@ describe("project repository", () => {
     expect(duplicate.snapshot.settings.bleedMm).toBe(1);
     expect(projects.readRecovery(canonical.id)).toMatchObject({ snapshot: recoveryCandidate });
     projects.discardRecovery(canonical.id);
+    expect(projects.readRecovery(canonical.id)).toBeUndefined();
+  });
+
+  it("copies a stale recovery into a new project and removes the candidate without changing the source", async () => {
+    const projects = await setup();
+    const card: WorkingCard = {
+      id: "working-card-recovery-copy",
+      quantity: 2,
+      order: 5,
+      importSource: { sourceId: "source-recovery", importKind: "text", entryKind: "card" },
+      identityHints: { name: "Recovery card" },
+      identity: null,
+      identityResolution: { status: "unresolved", candidates: [], confirmed: false },
+      faces: [{ id: "front", side: "front", name: "Recovery card" }],
+      selectedArtworkByFace: {
+        front: {
+          candidateId: `upload:${"a".repeat(64)}`,
+          source: "upload",
+          identityId: null,
+          faceId: "front",
+          selectionPolicy: "user-selected",
+        },
+      },
+      localArtworkIds: [`upload:${"a".repeat(64)}`],
+      mpcReferences: [],
+      faceAssociations: [],
+    };
+    const canonical = projects.create();
+    const candidate = deserializeProjectSnapshot(serializeProjectSnapshot([card], {
+      ...DEFAULT_PROJECT_SETTINGS,
+      bleedMm: 2,
+    }));
+    projects.stageRecovery(canonical.id, canonical.revision, candidate);
+    const newerCanonical = projects.save(canonical.id, canonical.revision, {
+      ...canonical.snapshot,
+      settings: { ...canonical.snapshot.settings, bleedMm: 1 },
+    });
+
+    const copy = projects.copyRecovery(canonical.id);
+
+    expect(copy).toMatchObject({
+      id: "project-2",
+      name: "Novo projeto (recuperado)",
+      revision: 1,
+      snapshot: candidate,
+    });
+    expect(copy.snapshot.cards[0]).toMatchObject({
+      id: "working-card-recovery-copy",
+      selectedArtworkByFace: { front: { candidateId: `upload:${"a".repeat(64)}` } },
+    });
+    expect(projects.open(canonical.id)).toEqual(newerCanonical);
     expect(projects.readRecovery(canonical.id)).toBeUndefined();
   });
 
