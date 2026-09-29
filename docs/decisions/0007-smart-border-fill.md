@@ -176,9 +176,7 @@ For Counterspell, subtle bleed mean luminance was 0.000–0.0001, compared with
 outside bleed sampled the interior rather than extending a dominant black
 band. Pixel-by-pixel comparison of every trim pixel passed for both modes on
 all three assets (331,840 trim pixels per image). The real-art matrix and full
-per-side report are local-only at
-evidência histórica gerada fora do repositório
-and are not committed. These measurements document the rejected approach only;
+per-side report were generated outside the repository and are not committed. These measurements document the rejected approach only;
 the renderer and matrix are not active project requirements.
 
 ## Consequences
