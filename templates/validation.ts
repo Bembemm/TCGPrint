@@ -8,6 +8,7 @@ import type {
   TemplateMetadata,
   TemplatePackageHashFile,
   TemplatePaper,
+  TemplateOrientation,
   TemplateRegistrationType,
   ValidatedTemplateFile,
 } from "./types";
@@ -22,7 +23,7 @@ const METADATA_FIELDS = new Set([
 const EXTENSIONS = new Set<TemplateFileExtension>(["studio3", "dxf", "svg", "json", "zip"]);
 const PAPERS = new Set<TemplatePaper>(["a4", "a3", "letter", "legal", "tabloid", "custom"]);
 const CARD_FORMATS = new Set<TemplateCardFormat>(["standard", "poker", "bridge", "tarot", "custom"]);
-const ORIENTATIONS = new Set(["portrait", "landscape"]);
+const ORIENTATIONS = new Set<TemplateOrientation>(["portrait", "landscape"]);
 const REGISTRATION_TYPES = new Set<TemplateRegistrationType>(["three-point", "four-point", "custom", "none"]);
 const BINARY_DXF_SIGNATURE = new TextEncoder().encode("AutoCAD Binary DXF\r\n\u001a\0");
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
