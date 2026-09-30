@@ -17,7 +17,7 @@ Projects must retain the exact Silhouette template version used to prepare a pri
 5. Project snapshots remain schema version 1. Template selection is persisted in relational rows and is included in the autosave/recovery request envelope. Reopen, duplicate, recovery promotion, and recovery copy preserve the full template ID/version/package hash tuple.
 6. Library deletion is rejected while any canonical Project or staged recovery refers to any version. Project deletion cascades only its relational selections. Unreferenced template metadata can be removed, while immutable content blobs remain available and may be shared.
 7. Projects with missing or corrupt originals keep their recorded selection. Verification reports `missing`, `corrupt`, or `hash-mismatch`; no newer version is substituted automatically.
-8. ZIP ingestion reuses `expandZipSource`. Traversal and symlink entries fail the whole template import. Limits are 32 uploads, 100 MiB total uploaded bytes, 50 MiB per non-ZIP file, 100 MiB per ZIP, 500 associated entries, 50 MiB per expanded entry, 200 MiB total expanded bytes, and compression ratio 100. Nested ZIPs are rejected. No entry is written as a filesystem path.
+8. ZIP ingestion reuses `expandZipSource`. Traversal and symlink entries fail the whole template import. Limits are 32 uploads, 100 MiB total uploaded bytes, 50 MiB per non-ZIP file, 100 MiB per ZIP, 500 ZIP entries across the complete package, 500 associated files, 50 MiB per expanded entry, 200 MiB total expanded bytes across the complete package, and compression ratio 100. Nested `.zip` entries are rejected. Expansion does not recurse into members, so opaque `.studio3` bytes are never interpreted even when they resemble ZIP. No entry is written as a filesystem path.
 9. `.studio3` is only bounded, hashed, and stored. SVG receives safe XML well-formedness/root validation; DXF receives minimal structural validation; JSON receives bounded syntax/tree validation. No geometry is extracted or used for cut export in Phase 9.
 
 ## Consequences
@@ -25,5 +25,5 @@ Projects must retain the exact Silhouette template version used to prepare a pri
 - Older Projects remain reproducible after later template versions are uploaded.
 - Identical file bytes consume one immutable blob even when referenced by multiple template versions.
 - Removing a template can leave unreferenced blob files on disk; cleanup requires a future ownership-aware garbage collector.
-- ZIP packages with nested archives are intentionally unsupported in Phase 9.
+- ZIP packages with nested `.zip` entries are intentionally unsupported in Phase 9. `.studio3` members remain opaque regardless of their bytes.
 - Geometry interpretation, Registration, calibration, PDF alignment, and Cut Export remain future phase work.

@@ -212,6 +212,8 @@ export class TemplateLibraryService {
       throw new TemplateLibraryError("TEMPLATE_UPLOAD_LIMIT", `Upload must include between 1 and ${this.limits.maxUploadFiles} files.`);
     }
     let uploadedBytes = 0;
+    let packageZipEntries = 0;
+    let packageExpandedBytes = 0;
     const records: Array<{ input: TemplateFileRecordInput; bytes: Uint8Array }> = [];
     for (const upload of uploads) {
       if (!upload || typeof upload.fileName !== "string" || !(upload.bytes instanceof Uint8Array)) {
@@ -239,14 +241,20 @@ export class TemplateLibraryService {
         originalBytes: upload.bytes,
         sha256: validated.contentHash,
       };
+      const remainingEntries = this.limits.maxZipEntries - packageZipEntries;
+      const remainingExpandedBytes = this.limits.maxZipTotalBytes - packageExpandedBytes;
+      if (remainingEntries <= 0 || remainingExpandedBytes <= 0) {
+        throw new TemplateLibraryError("TEMPLATE_UPLOAD_LIMIT", "Template ZIP files exceed the package-wide entry or expanded-byte limit.");
+      }
       let expanded;
       try {
         expanded = await expandZipSource(source, {
+          expandNestedArchives: false,
           limits: {
             maxZipArchiveBytes: this.limits.maxArchiveBytes,
-            maxZipEntries: this.limits.maxZipEntries,
+            maxZipEntries: remainingEntries,
             maxZipEntryBytes: this.limits.maxZipEntryBytes,
-            maxZipTotalUncompressedBytes: this.limits.maxZipTotalBytes,
+            maxZipTotalUncompressedBytes: remainingExpandedBytes,
             maxZipCompressionRatio: this.limits.maxZipCompressionRatio,
             maxZipNestingDepth: MAX_TEMPLATE_ZIP_NESTING_DEPTH,
           },
@@ -258,6 +266,8 @@ export class TemplateLibraryService {
         const first = expanded.errors[0]!;
         throw new TemplateLibraryError("TEMPLATE_PACKAGE_INVALID", `Template ZIP rejected (${first.code}): ${first.message}`);
       }
+      packageZipEntries += expanded.entriesSeen;
+      packageExpandedBytes += expanded.uncompressedBytes;
       if (expanded.sources.some((entry) => fileExtension(entry.filename ?? "") === "zip")) {
         throw new TemplateLibraryError("TEMPLATE_PACKAGE_INVALID", "Nested ZIP files are not allowed in a template package.");
       }

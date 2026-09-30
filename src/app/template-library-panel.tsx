@@ -104,9 +104,8 @@ export default function TemplateLibraryPanel({ selection, onSelect, disabled = f
       }));
       if (selectedTemplateId) form.set("templateId", selectedTemplateId);
       for (const file of files) form.append("files", file, file.name);
-      const result = await responseJson<{ templateId: string; version: TemplateVersionRecord }>(await fetch("/api/templates", { method: "POST", body: form }));
+      await responseJson<unknown>(await fetch("/api/templates", { method: "POST", body: form }));
       await refresh();
-      onSelect({ templateId: result.templateId, version: result.version.version, packageHash: result.version.packageHash });
       setFiles([]);
       formElement.reset();
     } catch (reason) {
@@ -173,7 +172,7 @@ export default function TemplateLibraryPanel({ selection, onSelect, disabled = f
           <input type="file" multiple accept=".studio3,.dxf,.svg,.json,.zip" disabled={disabled || busy} onChange={(event) => setFiles(Array.from(event.currentTarget.files ?? []))} />
         </label>
         <div className="template-import-actions">
-          <span>{files.length} arquivo(s) · até 32 uploads · ZIP aninhado não permitido.</span>
+          <span>{files.length} arquivo(s) · até 32 uploads · ZIP aninhado não permitido. A associação ao Project é explícita.</span>
           <button className="button primary" type="submit" disabled={disabled || busy || files.length === 0}>{busy ? "Processando…" : selectedTemplateId ? "Adicionar versão" : "Importar template"}</button>
         </div>
       </form>

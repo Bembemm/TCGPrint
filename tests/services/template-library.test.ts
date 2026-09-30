@@ -71,6 +71,20 @@ describe("template library service", () => {
     expect(created.version.packageHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("keeps ZIP-shaped .studio3 files opaque inside template packages", async () => {
+    const library = await setup();
+    const opaqueStudio = makeSyntheticZip([{ name: "internal.studio3", bytes: studio }]);
+    const packageBytes = makeSyntheticZip([{ name: "official.studio3", bytes: opaqueStudio }]);
+
+    const created = await library.importTemplate(metadata, [{ fileName: "package.zip", bytes: packageBytes }]);
+
+    expect(created.version.files.map(({ relativePath }) => relativePath).sort()).toEqual([
+      "package.zip", "package.zip.contents/official.studio3",
+    ]);
+    const original = created.version.files.find(({ extension }) => extension === "studio3")!;
+    expect(await library.readFile(original.fileId)).toEqual(opaqueStudio);
+  });
+
   it("ingests valid DXF, SVG and JSON as associated immutable originals with per-file SHA-256", async () => {
     const library = await setup();
     const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20"><path d="M0 0"/></svg>');
@@ -144,6 +158,24 @@ describe("template library service", () => {
 
     await expect(nestedLibrary.importTemplate(metadata, [{ fileName: "empty-package.zip", bytes: makeSyntheticZip([]) }]))
       .rejects.toMatchObject({ code: "TEMPLATE_PACKAGE_INVALID" });
+  });
+
+  it("applies ZIP entry and expanded-byte limits across all archives in one package", async () => {
+    const countLibrary = await setup({ limits: { maxZipEntries: 1 } });
+    const firstCountArchive = makeSyntheticZip([{ name: "template.studio3", bytes: studio }]);
+    const secondCountArchive = makeSyntheticZip([{ name: "template.dxf", bytes: dxf }]);
+    await expect(countLibrary.importTemplate(metadata, [
+      { fileName: "first.zip", bytes: firstCountArchive },
+      { fileName: "second.zip", bytes: secondCountArchive },
+    ])).rejects.toMatchObject({ code: "TEMPLATE_UPLOAD_LIMIT" });
+    expect(countLibrary.list()).toEqual([]);
+
+    const byteLibrary = await setup({ limits: { maxZipTotalBytes: studio.byteLength * 2 - 1 } });
+    await expect(byteLibrary.importTemplate(metadata, [
+      { fileName: "first.zip", bytes: makeSyntheticZip([{ name: "template.studio3", bytes: studio }]) },
+      { fileName: "second.zip", bytes: makeSyntheticZip([{ name: "template.studio3", bytes: studio }]) },
+    ])).rejects.toMatchObject({ code: "TEMPLATE_PACKAGE_INVALID" });
+    expect(byteLibrary.list()).toEqual([]);
   });
 
   it("rejects invalid metadata, malformed SVG/DXF/JSON and oversized associated files", async () => {

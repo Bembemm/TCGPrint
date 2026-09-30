@@ -8,6 +8,10 @@ import type { ImportError, ImportLimits, ImportProgress, ImportSource, Universal
 export interface ZipExpansion {
   readonly sources: readonly ImportSource[];
   readonly errors: readonly ImportError[];
+  /** ZIP member count, including directories and unsafe entries, inspected by this expansion. */
+  readonly entriesSeen: number;
+  /** Sum of actual uncompressed bytes read across this ZIP tree. */
+  readonly uncompressedBytes: number;
 }
 
 interface ZipState {
@@ -245,7 +249,7 @@ async function expandRecursive(source: ImportSource, state: ZipState, depth: num
         };
         expanded.push(child);
         const detection = detectImport({ bytes: childBytes, fileName: child.filename });
-        if (detection.selected?.kind === "zip") {
+        if (detection.selected?.kind === "zip" && state.options.expandNestedArchives !== false) {
           if (depth >= state.limits.maxZipNestingDepth) {
             state.errors.push(failure(child, "ZIP_DEPTH_LIMIT", `Nested ZIP exceeds depth ${state.limits.maxZipNestingDepth}.`, childPath));
           } else {
@@ -282,5 +286,5 @@ export async function expandZipSource(
     stopEntries: false,
   };
   const sources = await expandRecursive(source, state, 0);
-  return { sources, errors: state.errors };
+  return { sources, errors: state.errors, entriesSeen: state.entriesSeen, uncompressedBytes: state.uncompressedBytes };
 }

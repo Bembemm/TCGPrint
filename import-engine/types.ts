@@ -290,6 +290,8 @@ export interface UniversalImportOptions {
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: ImportProgress) => void;
   readonly limits?: Partial<ImportLimits>;
+  /** Defaults to true. Callers handling opaque file formats can preserve archive-shaped members without recursing. */
+  readonly expandNestedArchives?: boolean;
   readonly fetchImpl?: typeof fetch;
   readonly resolveHost?: (hostname: string) => Promise<readonly string[]>;
   readonly urlTimeoutMs?: number;
