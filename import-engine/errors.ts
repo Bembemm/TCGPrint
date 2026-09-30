@@ -26,6 +26,7 @@ export type ImportFailureCode =
   | "URL_TIMEOUT"
   | "URL_CONTENT_TYPE"
   | "URL_RESPONSE_LIMIT"
+  | "URL_HOST_BLOCKED"
   | "URL_REDIRECT_BLOCKED"
   | "URL_ADAPTER_PAYLOAD";
 

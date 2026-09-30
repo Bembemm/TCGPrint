@@ -81,6 +81,19 @@ function isUrlInput(value: string, explicitUrlLike = false): boolean {
   return explicitUrlLike || isHttpUrl(value) || /^\s*[a-z][a-z\d+.-]*:\/\//i.test(value);
 }
 
+function mediaTypeKind(mediaType?: string): ImportKind | undefined {
+  const normalized = mediaType?.split(";", 1)[0]?.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized === "image/svg+xml") return "svg";
+  if (["image/png", "image/jpeg", "image/webp", "image/tiff"].includes(normalized)) return "image";
+  if (["text/csv", "application/csv"].includes(normalized)) return "csv";
+  if (normalized === "text/tab-separated-values") return "tsv";
+  if (["application/json", "text/json"].includes(normalized)) return "json";
+  if (["application/xml", "text/xml"].includes(normalized)) return "generic-xml";
+  if (["application/zip", "application/x-zip-compressed"].includes(normalized)) return "zip";
+  return undefined;
+}
+
 function isTiff(bytes: Uint8Array): boolean {
   return bytes.length >= 4 && (
     (bytes[0] === 0x49 && bytes[1] === 0x49 && (bytes[2] === 0x2a || bytes[2] === 0x2b) && bytes[3] === 0)
@@ -248,6 +261,21 @@ export function detectImport(input: ImportDetectionInput, policy: DetectionPolic
     else if (/^\s*<\?xml\b/i.test(text) || /^\s*</.test(text)) addTextCandidates(text, input.fileName, candidates);
     else if (/^\s*[\[{]/.test(text)) addTextCandidates(text, input.fileName, candidates);
     else addTextCandidates(text, input.fileName, candidates);
+  }
+
+  const declaredKind = mediaTypeKind(input.mediaType);
+  if (declaredKind) {
+    const hasSpecificContentEvidence = candidates.some((candidate) => candidate.kind !== "simple-decklist" && candidate.kind !== "unknown");
+    if (!hasSpecificContentEvidence && candidates.some((candidate) => candidate.kind === "simple-decklist")) {
+      candidates.splice(0, candidates.length, {
+        kind: declaredKind,
+        confidence: 0.94,
+        reasons: [`Content-Type ${input.mediaType} indica ${declaredKind}; conteúdo genérico não apresentou um formato mais específico.`],
+        ...(declaredKind === "svg" ? { originalFormat: "svg" } : {}),
+      });
+    } else if (!candidates.some((candidate) => candidate.kind === declaredKind)) {
+      addCandidate(candidates, declaredKind, 0.82, `Content-Type ${input.mediaType} é uma evidência secundária para ${declaredKind}.`, declaredKind === "svg" ? "svg" : undefined);
+    }
   }
 
   let hinted = applyExtensionHint(candidates, input.fileName, reasons);

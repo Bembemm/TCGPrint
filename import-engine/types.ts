@@ -290,4 +290,8 @@ export interface UniversalImportOptions {
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: ImportProgress) => void;
   readonly limits?: Partial<ImportLimits>;
+  readonly fetchImpl?: typeof fetch;
+  readonly resolveHost?: (hostname: string) => Promise<readonly string[]>;
+  readonly urlTimeoutMs?: number;
+  readonly maxUrlResponseBytes?: number;
 }

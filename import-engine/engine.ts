@@ -8,6 +8,8 @@ import { parseCsvImport } from "./importers/csv";
 import { parseJsonImport } from "./importers/json";
 import { importGenericXml, importMpcAutofillXml } from "./importers/xml";
 import { expandZipSource } from "./zip";
+import { importDirectFileUrl } from "./urls/direct-file";
+import { resolveUrlAdapter } from "./urls/registry";
 import type {
   ImportCandidate,
   ImportDetection,
@@ -38,10 +40,14 @@ function fileSource(file: ImportFileInput, order: number): ImportSource {
     kind: file.kind ?? "file",
     filename: file.filename,
     sourcePath: file.sourcePath,
+    mediaType: file.mediaType,
+    sourceUrl: file.sourceUrl,
+    adapterId: file.adapterId,
     order,
     sizeBytes: file.bytes.byteLength,
     originalBytes: file.bytes,
     sha256: hashBytes(file.bytes),
+    metadata: file.metadata,
   };
 }
 
@@ -80,6 +86,9 @@ function candidateDetection(source: ImportSource, maxBytes: number, maxTextBytes
     ...(source.originalBytes ? { bytes: source.originalBytes } : {}),
     ...(source.originalText !== undefined ? { text: source.originalText } : {}),
     fileName: source.filename,
+    mediaType: source.mediaType,
+    sourceUrl: source.sourceUrl,
+    adapterId: source.adapterId,
   });
   return { ...result, sourceId: source.id };
 }
@@ -241,9 +250,60 @@ export async function importFiles(
   const importOne = async (source: ImportSource): Promise<void> => {
     if (options.signal?.aborted) throw new ImportCancelledError(source.id);
     let currentSource = source;
-    const isZipBySignature = source.originalBytes?.[0] === 0x50 && source.originalBytes?.[1] === 0x4b;
-    const detection = candidateDetection(source, isZipBySignature ? limits.maxZipArchiveBytes : limits.maxInputBytes, limits.maxTextBytes);
-    const requestedKind = request.selections?.[source.id];
+    const isZipBySignature = (input: ImportSource) => input.originalBytes?.[0] === 0x50 && input.originalBytes?.[1] === 0x4b;
+    let detection = candidateDetection(source, isZipBySignature(source) ? limits.maxZipArchiveBytes : limits.maxInputBytes, limits.maxTextBytes);
+    let requestedKind = request.selections?.[source.id];
+
+    if (detection.selected?.kind === "url") {
+      if (requestedKind && requestedKind !== "url") {
+        detections.push(detection);
+        errors.push(errorFrom(new ImportFailureError(`Selected importer ${requestedKind} does not apply until the URL response is inspected.`, "FORMAT_MISMATCH", source.id, source.sourcePath), source));
+        return;
+      }
+      try {
+        const sourceUrl = source.originalText?.trim();
+        if (!sourceUrl) throw new ImportFailureError("URL input must contain a complete URL string.", "URL_INVALID", source.id);
+        const resolution = resolveUrlAdapter(sourceUrl);
+        if (resolution.kind === "known-unsupported") {
+          throw new ImportFailureError(resolution.message, "URL_UNSUPPORTED", source.id);
+        }
+        const result = await importDirectFileUrl(sourceUrl, {
+          ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+          ...(options.resolveHost ? { resolveHost: options.resolveHost } : {}),
+          ...(options.signal ? { signal: options.signal } : {}),
+          ...(options.urlTimeoutMs !== undefined ? { timeoutMs: options.urlTimeoutMs } : {}),
+          ...(options.maxUrlResponseBytes !== undefined ? { maxResponseBytes: options.maxUrlResponseBytes } : {}),
+          sourceId: source.id,
+        });
+        if (result.kind !== "source") {
+          throw new ImportFailureError("Direct URL response did not produce a file source.", "URL_ADAPTER_PAYLOAD", source.id);
+        }
+        currentSource = {
+          id: source.id,
+          kind: "url",
+          filename: result.filename,
+          order: source.order,
+          originalFormat: sourceExtension(result.filename),
+          mediaType: result.mediaType,
+          sourceUrl: result.sourceUrl,
+          sizeBytes: result.bytes.byteLength,
+          originalBytes: result.bytes,
+          sha256: hashBytes(result.bytes),
+          metadata: result.metadata,
+        };
+        const sourceIndex = allSources.findIndex((candidateSource) => candidateSource.id === source.id);
+        if (sourceIndex >= 0) allSources[sourceIndex] = currentSource;
+        detection = candidateDetection(currentSource, isZipBySignature(currentSource) ? limits.maxZipArchiveBytes : limits.maxInputBytes, limits.maxTextBytes);
+        requestedKind = undefined;
+      } catch (error) {
+        if (error instanceof ImportCancelledError) throw error;
+        detections.push(detection);
+        selectedImporters.push({ sourceId: source.id, kind: "url" });
+        errors.push(errorFrom(error, source));
+        return;
+      }
+    }
+
     const selectedCandidate = requestedKind ? hasCandidate(detection, requestedKind) : detection.selected;
     let finalDetection: ImportDetection = detection;
     if (requestedKind && selectedCandidate) {
@@ -256,18 +316,19 @@ export async function importFiles(
     const kind = candidate?.kind ?? (detection.status === "unknown" ? "unknown" : undefined);
     if (kind) selectedImporters.push({ sourceId: source.id, kind });
     const originalFormat = candidate?.originalFormat
-      ?? (candidate?.kind === "url" ? "url" : sourceExtension(source.filename) ?? candidate?.kind);
+      ?? (candidate?.kind === "url" ? "url" : sourceExtension(currentSource.filename) ?? candidate?.kind);
     if (originalFormat) {
-      currentSource = { ...source, originalFormat };
+      currentSource = { ...currentSource, originalFormat };
       const sourceIndex = allSources.findIndex((candidateSource) => candidateSource.id === source.id);
       if (sourceIndex >= 0) allSources[sourceIndex] = currentSource;
     }
 
-    const sizeLimit = source.kind === "text" ? limits.maxTextBytes : isZipBySignature ? limits.maxZipArchiveBytes : limits.maxInputBytes;
-    if (source.sizeBytes > sizeLimit) {
-      const code = isZipBySignature ? "ZIP_SIZE_LIMIT" : "INPUT_TOO_LARGE";
-      const label = isZipBySignature ? "ZIP archive" : "Input";
-      errors.push(errorFrom(new ImportFailureError(`${label} is ${source.sizeBytes} bytes; configured limit is ${sizeLimit}.`, code, source.id, source.sourcePath), currentSource));
+    const currentIsZip = isZipBySignature(currentSource);
+    const sizeLimit = currentSource.kind === "text" ? limits.maxTextBytes : currentIsZip ? limits.maxZipArchiveBytes : limits.maxInputBytes;
+    if (currentSource.sizeBytes > sizeLimit) {
+      const code = currentIsZip ? "ZIP_SIZE_LIMIT" : "INPUT_TOO_LARGE";
+      const label = currentIsZip ? "ZIP archive" : "Input";
+      errors.push(errorFrom(new ImportFailureError(`${label} is ${currentSource.sizeBytes} bytes; configured limit is ${sizeLimit}.`, code, source.id, source.sourcePath), currentSource));
       return;
     }
     if (requestedKind && !selectedCandidate) return;
@@ -279,9 +340,8 @@ export async function importFiles(
       warnings.push(warning(currentSource, "AMBIGUOUS_DETECTION", "Mais de um formato é plausível; selecione um importer antes de processar."));
       return;
     }
-    if (candidate.kind === "url") {
-      warnings.push(warning(currentSource, "URL_ADAPTER_DEFERRED", "URL detectada; adapters e fetch de sites ficam fora desta fase."));
-      return;
+    if (currentSource.metadata?.contentTypeMismatch === true) {
+      warnings.push(warning(currentSource, "URL_CONTENT_TYPE_MISMATCH", "O Content-Type recebido diverge do formato identificado pelo conteúdo."));
     }
     if (candidate.kind !== "image" && candidate.kind !== "svg") {
       const mismatchReason = detection.reasons.find((reason) => /extensão \.\w+ diverge/i.test(reason));
@@ -318,7 +378,7 @@ export async function importFiles(
           importOutput = importMpcAutofillXml(currentSource, limits);
           break;
         case "zip": {
-          if (source.kind !== "zip-entry") {
+          if (currentSource.kind !== "zip-entry") {
             const expansion = await expandZipSource(currentSource, options);
             errors.push(...expansion.errors);
             allSources.push(...expansion.sources);
@@ -334,7 +394,10 @@ export async function importFiles(
         if (importOutput.mappings) mappings.push(...importOutput.mappings);
         if (importOutput.metadata) {
           const index = allSources.findIndex((candidateSource) => candidateSource.id === source.id);
-          if (index >= 0) allSources[index] = { ...currentSource, metadata: importOutput.metadata };
+          if (index >= 0) allSources[index] = {
+            ...currentSource,
+            metadata: { ...(currentSource.metadata ?? {}), ...importOutput.metadata },
+          };
         }
       }
     } catch (error) {
