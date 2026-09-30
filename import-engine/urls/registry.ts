@@ -25,14 +25,15 @@ function siteForHost(host: string): KnownUrlSite | undefined {
 }
 
 function parseHttpUrl(value: string): URL {
+  const scheme = /^\s*([a-z][a-z\d+.-]*):/i.exec(value)?.[1]?.toLowerCase();
+  if (!scheme) throw new ImportFailureError("URL input has no valid scheme.", "URL_INVALID");
+  if (scheme !== "http" && scheme !== "https") throw new ImportFailureError("Somente URLs HTTP e HTTPS podem ser importadas.", "URL_UNSUPPORTED");
+  if (!/^\s*https?:\/\//i.test(value)) throw new ImportFailureError("Importable URLs must begin with http:// or https://.", "URL_INVALID");
   let url: URL;
   try {
     url = new URL(value.trim());
   } catch (error) {
     throw new ImportFailureError("A entrada parece uma URL, mas seu formato é inválido.", "URL_INVALID", undefined, undefined, { cause: error });
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new ImportFailureError("Somente URLs HTTP e HTTPS podem ser importadas.", "URL_UNSUPPORTED");
   }
   if (!url.hostname || url.username || url.password) {
     throw new ImportFailureError("URL inválida: informe um host público sem credenciais embutidas.", "URL_INVALID");

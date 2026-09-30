@@ -1,0 +1,25 @@
+{
+  "id": "synthetic-cube",
+  "name": "Synthetic CubeCobra cube",
+  "cards": {
+    "id": "synthetic-cube",
+    "mainboard": [
+      {
+        "details": { "name": "Sol Ring", "set": "cmm", "collector_number": "396" },
+        "board": "mainboard"
+      }
+    ],
+    "maybeboard": [
+      {
+        "details": { "name": "Lightning Bolt", "set": "lea", "collector_number": "161" },
+        "board": "maybeboard"
+      }
+    ],
+    "basics": [
+      {
+        "details": { "name": "Island", "set": "m21", "collector_number": "310" },
+        "board": "basics"
+      }
+    ]
+  }
+}

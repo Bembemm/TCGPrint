@@ -5,8 +5,6 @@ import type { UrlAdapter } from "../../../import-engine/urls/types";
 
 const knownUnsupportedSites = [
   ["https://www.moxfield.com/decks/abc", "moxfield"],
-  ["https://archidekt.com/decks/7031486", "archidekt"],
-  ["https://cubecobra.com/cube/overview/obc", "cubecobra"],
   ["https://deckstats.net/decks/1/0", "deckstats"],
   ["https://www.mtggoldfish.com/deck/844544", "mtggoldfish"],
   ["https://tappedout.net/mtg-decks/example/", "tappedout"],
@@ -21,6 +19,8 @@ describe("URL adapter registry", () => {
     ["https://scryfall.com/card/war/235", "scryfall"],
     ["https://mtg.wtf/deck/m19/red-white-deck", "mtg-wtf"],
     ["https://www.mtgtop8.com/event?d=298009", "mtgtop8"],
+    ["https://archidekt.com/decks/7031486", "archidekt"],
+    ["https://cubecobra.com/cube/overview/obc", "cubecobra"],
   ])("resolves an implemented protocol for %s", (value, adapterId) => {
     expect(resolveUrlAdapter(value)).toMatchObject({ kind: "adapter", adapter: { id: adapterId } });
   });
@@ -51,7 +51,7 @@ describe("URL adapter registry", () => {
     expect(resolveUrlAdapter("https://api.scryfall.com/cards/war/235")).toMatchObject({ kind: "known-unsupported", siteId: "scryfall" });
   });
 
-  it.each(["https://", "https://[::1", "not a URL"])("rejects malformed URL %s with a typed failure", (value) => {
+  it.each(["https://", "https:/invalid.example/deck", "https://[::1", "not a URL"])("rejects malformed URL %s with a typed failure", (value) => {
     expect(() => resolveUrlAdapter(value)).toThrowError(ImportFailureError);
     try {
       resolveUrlAdapter(value);

@@ -1,0 +1,24 @@
+{
+  "id": 7031486,
+  "name": "Synthetic Archidekt deck",
+  "cards": [
+    {
+      "quantity": 2,
+      "categories": ["Creatures", "Mainboard"],
+      "card": {
+        "collectorNumber": "182",
+        "edition": { "editioncode": "bro" },
+        "oracleCard": { "name": "Gaea's Gift" }
+      }
+    },
+    {
+      "quantity": 1,
+      "categories": ["Sideboard"],
+      "card": {
+        "collectorNumber": "17",
+        "edition": { "editioncode": "m21" },
+        "oracleCard": { "name": "Example Card" }
+      }
+    }
+  ]
+}

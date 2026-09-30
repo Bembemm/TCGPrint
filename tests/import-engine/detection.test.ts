@@ -86,6 +86,7 @@ describe("universal import detection", () => {
   it("detects URLs as inert input and leaves unrecognized binary input unknown", () => {
     expect(selectedKind("https://example.invalid/deck.txt")).toBe("url");
     expect(selectedKind("https://")).toBe("url");
+    expect(selectedKind("https:/example.invalid/deck.txt")).toBe("url");
     expect(selectedKind("ftp://example.invalid/deck.txt")).toBe("url");
     const detection = detectImport({ bytes: new Uint8Array([0xff, 0x00, 0xff, 0x12]), fileName: "unknown.data" });
     expect(detection.status).toBe("unknown");

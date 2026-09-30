@@ -78,7 +78,7 @@ function isHttpUrl(value: string): boolean {
 }
 
 function isUrlInput(value: string, explicitUrlLike = false): boolean {
-  return explicitUrlLike || isHttpUrl(value) || /^\s*[a-z][a-z\d+.-]*:\/\//i.test(value);
+  return explicitUrlLike || isHttpUrl(value) || /^\s*(?:https?|ftp|file|mailto|data):/i.test(value) || /^\s*[a-z][a-z\d+.-]*:\/\//i.test(value);
 }
 
 function mediaTypeKind(mediaType?: string): ImportKind | undefined {
@@ -266,6 +266,14 @@ export function detectImport(input: ImportDetectionInput, policy: DetectionPolic
   const declaredKind = mediaTypeKind(input.mediaType);
   if (declaredKind) {
     const hasSpecificContentEvidence = candidates.some((candidate) => candidate.kind !== "simple-decklist" && candidate.kind !== "unknown");
+    const trimmedText = text?.trimStart() ?? "";
+    const structuredContentKind = /^\s*[\[{]/.test(trimmedText) && candidates.some((candidate) => candidate.kind === "json")
+      ? "json"
+      : /^\s*</.test(trimmedText) && candidates.some((candidate) => ["generic-xml", "mpc-autofill-xml", "svg"].includes(candidate.kind))
+        ? candidates.find((candidate) => ["mpc-autofill-xml", "svg", "generic-xml"].includes(candidate.kind))?.kind
+        : undefined;
+    const specializedDeck = candidates.some((candidate) => ["arena-like", "mtgo-like", "xmage-like", "mwdeck-like"].includes(candidate.kind));
+    const matchingCandidate = candidates.find((candidate) => candidate.kind === declaredKind);
     if (!hasSpecificContentEvidence && candidates.some((candidate) => candidate.kind === "simple-decklist")) {
       candidates.splice(0, candidates.length, {
         kind: declaredKind,
@@ -273,6 +281,15 @@ export function detectImport(input: ImportDetectionInput, policy: DetectionPolic
         reasons: [`Content-Type ${input.mediaType} indica ${declaredKind}; conteúdo genérico não apresentou um formato mais específico.`],
         ...(declaredKind === "svg" ? { originalFormat: "svg" } : {}),
       });
+    } else if (matchingCandidate && !signatureFormat && !specializedDeck && (!structuredContentKind || structuredContentKind === declaredKind)) {
+      const index = candidates.indexOf(matchingCandidate);
+      candidates[index] = {
+        ...matchingCandidate,
+        confidence: Math.max(matchingCandidate.confidence, 0.99),
+        reasons: [...matchingCandidate.reasons, `Content-Type ${input.mediaType} confirma o formato identificado no conteúdo.`],
+      };
+    } else if (!matchingCandidate && structuredContentKind && structuredContentKind !== declaredKind) {
+      // A recognizable JSON/XML document is stronger evidence than a conflicting media type.
     } else if (!candidates.some((candidate) => candidate.kind === declaredKind)) {
       addCandidate(candidates, declaredKind, 0.82, `Content-Type ${input.mediaType} é uma evidência secundária para ${declaredKind}.`, declaredKind === "svg" ? "svg" : undefined);
     }
