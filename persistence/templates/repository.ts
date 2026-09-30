@@ -345,11 +345,15 @@ export class TemplateRepository {
   }
 
   private sameVersionFiles(templateId: string, version: string, files: readonly TemplateFileRecordInput[]): boolean {
-    const stored = this.database.prepare("SELECT * FROM template_files WHERE template_id = ? AND version = ? ORDER BY relative_path")
+    const stored = this.database.prepare("SELECT * FROM template_files WHERE template_id = ? AND version = ?")
       .all(templateId, version) as TemplateFileRow[];
-    return stored.length === files.length && stored.every((row, index) => {
-      const input = files[index];
-      return row.relative_path === input?.relativePath
+    if (stored.length !== files.length) return false;
+    const storedByPath = new Map(stored.map((row) => [row.relative_path, row] as const));
+    if (storedByPath.size !== stored.length) return false;
+    return files.every((input) => {
+      const row = storedByPath.get(input.relativePath);
+      return row !== undefined
+        && row.relative_path === input.relativePath
         && row.file_name === input.fileName
         && row.extension === input.extension
         && row.media_type === input.mediaType

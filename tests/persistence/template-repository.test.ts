@@ -89,6 +89,60 @@ describe("template repository", () => {
     expect(repository.list()[0]?.versions).toHaveLength(1);
   });
 
+  it("treats same-version imports with Unicode paths as idempotent despite database ordering", () => {
+    database = openProjectDatabase(":memory:");
+    const repository = new TemplateRepository(database, {
+      idFactory: (() => { let index = 0; return () => `template-${++index}`; })(),
+      now: () => now,
+    });
+    const v5 = metadata("v5");
+    const dxfBytes = new TextEncoder().encode("0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nEOF\n");
+    const dxfHash = createHash("sha256").update(dxfBytes).digest("hex");
+    const unicodeFiles = [
+      {
+        relativePath: "𐀀.dxf",
+        fileName: "𐀀.dxf",
+        extension: "dxf" as const,
+        mediaType: "application/dxf",
+        contentHash: dxfHash,
+        byteLength: dxfBytes.byteLength,
+      },
+      {
+        relativePath: ".studio3",
+        fileName: ".studio3",
+        extension: "studio3" as const,
+        mediaType: "application/octet-stream",
+        contentHash: fileHash,
+        byteLength: fileBytes.byteLength,
+      },
+    ];
+    const packageHash = calculateTemplatePackageHash(v5, unicodeFiles.map(({ relativePath, contentHash, byteLength }) => ({ relativePath, contentHash, byteLength })));
+    const first = repository.addVersion({ metadata: v5, packageHash, files: unicodeFiles });
+    const sqliteOrder = (database.prepare("SELECT relative_path FROM template_files WHERE template_id = ? AND version = 'v5' ORDER BY relative_path")
+      .all(first.templateId) as Array<{ relative_path: string }>).map(({ relative_path }) => relative_path);
+    const javascriptOrder = [...unicodeFiles]
+      .sort((left, right) => left.relativePath < right.relativePath ? -1 : left.relativePath > right.relativePath ? 1 : 0)
+      .map(({ relativePath }) => relativePath);
+    expect(sqliteOrder).toEqual([".studio3", "𐀀.dxf"]);
+    expect(javascriptOrder).toEqual(["𐀀.dxf", ".studio3"]);
+    expect(sqliteOrder).not.toEqual(javascriptOrder);
+
+    const repeated = repository.addVersion({ templateId: first.templateId, metadata: v5, packageHash, files: unicodeFiles });
+
+    expect(repeated).toMatchObject({ templateId: first.templateId, created: false, version: { packageHash } });
+    const changedDxfHash = createHash("sha256").update(new Uint8Array([...dxfBytes, 0x20])).digest("hex");
+    const changedFiles = unicodeFiles.map((file) => file.extension === "dxf"
+      ? { ...file, contentHash: changedDxfHash, byteLength: dxfBytes.byteLength + 1 }
+      : file);
+    const changedPackageHash = calculateTemplatePackageHash(v5, changedFiles.map(({ relativePath, contentHash, byteLength }) => ({ relativePath, contentHash, byteLength })));
+    expect(() => repository.addVersion({
+      templateId: first.templateId,
+      metadata: v5,
+      packageHash: changedPackageHash,
+      files: changedFiles,
+    })).toThrowError(expect.objectContaining({ code: "TEMPLATE_VERSION_CONFLICT" }));
+  });
+
   it("requires an existing logical template ID when adding a version and keeps names out of identity", () => {
     database = openProjectDatabase(":memory:");
     const repository = new TemplateRepository(database, {
