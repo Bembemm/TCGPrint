@@ -11,6 +11,7 @@ import { ProjectAutosaveQueue } from "./project-autosave";
 import { saveProjectWithRecovery } from "./project-autosave-persistence";
 import TemplateLibraryPanel from "./template-library-panel";
 import type { TemplateRegistrationDefaults } from "./template-library-panel";
+import type { TemplateRegistrationStatus } from "./template-registration-compat";
 import { resolveProjectRecoveryChoice, type ProjectRecoveryChoice } from "./project-recovery-decision";
 import {
   createProjectOpenInteractionLock,
@@ -19,6 +20,7 @@ import {
   resolveProjectRecoveryWithInteractionLock,
 } from "./project-interaction-lock";
 import {
+  createNewProjectDocument,
   createProjectSessionState,
   projectSessionReducer,
   projectSnapshotDocument,
@@ -31,6 +33,7 @@ export interface ProjectsPanelProps {
   readonly settings: ProjectSettingsV1;
   readonly onProjectOpen: (project: ProjectDto) => void;
   readonly onTemplateDefaults?: (defaults: TemplateRegistrationDefaults | null) => void;
+  readonly onTemplateRegistrationStatusChange?: (status: TemplateRegistrationStatus) => void;
   readonly onProjectInteractionLockChange?: (locked: boolean) => void;
   readonly disabled?: boolean;
 }
@@ -45,6 +48,7 @@ export default function ProjectsPanel({
   settings,
   onProjectOpen,
   onTemplateDefaults,
+  onTemplateRegistrationStatusChange,
   onProjectInteractionLockChange,
   disabled = false,
 }: ProjectsPanelProps) {
@@ -181,7 +185,8 @@ export default function ProjectsPanel({
     setOperation("creating");
     try {
       await flushActiveProject();
-      const project = await api.create(undefined, templateSelection);
+      const initialDocument = createNewProjectDocument(settings, templateSelection);
+      const project = await api.create(initialDocument.snapshot, initialDocument.templateSelection);
       activateProject(project, currentSnapshotKeyRef.current);
       void refreshProjects();
     } catch (error) {
@@ -397,7 +402,7 @@ export default function ProjectsPanel({
         </li>)}
       </ul> : <p className="muted">Nenhum Project salvo.</p>}
 
-      <TemplateLibraryPanel selection={templateSelection} onSelect={(selection, defaults) => {
+      <TemplateLibraryPanel selection={templateSelection} onRegistrationStatusChange={onTemplateRegistrationStatusChange} onSelect={(selection, defaults) => {
         setTemplateSelection(selection);
         if (defaults) onTemplateDefaults?.(defaults);
         else if (selection === null) onTemplateDefaults?.(null);

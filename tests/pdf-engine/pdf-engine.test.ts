@@ -1246,6 +1246,28 @@ describe("LosslessPdfEngine", () => {
     expectExternalPdfSegmentsClear(guides, cards, paperFormat.heightMm, strokeWidthPt);
   });
 
+  it("keeps mixed-bleed Letter export on one page when a registration zone misses every card", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 3 });
+    const paperFormat = { name: "Letter", widthMm: 215.9, heightMm: 279.4 } as const;
+    const pdf = await engine.generate({
+      images: Array.from({ length: 9 }, () => original),
+      bleedResults: [bleed, ...Array.from({ length: 8 }, () => undefined)],
+      paperFormat,
+      registration: {
+        type: "custom",
+        orientation: "portrait",
+        marks: [[{ type: "line", x1Mm: 3, y1Mm: 3, x2Mm: 5, y2Mm: 3, strokeWidthMm: 0.2 }]],
+        reservedZones: [{ xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }],
+      },
+    });
+    const parsed = await parsePdf(pdf);
+
+    expect(parsed.document.getPages()).toHaveLength(1);
+    expect(parsed.document.getPages()[0]!.getMediaBox().width).toBeCloseTo(mmToPoints(215.9), 8);
+    expect(parsed.document.getPages()[0]!.getMediaBox().height).toBeCloseTo(mmToPoints(279.4), 8);
+  });
+
   it("fails clearly when the physical trim plus bleed cannot fit on the selected paper", async () => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });

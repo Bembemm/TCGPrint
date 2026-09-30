@@ -42,6 +42,11 @@ import type { ProjectDto } from "../../services/project-api";
 import { DEFAULT_PROJECT_SETTINGS, type ProjectSettingsV2 } from "../../persistence/projects/serializer";
 import ProjectsPanel from "./projects-panel";
 import type { TemplateRegistrationDefaults } from "./template-library-panel";
+import {
+  applyProjectRegistrationOverride,
+  templateRegistrationRequiresUserChoice,
+  type TemplateRegistrationStatus,
+} from "./template-registration-compat";
 import RegistrationLayoutPreview from "./registration-layout-preview";
 import { applyTemplateLayoutDefaults } from "./template-layout-defaults";
 import { createProjectRestoreLookupGate, runProjectRestoreProviderLookup } from "./project-restore-provider-gate";
@@ -477,6 +482,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [horizontalGapMm, setHorizontalGapMm] = useState(0);
   const [verticalGapMm, setVerticalGapMm] = useState(0);
   const [registration, setRegistration] = useState<RegistrationConfig>(() => createDefaultRegistrationConfig("none", "portrait"));
+  const [registrationOverride, setRegistrationOverride] = useState(false);
+  const [templateRegistrationStatus, setTemplateRegistrationStatus] = useState<TemplateRegistrationStatus>("unselected");
   const [layoutRows, setLayoutRows] = useState("");
   const [layoutColumns, setLayoutColumns] = useState("");
   const [skippedSlotIndices, setSkippedSlotIndices] = useState<readonly number[]>([]);
@@ -528,13 +535,14 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       horizontalGapMm,
       verticalGapMm,
       registration,
+      registrationOverride,
       layout: {
         ...(fixedGrid ? { rows: rowCount, columns: columnCount } : {}),
         skippedSlotIndices,
         ...(templateGeometry ? { templateGeometry } : {}),
       },
     };
-  }, [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor, pageOrientation, cardOrientation, paperFormat, cardFormat, marginsMm, horizontalGapMm, verticalGapMm, registration, layoutRows, layoutColumns, skippedSlotIndices, templateGeometry]);
+  }, [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor, pageOrientation, cardOrientation, paperFormat, cardFormat, marginsMm, horizontalGapMm, verticalGapMm, registration, registrationOverride, layoutRows, layoutColumns, skippedSlotIndices, templateGeometry]);
 
   function clearProblem(cardId: string | null = null) {
     setProblem("");
@@ -803,6 +811,14 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
   async function exportPdf() {
     if (!workingCards.length) return;
+    if (templateRegistrationRequiresUserChoice(templateRegistrationStatus)) {
+      setProblem(templateRegistrationStatus === "legacy-custom-unconfigured"
+        ? "O template custom legado não tem geometria de registration. Escolha uma configuração física no Project antes de exportar."
+        : templateRegistrationStatus === "legacy-physical-format-unconfigured"
+          ? "O template legado não tem dimensões físicas de papel/carta. Selecione uma versão com geometria física explícita antes de exportar."
+          : "A versão selecionada ainda não foi verificada. Revise ou desassocie o template antes de exportar.");
+      return;
+    }
     setBleedDiagnostics(null);
     setBusy(true); clearProblem(); setStatus(`Compondo quantidade física e gerando PDF ${paperFormat.name}…`);
     try {
@@ -840,6 +856,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
   function restoreProject(project: ProjectDto) {
     const { settings, cards } = project.snapshot;
+    setRegistrationOverride(settings.registrationOverride);
+    setTemplateRegistrationStatus(project.templateSelection ? "checking" : "unselected");
     const nextRestoreVersion = projectRestoreVersion + 1;
     projectRestoreLookupGate.current = createProjectRestoreLookupGate(nextRestoreVersion);
     setProjectRestoreVersion(nextRestoreVersion);
@@ -907,21 +925,41 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         cards={workingCards}
         settings={projectSettings}
         onProjectOpen={restoreProject}
+        onTemplateRegistrationStatusChange={(registrationStatus) => setTemplateRegistrationStatus(
+          applyProjectRegistrationOverride(registrationStatus, projectSettings.registrationOverride),
+        )}
         onTemplateDefaults={(defaults: TemplateRegistrationDefaults | null) => {
           if (!defaults) {
+            setTemplateRegistrationStatus("unselected");
             updateProjectSetting(() => {
+              setRegistrationOverride(false);
               const layout = applyTemplateLayoutDefaults({ rows: layoutRows, columns: layoutColumns, skippedSlotIndices }, undefined);
               setTemplateGeometry(undefined);
               setSkippedSlotIndices(layout.skippedSlotIndices);
             });
             return;
           }
+          if (defaults.physicalFormatUnconfigured) {
+            updateProjectSetting(() => {
+              setRegistrationOverride(false);
+              if (defaults.registration) setRegistration(defaults.registration);
+              setTemplateRegistrationStatus("legacy-physical-format-unconfigured");
+              const layout = applyTemplateLayoutDefaults({ rows: layoutRows, columns: layoutColumns, skippedSlotIndices }, undefined);
+              setTemplateGeometry(undefined);
+              setLayoutRows(layout.rows);
+              setLayoutColumns(layout.columns);
+              setSkippedSlotIndices(layout.skippedSlotIndices);
+            });
+            return;
+          }
           updateProjectSetting(() => {
+            setRegistrationOverride(false);
             setPageOrientation(defaults.pageOrientation);
             setCardOrientation(defaults.cardOrientation);
             setPaperFormat(defaults.paperFormat);
             setCardFormat(defaults.cardFormat);
-            setRegistration(defaults.registration);
+            if (defaults.registration) setRegistration(defaults.registration);
+            setTemplateRegistrationStatus(defaults.registrationUnconfigured ? "legacy-custom-unconfigured" : "configured");
             const layout = applyTemplateLayoutDefaults({ rows: layoutRows, columns: layoutColumns, skippedSlotIndices }, defaults.templateGeometry);
             setTemplateGeometry(layout.templateGeometry);
             setLayoutRows(layout.rows);
@@ -1077,12 +1115,19 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             onMarginChange={(side, value) => updateProjectSetting(() => setMarginsMm((current) => ({ ...current, [side]: value })))}
             onHorizontalGapChange={(value) => updateProjectSetting(() => setHorizontalGapMm(value))}
             onVerticalGapChange={(value) => updateProjectSetting(() => setVerticalGapMm(value))}
-            onRegistrationChange={(value) => updateProjectSetting(() => setRegistration(value))}
+            onRegistrationChange={(value) => updateProjectSetting(() => {
+              setRegistrationOverride(true);
+              setRegistration(value);
+              setTemplateRegistrationStatus((current) => applyProjectRegistrationOverride(current, true));
+            })}
             onLayoutRowsChange={(value) => updateProjectSetting(() => setLayoutRows(value))}
             onLayoutColumnsChange={(value) => updateProjectSetting(() => setLayoutColumns(value))}
           />
           <RegistrationLayoutPreview settings={projectSettings} cardCount={physicalCardCount} onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))} />
-          <button className="button primary" type="button" disabled={interactionBusy || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
+          {templateRegistrationStatus === "legacy-custom-unconfigured" && <p className="error-message" role="alert">O template selecionado declara registration custom, mas a versão não contém geometria física. O PDF usará somente a configuração independente do Project após escolha explícita.</p>}
+          {templateRegistrationStatus === "legacy-physical-format-unconfigured" && <p className="error-message" role="alert">A versão legada do template declara papel ou carta custom sem dimensões físicas. Os formatos atuais do Working Set não foram substituídos; exportação bloqueada até selecionar uma versão com geometria explícita.</p>}
+          {templateRegistrationStatus === "unavailable" && <p className="error-message" role="alert">A versão exata do template não está disponível para validar registration. Revise ou desassocie o template.</p>}
+          <button className="button primary" type="button" disabled={interactionBusy || templateRegistrationRequiresUserChoice(templateRegistrationStatus) || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
           {pdfUrl && <a className="download-link" href={pdfUrl} download="tcgprint-cards.pdf">Baixar PDF</a>}
         </div>
         <p className="muted">Bleed estende somente os pixels da borda imediata de cada lado. Moldura preta continua preta; full-art continua a própria arte. O trim da carta permanece intacto. Cantos arredondados são uma opção separada.</p>

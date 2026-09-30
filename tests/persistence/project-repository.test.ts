@@ -68,6 +68,7 @@ describe("project repository", () => {
         horizontalGapMm: 0,
         verticalGapMm: 0,
         registration: { type: "none", orientation: "portrait" },
+        registrationOverride: false,
         layout: { skippedSlotIndices: [] },
         },
       },

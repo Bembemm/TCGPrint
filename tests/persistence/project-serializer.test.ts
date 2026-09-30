@@ -75,6 +75,7 @@ describe("project snapshot serializer", () => {
         horizontalGapMm: 0,
         verticalGapMm: 0,
         registration: { type: "none", orientation: "portrait" },
+        registrationOverride: false,
         layout: { skippedSlotIndices: [] },
       },
     });
@@ -97,6 +98,7 @@ describe("project snapshot serializer", () => {
         pageOrientation: "portrait",
         cardOrientation: "portrait",
         registration: { type: "none", orientation: "portrait" },
+        registrationOverride: false,
         layout: { skippedSlotIndices: [] },
       },
     });
@@ -131,6 +133,16 @@ describe("project snapshot serializer", () => {
     };
 
     expect(deserializeProjectSnapshot(serializeProjectSnapshot([], settings)).settings).toEqual(settings);
+  });
+
+  it("persists an explicit Project registration override and defaults older snapshots to no override", () => {
+    const encoded = serializeProjectSnapshot([], DEFAULT_PROJECT_SETTINGS);
+    const legacySettings = JSON.parse(encoded) as { settings: Record<string, unknown> };
+    delete legacySettings.settings.registrationOverride;
+    const currentSettings = { ...DEFAULT_PROJECT_SETTINGS, registrationOverride: true };
+
+    expect(deserializeProjectSnapshot(legacySettings).settings.registrationOverride).toBe(false);
+    expect(deserializeProjectSnapshot(serializeProjectSnapshot([], currentSettings)).settings.registrationOverride).toBe(true);
   });
 
   it("requires skipped slots to have a fixed grid or versioned template geometry", () => {

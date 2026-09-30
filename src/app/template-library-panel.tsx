@@ -4,22 +4,20 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import type { TemplateRecord, TemplateVersionRecord } from "../../persistence/templates/repository";
 import type { TemplateSelection } from "../../templates/types";
 import type { TemplateSelectionInspection } from "../../services/template-library";
-import { createDefaultRegistrationConfig, type RegistrationConfig } from "../../core/registration";
-import { templatePhysicalFormats } from "../../templates/physical-formats";
-import type { CardFormat, PaperFormat, TemplateLayoutGeometryMm } from "../../core/geometry";
+import {
+  registrationDefaultsForTemplate,
+  resolveTemplateRegistrationStatus,
+  templateRegistrationLabel,
+  type TemplateRegistrationDefaults,
+  type TemplateRegistrationStatus,
+} from "./template-registration-compat";
 
-export interface TemplateRegistrationDefaults {
-  readonly pageOrientation: "portrait" | "landscape";
-  readonly cardOrientation: "portrait" | "landscape";
-  readonly paperFormat: PaperFormat;
-  readonly cardFormat: CardFormat;
-  readonly registration: RegistrationConfig;
-  readonly templateGeometry?: TemplateLayoutGeometryMm;
-}
+export type { TemplateRegistrationDefaults } from "./template-registration-compat";
 
 interface TemplateLibraryPanelProps {
   readonly selection: TemplateSelection | null;
   readonly onSelect: (selection: TemplateSelection | null, defaults?: TemplateRegistrationDefaults) => void;
+  readonly onRegistrationStatusChange?: (status: TemplateRegistrationStatus) => void;
   readonly disabled?: boolean;
 }
 
@@ -57,7 +55,7 @@ function integrityLabel(status: TemplateSelectionInspection["status"]): string {
   }
 }
 
-export default function TemplateLibraryPanel({ selection, onSelect, disabled = false }: TemplateLibraryPanelProps) {
+export default function TemplateLibraryPanel({ selection, onSelect, onRegistrationStatusChange, disabled = false }: TemplateLibraryPanelProps) {
   const [templates, setTemplates] = useState<readonly TemplateRecord[]>([]);
   const [metadata, setMetadata] = useState(DEFAULT_METADATA);
   const [files, setFiles] = useState<readonly File[]>([]);
@@ -95,6 +93,11 @@ export default function TemplateLibraryPanel({ selection, onSelect, disabled = f
   }, [selection?.templateId, selection?.version, selection?.packageHash]);
 
   const selectedId = useMemo(() => selection ? `${selection.templateId}:${selection.version}` : "", [selection]);
+  const registrationStatus = resolveTemplateRegistrationStatus(selection, inspection);
+
+  useEffect(() => {
+    onRegistrationStatusChange?.(registrationStatus);
+  }, [onRegistrationStatusChange, registrationStatus]);
 
   async function importTemplate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -201,6 +204,9 @@ export default function TemplateLibraryPanel({ selection, onSelect, disabled = f
       {selection && <div className={`template-selection-status template-integrity-${inspection?.status ?? "checking"}`} aria-live="polite">
         <strong>Project selecionado:</strong> {selection.templateId} · v{selection.version} · SHA-256 {selection.packageHash}
         <span>{inspection ? integrityLabel(inspection.status) : "Verificando arquivos originais…"}</span>
+        {registrationStatus === "legacy-custom-unconfigured" && <span role="alert">Registration custom desta versão legada não tem geometria física configurada. Ela não será convertida para “none”; escolha uma configuração de registration do Project antes de exportar.</span>}
+        {registrationStatus === "legacy-physical-format-unconfigured" && <span role="alert">Esta versão legada declara papel ou formato de carta custom sem dimensões em mm. Os valores do Working Set foram mantidos; selecione uma versão com geometria física explícita antes de exportar.</span>}
+        {registrationStatus === "unavailable" && <span role="alert">A versão selecionada não pôde ser verificada exatamente. Revise ou desassocie o template antes de exportar.</span>}
         {inspection?.files.filter((file) => file.status !== "available").map((file) => <span key={file.fileId} role="alert">{file.relativePath}: {file.status === "missing" ? "ausente" : "corrompido"}</span>)}
       </div>}
 
@@ -216,7 +222,7 @@ export default function TemplateLibraryPanel({ selection, onSelect, disabled = f
               <div className="template-version-meta">
                 <strong>v{version.version} · {version.paper.toUpperCase()} · {version.cardFormat} · {version.orientation}</strong>
                 <code>SHA-256 {version.packageHash}</code>
-                <span>{version.registrationType}{version.recommendedBleedMm === undefined ? "" : ` · bleed ${version.recommendedBleedMm} mm`} · {version.files.length} arquivo(s)</span>
+                <span>{templateRegistrationLabel(version)}{version.recommendedBleedMm === undefined ? "" : ` · bleed ${version.recommendedBleedMm} mm`} · {version.files.length} arquivo(s)</span>
                 <ul>{version.files.map((file) => <li key={file.fileId}>
                   <a href={`/api/templates/files/${encodeURIComponent(file.fileId)}`}>{file.relativePath}</a>
                   <span>{file.byteLength.toLocaleString()} bytes · SHA-256 {file.contentHash}</span>
@@ -224,14 +230,7 @@ export default function TemplateLibraryPanel({ selection, onSelect, disabled = f
               </div>
               <button className={`button ${selectedVersion(selection, template, version) ? "primary" : "secondary"}`} type="button" disabled={disabled || busy} aria-pressed={selectedId === versionKey} onClick={() => onSelect(
                 { templateId: template.id, version: version.version, packageHash: version.packageHash },
-                {
-                  pageOrientation: version.orientation,
-                  cardOrientation: version.templateGeometry?.cardOrientation ?? "portrait",
-                  paperFormat: templatePhysicalFormats(version).paper,
-                  cardFormat: templatePhysicalFormats(version).card,
-                  registration: version.registrationConfig ?? createDefaultRegistrationConfig(version.registrationType === "custom" ? "none" : version.registrationType, "portrait"),
-                  ...(version.templateGeometry === undefined ? {} : { templateGeometry: version.templateGeometry }),
-                },
+                registrationDefaultsForTemplate(version),
               )}>
                 {selectedVersion(selection, template, version) ? "Associado" : "Associar ao Project"}
               </button>

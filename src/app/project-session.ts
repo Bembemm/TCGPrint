@@ -79,6 +79,14 @@ export function projectSnapshotDocument(
   return { snapshot: JSON.parse(snapshotJson) as ProjectSnapshotV1, templateSelection };
 }
 
+/** Creates an empty Project using the active Working Set's effective settings. */
+export function createNewProjectDocument(
+  settings: ProjectSettingsV1,
+  templateSelection: TemplateSelection | null,
+): ProjectSaveState {
+  return projectSnapshotDocument([], settings, templateSelection);
+}
+
 export function projectSnapshotKey(
   cards: readonly WorkingCard[],
   settings: ProjectSettingsV1,

@@ -68,6 +68,22 @@ describe("bleed-aware physical grid placement", () => {
     }
   });
 
+  it("does not reserve the maximum card bleed in every row and column for an unrelated reserved zone", () => {
+    const layout = calculateGridPlacement({
+      paper: { name: "Letter", widthMm: 215.9, heightMm: 279.4 },
+      card: MAGIC_STANDARD_CARD,
+      count: 9,
+      bleedMm: 0,
+      bleedByCardMm: [3, 0, 0, 0, 0, 0, 0, 0, 0],
+      reservedZonesMm: [{ xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }],
+    });
+
+    expect(layout).toMatchObject({ columns: 3, rows: 3, capacity: 9 });
+    expect(layout.slots).toHaveLength(9);
+    expect(layout.slots[0]!.trim.widthMm).toBe(63.5);
+    expect(layout.slots[0]!.trim.heightMm).toBe(88.9);
+  });
+
   it("centers the complete grid and does not move a single trim when symmetric bleed changes", () => {
     const placements = [0, 0.625, 1, 2, 3].map((bleedMm) => calculateGridPlacement({
       paper: PAPER_FORMATS.A4,
@@ -289,6 +305,26 @@ describe("bleed-aware physical grid placement", () => {
     expect(after.slots.map(({ index, cardIndex }) => [index, cardIndex])).toEqual([[0, 0], [2, 1], [3, 2]]);
   });
 
+  it("does not shift fixed slot geometry when skips reassign cards with different bleed", () => {
+    const request = {
+      paper: { name: "100 × 50 mm", widthMm: 100, heightMm: 50 },
+      card: { id: "small", name: "20 × 30 mm", widthMm: 20, heightMm: 30 },
+      count: 1,
+      bleedMm: 0,
+      bleedByCardMm: [3],
+      rows: 1,
+      columns: 3,
+    };
+    const before = calculateGridPlacement(request);
+    const after = calculateGridPlacement({ ...request, skippedSlotIndices: [0] });
+
+    expect(after.gridSlots.map(({ trim }) => trim)).toEqual(before.gridSlots.map(({ trim }) => trim));
+    expect(after.slots.map(({ index, cardIndex }) => [index, cardIndex])).toEqual([[1, 0]]);
+
+    expect(() => calculateGridPlacement({ ...request, count: 2, bleedByCardMm: [3, 0], skippedSlotIndices: [0] }))
+      .toThrow(/no physical card slot fits.*bleed.*preserved/i);
+  });
+
   it("searches enough automatic positions when a large reserved zone blocks many candidate slots", () => {
     const layout = calculateGridPlacement({
       paper: { name: "100 mm square", widthMm: 100, heightMm: 100 },
@@ -350,6 +386,22 @@ describe("bleed-aware physical grid placement", () => {
       columns: 2,
       reservedZonesMm: [{ xMm: 45, yMm: 20, widthMm: 10, heightMm: 20 }],
     })).toThrow(/reserved zone/i);
+  });
+
+  it("keeps a skipped slot identified separately when it also intersects a physical reserved zone", () => {
+    const layout = calculateGridPlacement({
+      paper: PAPER_FORMATS.A4,
+      card: { id: "test-card", name: "Test card", widthMm: 20, heightMm: 30 },
+      count: 1,
+      bleedMm: 0,
+      rows: 1,
+      columns: 2,
+      skippedSlotIndices: [0],
+      reservedZonesMm: [{ xMm: 85, yMm: 133, widthMm: 5, heightMm: 5 }],
+    });
+
+    expect(layout.slots.map(({ index, cardIndex }) => ({ index, cardIndex }))).toEqual([{ index: 1, cardIndex: 0 }]);
+    expect(layout.gridSlots[0]).toMatchObject({ index: 0, skippedByUser: true, reserved: true });
   });
 
   it("combines several physical zones with a separate user skip without changing slot identity", () => {

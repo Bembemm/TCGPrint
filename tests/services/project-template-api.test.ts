@@ -7,12 +7,14 @@ import {
 } from "../../persistence/projects/serializer";
 import {
   handleProjectCreate,
+  handleProjectCopyRecovery,
   handleProjectDuplicate,
   handleProjectOpen,
   handleProjectPromoteRecovery,
   handleProjectSave,
   handleProjectStageRecovery,
 } from "../../services/project-api";
+import { createNewProjectDocument } from "../../src/app/project-session";
 import type { TemplateSelection } from "../../templates/types";
 
 describe("Project template API persistence", () => {
@@ -74,6 +76,75 @@ describe("Project template API persistence", () => {
     expect(await promotedResponse.json()).toMatchObject({ revision: 3, templateSelection: v6 });
     const duplicateResponse = await handleProjectDuplicate(request("POST"), created.id, projects);
     expect(await duplicateResponse.json()).toMatchObject({ templateSelection: v6 });
+  });
+
+  it("creates a new Project from selected template geometry and preserves it through save, reopen, recovery, and duplicate", async () => {
+    const { projects, v5 } = setup();
+    const templateGeometry = {
+      orientation: "portrait" as const,
+      cardOrientation: "portrait" as const,
+      pageSizeMm: { widthMm: 210, heightMm: 297 },
+      cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+      rows: 1,
+      columns: 1,
+      slots: [{ index: 0, row: 0, column: 0, xMm: 73.25, yMm: 104.05 }],
+    };
+    database!.prepare("UPDATE template_versions SET template_geometry_json = ? WHERE template_id = ? AND version = ?")
+      .run(JSON.stringify(templateGeometry), v5.templateId, v5.version);
+    const initialDocument = createNewProjectDocument({
+      ...DEFAULT_PROJECT_SETTINGS,
+      layout: { skippedSlotIndices: [], templateGeometry },
+    }, v5);
+    const createdResponse = await handleProjectCreate(request("POST", initialDocument), projects);
+
+    expect(createdResponse.status).toBe(201);
+    const created = await createdResponse.json() as { id: string; revision: number; snapshot: ProjectSnapshotV1; templateSelection: TemplateSelection };
+    expect(created.snapshot.cards).toEqual([]);
+    expect(created.snapshot.settings.layout.templateGeometry).toEqual(templateGeometry);
+    expect(created.templateSelection).toEqual(v5);
+
+    const savedSnapshot: ProjectSnapshotV1 = {
+      ...initialDocument.snapshot,
+      settings: {
+        ...initialDocument.snapshot.settings,
+        bleedMm: 1.25,
+        registration: { type: "none", orientation: "landscape" },
+        registrationOverride: true,
+      },
+    };
+    const savedResponse = await handleProjectSave(request("PUT", {
+      expectedRevision: created.revision,
+      snapshot: savedSnapshot,
+      templateSelection: v5,
+    }), created.id, projects);
+    expect(savedResponse.status).toBe(200);
+    const reopenedResponse = await handleProjectOpen(request("GET"), created.id, projects);
+    expect(await reopenedResponse.json()).toMatchObject({ snapshot: savedSnapshot, templateSelection: v5 });
+
+    const stagedResponse = await handleProjectStageRecovery(request("POST", {
+      expectedRevision: 2,
+      snapshot: savedSnapshot,
+      templateSelection: v5,
+    }), created.id, projects);
+    expect(stagedResponse.status).toBe(200);
+    const recoveryCopyResponse = await handleProjectCopyRecovery(request("POST"), created.id, projects);
+    const recoveryCopy = await recoveryCopyResponse.json() as { snapshot: ProjectSnapshotV1; templateSelection: TemplateSelection };
+    expect(recoveryCopy.snapshot.settings.registrationOverride).toBe(true);
+    expect(recoveryCopy.snapshot.settings.layout.templateGeometry).toEqual(templateGeometry);
+    expect(recoveryCopy.templateSelection).toEqual(v5);
+    expect((await handleProjectStageRecovery(request("POST", {
+      expectedRevision: 2,
+      snapshot: savedSnapshot,
+      templateSelection: v5,
+    }), created.id, projects)).status).toBe(200);
+    expect((await handleProjectPromoteRecovery(request("POST"), created.id, projects)).status).toBe(200);
+    const duplicateResponse = await handleProjectDuplicate(request("POST"), created.id, projects);
+    const duplicate = await duplicateResponse.json() as { snapshot: ProjectSnapshotV1; templateSelection: TemplateSelection };
+
+    expect(duplicateResponse.status).toBe(201);
+    expect(duplicate.snapshot.settings.layout.templateGeometry).toEqual(templateGeometry);
+    expect(duplicate.snapshot.settings.registrationOverride).toBe(true);
+    expect(duplicate.templateSelection).toEqual(v5);
   });
 
   it("rejects an unknown or hash-mismatched selection without changing the Project", async () => {

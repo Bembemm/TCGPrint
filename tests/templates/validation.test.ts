@@ -6,6 +6,7 @@ import {
   validateTemplateFile,
 } from "../../templates/validation";
 import { createDefaultRegistrationConfig } from "../../core/registration";
+import type { TemplateMetadata } from "../../templates/types";
 
 const metadataInput = {
   name: "  A4 Standard  ",
@@ -40,6 +41,28 @@ describe("template metadata and original validation", () => {
 
     expect(metadata.registrationConfig).toEqual(config);
     expect(calculateTemplatePackageHash(metadata, [])).not.toBe(calculateTemplatePackageHash(parseTemplateMetadata(metadataInput), []));
+  });
+
+  it("keeps new custom imports strict while exposing an explicit legacy-only hash path", () => {
+    const phaseNineCustom = { ...metadataInput, registrationType: "custom" } as unknown as TemplateMetadata;
+
+    expect(() => parseTemplateMetadata(phaseNineCustom)).toThrowError(
+      expect.objectContaining({ code: "TEMPLATE_METADATA_INVALID" }),
+    );
+    expect(() => calculateTemplatePackageHash(phaseNineCustom, [])).toThrowError(
+      expect.objectContaining({ code: "TEMPLATE_METADATA_INVALID" }),
+    );
+    expect(() => calculateTemplatePackageHash(phaseNineCustom, [], {
+      allowLegacyPhaseNineMetadata: true,
+    })).not.toThrow();
+
+    const legacyCustomFormats = { ...phaseNineCustom, paper: "custom", cardFormat: "custom" } as unknown as TemplateMetadata;
+    expect(() => calculateTemplatePackageHash(legacyCustomFormats, [], {
+      allowLegacyPhaseNineMetadata: true,
+    })).not.toThrow();
+    expect(() => calculateTemplatePackageHash(legacyCustomFormats, [])).toThrowError(
+      expect.objectContaining({ code: "TEMPLATE_METADATA_INVALID" }),
+    );
   });
 
   it("validates and hashes exact bounded template slot geometry as immutable version metadata", () => {

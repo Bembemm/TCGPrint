@@ -135,6 +135,7 @@ interface Candidate {
   readonly gridHeightMm: number;
   readonly aspectError: number;
   readonly capacity: number;
+  readonly reservedGridIndices: readonly number[];
 }
 
 function candidateFor(
@@ -152,55 +153,100 @@ function candidateFor(
   if (skipSet.size && Math.max(...skipSet) >= positions) return undefined;
   const activeGridIndices = Array.from({ length: positions }, (_, index) => index)
     .filter((index) => !skipSet.has(index));
-  const hasReservedZones = zones.length > 0;
-  const maximumRequestedBleed = Math.max(request.bleedMm, ...bleedByCardMm);
-  const finalColumnBleeds = Array.from({ length: columns }, () => hasReservedZones ? maximumRequestedBleed : 0);
-  const finalRowBleeds = Array.from({ length: rows }, () => hasReservedZones ? maximumRequestedBleed : 0);
   const horizontalGapMm = request.horizontalGapMm ?? 0;
   const verticalGapMm = request.verticalGapMm ?? 0;
-  const pageCenterX = margins.left + (page.widthMm - margins.left - margins.right) / 2;
-  const pageCenterY = margins.top + (page.heightMm - margins.top - margins.bottom) / 2;
-  const preliminaryWidth = columns * card.widthMm
-    + 2 * finalColumnBleeds.reduce((sum, value) => sum + value, 0)
-    + Math.max(0, columns - 1) * horizontalGapMm;
-  const preliminaryHeight = rows * card.heightMm
-    + 2 * finalRowBleeds.reduce((sum, value) => sum + value, 0)
-    + Math.max(0, rows - 1) * verticalGapMm;
-  const preliminaryX = margins.left + (page.widthMm - margins.left - margins.right - preliminaryWidth) / 2;
-  const preliminaryY = margins.top + (page.heightMm - margins.top - margins.bottom - preliminaryHeight) / 2;
-  const preliminaryColumnOffsets = finalColumnBleeds.map((_bleed, column) =>
-    preliminaryX + finalColumnBleeds.slice(0, column).reduce((sum, value) => sum + card.widthMm + 2 * value + horizontalGapMm, 0));
-  const preliminaryRowOffsets = finalRowBleeds.map((_bleed, row) =>
-    preliminaryY + finalRowBleeds.slice(0, row).reduce((sum, value) => sum + card.heightMm + 2 * value + verticalGapMm, 0));
-  const eligibleIndices = hasReservedZones
-    ? activeGridIndices.filter((gridIndex) => {
-      const column = gridIndex % columns;
-      const row = Math.floor(gridIndex / columns);
-      return !zones.some((zone) => overlaps({
-        xMm: preliminaryColumnOffsets[column],
-        yMm: preliminaryRowOffsets[row],
-        widthMm: card.widthMm + 2 * finalColumnBleeds[column],
-        heightMm: card.heightMm + 2 * finalRowBleeds[row],
-      }, zone));
-    })
-    : activeGridIndices;
-  const capacity = eligibleIndices.length;
-  const assigned = eligibleIndices.slice(0, request.count);
-  if (!hasReservedZones) assigned.forEach((gridIndex, cardIndex) => {
+  const availableWidthMm = page.widthMm - margins.left - margins.right;
+  const availableHeightMm = page.heightMm - margins.top - margins.bottom;
+  const reservedGridIndices = new Set<number>();
+  const finalColumnBleeds = Array.from({ length: columns }, () => 0);
+  const finalRowBleeds = Array.from({ length: rows }, () => 0);
+  // Physical slot geometry is anchored to the original row-major sequence,
+  // independent of user skips or reserved-zone reassignment. A newly assigned
+  // card whose bleed cannot fit those stable coordinates makes this candidate
+  // invalid; it never moves the other trims to make room.
+  for (let cardIndex = 0; cardIndex < Math.min(request.count, positions); cardIndex += 1) {
     const bleed = bleedByCardMm[cardIndex] ?? request.bleedMm;
-    finalColumnBleeds[gridIndex % columns] = Math.max(finalColumnBleeds[gridIndex % columns], bleed);
-    finalRowBleeds[Math.floor(gridIndex / columns)] = Math.max(finalRowBleeds[Math.floor(gridIndex / columns)], bleed);
-  });
+    const column = cardIndex % columns;
+    const row = Math.floor(cardIndex / columns);
+    finalColumnBleeds[column] = Math.max(finalColumnBleeds[column]!, bleed);
+    finalRowBleeds[row] = Math.max(finalRowBleeds[row]!, bleed);
+  }
   const gridWidthMm = columns * card.widthMm
     + 2 * finalColumnBleeds.reduce((sum, value) => sum + value, 0)
     + Math.max(0, columns - 1) * horizontalGapMm;
   const gridHeightMm = rows * card.heightMm
     + 2 * finalRowBleeds.reduce((sum, value) => sum + value, 0)
     + Math.max(0, rows - 1) * verticalGapMm;
-  const availableWidthMm = page.widthMm - margins.left - margins.right;
-  const availableHeightMm = page.heightMm - margins.top - margins.bottom;
-  if (gridWidthMm > availableWidthMm + PLACEMENT_EPSILON_MM
-    || gridHeightMm > availableHeightMm + PLACEMENT_EPSILON_MM) return undefined;
+  const dimensionsFit = gridWidthMm <= availableWidthMm + PLACEMENT_EPSILON_MM
+    && gridHeightMm <= availableHeightMm + PLACEMENT_EPSILON_MM;
+  const gridXmm = margins.left + (availableWidthMm - gridWidthMm) / 2;
+  const gridYmm = margins.top + (availableHeightMm - gridHeightMm) / 2;
+  const columnOffsets = finalColumnBleeds.map((_bleed, column) =>
+    gridXmm + finalColumnBleeds.slice(0, column).reduce((sum, value) => sum + card.widthMm + 2 * value + horizontalGapMm, 0));
+  const rowOffsets = finalRowBleeds.map((_bleed, row) =>
+    gridYmm + finalRowBleeds.slice(0, row).reduce((sum, value) => sum + card.heightMm + 2 * value + verticalGapMm, 0));
+  let capacity = 0;
+
+  // A zone can remove a slot and change which card occupies later positions.
+  // Recompute stable row-major assignments until every remaining card clears
+  // the zones; slot envelopes and trim coordinates stay fixed throughout.
+  for (let iteration = 0; iteration <= activeGridIndices.length; iteration += 1) {
+    const eligibleIndices = activeGridIndices.filter((index) => !reservedGridIndices.has(index));
+    const assignments = new Map(eligibleIndices.slice(0, request.count).map((index, cardIndex) => [index, cardIndex] as const));
+    const newlyReserved = eligibleIndices.filter((gridIndex) => {
+      const column = gridIndex % columns;
+      const row = Math.floor(gridIndex / columns);
+      const cardIndex = assignments.get(gridIndex);
+      const bleed = cardIndex === undefined ? request.bleedMm : bleedByCardMm[cardIndex] ?? request.bleedMm;
+      return zones.some((zone) => overlaps({
+        xMm: columnOffsets[column]! + finalColumnBleeds[column]! - bleed,
+        yMm: rowOffsets[row]! + finalRowBleeds[row]! - bleed,
+        widthMm: card.widthMm + 2 * bleed,
+        heightMm: card.heightMm + 2 * bleed,
+      }, zone));
+    });
+    if (newlyReserved.length === 0) {
+      if (!dimensionsFit) return undefined;
+      const assignedBounds = [...assignments].map(([gridIndex, cardIndex]) => {
+        const column = gridIndex % columns;
+        const row = Math.floor(gridIndex / columns);
+        const bleed = bleedByCardMm[cardIndex] ?? request.bleedMm;
+        const trimXmm = columnOffsets[column]! + finalColumnBleeds[column]!;
+        const trimYmm = rowOffsets[row]! + finalRowBleeds[row]!;
+        return {
+          gridIndex,
+          column,
+          row,
+          bounds: {
+            xMm: trimXmm - bleed,
+            yMm: trimYmm - bleed,
+            widthMm: card.widthMm + 2 * bleed,
+            heightMm: card.heightMm + 2 * bleed,
+          },
+        };
+      });
+      if (assignedBounds.some(({ bounds }) => bounds.xMm < margins.left - PLACEMENT_EPSILON_MM
+        || bounds.yMm < margins.top - PLACEMENT_EPSILON_MM
+        || bounds.xMm + bounds.widthMm > page.widthMm - margins.right + PLACEMENT_EPSILON_MM
+        || bounds.yMm + bounds.heightMm > page.heightMm - margins.bottom + PLACEMENT_EPSILON_MM)) return undefined;
+      for (let firstIndex = 0; firstIndex < assignedBounds.length; firstIndex += 1) {
+        const first = assignedBounds[firstIndex]!;
+        for (let secondIndex = firstIndex + 1; secondIndex < assignedBounds.length; secondIndex += 1) {
+          const second = assignedBounds[secondIndex]!;
+          if (overlaps(first.bounds, second.bounds)) return undefined;
+          if (second.row === first.row && second.column === first.column + 1
+            && second.bounds.xMm - (first.bounds.xMm + first.bounds.widthMm) < horizontalGapMm - PLACEMENT_EPSILON_MM) return undefined;
+          if (second.column === first.column && second.row === first.row + 1
+            && second.bounds.yMm - (first.bounds.yMm + first.bounds.heightMm) < verticalGapMm - PLACEMENT_EPSILON_MM) return undefined;
+        }
+      }
+      capacity = eligibleIndices.length;
+      break;
+    }
+    newlyReserved.forEach((index) => reservedGridIndices.add(index));
+    if (iteration === activeGridIndices.length) return undefined;
+  }
+  if (capacity === 0 && activeGridIndices.length > 0 && reservedGridIndices.size < activeGridIndices.length) return undefined;
 
   return {
     columns,
@@ -214,6 +260,7 @@ function candidateFor(
     gridHeightMm,
     aspectError: Math.abs(Math.log((gridWidthMm / gridHeightMm) / (availableWidthMm / availableHeightMm))),
     capacity,
+    reservedGridIndices: [...reservedGridIndices],
   };
 }
 
@@ -520,25 +567,30 @@ function buildPlacement(
     gridYmm + selected.rowBleeds.slice(0, row).reduce((sum, value) => sum + card.heightMm + 2 * value + selected.verticalGapMm, 0));
   const activeGridIndices = Array.from({ length: selected.positions }, (_, index) => index)
     .filter((index) => !skipSet.has(index));
+  const reservedGridIndices = new Set(selected.reservedGridIndices);
   const assignments = new Map<number, number>();
   let assignedCardIndex = 0;
   for (const index of activeGridIndices) {
-    const column = index % selected.columns;
-    const row = Math.floor(index / selected.columns);
-    const slotXmm = columnOffsets[column];
-    const slotYmm = rowOffsets[row];
-    const columnBleedMm = selected.columnBleeds[column];
-    const rowBleedMm = selected.rowBleeds[row];
-    const slotBounds = {
-      xMm: slotXmm,
-      yMm: slotYmm,
-      widthMm: card.widthMm + 2 * columnBleedMm,
-      heightMm: card.heightMm + 2 * rowBleedMm,
-    };
-    if (zones.some((zone) => overlaps(slotBounds, zone))) continue;
+    if (reservedGridIndices.has(index)) continue;
     if (assignedCardIndex < count) assignments.set(index, assignedCardIndex++);
   }
   if (assignedCardIndex !== count) throw new RangeError("No physical card slots remain after reserved-zone validation.");
+  for (const [index, cardIndex] of assignments) {
+    const column = index % selected.columns;
+    const row = Math.floor(index / selected.columns);
+    const bleed = bleedByCardMm[cardIndex] ?? bleedMm;
+    const trimXmm = columnOffsets[column]! + selected.columnBleeds[column]!;
+    const trimYmm = rowOffsets[row]! + selected.rowBleeds[row]!;
+    const actualCardBounds = {
+      xMm: trimXmm - bleed,
+      yMm: trimYmm - bleed,
+      widthMm: card.widthMm + 2 * bleed,
+      heightMm: card.heightMm + 2 * bleed,
+    };
+    if (zones.some((zone) => overlaps(actualCardBounds, zone))) {
+      throw new RangeError(`Card slot ${index + 1} overlaps a registration reserved zone after requested bleed was applied.`);
+    }
+  }
   const gridSlots = Array.from({ length: selected.positions }, (_, index) => {
     const column = index % selected.columns;
     const row = Math.floor(index / selected.columns);
@@ -552,7 +604,13 @@ function buildPlacement(
       widthMm: card.widthMm + 2 * columnBleedMm,
       heightMm: card.heightMm + 2 * rowBleedMm,
     };
-    const reserved = zones.some((zone) => overlaps(bounds, zone));
+    const skippedSlotIntersectsZone = skipSet.has(index) && zones.some((zone) => overlaps({
+      xMm: slotXmm + columnBleedMm - bleedMm,
+      yMm: slotYmm + rowBleedMm - bleedMm,
+      widthMm: card.widthMm + 2 * bleedMm,
+      heightMm: card.heightMm + 2 * bleedMm,
+    }, zone));
+    const reserved = reservedGridIndices.has(index) || skippedSlotIntersectsZone;
     return Object.freeze({
       index,
       column,

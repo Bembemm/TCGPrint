@@ -66,8 +66,7 @@ function enumValue<T extends string>(value: unknown, field: string, allowed: Rea
   return normalized;
 }
 
-/** Strictly validates and normalizes the metadata stored with an immutable template version. */
-export function parseTemplateMetadata(value: unknown): TemplateMetadata {
+function parseTemplateMetadataInternal(value: unknown, allowLegacyPhaseNineMetadata: boolean): TemplateMetadata {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalidMetadata("Template metadata must be an object.");
   const source = value as Record<string, unknown>;
   for (const key of Reflect.ownKeys(source)) {
@@ -90,7 +89,7 @@ export function parseTemplateMetadata(value: unknown): TemplateMetadata {
     if (registrationConfig.type !== registrationType) {
       invalidMetadata("Template metadata registrationConfig.type must match registrationType.");
     }
-  } else if (registrationType === "custom") {
+  } else if (registrationType === "custom" && !allowLegacyPhaseNineMetadata) {
     invalidMetadata("Template metadata custom registrationType requires explicit registrationConfig geometry.");
   }
   let templateGeometry;
@@ -113,9 +112,19 @@ export function parseTemplateMetadata(value: unknown): TemplateMetadata {
     ...(registrationConfig !== undefined ? { registrationConfig } : {}),
     ...(templateGeometry !== undefined ? { templateGeometry } : {}),
   };
-  try { templatePhysicalFormats(metadata); }
-  catch (error) { invalidMetadata(error instanceof Error ? error.message : "Template physical formats are invalid."); }
+  const hasLegacyCustomFormatWithoutDimensions = allowLegacyPhaseNineMetadata
+    && templateGeometry === undefined
+    && (metadata.paper === "custom" || metadata.cardFormat === "custom");
+  if (!hasLegacyCustomFormatWithoutDimensions) {
+    try { templatePhysicalFormats(metadata); }
+    catch (error) { invalidMetadata(error instanceof Error ? error.message : "Template physical formats are invalid."); }
+  }
   return metadata;
+}
+
+/** Strictly validates metadata submitted for a new immutable template version. */
+export function parseTemplateMetadata(value: unknown): TemplateMetadata {
+  return parseTemplateMetadataInternal(value, false);
 }
 
 function safeTemplateFileName(value: string): string {
@@ -344,8 +353,9 @@ function normalizeTemplatePath(value: string): string {
 export function calculateTemplatePackageHash(
   metadataInput: TemplateMetadata,
   files: readonly TemplatePackageHashFile[],
+  options: { readonly allowLegacyPhaseNineMetadata?: boolean } = {},
 ): string {
-  const metadata = parseTemplateMetadata(metadataInput);
+  const metadata = parseTemplateMetadataInternal(metadataInput, options.allowLegacyPhaseNineMetadata === true);
   const normalizedFiles = files.map((file) => {
     const relativePath = normalizeTemplatePath(file.relativePath);
     if (!SHA256_PATTERN.test(file.contentHash) || !Number.isSafeInteger(file.byteLength) || file.byteLength <= 0) {

@@ -329,7 +329,11 @@ export class TemplateLibraryService {
         status,
       };
     }));
-    const expectedPackageHash = calculateTemplatePackageHash(metadataForHash(version), version.files.map(({ relativePath, contentHash, byteLength }) => ({ relativePath, contentHash, byteLength })));
+    const expectedPackageHash = calculateTemplatePackageHash(
+      metadataForHash(version),
+      version.files.map(({ relativePath, contentHash, byteLength }) => ({ relativePath, contentHash, byteLength })),
+      { allowLegacyPhaseNineMetadata: true },
+    );
     const status = selection.packageHash !== version.packageHash || expectedPackageHash !== version.packageHash ? "hash-mismatch"
       : files.some(({ status: fileStatus }) => fileStatus === "missing") ? "missing"
         : files.some(({ status: fileStatus }) => fileStatus === "corrupt") ? "corrupt" : "available";

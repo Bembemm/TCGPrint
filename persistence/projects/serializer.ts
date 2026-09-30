@@ -34,6 +34,8 @@ export interface ProjectSettingsV2 {
   readonly horizontalGapMm: number;
   readonly verticalGapMm: number;
   readonly registration: RegistrationConfig;
+  /** Explicit Project-level registration choice overriding a version's registration default. */
+  readonly registrationOverride: boolean;
   readonly layout: {
     readonly rows?: number;
     readonly columns?: number;
@@ -86,6 +88,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettingsV1 = Object.freeze({
   horizontalGapMm: 0,
   verticalGapMm: 0,
   registration: Object.freeze({ type: "none", orientation: "portrait" }),
+  registrationOverride: false,
   layout: Object.freeze({ skippedSlotIndices: Object.freeze([]) }),
 });
 
@@ -436,9 +439,11 @@ function persistedCard(value: unknown, index: number): PersistedWorkingCard {
 
 function projectSettings(value: unknown, legacy = false): ProjectSettingsV2 {
   const baseKeys = ["bleedMm", "roundedCorners", "cutGuides"];
+  const currentKeys = [...baseKeys, "pageOrientation", "cardOrientation", "paperFormat", "cardFormat", "marginsMm", "horizontalGapMm", "verticalGapMm", "registration", "registrationOverride", "layout"];
   const source = object(value, "snapshot.settings", legacy
     ? baseKeys
-    : [...baseKeys, "pageOrientation", "cardOrientation", "paperFormat", "cardFormat", "marginsMm", "horizontalGapMm", "verticalGapMm", "registration", "layout"]);
+    : currentKeys,
+  legacy ? undefined : currentKeys.filter((key) => key !== "registrationOverride"));
   const guides = object(source.cutGuides, "snapshot.settings.cutGuides", ["trim", "external"]);
   const trim = object(guides.trim, "snapshot.settings.cutGuides.trim", ["enabled", "extentMm", "color"]);
   const external = object(guides.external, "snapshot.settings.cutGuides.external", ["enabled", "strokeWidthPt", "color"]);
@@ -495,6 +500,9 @@ function projectSettings(value: unknown, legacy = false): ProjectSettingsV2 {
   let registration: RegistrationConfig;
   try { registration = parseRegistrationConfig(source.registration); }
   catch (error) { invalid("snapshot.settings.registration", error instanceof Error ? error.message : "must be valid bounded geometry."); }
+  const registrationOverride = source.registrationOverride === undefined
+    ? false
+    : boolean(source.registrationOverride, "snapshot.settings.registrationOverride");
   const layoutSource = object(source.layout, "snapshot.settings.layout", ["rows", "columns", "skippedSlotIndices", "templateGeometry"], ["skippedSlotIndices"]);
   const rows = layoutSource.rows === undefined ? undefined : finiteNumber(layoutSource.rows, "snapshot.settings.layout.rows", 1, 1_128);
   const columns = layoutSource.columns === undefined ? undefined : finiteNumber(layoutSource.columns, "snapshot.settings.layout.columns", 1, 1_128);
@@ -541,6 +549,7 @@ function projectSettings(value: unknown, legacy = false): ProjectSettingsV2 {
     horizontalGapMm,
     verticalGapMm,
     registration,
+    registrationOverride,
     layout: {
       ...(rows !== undefined ? { rows, columns } : {}),
       skippedSlotIndices,

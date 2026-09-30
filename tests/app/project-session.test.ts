@@ -4,6 +4,7 @@ import type { ProjectDto, ProjectSummaryDto } from "../../services/project-api";
 import {
   createProjectSessionState,
   projectSessionReducer,
+  createNewProjectDocument,
   projectSnapshotKey,
   projectSnapshotValue,
 } from "../../src/app/project-session";
@@ -40,6 +41,35 @@ describe("Project autosave snapshot identity", () => {
     expect(projectSnapshotValue(snapshot, v5)).not.toBe(projectSnapshotValue(snapshot, v6));
     expect(projectSnapshotValue(snapshot, v5)).not.toBe(projectSnapshotValue(snapshot, { ...v5, packageHash: "f".repeat(64) }));
     expect(projectSnapshotKey([], DEFAULT_PROJECT_SETTINGS, v5)).not.toBe(projectSnapshotKey([], DEFAULT_PROJECT_SETTINGS, null));
+  });
+});
+
+describe("new Project creation snapshot", () => {
+  it("persists the effective settings and exact template geometry while keeping the Project empty", () => {
+    const templateGeometry = {
+      orientation: "portrait" as const,
+      cardOrientation: "portrait" as const,
+      pageSizeMm: { widthMm: 210, heightMm: 297 },
+      cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+      rows: 1,
+      columns: 1,
+      slots: [{ index: 0, row: 0, column: 0, xMm: 73.25, yMm: 104.05 }],
+    };
+    const settings = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      layout: { skippedSlotIndices: [], templateGeometry },
+    };
+    const templateSelection = {
+      templateId: "template-letter",
+      version: "v5",
+      packageHash: "5".repeat(64),
+    };
+
+    const document = createNewProjectDocument(settings, templateSelection);
+
+    expect(document.snapshot.cards).toEqual([]);
+    expect(document.snapshot.settings.layout.templateGeometry).toEqual(templateGeometry);
+    expect(document.templateSelection).toEqual(templateSelection);
   });
 });
 
