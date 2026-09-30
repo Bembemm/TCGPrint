@@ -103,6 +103,17 @@ describe("template metadata and original validation", () => {
     );
   });
 
+  it("validates large text DXFs pair-by-pair without changing their original identity", () => {
+    const source = `0\nSECTION\n2\nHEADER\n${"9\n$CUSTOM\n".repeat(100_000)}0\nENDSEC\n0\nEOF\n`;
+    const bytes = new TextEncoder().encode(source);
+
+    expect(validateTemplateFile("large-cut.dxf", bytes)).toMatchObject({
+      extension: "dxf",
+      byteLength: bytes.byteLength,
+      contentHash: createHash("sha256").update(bytes).digest("hex"),
+    });
+  });
+
   it("requires valid bounded JSON for associated JSON files", () => {
     expect(validateTemplateFile("template.json", new TextEncoder().encode('{"name":"A4 Standard"}')).extension).toBe("json");
     expect(() => validateTemplateFile("template.json", new TextEncoder().encode("{bad}"))).toThrowError(

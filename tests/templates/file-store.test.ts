@@ -61,6 +61,18 @@ describe("immutable template file store", () => {
     expect(await readFile(path)).toEqual(Buffer.from([9, 8, 6]));
   });
 
+  it("rejects an unexpectedly oversized corrupted blob before serving it", async () => {
+    root = await mkdtemp(join(tmpdir(), "tcgprint-template-store-"));
+    const store = new TemplateFileStore(root, { maximumBytes: 1024 });
+    const original = new Uint8Array([1, 2, 3]);
+    const hash = createHash("sha256").update(original).digest("hex");
+    const shard = join(root, hash.slice(0, 2));
+    await mkdir(shard, { recursive: true });
+    await writeFile(join(shard, hash), new Uint8Array(1025).fill(9));
+
+    await expect(store.get(hash, original.byteLength)).rejects.toMatchObject({ code: "TEMPLATE_FILE_CORRUPT" });
+  });
+
   it.skipIf(process.platform === "win32")("refuses to follow a symlink from a content-addressed blob path", async () => {
     root = await mkdtemp(join(tmpdir(), "tcgprint-template-store-"));
     const store = new TemplateFileStore(root);

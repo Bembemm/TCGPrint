@@ -32,7 +32,17 @@ function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException)?.code === "ENOENT";
 }
 
-async function readImmutableFile(path: string): Promise<Uint8Array> {
+async function readImmutableFile(path: string, maximumBytes: number, expectedByteLength?: number): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes <= 0
+    || (expectedByteLength !== undefined && (!Number.isSafeInteger(expectedByteLength) || expectedByteLength <= 0 || expectedByteLength > maximumBytes))) {
+    throw new TemplateFileStoreError("TEMPLATE_FILE_CORRUPT", "Template original has invalid stored size metadata.");
+  }
+  const validateSize = (size: number) => {
+    if (!Number.isSafeInteger(size) || size < 0 || size > maximumBytes
+      || (expectedByteLength !== undefined && size !== expectedByteLength)) {
+      throw new TemplateFileStoreError("TEMPLATE_FILE_CORRUPT", "Template original size differs from its bounded stored size.");
+    }
+  };
   let details;
   try { details = await lstat(path); } catch (error) {
     if (isMissing(error)) throw new TemplateFileStoreError("TEMPLATE_FILE_MISSING", "Template original file is missing.", error);
@@ -41,13 +51,27 @@ async function readImmutableFile(path: string): Promise<Uint8Array> {
   if (details.isSymbolicLink() || !details.isFile()) {
     throw new TemplateFileStoreError("TEMPLATE_FILE_CORRUPT", "Template original path is not a regular file.");
   }
+  validateSize(details.size);
 
   let handle;
   try {
     handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     const opened = await handle.stat();
     if (!opened.isFile()) throw new TemplateFileStoreError("TEMPLATE_FILE_CORRUPT", "Template original path is not a regular file.");
-    return new Uint8Array(await handle.readFile());
+    validateSize(opened.size);
+    // Read at most the opened size plus one byte. The extra byte detects growth after stat
+    // without allowing a corrupted blob to allocate memory based on its current file size.
+    const buffer = Buffer.allocUnsafe(opened.size + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.byteLength) {
+      const result = await handle.read(buffer, bytesRead, buffer.byteLength - bytesRead, bytesRead);
+      if (result.bytesRead === 0) break;
+      bytesRead += result.bytesRead;
+    }
+    if (bytesRead !== opened.size || (expectedByteLength !== undefined && bytesRead !== expectedByteLength)) {
+      throw new TemplateFileStoreError("TEMPLATE_FILE_CORRUPT", "Template original changed size while it was being read.");
+    }
+    return new Uint8Array(buffer.subarray(0, bytesRead));
   } catch (error) {
     if (error instanceof TemplateFileStoreError) throw error;
     if (isMissing(error) || (error as NodeJS.ErrnoException)?.code === "ELOOP") {
@@ -68,8 +92,8 @@ async function ensurePrivateDirectory(path: string): Promise<void> {
   }
 }
 
-async function verifyExisting(path: string, contentHash: string, expectedByteLength: number): Promise<void> {
-  const bytes = await readImmutableFile(path);
+async function verifyExisting(path: string, contentHash: string, expectedByteLength: number, maximumBytes: number): Promise<void> {
+  const bytes = await readImmutableFile(path, maximumBytes, expectedByteLength);
   if (bytes.byteLength !== expectedByteLength || digest(bytes) !== contentHash) {
     throw new TemplateFileStoreError("TEMPLATE_FILE_CORRUPT", "Existing template original does not match its content-addressed SHA-256 path.");
   }
@@ -109,7 +133,7 @@ export class TemplateFileStore {
         await link(temporaryPath, path);
       } catch (error) {
         if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") throw error;
-        await verifyExisting(path, contentHash, bytes.byteLength);
+        await verifyExisting(path, contentHash, bytes.byteLength, this.maximumBytes);
       }
       return { contentHash, byteLength: bytes.byteLength };
     } catch (error) {
@@ -122,7 +146,7 @@ export class TemplateFileStore {
   }
 
   async get(contentHash: string, expectedByteLength?: number): Promise<Uint8Array> {
-    const bytes = await readImmutableFile(blobPath(this.rootDirectory, contentHash));
+    const bytes = await readImmutableFile(blobPath(this.rootDirectory, contentHash), this.maximumBytes, expectedByteLength);
     if (digest(bytes) !== contentHash || (expectedByteLength !== undefined && bytes.byteLength !== expectedByteLength)) {
       throw new TemplateFileStoreError("TEMPLATE_FILE_CORRUPT", "Template original failed its byte-length or SHA-256 integrity check.");
     }

@@ -164,31 +164,100 @@ function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
   return true;
 }
 
+function isTrimWhitespace(text: string, index: number): boolean {
+  const code = text.charCodeAt(index);
+  return (code >= 0x0009 && code <= 0x000d) || code === 0x0020 || code === 0x00a0 || code === 0x1680
+    || (code >= 0x2000 && code <= 0x200a) || code === 0x2028 || code === 0x2029 || code === 0x202f
+    || code === 0x205f || code === 0x3000 || code === 0xfeff;
+}
+
+interface DxfLine {
+  readonly start: number;
+  readonly end: number;
+  readonly next: number;
+  readonly hasNewline: boolean;
+}
+
+function readDxfLine(text: string, start: number): DxfLine {
+  const newline = text.indexOf("\n", start);
+  let end = newline === -1 ? text.length : newline;
+  if (end > start && text.charCodeAt(end - 1) === 0x000d) end -= 1;
+  return { start, end, next: newline === -1 ? text.length : newline + 1, hasNewline: newline !== -1 };
+}
+
+function trimmedRange(text: string, start: number, end: number): readonly [number, number] {
+  while (start < end && isTrimWhitespace(text, start)) start += 1;
+  while (end > start && isTrimWhitespace(text, end - 1)) end -= 1;
+  return [start, end];
+}
+
+function trimmedEquals(text: string, start: number, end: number, expected: string): boolean {
+  const [trimmedStart, trimmedEnd] = trimmedRange(text, start, end);
+  if (trimmedEnd - trimmedStart !== expected.length) return false;
+  for (let index = 0; index < expected.length; index += 1) {
+    const character = text.charCodeAt(trimmedStart + index);
+    const upper = character >= 0x0061 && character <= 0x007a ? character - 0x20 : character;
+    if (upper !== expected.charCodeAt(index)) return false;
+  }
+  return true;
+}
+
 function validateDxf(bytes: Uint8Array): void {
   if (equalBytes(bytes, BINARY_DXF_SIGNATURE)) return;
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes).replace(/^\uFEFF/, "");
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch (error) {
     invalidFile("DXF template must be an ASCII/UTF-8 text DXF or a recognized binary DXF.", error);
   }
-  const lines = (text as string).split(/\r?\n/);
-  while (lines.length > 0 && lines[lines.length - 1]?.trim() === "") lines.pop();
-  if (lines.length < 4 || lines.length % 2 !== 0) invalidFile("DXF template does not contain complete group-code/value pairs.");
-  const pairs: Array<readonly [string, string]> = [];
-  for (let index = 0; index < lines.length; index += 2) {
-    const code = lines[index]?.trim() ?? "";
+  const source = text as string;
+  const start = source.charCodeAt(0) === 0xfeff ? 1 : 0;
+
+  // Count significant lines first so blank trailing lines match the prior parser's behavior.
+  // The second pass validates pairs in place, avoiding arrays proportional to untrusted DXF size.
+  let cursor = start;
+  let lineCount = 0;
+  let lastNonBlankLine = -1;
+  while (true) {
+    const line = readDxfLine(source, cursor);
+    let blank = true;
+    for (let index = line.start; index < line.end; index += 1) {
+      if (!isTrimWhitespace(source, index)) { blank = false; break; }
+    }
+    if (!blank) lastNonBlankLine = lineCount;
+    lineCount += 1;
+    if (!line.hasNewline) break;
+    cursor = line.next;
+  }
+  const significantLines = lastNonBlankLine + 1;
+  if (significantLines < 4 || significantLines % 2 !== 0) {
+    invalidFile("DXF template does not contain complete group-code/value pairs.");
+  }
+
+  cursor = start;
+  let firstPairIsSection = false;
+  let hasEndSection = false;
+  let lastPairIsEof = false;
+  for (let pairIndex = 0; pairIndex < significantLines / 2; pairIndex += 1) {
+    const codeLine = readDxfLine(source, cursor);
+    const valueLine = readDxfLine(source, codeLine.next);
+    cursor = valueLine.next;
+    const [codeStart, codeEnd] = trimmedRange(source, codeLine.start, codeLine.end);
+    const codeLength = codeEnd - codeStart;
+    const code = codeLength <= 5 ? source.slice(codeStart, codeEnd) : "";
     const numericCode = Number(code);
     if (!/^-?\d{1,4}$/.test(code) || !Number.isInteger(numericCode) || numericCode < -5 || numericCode > 1071) {
-      invalidFile(`DXF template has an invalid group code on line ${index + 1}.`);
+      invalidFile(`DXF template has an invalid group code on line ${pairIndex * 2 + 1}.`);
     }
-    pairs.push([code, lines[index + 1] ?? ""]);
+    const isZeroCode = code === "0";
+    const isSectionValue = isZeroCode && trimmedEquals(source, valueLine.start, valueLine.end, "SECTION");
+    const isEndSectionValue = isZeroCode && trimmedEquals(source, valueLine.start, valueLine.end, "ENDSEC");
+    const isEofValue = isZeroCode && trimmedEquals(source, valueLine.start, valueLine.end, "EOF");
+    if (pairIndex === 0) firstPairIsSection = isSectionValue;
+    hasEndSection ||= isEndSectionValue;
+    lastPairIsEof = isEofValue;
   }
-  const first = pairs[0];
-  const last = pairs[pairs.length - 1];
-  if (first?.[0] !== "0" || first[1].trim().toUpperCase() !== "SECTION"
-    || last?.[0] !== "0" || last[1].trim().toUpperCase() !== "EOF"
-    || !pairs.some(([code, value]) => code === "0" && value.trim().toUpperCase() === "ENDSEC")) {
+  if (!firstPairIsSection || !lastPairIsEof || !hasEndSection) {
     invalidFile("DXF template must contain a SECTION, ENDSEC, and final EOF marker.");
   }
 }
