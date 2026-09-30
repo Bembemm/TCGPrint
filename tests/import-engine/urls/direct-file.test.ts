@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { importFiles } from "../../../import-engine";
 import type { UniversalImportOptions } from "../../../import-engine/types";
+import { makeSyntheticZip } from "../../helpers/zip";
 
 const PUBLIC_DNS = async () => ["93.184.216.34"];
 
@@ -44,6 +45,63 @@ describe("direct URL file imports", () => {
     expect(result.entries[0]).toMatchObject({ kind: "custom-card", asset: { originalFormat: "png", mediaType: "image/png" } });
     expect(result.report.warnings.map(({ code }) => code)).toContain("URL_CONTENT_TYPE_MISMATCH");
     expect(result.sources[0]).toMatchObject({ originalFormat: "png", sourceUrl: "https://files.example.invalid/card.csv" });
+  });
+
+  it.each(["application/zip", "application/octet-stream"])("imports ZIP bytes returned with Content-Type %s exactly once", async (mediaType) => {
+    const url = "https://files.example.invalid/archive.bin";
+    const zip = makeSyntheticZip([{ name: "deck.txt", bytes: new TextEncoder().encode("1 Sol Ring") }]);
+    const { result } = await importUrl(url, new Response(Buffer.from(zip), { headers: { "content-type": mediaType } }));
+    const urlSource = result.sources.find((source) => source.kind === "url");
+    const child = result.sources.find((source) => source.kind === "zip-entry");
+
+    expect(result.report.errors).toEqual([]);
+    expect(urlSource).toMatchObject({ sourceUrl: url, mediaType, originalFormat: "zip" });
+    expect(child).toMatchObject({ kind: "zip-entry", filename: "deck.txt", sourcePath: "deck.txt", parentSourceId: urlSource?.id });
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]).toMatchObject({ kind: "deck-card", sourceId: child?.id, sourcePath: "deck.txt", cardHint: { name: "Sol Ring" } });
+    expect(result.detections.filter((detection) => detection.sourceId === child?.id)).toHaveLength(1);
+    expect(result.report.selectedImporters.filter((item) => item.sourceId === child?.id)).toHaveLength(1);
+  });
+
+  it("keeps valid ZIP siblings when one extracted entry fails", async () => {
+    const zip = makeSyntheticZip([
+      { name: "broken.json", bytes: new TextEncoder().encode("{") },
+      { name: "deck.txt", bytes: new TextEncoder().encode("1 Sol Ring") },
+    ]);
+    const { result } = await importUrl(
+      "https://files.example.invalid/archive.zip",
+      new Response(Buffer.from(zip), { headers: { "content-type": "application/zip" } }),
+    );
+
+    expect(result.report.errors).toMatchObject([{ code: "INVALID_JSON" }]);
+    expect(result.entries.map((entry) => entry.cardHint?.name)).toEqual(["Sol Ring"]);
+  });
+
+  it("imports nested ZIP descendants from a URL and enforces the ZIP tree entry limit", async () => {
+    const nested = makeSyntheticZip([{ name: "inside.txt", bytes: new TextEncoder().encode("2 Island") }]);
+    const zip = makeSyntheticZip([
+      { name: "nested/cards.zip", bytes: nested },
+      { name: "outer.txt", bytes: new TextEncoder().encode("1 Sol Ring") },
+    ]);
+    const url = "https://files.example.invalid/archive.zip";
+    const { result } = await importUrl(
+      url,
+      new Response(Buffer.from(zip), { headers: { "content-type": "application/zip" } }),
+    );
+    const nestedSource = result.sources.find((source) => source.kind === "zip-entry" && source.filename === "cards.zip");
+    const leaf = result.sources.find((source) => source.kind === "zip-entry" && source.filename === "inside.txt");
+
+    expect(result.report.errors).toEqual([]);
+    expect(result.entries.map((entry) => entry.cardHint?.name)).toEqual(["Island", "Sol Ring"]);
+    expect(leaf?.parentSourceId).toBe(nestedSource?.id);
+    expect(result.detections.filter((detection) => detection.sourceId === leaf?.id)).toHaveLength(1);
+
+    const limited = await importUrl(
+      url,
+      new Response(Buffer.from(zip), { headers: { "content-type": "application/zip" } }),
+      { limits: { maxZipEntries: 1 } },
+    );
+    expect(limited.result.report.errors.some((error) => error.code === "ZIP_ENTRY_LIMIT")).toBe(true);
   });
 
   it("rejects HTML even when the URL looks like a text deck file", async () => {

@@ -452,13 +452,11 @@ export async function importFiles(
   for (let index = 0; index < roots.length; index += 1) {
     const root = roots[index];
     await importOne(root);
-    if (root.originalBytes && root.originalBytes[0] === 0x50 && root.originalBytes[1] === 0x4b) {
-      const descendants = allSources
-        .filter((source) => source.kind === "zip-entry" && source.id.startsWith(`${root.id}!/`))
-        .sort((left, right) => left.order - right.order);
-      for (const child of descendants) {
-        if (!detections.some((detection) => detection.sourceId === child.id)) await importOne(child);
-      }
+    const descendants = allSources
+      .filter((source) => source.kind === "zip-entry" && source.id.startsWith(`${root.id}!/`))
+      .sort((left, right) => left.order - right.order);
+    for (const child of descendants) {
+      if (!detections.some((detection) => detection.sourceId === child.id)) await importOne(child);
     }
     if (options.signal?.aborted) throw new ImportCancelledError(root.id);
     options.onProgress?.({ phase: "input", completed: index + 1, total: roots.length, sourceId: root.id, sourcePath: root.sourcePath });
