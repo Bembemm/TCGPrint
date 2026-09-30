@@ -16,6 +16,7 @@ function project(id: string, revision: number): ProjectDto {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     snapshot: { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+    templateSelection: null,
   };
 }
 
@@ -30,6 +31,8 @@ describe("Projects panel", () => {
 
     expect(markup).toContain('aria-label="Projects"');
     expect(markup).toContain("Criar Project vazio");
+    expect(markup).toContain("Silhouette Template Library");
+    expect(markup).toContain(".studio3, .dxf, .svg, .json, .zip");
     expect(markup).toContain("Salvar");
     expect(markup).toContain("Dirty");
     expect(markup).toContain("Nenhum Project aberto");
@@ -43,6 +46,7 @@ describe("Projects panel", () => {
         baseRevision: 4,
         projectSchemaVersion: 1,
         snapshot: { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },
     };
@@ -71,6 +75,7 @@ describe("Projects panel", () => {
         baseRevision: choice === "copy" ? 3 : 4,
         projectSchemaVersion: 1,
         snapshot: { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },
     };
@@ -109,6 +114,7 @@ describe("Projects panel", () => {
         baseRevision: 4,
         projectSchemaVersion: 1,
         snapshot: { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },
     };
@@ -136,6 +142,7 @@ describe("Projects panel", () => {
         baseRevision: 4,
         projectSchemaVersion: 1,
         snapshot: { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },
     };

@@ -153,6 +153,35 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .project-list-row span { color: #65717d; font-size: 10px; }
 .project-row-actions { flex: none; }
 .project-list-row .button { min-height: 28px; padding: 4px 7px; font-size: 10px; }
+.template-library { margin-top: 14px; border-top: 1px solid #d8dee4; padding-top: 14px; }
+.template-library-heading, .template-title-row, .template-version-row, .template-import-actions { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.template-library-heading { margin-bottom: 10px; }
+.template-library-heading h3 { margin: 0 0 3px; font-size: 14px; }
+.template-library-heading p, .template-import-actions span { margin: 0; color: #65717d; font-size: 10px; line-height: 1.5; }
+.template-import-form { padding: 10px; border: 1px solid #d8dee4; border-radius: 4px; background: #f8fafb; }
+.template-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.template-form-grid label, .template-files-field { display: grid; gap: 4px; color: #354452; font-size: 10px; font-weight: 650; }
+.template-form-grid input, .template-form-grid select { min-width: 0; min-height: 32px; border: 1px solid #aeb9c4; border-radius: 3px; padding: 6px 7px; background: #fff; color: #18212a; font-size: 11px; }
+.template-files-field { margin-top: 10px; }
+.template-files-field input { font-size: 11px; font-weight: 400; }
+.template-import-actions { align-items: center; margin-top: 8px; }
+.template-import-actions .button, .template-title-row .button, .template-version-row > .button { flex: none; min-height: 29px; padding: 5px 8px; font-size: 10px; }
+.template-selection-status { display: grid; gap: 3px; margin: 10px 0; padding: 8px; border: 1px solid #b7c7d5; border-radius: 4px; overflow-wrap: anywhere; background: #f4f8fb; color: #354452; font-size: 10px; }
+.template-integrity-available { border-color: #83b69a; background: #f1faf4; }
+.template-integrity-missing, .template-integrity-corrupt, .template-integrity-hash-mismatch { border-color: #d7867d; background: #fff4f2; }
+.template-list { display: grid; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
+.template-list-item { min-width: 0; border: 1px solid #d8dee4; border-radius: 4px; padding: 9px; }
+.template-title-row { align-items: center; }
+.template-title-row > div { display: grid; gap: 2px; min-width: 0; }
+.template-title-row strong { overflow-wrap: anywhere; font-size: 11px; }
+.template-title-row span, .template-version-meta > span { color: #65717d; font-size: 10px; }
+.template-version-row { align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e9ed; }
+.template-version-meta { display: grid; min-width: 0; gap: 4px; }
+.template-version-meta strong, .template-version-meta code { overflow-wrap: anywhere; font-size: 10px; }
+.template-version-meta ul { display: grid; gap: 3px; margin: 1px 0 0; padding: 0; list-style: none; }
+.template-version-meta li { display: flex; flex-wrap: wrap; gap: 8px; font-size: 9px; }
+.template-version-meta li a { overflow-wrap: anywhere; color: #245a88; }
+.template-version-meta li span { color: #65717d; }
 .phase5-actions { margin: 0 0 13px; }
 .editor-history-controls { display: flex; align-items: center; gap: 8px; }
 .card-workbench-layout { display: grid; grid-template-columns: minmax(290px, 0.9fr) minmax(0, 1.8fr); gap: 14px; margin-top: 16px; align-items: start; }
@@ -247,9 +276,13 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
   .project-save-controls { width: 100%; }
   .project-list-row { align-items: flex-start; flex-direction: column; }
   .project-row-actions { width: 100%; justify-content: flex-end; }
+  .template-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .template-version-row { align-items: flex-start; flex-direction: column; }
+  .template-version-row > .button { align-self: flex-end; }
   .card-details-grid { grid-template-columns: minmax(0, 1fr); }
   .artwork-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
   .panel { padding: 13px; }
+  .template-form-grid { grid-template-columns: 1fr; }
   .pdf-controls select { min-width: 0; }
   .action-row { align-items: flex-start; flex-direction: column; }
 }
