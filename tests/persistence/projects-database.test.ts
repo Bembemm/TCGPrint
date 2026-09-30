@@ -20,12 +20,54 @@ describe("project database", () => {
     await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
   });
 
-  it("creates the version-one relational schema in a real SQLite database", () => {
+  it("creates the version-two relational schema in a real SQLite database", () => {
     database = openProjectDatabase(":memory:");
 
-    expect(database.pragma("user_version", { simple: true })).toBe(1);
+    expect(database.pragma("user_version", { simple: true })).toBe(2);
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
-      .toEqual([{ name: "project_recovery" }, { name: "projects" }]);
+      .toEqual([
+        { name: "project_recovery" },
+        { name: "project_recovery_template_selections" },
+        { name: "project_template_selections" },
+        { name: "projects" },
+        { name: "template_files" },
+        { name: "template_versions" },
+        { name: "templates" },
+      ]);
+  });
+
+  it("upgrades a populated version-one Projects database without replacing Projects or recoveries", () => {
+    database = new Database(":memory:");
+    database.exec(`
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        project_schema_version INTEGER NOT NULL CHECK (project_schema_version >= 1),
+        revision INTEGER NOT NULL CHECK (revision >= 1),
+        snapshot_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        autosaved_at TEXT NOT NULL
+      );
+      CREATE TABLE project_recovery (
+        project_id TEXT PRIMARY KEY NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        base_revision INTEGER NOT NULL CHECK (base_revision >= 1),
+        project_schema_version INTEGER NOT NULL CHECK (project_schema_version >= 1),
+        snapshot_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO projects VALUES ('project-1', 'Preservado', 1, 3, '{"projectSchemaVersion":1}', '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z');
+      INSERT INTO project_recovery VALUES ('project-1', 3, 1, '{"projectSchemaVersion":1,"recovery":true}', '2026-01-03T00:00:00.000Z');
+      PRAGMA user_version = 1;
+    `);
+
+    expect(migrateProjectDatabase(database)).toBe(2);
+    expect(database.pragma("user_version", { simple: true })).toBe(2);
+    expect(database.prepare("SELECT id, name, revision, snapshot_json FROM projects").get())
+      .toEqual({ id: "project-1", name: "Preservado", revision: 3, snapshot_json: '{"projectSchemaVersion":1}' });
+    expect(database.prepare("SELECT project_id, base_revision, snapshot_json FROM project_recovery").get())
+      .toEqual({ project_id: "project-1", base_revision: 3, snapshot_json: '{"projectSchemaVersion":1,"recovery":true}' });
+    expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
   it("resolves the projects database beneath an explicit application data directory", () => {
@@ -62,13 +104,13 @@ describe("project database", () => {
     temporaryDirectories.push(directory);
     const path = join(directory, "projects.sqlite");
     const futureDatabase = new Database(path);
-    futureDatabase.exec("CREATE TABLE future_marker (value TEXT NOT NULL); INSERT INTO future_marker VALUES ('preserve'); PRAGMA user_version = 2;");
+    futureDatabase.exec("CREATE TABLE future_marker (value TEXT NOT NULL); INSERT INTO future_marker VALUES ('preserve'); PRAGMA user_version = 3;");
     futureDatabase.close();
 
     expect(() => openProjectDatabase(path)).toThrow(/newer than this application supports/);
 
     const unchanged = new Database(path);
-    expect(unchanged.pragma("user_version", { simple: true })).toBe(2);
+    expect(unchanged.pragma("user_version", { simple: true })).toBe(3);
     expect(unchanged.prepare("SELECT value FROM future_marker").get()).toEqual({ value: "preserve" });
     expect(unchanged.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get()).toBeUndefined();
     unchanged.close();
@@ -99,10 +141,10 @@ describe("project database", () => {
     });
 
     try {
-      expect(migrateProjectDatabase(migratingDatabase)).toBe(1);
-      expect(migratingDatabase.pragma("user_version", { simple: true })).toBe(1);
+      expect(migrateProjectDatabase(migratingDatabase)).toBe(2);
+      expect(migratingDatabase.pragma("user_version", { simple: true })).toBe(2);
       expect(migratingDatabase.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
-        .toEqual([{ name: "project_recovery" }, { name: "projects" }]);
+        .toContainEqual({ name: "templates" });
     } finally {
       transactionSpy.mockRestore();
       migratingDatabase.close();
