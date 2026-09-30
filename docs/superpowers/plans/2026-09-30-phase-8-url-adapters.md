@@ -160,4 +160,4 @@
 - [x] Smoke live Scryfall link parsing, Archidekt, CubeCobra, MTGTop8, mtg.wtf, and a direct image URL; all returned zero import errors. A separate direct plain-text URL was not live-smoked; deterministic TXT fallback tests pass.
 - [x] Review the full diff against `IMPLEMENTATION_PLAN.md`, ADRs, Importer/Provider separation, and phase scope; fix blocking findings.
 - [x] Confirm `main` remains at `cdcb69c1dce8a48254189fc74a1d29c7a1df7a24`, feature branch only contains coherent commits, and no merge was made.
-- [ ] Push only `feature/fase-8-url-adapters` to `origin`.
+- [x] Push only `feature/fase-8-url-adapters` to `origin`.
