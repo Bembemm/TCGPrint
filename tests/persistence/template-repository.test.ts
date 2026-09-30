@@ -138,8 +138,13 @@ describe("template repository", () => {
     const template = repository.addVersion({ metadata: v5, packageHash, files: files() });
 
     expect(repository.getFile(template.version.files[0]!.fileId)).toMatchObject({ contentHash: fileHash, byteLength: 4 });
+    expect(() => database!.prepare(`INSERT INTO template_files
+      (file_id, template_id, version, relative_path, file_name, extension, media_type, content_hash, byte_length, created_at)
+      VALUES ('bad-media-type', ?, 'v5', 'other.studio3', 'other.studio3', 'studio3', 'image/svg+xml', ?, 4, ?)`)
+      .run(template.templateId, fileHash, now)).toThrow();
     expect(JSON.stringify(repository.list())).not.toContain("/home/agent");
     repository.delete(template.templateId);
     expect(repository.list()).toEqual([]);
+    expect(database.pragma("foreign_key_check")).toEqual([]);
   });
 });

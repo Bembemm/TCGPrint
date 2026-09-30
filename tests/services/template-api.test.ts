@@ -68,6 +68,8 @@ describe("template API", () => {
     expect(await listed.json()).toMatchObject({ templates: [{ versions: [{ version: "5", packageHash: result.version.packageHash }] }] });
     const verified = await handleTemplateVerify(new Request("http://localhost"), result.templateId, "5", library);
     expect(await verified.json()).toMatchObject({ status: "available", selection: { packageHash: result.version.packageHash } });
+    const mismatched = await handleTemplateVerify(new Request("http://localhost"), result.templateId, "5", library, "f".repeat(64));
+    expect(await mismatched.json()).toMatchObject({ status: "hash-mismatch", selection: { packageHash: "f".repeat(64) } });
     const downloaded = await handleTemplateFileDownload(new Request("http://localhost"), file.fileId, library);
     expect(downloaded.status).toBe(200);
     expect(new Uint8Array(await downloaded.arrayBuffer())).toEqual(studio);

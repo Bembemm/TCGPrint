@@ -28,7 +28,7 @@ function migrateToV1(database: Database.Database): void {
 function migrateToV2(database: Database.Database): void {
   database.exec(`
     CREATE TABLE templates (
-      id TEXT PRIMARY KEY NOT NULL,
+      id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) BETWEEN 1 AND 180),
       name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 160),
       source TEXT NOT NULL CHECK (length(trim(source)) BETWEEN 1 AND 240),
       created_at TEXT NOT NULL,
@@ -50,13 +50,19 @@ function migrateToV2(database: Database.Database): void {
     );
 
     CREATE TABLE template_files (
-      file_id TEXT PRIMARY KEY NOT NULL,
+      file_id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(file_id)) BETWEEN 1 AND 180),
       template_id TEXT NOT NULL,
       version TEXT NOT NULL,
       relative_path TEXT NOT NULL CHECK (length(relative_path) BETWEEN 1 AND 1024),
       file_name TEXT NOT NULL CHECK (length(file_name) BETWEEN 1 AND 255),
       extension TEXT NOT NULL CHECK (extension IN ('studio3','dxf','svg','json','zip')),
-      media_type TEXT NOT NULL,
+      media_type TEXT NOT NULL CHECK (
+        (extension = 'studio3' AND media_type = 'application/octet-stream' AND lower(file_name) GLOB '*.studio3') OR
+        (extension = 'dxf' AND media_type = 'application/dxf' AND lower(file_name) GLOB '*.dxf') OR
+        (extension = 'svg' AND media_type = 'image/svg+xml' AND lower(file_name) GLOB '*.svg') OR
+        (extension = 'json' AND media_type = 'application/json' AND lower(file_name) GLOB '*.json') OR
+        (extension = 'zip' AND media_type = 'application/zip' AND lower(file_name) GLOB '*.zip')
+      ),
       content_hash TEXT NOT NULL CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
       byte_length INTEGER NOT NULL CHECK (byte_length > 0),
       created_at TEXT NOT NULL,

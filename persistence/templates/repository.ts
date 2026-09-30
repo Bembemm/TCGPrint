@@ -146,6 +146,11 @@ function normalizedFiles(files: readonly TemplateFileRecordInput[]): TemplateFil
       || /[\\/\u0000-\u001f\u007f]/.test(file.fileName)) {
       throw new TemplateRepositoryError("TEMPLATE_INVALID", "Template associated file name is invalid.");
     }
+    const dot = file.fileName.lastIndexOf(".");
+    const extensionFromName = dot > 0 ? file.fileName.slice(dot + 1).toLowerCase() : "";
+    if (segments.at(-1) !== file.fileName.normalize("NFC") || extensionFromName !== file.extension) {
+      throw new TemplateRepositoryError("TEMPLATE_INVALID", "Template file name, relative path, and extension must agree.");
+    }
     if (!EXTENSIONS.has(file.extension) || file.mediaType !== MIME_TYPES[file.extension]
       || !SHA256_PATTERN.test(file.contentHash) || !Number.isSafeInteger(file.byteLength) || file.byteLength <= 0) {
       throw new TemplateRepositoryError("TEMPLATE_INVALID", "Template associated file format, media type, hash, or byte length is invalid.");
@@ -340,7 +345,7 @@ export class TemplateRepository {
   }
 
   private sameVersionFiles(templateId: string, version: string, files: readonly TemplateFileRecordInput[]): boolean {
-    const stored = this.database.prepare("SELECT * FROM template_files WHERE template_id = ? AND version = ? ORDER BY relative_path COLLATE NOCASE, relative_path")
+    const stored = this.database.prepare("SELECT * FROM template_files WHERE template_id = ? AND version = ? ORDER BY relative_path")
       .all(templateId, version) as TemplateFileRow[];
     return stored.length === files.length && stored.every((row, index) => {
       const input = files[index];

@@ -162,8 +162,7 @@ export async function handleTemplateVerify(
     return Response.json({ code: "INVALID_TEMPLATE_SELECTION", message: "Template ID or version is invalid." }, { status: 400 });
   }
   try {
-    const template = library.list().find(({ id }) => id === templateId);
-    const selectedVersion = template?.versions.find((candidate) => candidate.version === version);
+    const selectedVersion = library.getVersion(templateId, version);
     if (!selectedVersion) return Response.json({ code: "TEMPLATE_NOT_FOUND", message: "Template version was not found." }, { status: 404 });
     const selection: TemplateSelection = {
       templateId,
@@ -177,7 +176,7 @@ export async function handleTemplateVerify(
 export async function handleTemplateFileDownload(_request: Request, fileId: string, library: TemplateLibraryService): Promise<Response> {
   if (!validTemplateId(fileId)) return Response.json({ code: "INVALID_TEMPLATE_FILE_ID", message: "Template file ID is invalid." }, { status: 400 });
   try {
-    const metadata = library.list().flatMap(({ versions }) => versions).flatMap(({ files }) => files).find(({ fileId: id }) => id === fileId);
+    const metadata = library.getFileMetadata(fileId);
     if (!metadata) return Response.json({ code: "TEMPLATE_NOT_FOUND", message: "Template file was not found." }, { status: 404 });
     const bytes = await library.readFile(fileId);
     const asciiFallback = metadata.fileName.replace(/[^\x20-\x7e]|["\\]/g, "_");

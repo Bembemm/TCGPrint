@@ -194,6 +194,14 @@ export class TemplateLibraryService {
     return this.repository.list();
   }
 
+  getVersion(templateId: string, version: string): TemplateVersionRecord | undefined {
+    return this.repository.getVersion(templateId, version);
+  }
+
+  getFileMetadata(fileId: string) {
+    return this.repository.getFile(fileId);
+  }
+
   remove(templateId: string): void {
     this.repository.delete(templateId);
   }
@@ -264,6 +272,9 @@ export class TemplateLibraryService {
     }
     if (records.length > this.limits.maxExpandedFiles) {
       throw new TemplateLibraryError("TEMPLATE_UPLOAD_LIMIT", `Template package exceeds ${this.limits.maxExpandedFiles} associated files.`);
+    }
+    if (!records.some(({ input }) => input.extension === "studio3" || input.extension === "dxf" || input.extension === "svg")) {
+      throw new TemplateLibraryError("TEMPLATE_PACKAGE_INVALID", "Template package must contain at least one .studio3, .dxf, or .svg file.");
     }
     const files = records.map(({ input }) => input);
     const packageHash = calculateTemplatePackageHash(metadata, files);
