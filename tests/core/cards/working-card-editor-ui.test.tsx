@@ -26,6 +26,25 @@ const card: WorkingCard = {
 };
 
 describe("working card editor list UI", () => {
+  it("blocks selection, quantity, reorder, duplicate, and delete controls while locked", () => {
+    const markup = renderToStaticMarkup(createElement(WorkingCardList, {
+      cards: [card, { ...card, id: "second-card", order: 1 }],
+      selectedCardId: card.id,
+      physicalCardCount: 3,
+      disabled: true,
+      onSelect: vi.fn(),
+      onQuantityCommit: vi.fn(),
+      onQuantityAdjust: vi.fn(),
+      onMove: vi.fn(),
+      onDuplicate: vi.fn(),
+      onDelete: vi.fn(),
+    }));
+
+    expect(markup).toMatch(/class="working-card-select"[^>]*disabled=""/);
+    expect(markup).toMatch(/draggable="false"/);
+    expect([...markup.matchAll(/aria-label="(?:Diminuir quantidade|Aumentar quantidade|Quantidade|Mover|Duplicar|Excluir)[^"]*"[^>]*disabled=""/g)]).toHaveLength(14);
+  });
+
   it("renders Card Details origin, imported hints, current identity, both artwork faces and manual mismatch text", () => {
     const detailed: WorkingCard = {
       ...card,

@@ -3,6 +3,7 @@
 import { GUIDE_COLOR_OPTIONS, type GuideColor } from "../../core/geometry";
 
 export interface CutGuideControlsProps {
+  readonly disabled?: boolean;
   readonly trimEnabled: boolean;
   readonly trimExtentMm: string;
   readonly trimColor: GuideColor;
@@ -26,6 +27,7 @@ export default function CutGuideControls({
   externalEnabled,
   externalStrokeWidthPt,
   externalColor,
+  disabled = false,
   onTrimEnabledChange,
   onTrimExtentMmChange,
   onTrimColorChange,
@@ -38,24 +40,24 @@ export default function CutGuideControls({
   return (
     <>
       <label className="checkbox-field">
-        <input type="checkbox" checked={trimEnabled} onChange={(event) => onTrimEnabledChange(event.currentTarget.checked)} />
+        <input type="checkbox" checked={trimEnabled} disabled={disabled} onChange={(event) => onTrimEnabledChange(event.currentTarget.checked)} />
         Guia de corte no trim
       </label>
       <label className="narrow-field">
         Comprimento da guia no trim (mm)
-        <select value={trimExtentMm} disabled={!trimEnabled} onChange={(event) => onTrimExtentMmChange(event.currentTarget.value)}>
+        <select value={trimExtentMm} disabled={disabled || !trimEnabled} onChange={(event) => onTrimExtentMmChange(event.currentTarget.value)}>
           {!hasPresetTrimExtent && trimExtentMm !== "" && <option value={trimExtentMm}>{trimExtentMm} mm</option>}
           {TRIM_EXTENTS_MM.map((value) => <option key={value} value={value}>{value === "full" ? "full" : `${value} mm`}</option>)}
         </select>
       </label>
       <label className="narrow-field">
         Cor da guia no trim
-        <select value={trimColor} disabled={!trimEnabled} onChange={(event) => onTrimColorChange(event.currentTarget.value as GuideColor)}>
+        <select value={trimColor} disabled={disabled || !trimEnabled} onChange={(event) => onTrimColorChange(event.currentTarget.value as GuideColor)}>
           {GUIDE_COLOR_OPTIONS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
         </select>
       </label>
       <label className="checkbox-field">
-        <input type="checkbox" checked={externalEnabled} onChange={(event) => onExternalEnabledChange(event.currentTarget.checked)} />
+        <input type="checkbox" checked={externalEnabled} disabled={disabled} onChange={(event) => onExternalEnabledChange(event.currentTarget.checked)} />
         Guia externa de corte
       </label>
       <label className="narrow-field">
@@ -65,13 +67,13 @@ export default function CutGuideControls({
           min="0.1"
           step="0.1"
           value={externalStrokeWidthPt}
-          disabled={!externalEnabled}
+          disabled={disabled || !externalEnabled}
           onChange={(event) => onExternalStrokeWidthPtChange(event.currentTarget.value)}
         />
       </label>
       <label className="narrow-field">
         Cor da guia externa
-        <select value={externalColor} disabled={!externalEnabled} onChange={(event) => onExternalColorChange(event.currentTarget.value as GuideColor)}>
+        <select value={externalColor} disabled={disabled || !externalEnabled} onChange={(event) => onExternalColorChange(event.currentTarget.value as GuideColor)}>
           {GUIDE_COLOR_OPTIONS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
         </select>
       </label>

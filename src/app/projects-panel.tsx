@@ -10,6 +10,12 @@ import { ProjectAutosaveQueue } from "./project-autosave";
 import { saveProjectWithRecovery } from "./project-autosave-persistence";
 import { resolveProjectRecoveryChoice, type ProjectRecoveryChoice } from "./project-recovery-decision";
 import {
+  createProjectOpenInteractionLock,
+  keepCurrentProjectWorkingSet,
+  openProjectWithInteractionLock,
+  resolveProjectRecoveryWithInteractionLock,
+} from "./project-interaction-lock";
+import {
   createProjectSessionState,
   projectSessionReducer,
   projectSnapshotKey,
@@ -20,10 +26,7 @@ export interface ProjectsPanelProps {
   readonly cards: readonly WorkingCard[];
   readonly settings: ProjectSettingsV1;
   readonly onProjectOpen: (project: ProjectDto) => void;
-  readonly onProjectOpenStart?: () => void;
-  readonly onProjectOpenEnd?: () => void;
-  readonly onProjectInteractionStart?: () => void;
-  readonly onProjectInteractionEnd?: () => void;
+  readonly onProjectInteractionLockChange?: (locked: boolean) => void;
   readonly disabled?: boolean;
 }
 
@@ -36,10 +39,7 @@ export default function ProjectsPanel({
   cards,
   settings,
   onProjectOpen,
-  onProjectOpenStart,
-  onProjectOpenEnd,
-  onProjectInteractionStart,
-  onProjectInteractionEnd,
+  onProjectInteractionLockChange,
   disabled = false,
 }: ProjectsPanelProps) {
   const currentSnapshot = useMemo(() => {
@@ -62,7 +62,14 @@ export default function ProjectsPanel({
   );
   const [operation, setOperation] = useState<"creating" | "opening" | "duplicating" | "deleting" | null>(null);
   const [recoveryDecision, setRecoveryDecision] = useState<ProjectOpenDto | null>(null);
+  const recoveryChoiceInProgress = useRef(false);
+  const interactionLockCallbackRef = useRef(onProjectInteractionLockChange);
+  interactionLockCallbackRef.current = onProjectInteractionLockChange;
+  const projectOpenLock = useMemo(() => createProjectOpenInteractionLock((locked) => {
+    interactionLockCallbackRef.current?.(locked);
+  }), []);
   const operationDisabled = disabled || operation !== null || session.saving !== null;
+  const recoveryActionDisabled = operationDisabled;
   const projectActionsDisabled = operationDisabled || recoveryDecision !== null;
 
   useEffect(() => {
@@ -153,7 +160,7 @@ export default function ProjectsPanel({
   }, [refreshProjects]);
 
   async function createProject() {
-    if (projectActionsDisabled) return;
+    if (projectActionsDisabled || projectOpenLock.isLocked()) return;
     setOperation("creating");
     try {
       await flushActiveProject();
@@ -168,31 +175,32 @@ export default function ProjectsPanel({
   }
 
   async function openProject(projectId: string, discardLocalConflict = false) {
-    if (projectActionsDisabled) return;
+    if (projectActionsDisabled || projectOpenLock.isLocked()) return;
     setOperation("opening");
-    let restoreStart = false;
     try {
-      if (!discardLocalConflict) await flushActiveProject();
-      onProjectOpenStart?.();
-      restoreStart = true;
-      const project = await api.open(projectId);
-      if (project.recovery) {
-        setRecoveryDecision(project);
-      } else {
-        onProjectOpen(project);
-        activateProject(project, projectSnapshotValue(project.snapshot));
-      }
+      const result = await openProjectWithInteractionLock(
+        projectOpenLock,
+        async () => {
+          if (!discardLocalConflict) await flushActiveProject();
+          return api.open(projectId);
+        },
+        (opened) => opened.recovery !== null,
+        (opened) => {
+          onProjectOpen(opened);
+          activateProject(opened, projectSnapshotValue(opened.snapshot));
+        },
+      );
+      if (result.recoveryPending) setRecoveryDecision(result.project);
       void refreshProjects();
     } catch (error) {
       dispatchSession({ type: "request-failed", message: errorMessage(error) });
     } finally {
-      if (restoreStart) onProjectOpenEnd?.();
       setOperation(null);
     }
   }
 
   async function saveProject() {
-    if (!session.activeProject || operationDisabled) return;
+    if (!session.activeProject || projectActionsDisabled || projectOpenLock.isLocked()) return;
     try {
       await flushActiveProject();
     } catch (error) {
@@ -201,7 +209,7 @@ export default function ProjectsPanel({
   }
 
   async function saveLocalCopy() {
-    if (operationDisabled || !session.activeProject) return;
+    if (projectActionsDisabled || projectOpenLock.isLocked() || !session.activeProject) return;
     const snapshotKey = currentSnapshotKeyRef.current;
     if (snapshotKey === null) {
       dispatchSession({ type: "request-failed", message: currentSnapshotErrorRef.current ?? "O Working Set atual não forma um snapshot válido." });
@@ -222,34 +230,51 @@ export default function ProjectsPanel({
 
   async function openCanonicalAfterConflict() {
     const activeProjectId = session.activeProject?.id;
-    if (!activeProjectId || operationDisabled) return;
+    if (!activeProjectId || projectActionsDisabled || projectOpenLock.isLocked()) return;
     await openProject(activeProjectId, true);
   }
 
   async function chooseRecovery(choice: ProjectRecoveryChoice) {
     const pending = recoveryDecision;
-    if (!pending || operationDisabled) return;
+    if (!pending || recoveryActionDisabled || recoveryChoiceInProgress.current) return;
+    recoveryChoiceInProgress.current = true;
     setOperation("opening");
     try {
-      const project = await resolveProjectRecoveryChoice(pending, choice, api);
-      onProjectOpen(project);
-      activateProject(project, projectSnapshotValue(project.snapshot));
-      setRecoveryDecision(null);
+      await resolveProjectRecoveryWithInteractionLock(
+        projectOpenLock,
+        () => resolveProjectRecoveryChoice(pending, choice, api),
+        (project) => {
+          onProjectOpen(project);
+          activateProject(project, projectSnapshotValue(project.snapshot));
+          setRecoveryDecision(null);
+        },
+      );
       void refreshProjects();
     } catch (error) {
       dispatchSession({ type: "request-failed", message: errorMessage(error) });
       try {
         const latest = await api.open(pending.id);
-        if (latest.recovery) setRecoveryDecision(latest);
-        else setRecoveryDecision(null);
+        if (latest.recovery) {
+          projectOpenLock.refreshRecovery(true);
+          setRecoveryDecision(latest);
+        } else {
+          projectOpenLock.refreshRecovery(false);
+          setRecoveryDecision(null);
+        }
       } catch { /* Keep the candidate and local Working Set visible for another explicit choice. */ }
     } finally {
+      recoveryChoiceInProgress.current = false;
       setOperation(null);
     }
   }
 
+  function keepCurrentWorkingSet() {
+    if (!recoveryDecision || recoveryActionDisabled || recoveryChoiceInProgress.current || !projectOpenLock.isLocked()) return;
+    keepCurrentProjectWorkingSet(projectOpenLock, () => setRecoveryDecision(null));
+  }
+
   async function duplicateProject(projectId: string) {
-    if (projectActionsDisabled) return;
+    if (projectActionsDisabled || projectOpenLock.isLocked()) return;
     setOperation("duplicating");
     try {
       if (session.activeProject?.id === projectId) await flushActiveProject();
@@ -264,13 +289,13 @@ export default function ProjectsPanel({
   }
 
   async function deleteProject(projectId: string) {
-    if (projectActionsDisabled) return;
+    if (projectActionsDisabled || projectOpenLock.isLocked()) return;
     setOperation("deleting");
     const deletingActive = session.activeProject?.id === projectId;
     let autosaveDisposed = false;
     try {
       if (deletingActive) {
-        onProjectInteractionStart?.();
+        projectOpenLock.beginOpen();
         await flushActiveProject();
         autosave.dispose();
         autosaveDisposed = true;
@@ -284,7 +309,10 @@ export default function ProjectsPanel({
           const latest = await api.open(projectId);
           const currentKey = currentSnapshotKeyRef.current;
           const canonicalKey = projectSnapshotValue(latest.snapshot);
-          if (latest.recovery) setRecoveryDecision(latest);
+          if (latest.recovery) {
+            projectOpenLock.recoveryFound();
+            setRecoveryDecision(latest);
+          }
           if (currentKey === canonicalKey) {
             activateProject(latest, currentKey);
           } else {
@@ -304,7 +332,7 @@ export default function ProjectsPanel({
       }
       dispatchSession({ type: "request-failed", message: errorMessage(error) });
     } finally {
-      if (deletingActive) onProjectInteractionEnd?.();
+      if (deletingActive) projectOpenLock.finishOpenRequest();
       setOperation(null);
     }
   }
@@ -355,8 +383,8 @@ export default function ProjectsPanel({
           ? "A revisão salva mudou em outro lugar. O Working Set local continua aberto e não foi sobrescrito."
           : "O autosave não concluiu. O Working Set local continua aberto."}</p>
         <div className="project-row-actions">
-          <button className="button primary" type="button" disabled={operationDisabled} onClick={() => void saveLocalCopy()}>Salvar cópia local como novo Project</button>
-          {session.status === "Conflito" && <button className="button secondary" type="button" disabled={operationDisabled} onClick={() => void openCanonicalAfterConflict()}>Descartar alterações locais e abrir a versão atual</button>}
+          <button className="button primary" type="button" disabled={projectActionsDisabled} onClick={() => void saveLocalCopy()}>Salvar cópia local como novo Project</button>
+          {session.status === "Conflito" && <button className="button secondary" type="button" disabled={projectActionsDisabled} onClick={() => void openCanonicalAfterConflict()}>Descartar alterações locais e abrir a versão atual</button>}
         </div>
       </section>}
 
@@ -365,17 +393,17 @@ export default function ProjectsPanel({
           <h3 id="project-recovery-heading">Autosave recuperado</h3>
           <p>Existe uma recuperação baseada na revisão atual de {recoveryDecision.name}. Escolha antes de carregar este Project.</p>
           <div className="project-row-actions">
-            <button className="button primary" type="button" disabled={operationDisabled} onClick={() => void chooseRecovery("restore")}>Restaurar recuperação</button>
-            <button className="button secondary" type="button" disabled={operationDisabled} onClick={() => void chooseRecovery("discard")}>Descartar recuperação e abrir a versão salva</button>
-            <button className="button secondary" type="button" disabled={operationDisabled} onClick={() => setRecoveryDecision(null)}>Manter Working Set atual</button>
+            <button className="button primary" type="button" disabled={recoveryActionDisabled} onClick={() => void chooseRecovery("restore")}>Restaurar recuperação</button>
+            <button className="button secondary" type="button" disabled={recoveryActionDisabled} onClick={() => void chooseRecovery("discard")}>Descartar recuperação e abrir a versão salva</button>
+            <button className="button secondary" type="button" disabled={recoveryActionDisabled} onClick={keepCurrentWorkingSet}>Manter Working Set atual</button>
           </div>
         </> : <>
           <h3 id="project-recovery-heading">Recovery de revisão antiga</h3>
           <p>A recuperação de {recoveryDecision.name} parte da revisão {recoveryDecision.recovery?.baseRevision}; a versão canônica está na revisão {recoveryDecision.revision}. Escolha antes de carregar o Project.</p>
           <div className="project-row-actions">
-            <button className="button primary" type="button" disabled={operationDisabled} onClick={() => void chooseRecovery("copy")}>Salvar recuperação como novo Project</button>
-            <button className="button secondary" type="button" disabled={operationDisabled} onClick={() => void chooseRecovery("discard")}>Descartar recovery e abrir a versão atual</button>
-            <button className="button secondary" type="button" disabled={operationDisabled} onClick={() => setRecoveryDecision(null)}>Manter Working Set atual</button>
+            <button className="button primary" type="button" disabled={recoveryActionDisabled} onClick={() => void chooseRecovery("copy")}>Salvar recuperação como novo Project</button>
+            <button className="button secondary" type="button" disabled={recoveryActionDisabled} onClick={() => void chooseRecovery("discard")}>Descartar recovery e abrir a versão atual</button>
+            <button className="button secondary" type="button" disabled={recoveryActionDisabled} onClick={keepCurrentWorkingSet}>Manter Working Set atual</button>
           </div>
         </>}
       </section>}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import Image from "next/image";
 import type { ImportKind } from "../../import-engine/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard } from "../../core/cards/types";
@@ -33,7 +33,8 @@ import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
 import { postArtworkSelection } from "./artwork-selection-request";
 import { clearRequestCache, createRequestCache, getOrCreateCachedRequest, updateResolvedRequestCache } from "./request-cache";
 import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
-import CutGuideControls from "./cut-guide-controls";
+import ProjectSettingsControls from "./project-settings-controls";
+import { runIfProjectInteractionUnlocked } from "./project-interaction-lock";
 import type { GuideColor } from "../../core/geometry";
 import type { ProjectDto } from "../../services/project-api";
 import type { ProjectSettingsV1 } from "../../persistence/projects/serializer";
@@ -222,12 +223,14 @@ export function WorkingCardList({ cards, selectedCardId, physicalCardCount, disa
         key={card.id}
         className={`working-card-row ${card.id === selectedCardId ? "is-active" : ""}`}
         onDragOver={(event) => {
+          if (disabled) return;
           if (event.dataTransfer.types.includes("text/plain")) {
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
           }
         }}
         onDrop={(event) => {
+          if (disabled) return;
           event.preventDefault();
           const draggedCardId = event.dataTransfer.getData("text/plain");
           if (draggedCardId) onMove(draggedCardId, index);
@@ -239,11 +242,12 @@ export function WorkingCardList({ cards, selectedCardId, physicalCardCount, disa
           aria-label={`Arraste ${name} para reordenar`}
           title="Arraste para reordenar"
           onDragStart={(event) => {
+            if (disabled) return;
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData("text/plain", card.id);
           }}
         >⠿</span>
-        <button type="button" className="working-card-select" aria-pressed={card.id === selectedCardId} onClick={() => onSelect(card.id)}>
+        <button type="button" className="working-card-select" aria-pressed={card.id === selectedCardId} disabled={disabled} onClick={() => onSelect(card.id)}>
           <span className="working-card-name">{index + 1}/{orderedCards.length} · {name}</span>
           <span className="working-card-meta">×{card.quantity} · {card.section ?? "sem seção"} · {statusLabel(card)}</span>
           <span className="working-card-meta">{artworkStatus}</span>
@@ -427,7 +431,15 @@ const initialEditorState: EditorUiState = { ...createWorkingCardEditorState([]),
 const initialEditorHistoryState: EditorHistoryUiState = createEditorHistoryState(initialEditorState);
 
 export default function CardIdentityWorkbench({ files, text, choices }: Props) {
-  const [editorHistory, dispatchEditor] = useReducer(editorHistoryReducer, initialEditorHistoryState);
+  const [editorHistory, dispatchEditorAction] = useReducer(editorHistoryReducer, initialEditorHistoryState);
+  const projectOpenPendingRef = useRef(false);
+  const dispatchEditor = useCallback((action: EditorAction) => {
+    if (action.type === "load-project") {
+      dispatchEditorAction(action);
+      return;
+    }
+    runIfProjectInteractionUnlocked(projectOpenPendingRef.current, () => dispatchEditorAction(action));
+  }, [dispatchEditorAction]);
   const editorState: EditorUiState = { ...editorHistory.present, error: editorHistory.error };
   const workingCards = editorState.cards;
   const selectedCardId = editorState.selectedCardId;
@@ -467,6 +479,13 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [pdfUrl, setPdfUrl] = useState("");
   const [bleedDiagnostics, setBleedDiagnostics] = useState<BleedDiagnosticsReport | null>(null);
   const interactionBusy = busy || projectOpenPending;
+  function setProjectInteractionLocked(locked: boolean) {
+    projectOpenPendingRef.current = locked;
+    setProjectOpenPending(locked);
+  }
+  function updateProjectSetting(update: () => void) {
+    runIfProjectInteractionUnlocked(projectOpenPendingRef.current, update);
+  }
   const projectSettings = useMemo<ProjectSettingsV1>(() => ({
     bleedMm: Number(bleedMm),
     roundedCorners,
@@ -826,11 +845,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         cards={workingCards}
         settings={projectSettings}
         onProjectOpen={restoreProject}
-        onProjectOpenStart={() => setProjectOpenPending(true)}
-        onProjectOpenEnd={() => setProjectOpenPending(false)}
-        onProjectInteractionStart={() => setProjectOpenPending(true)}
-        onProjectInteractionEnd={() => setProjectOpenPending(false)}
-        disabled={interactionBusy}
+        onProjectInteractionLockChange={setProjectInteractionLocked}
+        disabled={busy}
       />
 
       <div className="action-row phase5-actions">
@@ -944,21 +960,24 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       {workingCards.length > 0 && <div className="phase5-export">
         <div className="panel-heading"><div><h3>Export PDF</h3><p>PDF A4 · Magic Standard 63,5 × 88,9 mm · quantities expandidas somente na composição.</p></div></div>
         <div className="pdf-controls">
-          <label className="narrow-field">Bleed externo (mm)<input type="number" min="0" max="3" step="0.125" value={bleedMm} onChange={(event) => setBleedMm(event.currentTarget.value)} /></label>
-          <label className="checkbox-field"><input type="checkbox" checked={roundedCorners} onChange={(event) => setRoundedCorners(event.currentTarget.checked)} /> Cantos arredondados (opcional; desligado por padrão)</label>
-          <CutGuideControls
-            trimEnabled={trimGuideEnabled}
-            trimExtentMm={trimGuideExtentMm}
-            trimColor={trimGuideColor}
-            externalEnabled={externalGuideEnabled}
-            externalStrokeWidthPt={externalGuideStrokeWidthPt}
-            externalColor={externalGuideColor}
-            onTrimEnabledChange={setTrimGuideEnabled}
-            onTrimExtentMmChange={setTrimGuideExtentMm}
-            onTrimColorChange={setTrimGuideColor}
-            onExternalEnabledChange={setExternalGuideEnabled}
-            onExternalStrokeWidthPtChange={setExternalGuideStrokeWidthPt}
-            onExternalColorChange={setExternalGuideColor}
+          <ProjectSettingsControls
+            bleedMm={bleedMm}
+            roundedCorners={roundedCorners}
+            trimGuideEnabled={trimGuideEnabled}
+            trimGuideExtentMm={trimGuideExtentMm}
+            trimGuideColor={trimGuideColor}
+            externalGuideEnabled={externalGuideEnabled}
+            externalGuideStrokeWidthPt={externalGuideStrokeWidthPt}
+            externalGuideColor={externalGuideColor}
+            disabled={interactionBusy}
+            onBleedMmChange={(value) => updateProjectSetting(() => setBleedMm(value))}
+            onRoundedCornersChange={(value) => updateProjectSetting(() => setRoundedCorners(value))}
+            onTrimGuideEnabledChange={(value) => updateProjectSetting(() => setTrimGuideEnabled(value))}
+            onTrimGuideExtentMmChange={(value) => updateProjectSetting(() => setTrimGuideExtentMm(value))}
+            onTrimGuideColorChange={(value) => updateProjectSetting(() => setTrimGuideColor(value))}
+            onExternalGuideEnabledChange={(value) => updateProjectSetting(() => setExternalGuideEnabled(value))}
+            onExternalGuideStrokeWidthPtChange={(value) => updateProjectSetting(() => setExternalGuideStrokeWidthPt(value))}
+            onExternalGuideColorChange={(value) => updateProjectSetting(() => setExternalGuideColor(value))}
           />
           <button className="button primary" type="button" disabled={interactionBusy || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
           {pdfUrl && <a className="download-link" href={pdfUrl} download="tcgprint-cards.pdf">Baixar PDF</a>}
