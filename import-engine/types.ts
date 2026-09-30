@@ -30,6 +30,10 @@ export interface ImportSource {
   readonly order: number;
   readonly originalFormat?: string;
   readonly mediaType?: string;
+  /** URL used to obtain this source, if it came from a remote import. */
+  readonly sourceUrl?: string;
+  /** Explicit site adapter used for this source, if any. */
+  readonly adapterId?: string;
   readonly sizeBytes: number;
   /** Exact caller supplied file bytes. They are never normalized or re-encoded. */
   readonly originalBytes?: Uint8Array;
@@ -211,6 +215,11 @@ export interface ImportDetectionInput {
   readonly bytes?: Uint8Array;
   readonly text?: string;
   readonly fileName?: string;
+  readonly mediaType?: string;
+  readonly sourceUrl?: string;
+  readonly adapterId?: string;
+  /** Preserve URL intent when the supplied URL is malformed. */
+  readonly urlLike?: boolean;
 }
 
 export interface JsonImportMapping {
@@ -239,6 +248,10 @@ export interface CsvImportMapping {
 export interface ImportFileInput {
   readonly filename: string;
   readonly bytes: Uint8Array;
+  readonly mediaType?: string;
+  readonly sourceUrl?: string;
+  readonly adapterId?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
   readonly sourcePath?: string;
   readonly kind?: "file" | "folder-file";
 }

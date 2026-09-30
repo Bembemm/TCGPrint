@@ -68,13 +68,17 @@ function addCandidate(
   candidates.push({ kind, confidence, reasons: [reason], ...(originalFormat ? { originalFormat } : {}) });
 }
 
-function isUrl(value: string): boolean {
+function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value.trim());
     return url.protocol === "https:" || url.protocol === "http:";
   } catch {
     return false;
   }
+}
+
+function isUrlInput(value: string, explicitUrlLike = false): boolean {
+  return explicitUrlLike || isHttpUrl(value) || /^\s*[a-z][a-z\d+.-]*:\/\//i.test(value);
 }
 
 function isTiff(bytes: Uint8Array): boolean {
@@ -118,7 +122,7 @@ function addTextCandidates(text: string, filename: string | undefined, candidate
   const commaRows = countUnquotedDelimiters(text, ",");
   const tabRows = countUnquotedDelimiters(text, "\t");
   const isTabular = (commaRows[0] ?? 0) > 0 || (tabRows[0] ?? 0) > 0;
-  const isStructured = /^[\[{<]/.test(trimmed) || isUrl(trimmed);
+  const isStructured = /^[\[{<]/.test(trimmed) || isUrlInput(trimmed);
 
   const hasMtgoMarker = /^\s*(?:SB\s*:\s*\d+|SIDEBOARD\s*:\s*\d+)\s+/im.test(text);
   const xmageMarkers = /^\s*LAYOUT\s+(?:MAIN|SIDEBOARD|COMMANDER|MAYBEBOARD)\s*$/im;
@@ -240,7 +244,7 @@ export function detectImport(input: ImportDetectionInput, policy: DetectionPolic
   }
 
   if (!signatureFormat && !candidates.some((candidate) => candidate.kind === "zip") && text !== undefined) {
-    if (isUrl(text)) addCandidate(candidates, "url", 0.99, "Texto é uma URL HTTP(S); não haverá fetch nesta fase.");
+    if (isUrlInput(text, input.urlLike)) addCandidate(candidates, "url", 0.99, "Entrada tem formato de URL; o protocolo e o domínio serão validados antes do acesso remoto.");
     else if (/^\s*<\?xml\b/i.test(text) || /^\s*</.test(text)) addTextCandidates(text, input.fileName, candidates);
     else if (/^\s*[\[{]/.test(text)) addTextCandidates(text, input.fileName, candidates);
     else addTextCandidates(text, input.fileName, candidates);

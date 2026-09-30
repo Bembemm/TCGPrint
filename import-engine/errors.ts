@@ -19,7 +19,15 @@ export type ImportFailureCode =
   | "ZIP_RATIO_LIMIT"
   | "ZIP_DEPTH_LIMIT"
   | "MAPPING_INVALID"
-  | "INVALID_SOURCE_PATH";
+  | "INVALID_SOURCE_PATH"
+  | "URL_INVALID"
+  | "URL_UNSUPPORTED"
+  | "URL_HTTP_ERROR"
+  | "URL_TIMEOUT"
+  | "URL_CONTENT_TYPE"
+  | "URL_RESPONSE_LIMIT"
+  | "URL_REDIRECT_BLOCKED"
+  | "URL_ADAPTER_PAYLOAD";
 
 export class ImportFailureError extends Error {
   constructor(

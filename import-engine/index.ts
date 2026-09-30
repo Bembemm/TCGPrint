@@ -1,6 +1,8 @@
 export { DETECTION_POLICY, detectImport } from "./detection";
 export type { DetectionPolicy } from "./detection";
 export { importFiles } from "./engine";
+export { KNOWN_URL_SITES, resolveUrlAdapter } from "./urls/registry";
+export type { UrlAdapter, UrlAdapterContext, UrlAdapterResolution, UrlAdapterResult } from "./urls/types";
 export { importImageSource } from "./importers/image";
 export { parseTextImport } from "./importers/text";
 export { parseCsvImport } from "./importers/csv";
