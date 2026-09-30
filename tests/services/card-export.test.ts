@@ -240,12 +240,14 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     workbenches.push(workbench);
     const jpeg = new Uint8Array(await readFile(join(process.cwd(), "tests", "fixtures", "pdf", "synthetic-gradient.jpg")));
     const imported = await workbench.importForWorkingSet({ files: [{ filename: "original.jpg", bytes: jpeg }] });
+    const generateBleed = vi.spyOn(BleedEngine.prototype, "generate");
     const response = await handleCardExport(new Request("http://localhost/api/cards/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cards: imported.workingCards, options: { bleedMm: 0.625, cutGuides: FULL_TRIM_GUIDES } }),
+      body: JSON.stringify({ cards: imported.workingCards, options: { bleedMm: 0.625, cutGuides: FULL_TRIM_GUIDES, cardOrientation: "landscape" } }),
     }), workbench);
     expect(response.status).toBe(200);
+    expect(generateBleed.mock.calls[0]?.[0].trimSizeMm).toEqual({ widthMm: 63.5, heightMm: 88.9 });
     const pdf = await PDFDocument.load(await response.arrayBuffer());
     const dct = [...pdf.context.enumerateIndirectObjects()].map(([, object]) => object).find((object): object is PDFRawStream =>
       object instanceof PDFRawStream && object.dict.get(PDFName.of("Filter"))?.toString() === "/DCTDecode",

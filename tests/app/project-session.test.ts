@@ -10,14 +10,14 @@ import {
 import type { WorkingCard } from "../../core/cards/types";
 
 function emptySnapshot(): ProjectSnapshotV1 {
-  return { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS };
+  return { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS };
 }
 
 function project(id: string, revision = 1, snapshot = emptySnapshot()): ProjectDto {
   return {
     id,
     name: "Novo projeto",
-    projectSchemaVersion: 1,
+    projectSchemaVersion: 2,
     revision,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -64,7 +64,7 @@ describe("project session", () => {
   it("keeps selection and visual face changes out of the persisted dirty state", () => {
     const cards = [card("first", 9), card("second", 3)];
     const key = projectSnapshotKey(cards, DEFAULT_PROJECT_SETTINGS);
-    const saved = project("project-1", 1, { projectSchemaVersion: 1, cards, settings: DEFAULT_PROJECT_SETTINGS });
+    const saved = project("project-1", 1, { projectSchemaVersion: 2, cards, settings: DEFAULT_PROJECT_SETTINGS });
     const state = projectSessionReducer(createProjectSessionState(key), {
       type: "activate-project",
       project: saved,
@@ -94,7 +94,7 @@ describe("project session", () => {
       type: "save-succeeded",
       projectId: "project-1",
       expectedRevision: 1,
-      project: project("project-1", 2, { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS }),
+      project: project("project-1", 2, { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS }),
       snapshotKey: "changed",
     });
 

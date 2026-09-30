@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { parseTemplateLayoutGeometry, type TemplateLayoutGeometryMm } from "../../core/geometry";
 import type { ProjectSnapshotV1 } from "./serializer";
 import type { TemplateSelection } from "../../templates/types";
 import {
@@ -45,6 +46,7 @@ export class ProjectRepositoryError extends Error {
       | "PROJECT_RECOVERY_NOT_FOUND"
       | "PROJECT_RECOVERY_EXISTS"
       | "PROJECT_TEMPLATE_NOT_FOUND"
+      | "PROJECT_TEMPLATE_GEOMETRY_MISMATCH"
       | "INVALID_PROJECT_TIMESTAMP",
     message: string,
     readonly expectedRevision?: number,
@@ -170,13 +172,13 @@ export class ProjectRepository {
         FROM project_recovery WHERE project_id = ?
       `).get(projectId) as ProjectRecoveryRow | undefined;
       const selection = candidateSelection === undefined ? canonical.templateSelection : candidateSelection;
+      this.validateTemplateSelection(selection, snapshot);
       if (existing) {
         const recovery = this.recoveryFromRow(existing);
         if (recovery.baseRevision === baseRevision && existing.snapshot_json === snapshotJson
           && this.sameSelection(recovery.templateSelection, selection)) return recovery;
         throw new ProjectRepositoryError("PROJECT_RECOVERY_EXISTS", `Project ${projectId} already has a staged recovery candidate.`);
       }
-      this.validateTemplateSelection(selection);
       const createdAt = this.timestamp();
       this.database.prepare(`
         INSERT INTO project_recovery (project_id, base_revision, project_schema_version, snapshot_json, created_at)
@@ -213,6 +215,7 @@ export class ProjectRepository {
       }
       const current = this.recordFromRow(project);
       const recovery = this.recoveryFromRow(staged);
+      this.validateTemplateSelection(recovery.templateSelection, recovery.snapshot);
       if (project.revision !== recovery.baseRevision) {
         throw new ProjectRepositoryError(
           "PROJECT_REVISION_CONFLICT",
@@ -315,7 +318,7 @@ export class ProjectRepository {
   }
 
   private insertProject(project: ProjectRecord): void {
-    this.validateTemplateSelection(project.templateSelection);
+    this.validateTemplateSelection(project.templateSelection, project.snapshot);
     const snapshotJson = serializeProjectSnapshot(project.snapshot.cards, project.snapshot.settings);
     this.database.prepare(`
       INSERT INTO projects
@@ -362,7 +365,7 @@ export class ProjectRepository {
       }
       const current = this.recordFromRow(row);
       const selection = nextSelection === undefined ? current.templateSelection : nextSelection;
-      this.validateTemplateSelection(selection);
+      this.validateTemplateSelection(selection, snapshot);
       const now = this.timestamp();
       const nextRevision = row.revision + 1;
       const result = this.database.prepare(`
@@ -393,11 +396,13 @@ export class ProjectRepository {
     if (typeof row.snapshot_json !== "string") {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.id} snapshot must be stored as JSON text.`);
     }
-    const snapshot = deserializeProjectSnapshot(row.snapshot_json);
-    if (row.project_schema_version !== snapshot.projectSchemaVersion) {
+    let snapshot = deserializeProjectSnapshot(row.snapshot_json);
+    if (row.project_schema_version !== snapshot.projectSchemaVersion && row.project_schema_version !== 1) {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.id} database and snapshot schema versions do not match.`);
     }
-    return { ...metadata, snapshot, templateSelection: this.readProjectTemplateSelection(row.id) };
+    const templateSelection = this.readProjectTemplateSelection(row.id);
+    snapshot = this.restoreVersionedTemplateGeometry(snapshot, templateSelection);
+    return { ...metadata, projectSchemaVersion: snapshot.projectSchemaVersion, snapshot, templateSelection };
   }
 
   private recoveryFromRow(row: ProjectRecoveryRow): ProjectRecoveryRecord {
@@ -407,16 +412,18 @@ export class ProjectRepository {
       || typeof row.snapshot_json !== "string") {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", "Project recovery metadata is invalid.");
     }
-    const snapshot = deserializeProjectSnapshot(row.snapshot_json);
-    if (row.project_schema_version !== snapshot.projectSchemaVersion) {
+    let snapshot = deserializeProjectSnapshot(row.snapshot_json);
+    if (row.project_schema_version !== snapshot.projectSchemaVersion && row.project_schema_version !== 1) {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.project_id} recovery schema versions do not match.`);
     }
+    const templateSelection = this.readRecoveryTemplateSelection(row.project_id);
+    snapshot = this.restoreVersionedTemplateGeometry(snapshot, templateSelection);
     return {
       projectId: row.project_id,
       baseRevision: row.base_revision,
-      projectSchemaVersion: row.project_schema_version,
+      projectSchemaVersion: snapshot.projectSchemaVersion,
       snapshot,
-      templateSelection: this.readRecoveryTemplateSelection(row.project_id),
+      templateSelection,
       createdAt: this.readTimestamp(row.created_at),
     };
   }
@@ -435,18 +442,56 @@ export class ProjectRepository {
     return row ? { templateId: row.template_id, version: row.version, packageHash: row.package_hash } : null;
   }
 
-  private validateTemplateSelection(selection: TemplateSelection | null): void {
+  private validateTemplateSelection(selection: TemplateSelection | null, snapshot: ProjectSnapshotV1): void {
     if (selection === null) return;
     if (!selection || typeof selection.templateId !== "string" || !selection.templateId
       || typeof selection.version !== "string" || !selection.version
       || !/^[a-f0-9]{64}$/.test(selection.packageHash)) {
       throw new ProjectRepositoryError("PROJECT_TEMPLATE_NOT_FOUND", "Project template selection is invalid.");
     }
-    const exists = this.database.prepare(`
-      SELECT 1 FROM template_versions WHERE template_id = ? AND version = ? AND package_hash = ?
+    const version = this.database.prepare(`
+      SELECT template_geometry_json FROM template_versions WHERE template_id = ? AND version = ? AND package_hash = ?
     `).get(selection.templateId, selection.version, selection.packageHash);
-    if (!exists) {
+    if (!version) {
       throw new ProjectRepositoryError("PROJECT_TEMPLATE_NOT_FOUND", "The selected template ID, version, and hash are not present in the library.");
+    }
+    const geometry = this.templateGeometryFromVersion((version as { template_geometry_json: string | null }).template_geometry_json);
+    const projectGeometry = snapshot.settings.layout.templateGeometry;
+    if ((geometry === undefined) !== (projectGeometry === undefined)
+      || (geometry !== undefined && JSON.stringify(geometry) !== JSON.stringify(projectGeometry))) {
+      throw new ProjectRepositoryError(
+        "PROJECT_TEMPLATE_GEOMETRY_MISMATCH",
+        `Project geometry does not match template ${selection.templateId} version ${selection.version} (${selection.packageHash}); this version's immutable geometry must be used exactly.`,
+      );
+    }
+  }
+
+  private restoreVersionedTemplateGeometry(snapshot: ProjectSnapshotV1, selection: TemplateSelection | null): ProjectSnapshotV1 {
+    if (!selection || snapshot.settings.layout.templateGeometry) return snapshot;
+    const row = this.database.prepare(`
+      SELECT template_geometry_json FROM template_versions WHERE template_id = ? AND version = ? AND package_hash = ?
+    `).get(selection.templateId, selection.version, selection.packageHash) as { template_geometry_json: string | null } | undefined;
+    if (!row) return snapshot;
+    const geometry = this.templateGeometryFromVersion(row.template_geometry_json);
+    if (!geometry) return snapshot;
+    return deserializeProjectSnapshot({
+      ...snapshot,
+      settings: {
+        ...snapshot.settings,
+        layout: { ...snapshot.settings.layout, templateGeometry: geometry },
+      },
+    });
+  }
+
+  private templateGeometryFromVersion(value: string | null): TemplateLayoutGeometryMm | undefined {
+    if (value === null) return undefined;
+    try {
+      return parseTemplateLayoutGeometry(JSON.parse(value) as unknown);
+    } catch (error) {
+      throw new ProjectRepositoryError(
+        "PROJECT_TEMPLATE_NOT_FOUND",
+        `Selected template version contains invalid immutable geometry: ${error instanceof Error ? error.message : "invalid JSON"}`,
+      );
     }
   }
 
@@ -486,7 +531,7 @@ export class ProjectRepository {
     return {
       id: row.id,
       name: row.name,
-      projectSchemaVersion: row.project_schema_version,
+      projectSchemaVersion: row.project_schema_version === 1 ? CURRENT_PROJECT_SCHEMA_VERSION : row.project_schema_version,
       revision: row.revision,
       createdAt: this.readTimestamp(row.created_at),
       updatedAt: this.readTimestamp(row.updated_at),

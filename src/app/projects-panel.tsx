@@ -10,6 +10,7 @@ import { createProjectListRequestGuard } from "./project-list-request-guard";
 import { ProjectAutosaveQueue } from "./project-autosave";
 import { saveProjectWithRecovery } from "./project-autosave-persistence";
 import TemplateLibraryPanel from "./template-library-panel";
+import type { TemplateRegistrationDefaults } from "./template-library-panel";
 import { resolveProjectRecoveryChoice, type ProjectRecoveryChoice } from "./project-recovery-decision";
 import {
   createProjectOpenInteractionLock,
@@ -29,6 +30,7 @@ export interface ProjectsPanelProps {
   readonly cards: readonly WorkingCard[];
   readonly settings: ProjectSettingsV1;
   readonly onProjectOpen: (project: ProjectDto) => void;
+  readonly onTemplateDefaults?: (defaults: TemplateRegistrationDefaults | null) => void;
   readonly onProjectInteractionLockChange?: (locked: boolean) => void;
   readonly disabled?: boolean;
 }
@@ -42,6 +44,7 @@ export default function ProjectsPanel({
   cards,
   settings,
   onProjectOpen,
+  onTemplateDefaults,
   onProjectInteractionLockChange,
   disabled = false,
 }: ProjectsPanelProps) {
@@ -394,7 +397,11 @@ export default function ProjectsPanel({
         </li>)}
       </ul> : <p className="muted">Nenhum Project salvo.</p>}
 
-      <TemplateLibraryPanel selection={templateSelection} onSelect={setTemplateSelection} disabled={projectActionsDisabled} />
+      <TemplateLibraryPanel selection={templateSelection} onSelect={(selection, defaults) => {
+        setTemplateSelection(selection);
+        if (defaults) onTemplateDefaults?.(defaults);
+        else if (selection === null) onTemplateDefaults?.(null);
+      }} disabled={projectActionsDisabled} />
 
       {(session.status === "Conflito" || session.status === "Erro") && session.activeProject && <section className="project-conflict" aria-label={session.status === "Conflito" ? "Conflito de revisão" : "Falha no autosave"}>
         <p role="alert">{session.status === "Conflito"

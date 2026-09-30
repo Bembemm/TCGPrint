@@ -110,4 +110,6 @@ export type {
   TrimRectangleMm,
 } from "./cut-guides";
 export { calculateGridPlacement } from "./placement";
-export type { CardSlotMm, GridPlacementMm, GridPlacementRequest } from "./placement";
+export type { CardSlotMm, GridPlacementMm, GridPlacementRequest, LayoutReservedZoneMm } from "./placement";
+export { parseTemplateLayoutGeometry } from "./template-layout";
+export type { TemplateLayoutGeometryMm, TemplateLayoutSlotMm } from "./template-layout";

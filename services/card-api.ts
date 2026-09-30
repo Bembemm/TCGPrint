@@ -10,7 +10,9 @@ import { ImportFailureError } from "../import-engine/errors";
 import { ScryfallError } from "../providers/scryfall/errors";
 import { ArtworkStorageError } from "../artwork/storage/types";
 import { MpcArtworkProviderError } from "../artwork/mpc-provider";
-import { parseCutGuideConfig, type CutGuideConfig } from "../core/geometry";
+import { parseCutGuideConfig, parseTemplateLayoutGeometry, type CardFormat, type CutGuideConfig, type PageOrientation, type PaperFormat, type TemplateLayoutGeometryMm } from "../core/geometry";
+import type { PageMarginsMm } from "../core/geometry";
+import { parseRegistrationConfig } from "../core/registration";
 
 const FORBIDDEN_PROPERTIES = new Set(["originalBytes", "bytes", "sourcePath", "localOriginalPath", "originalUri", "previewUri", "filePaths", "absolutePath", "filesystemPath"]);
 const SOURCES = new Set(["scryfall", "upload", "mpc", "url", "custom"]);
@@ -44,6 +46,65 @@ function requiredString(value: unknown, key: string, maximum = 256): string {
 function optionalString(value: unknown, key: string, maximum = 256): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   return requiredString(value, key, maximum);
+}
+
+function optionalOrientation(value: unknown, key: string): PageOrientation | undefined {
+  if (value === undefined) return undefined;
+  if (value !== "portrait" && value !== "landscape") throw new ApiRequestError(400, "INVALID_LAYOUT", `${key} must be portrait or landscape.`);
+  return value;
+}
+
+function optionalLayoutMm(value: unknown, key: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 2_000) {
+    throw new ApiRequestError(400, "INVALID_LAYOUT", `${key} must be a finite millimeter value from 0 to 2000.`);
+  }
+  return value;
+}
+
+function optionalMargins(value: unknown): PageMarginsMm | undefined {
+  if (value === undefined) return undefined;
+  const margins = record(value);
+  const sides = ["top", "right", "bottom", "left"] as const;
+  if (!margins || Object.keys(margins).length !== sides.length || sides.some((side) => !Object.hasOwn(margins, side))) {
+    throw new ApiRequestError(400, "INVALID_LAYOUT", "marginsMm must contain top, right, bottom, and left values.");
+  }
+  return Object.fromEntries(sides.map((side) => [side, optionalLayoutMm(margins[side], `marginsMm.${side}`)])) as unknown as PageMarginsMm;
+}
+
+function optionalPhysicalFormat(value: unknown, key: string, card: false): PaperFormat | undefined;
+function optionalPhysicalFormat(value: unknown, key: string, card: true): CardFormat | undefined;
+function optionalPhysicalFormat(value: unknown, key: string, card: boolean): PaperFormat | CardFormat | undefined {
+  if (value === undefined) return undefined;
+  const source = record(value);
+  const fields = card ? ["id", "name", "widthMm", "heightMm", "cornerRadiusMm"] : ["id", "name", "widthMm", "heightMm"];
+  const requiredFields = card ? fields.filter((field) => field !== "cornerRadiusMm") : ["name", "widthMm", "heightMm"];
+  if (!source || Object.keys(source).some((field) => !fields.includes(field))
+    || requiredFields.some((field) => !Object.hasOwn(source, field))) {
+    throw new ApiRequestError(400, "INVALID_LAYOUT", `${key} must contain valid physical format metadata.`);
+  }
+  const name = requiredString(source.name, `${key}.name`, 100);
+  if (!card && source.id !== undefined) requiredString(source.id, `${key}.id`, 100);
+  const widthMm = optionalLayoutMm(source.widthMm, `${key}.widthMm`);
+  const heightMm = optionalLayoutMm(source.heightMm, `${key}.heightMm`);
+  if (widthMm === undefined || heightMm === undefined || widthMm <= 0 || heightMm <= 0) {
+    throw new ApiRequestError(400, "INVALID_LAYOUT", `${key} dimensions must be greater than zero and at most 2000 mm.`);
+  }
+  if (!card) return { name, widthMm, heightMm };
+  const id = requiredString(source.id, `${key}.id`, 100);
+  const cornerRadiusMm = source.cornerRadiusMm === undefined ? undefined : optionalLayoutMm(source.cornerRadiusMm, `${key}.cornerRadiusMm`);
+  if (cornerRadiusMm !== undefined && (cornerRadiusMm <= 0 || cornerRadiusMm * 2 > Math.min(widthMm, heightMm))) {
+    throw new ApiRequestError(400, "INVALID_LAYOUT", `${key}.cornerRadiusMm exceeds half the smaller card dimension.`);
+  }
+  return { id, name, widthMm, heightMm, ...(cornerRadiusMm === undefined ? {} : { cornerRadiusMm }) };
+}
+
+function optionalGridDimension(value: unknown, key: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 1_128) {
+    throw new ApiRequestError(400, "INVALID_LAYOUT", `${key} must be an integer from 1 to 1128.`);
+  }
+  return value as number;
 }
 
 function safeIdentity(value: unknown): CardIdentity | null {
@@ -548,10 +609,53 @@ export async function handleCardExport(request: Request, workbench: CardWorkbenc
     if (options.roundedCorners !== undefined && typeof options.roundedCorners !== "boolean") {
       throw new ApiRequestError(400, "INVALID_ROUNDED_CORNERS", "roundedCorners must be a boolean.");
     }
+    let registration;
+    try {
+      registration = parseRegistrationConfig(options.registration ?? { type: "none", orientation: "portrait" });
+    } catch (error) {
+      throw new ApiRequestError(400, "INVALID_REGISTRATION", error instanceof Error ? error.message : "Registration configuration is invalid.");
+    }
+    const pageOrientation = optionalOrientation(options.pageOrientation, "pageOrientation");
+    const cardOrientation = optionalOrientation(options.cardOrientation, "cardOrientation");
+    const paperFormat = optionalPhysicalFormat(options.paperFormat, "paperFormat", false);
+    const cardFormat = optionalPhysicalFormat(options.cardFormat, "cardFormat", true);
+    const marginsMm = optionalMargins(options.marginsMm);
+    const horizontalGapMm = optionalLayoutMm(options.horizontalGapMm, "horizontalGapMm");
+    const verticalGapMm = optionalLayoutMm(options.verticalGapMm, "verticalGapMm");
+    let templateGeometry: TemplateLayoutGeometryMm | undefined;
+    if (options.templateGeometry !== undefined) {
+      try { templateGeometry = parseTemplateLayoutGeometry(options.templateGeometry); }
+      catch (error) { throw new ApiRequestError(400, "INVALID_LAYOUT", error instanceof Error ? error.message : "Template layout geometry is invalid."); }
+    }
+    const layoutRows = optionalGridDimension(options.layoutRows, "layoutRows");
+    const layoutColumns = optionalGridDimension(options.layoutColumns, "layoutColumns");
+    if ((layoutRows === undefined) !== (layoutColumns === undefined)) {
+      throw new ApiRequestError(400, "INVALID_LAYOUT", "layoutRows and layoutColumns must be supplied together.");
+    }
+    const skippedSlotIndices = options.skippedSlotIndices;
+    if (skippedSlotIndices !== undefined && (!Array.isArray(skippedSlotIndices) || skippedSlotIndices.length > 1_128
+      || skippedSlotIndices.some((index) => !Number.isSafeInteger(index) || (index as number) < 0)
+      || new Set(skippedSlotIndices).size !== skippedSlotIndices.length)) {
+      throw new ApiRequestError(400, "INVALID_LAYOUT", "skippedSlotIndices must contain unique non-negative integer slot IDs.");
+    }
+    if (skippedSlotIndices?.length && layoutRows === undefined && templateGeometry === undefined) {
+      throw new ApiRequestError(400, "INVALID_LAYOUT", "Skipped slots require a fixed grid or versioned template geometry.");
+    }
     const result = await exportWorkingCardsWithDiagnostics(workbench, cards, {
       bleedMm,
       cutGuides,
       roundedCorners: options.roundedCorners ?? false,
+      ...(pageOrientation ? { pageOrientation } : {}),
+      ...(cardOrientation ? { cardOrientation } : {}),
+      ...(paperFormat ? { paperFormat } : {}),
+      ...(cardFormat ? { cardFormat } : {}),
+      ...(marginsMm ? { marginsMm } : {}),
+      ...(horizontalGapMm !== undefined ? { horizontalGapMm } : {}),
+      ...(verticalGapMm !== undefined ? { verticalGapMm } : {}),
+      registration,
+      ...(templateGeometry ? { templateGeometry } : {}),
+      ...(layoutRows !== undefined ? { layoutRows, layoutColumns } : {}),
+      ...(skippedSlotIndices ? { skippedSlotIndices } : {}),
     }, request.signal);
     const bleedReport = encodeBleedDiagnostics(result.bleedDiagnostics);
     return new Response(new Uint8Array(result.pdfBytes), {

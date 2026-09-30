@@ -11,9 +11,10 @@ import type {
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
 import { isSafeArtworkCandidateId } from "../../core/cards/artwork-candidate-id";
 import { validateCardIdentityMetadata } from "../../core/cards/safe-identity-metadata";
-import { DEFAULT_CUT_GUIDE_CONFIG, GUIDE_COLOR_OPTIONS, type CutGuideConfig, type GuideColor } from "../../core/geometry";
+import { DEFAULT_CUT_GUIDE_CONFIG, GUIDE_COLOR_OPTIONS, MAGIC_STANDARD_CARD, PAPER_FORMATS, parseTemplateLayoutGeometry, type CardFormat, type CutGuideConfig, type GuideColor, type PageOrientation, type PaperFormat, type TemplateLayoutGeometryMm } from "../../core/geometry";
+import { parseRegistrationConfig, type RegistrationConfig } from "../../core/registration";
 
-export const CURRENT_PROJECT_SCHEMA_VERSION = 1;
+export const CURRENT_PROJECT_SCHEMA_VERSION = 2;
 
 /** 16 MiB bounds a 500-entry resolved Working Set without ever embedding artwork bytes. */
 export const MAX_PROJECT_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -21,16 +22,41 @@ const MAX_PROJECT_CARDS = 500;
 
 export type PersistedWorkingCard = Omit<WorkingCard, "metadata">;
 
-export interface ProjectSettingsV1 {
+export interface ProjectSettingsV2 {
+  readonly bleedMm: number;
+  readonly roundedCorners: boolean;
+  readonly cutGuides: CutGuideConfig;
+  readonly pageOrientation: PageOrientation;
+  readonly cardOrientation: PageOrientation;
+  readonly paperFormat: PaperFormat;
+  readonly cardFormat: CardFormat;
+  readonly marginsMm: { readonly top: number; readonly right: number; readonly bottom: number; readonly left: number };
+  readonly horizontalGapMm: number;
+  readonly verticalGapMm: number;
+  readonly registration: RegistrationConfig;
+  readonly layout: {
+    readonly rows?: number;
+    readonly columns?: number;
+    readonly skippedSlotIndices: readonly number[];
+    readonly templateGeometry?: TemplateLayoutGeometryMm;
+  };
+}
+
+export interface LegacyProjectSettingsV1 {
   readonly bleedMm: number;
   readonly roundedCorners: boolean;
   readonly cutGuides: CutGuideConfig;
 }
 
+/** @deprecated Kept as a source-compatible name; current settings use the v2 shape. */
+export type ProjectSettingsV1 = ProjectSettingsV2;
+export type ProjectSettingsInput = ProjectSettingsV2 | LegacyProjectSettingsV1;
+
 export interface ProjectSnapshotV1 {
-  readonly projectSchemaVersion: 1;
+  /** Legacy version-1 snapshots are accepted and promoted to version 2 on read. */
+  readonly projectSchemaVersion: number;
   readonly cards: readonly PersistedWorkingCard[];
-  readonly settings: ProjectSettingsV1;
+  readonly settings: ProjectSettingsV2;
 }
 
 export class ProjectSnapshotError extends Error {
@@ -52,6 +78,15 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettingsV1 = Object.freeze({
   bleedMm: 0.625,
   roundedCorners: false,
   cutGuides: DEFAULT_CUT_GUIDE_CONFIG,
+  pageOrientation: "portrait",
+  cardOrientation: "portrait",
+  paperFormat: Object.freeze({ name: PAPER_FORMATS.A4.name, widthMm: PAPER_FORMATS.A4.widthMm, heightMm: PAPER_FORMATS.A4.heightMm }),
+  cardFormat: MAGIC_STANDARD_CARD,
+  marginsMm: Object.freeze({ top: 0, right: 0, bottom: 0, left: 0 }),
+  horizontalGapMm: 0,
+  verticalGapMm: 0,
+  registration: Object.freeze({ type: "none", orientation: "portrait" }),
+  layout: Object.freeze({ skippedSlotIndices: Object.freeze([]) }),
 });
 
 type DataObject = Record<string, unknown>;
@@ -399,8 +434,11 @@ function persistedCard(value: unknown, index: number): PersistedWorkingCard {
   };
 }
 
-function projectSettings(value: unknown): ProjectSettingsV1 {
-  const source = object(value, "snapshot.settings", ["bleedMm", "roundedCorners", "cutGuides"]);
+function projectSettings(value: unknown, legacy = false): ProjectSettingsV2 {
+  const baseKeys = ["bleedMm", "roundedCorners", "cutGuides"];
+  const source = object(value, "snapshot.settings", legacy
+    ? baseKeys
+    : [...baseKeys, "pageOrientation", "cardOrientation", "paperFormat", "cardFormat", "marginsMm", "horizontalGapMm", "verticalGapMm", "registration", "layout"]);
   const guides = object(source.cutGuides, "snapshot.settings.cutGuides", ["trim", "external"]);
   const trim = object(guides.trim, "snapshot.settings.cutGuides.trim", ["enabled", "extentMm", "color"]);
   const external = object(guides.external, "snapshot.settings.cutGuides.external", ["enabled", "strokeWidthPt", "color"]);
@@ -408,11 +446,11 @@ function projectSettings(value: unknown): ProjectSettingsV1 {
   const externalColor = string(external.color, "snapshot.settings.cutGuides.external.color", 16);
   if (!GUIDE_COLORS.has(trimColor as GuideColor)) invalid("snapshot.settings.cutGuides.trim.color", "is not a supported guide color.");
   if (!GUIDE_COLORS.has(externalColor as GuideColor)) invalid("snapshot.settings.cutGuides.external.color", "is not a supported guide color.");
-  const extentMm = trim.extentMm === "full"
+  const extentMm: CutGuideConfig["trim"]["extentMm"] = trim.extentMm === "full"
     ? "full"
     : finiteNumber(trim.extentMm, "snapshot.settings.cutGuides.trim.extentMm", Number.MIN_VALUE);
   const strokeWidthPt = finiteNumber(external.strokeWidthPt, "snapshot.settings.cutGuides.external.strokeWidthPt", Number.MIN_VALUE);
-  return {
+  const base: Pick<ProjectSettingsV2, "bleedMm" | "roundedCorners" | "cutGuides"> = {
     bleedMm: finiteNumber(source.bleedMm, "snapshot.settings.bleedMm", 0, 3),
     roundedCorners: boolean(source.roundedCorners, "snapshot.settings.roundedCorners"),
     cutGuides: {
@@ -420,9 +458,98 @@ function projectSettings(value: unknown): ProjectSettingsV1 {
       external: { enabled: boolean(external.enabled, "snapshot.settings.cutGuides.external.enabled"), strokeWidthPt, color: externalColor as GuideColor },
     },
   };
+  if (legacy) return { ...DEFAULT_PROJECT_SETTINGS, ...base };
+
+  const pageOrientation = string(source.pageOrientation, "snapshot.settings.pageOrientation", 12);
+  const cardOrientation = string(source.cardOrientation, "snapshot.settings.cardOrientation", 12);
+  if (pageOrientation !== "portrait" && pageOrientation !== "landscape") invalid("snapshot.settings.pageOrientation", "must be portrait or landscape.");
+  if (cardOrientation !== "portrait" && cardOrientation !== "landscape") invalid("snapshot.settings.cardOrientation", "must be portrait or landscape.");
+  const paperSource = object(source.paperFormat, "snapshot.settings.paperFormat", ["name", "widthMm", "heightMm"]);
+  const paperFormat: PaperFormat = {
+    name: string(paperSource.name, "snapshot.settings.paperFormat.name", 100),
+    widthMm: finiteNumber(paperSource.widthMm, "snapshot.settings.paperFormat.widthMm", Number.MIN_VALUE, 2_000),
+    heightMm: finiteNumber(paperSource.heightMm, "snapshot.settings.paperFormat.heightMm", Number.MIN_VALUE, 2_000),
+  };
+  const cardSource = object(source.cardFormat, "snapshot.settings.cardFormat", ["id", "name", "widthMm", "heightMm", "cornerRadiusMm"]);
+  const cardFormat: CardFormat = {
+    id: string(cardSource.id, "snapshot.settings.cardFormat.id", 100),
+    name: string(cardSource.name, "snapshot.settings.cardFormat.name", 100),
+    widthMm: finiteNumber(cardSource.widthMm, "snapshot.settings.cardFormat.widthMm", Number.MIN_VALUE, 2_000),
+    heightMm: finiteNumber(cardSource.heightMm, "snapshot.settings.cardFormat.heightMm", Number.MIN_VALUE, 2_000),
+    ...(cardSource.cornerRadiusMm !== undefined
+      ? { cornerRadiusMm: finiteNumber(cardSource.cornerRadiusMm, "snapshot.settings.cardFormat.cornerRadiusMm", Number.MIN_VALUE, 1_000) }
+      : {}),
+  };
+  if (cardFormat.cornerRadiusMm !== undefined && cardFormat.cornerRadiusMm * 2 > Math.min(cardFormat.widthMm, cardFormat.heightMm)) {
+    invalid("snapshot.settings.cardFormat.cornerRadiusMm", "must not exceed half the smaller card dimension.");
+  }
+  const margins = object(source.marginsMm, "snapshot.settings.marginsMm", ["top", "right", "bottom", "left"]);
+  const marginsMm = {
+    top: finiteNumber(margins.top, "snapshot.settings.marginsMm.top", 0, 2_000),
+    right: finiteNumber(margins.right, "snapshot.settings.marginsMm.right", 0, 2_000),
+    bottom: finiteNumber(margins.bottom, "snapshot.settings.marginsMm.bottom", 0, 2_000),
+    left: finiteNumber(margins.left, "snapshot.settings.marginsMm.left", 0, 2_000),
+  };
+  const horizontalGapMm = finiteNumber(source.horizontalGapMm, "snapshot.settings.horizontalGapMm", 0, 2_000);
+  const verticalGapMm = finiteNumber(source.verticalGapMm, "snapshot.settings.verticalGapMm", 0, 2_000);
+  let registration: RegistrationConfig;
+  try { registration = parseRegistrationConfig(source.registration); }
+  catch (error) { invalid("snapshot.settings.registration", error instanceof Error ? error.message : "must be valid bounded geometry."); }
+  const layoutSource = object(source.layout, "snapshot.settings.layout", ["rows", "columns", "skippedSlotIndices", "templateGeometry"], ["skippedSlotIndices"]);
+  const rows = layoutSource.rows === undefined ? undefined : finiteNumber(layoutSource.rows, "snapshot.settings.layout.rows", 1, 1_128);
+  const columns = layoutSource.columns === undefined ? undefined : finiteNumber(layoutSource.columns, "snapshot.settings.layout.columns", 1, 1_128);
+  if ((rows === undefined) !== (columns === undefined)) invalid("snapshot.settings.layout", "rows and columns must be supplied together.");
+  if ((rows !== undefined && !Number.isSafeInteger(rows)) || (columns !== undefined && !Number.isSafeInteger(columns))) {
+    invalid("snapshot.settings.layout", "rows and columns must be positive integers.");
+  }
+  if (rows !== undefined && columns !== undefined && rows * columns > 1_128) {
+    invalid("snapshot.settings.layout", "fixed grid may contain at most 1128 positions.");
+  }
+  const skippedSlotIndices = array(layoutSource.skippedSlotIndices, "snapshot.settings.layout.skippedSlotIndices", 1_128)
+    .map((index, position) => {
+      if (!Number.isSafeInteger(index) || (index as number) < 0) invalid(`snapshot.settings.layout.skippedSlotIndices[${position}]`, "must be a non-negative safe integer.");
+      return index as number;
+    });
+  if (new Set(skippedSlotIndices).size !== skippedSlotIndices.length) invalid("snapshot.settings.layout.skippedSlotIndices", "must not contain duplicate slot indices.");
+  if (rows !== undefined && columns !== undefined && skippedSlotIndices.some((index) => index >= rows * columns)) {
+    invalid("snapshot.settings.layout.skippedSlotIndices", "contains an index outside the fixed grid.");
+  }
+  let templateGeometry: TemplateLayoutGeometryMm | undefined;
+  if (layoutSource.templateGeometry !== undefined) {
+    let parsedGeometry: TemplateLayoutGeometryMm;
+    try { parsedGeometry = parseTemplateLayoutGeometry(layoutSource.templateGeometry); }
+    catch (error) { invalid("snapshot.settings.layout.templateGeometry", error instanceof Error ? error.message : "must be bounded template geometry."); }
+    templateGeometry = parsedGeometry!;
+    const parsedTemplateGeometry = templateGeometry as TemplateLayoutGeometryMm;
+    if ((rows !== undefined && rows !== parsedTemplateGeometry.rows) || (columns !== undefined && columns !== parsedTemplateGeometry.columns)) {
+      invalid("snapshot.settings.layout", "manual rows and columns conflict with immutable template geometry.");
+    }
+    if (skippedSlotIndices.some((index) => !parsedTemplateGeometry.slots.some((slot) => slot.index === index))) {
+      invalid("snapshot.settings.layout.skippedSlotIndices", "contains an index without a physical template slot.");
+    }
+  }
+  if (skippedSlotIndices.length > 0 && rows === undefined && templateGeometry === undefined) {
+    invalid("snapshot.settings.layout.skippedSlotIndices", "skipped slots require a fixed grid or versioned template geometry.");
+  }
+  return {
+    ...base,
+    pageOrientation,
+    cardOrientation,
+    paperFormat,
+    cardFormat,
+    marginsMm,
+    horizontalGapMm,
+    verticalGapMm,
+    registration,
+    layout: {
+      ...(rows !== undefined ? { rows, columns } : {}),
+      skippedSlotIndices,
+      ...(templateGeometry !== undefined ? { templateGeometry } : {}),
+    },
+  };
 }
 
-function validateSnapshot(value: unknown): ProjectSnapshotV1 {
+function validateSnapshot(value: unknown, legacy = false): ProjectSnapshotV1 {
   const source = object(value, "snapshot", ["projectSchemaVersion", "cards", "settings"]);
   const cards = array(source.cards, "snapshot.cards", MAX_PROJECT_CARDS).map((card, index) => persistedCard(card, index));
   if (new Set(cards.map(({ id }) => id)).size !== cards.length) invalid("snapshot.cards", "must not contain duplicate WorkingCard IDs.");
@@ -432,7 +559,7 @@ function validateSnapshot(value: unknown): ProjectSnapshotV1 {
   return {
     projectSchemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
     cards,
-    settings: projectSettings(source.settings),
+    settings: projectSettings(source.settings, legacy),
   };
 }
 
@@ -443,14 +570,16 @@ function checkSnapshotSize(serialized: string): void {
 }
 
 /** Serializes only durable WorkingCard fields; WorkingCard.metadata is intentionally omitted. */
-export function serializeProjectSnapshot(cards: readonly WorkingCard[], settings: ProjectSettingsV1): string {
+export function serializeProjectSnapshot(cards: readonly WorkingCard[], settings: ProjectSettingsInput): string {
   const persistedCards = cards.map((card, index) => {
     if (!isPlainObject(card)) invalid(`cards[${index}]`, "must be a plain object.");
     const copy = { ...card } as DataObject;
     delete copy.metadata;
     return copy;
   });
-  const candidate = { projectSchemaVersion: CURRENT_PROJECT_SCHEMA_VERSION, cards: persistedCards, settings };
+  const isLegacySettings = isPlainObject(settings) && !Object.prototype.hasOwnProperty.call(settings, "registration");
+  const normalizedSettings = projectSettings(settings, isLegacySettings);
+  const candidate = { projectSchemaVersion: CURRENT_PROJECT_SCHEMA_VERSION, cards: persistedCards, settings: normalizedSettings };
   assertJsonData(candidate, "snapshot");
   const snapshot = validateSnapshot(candidate);
   const serialized = JSON.stringify(snapshot);
@@ -486,9 +615,10 @@ export function deserializeProjectSnapshot(value: string | unknown): ProjectSnap
   if (version > CURRENT_PROJECT_SCHEMA_VERSION) {
     throw new ProjectSnapshotError("FUTURE_PROJECT_SCHEMA_VERSION", `Project snapshot schema ${version} is newer than this application supports (${CURRENT_PROJECT_SCHEMA_VERSION}).`);
   }
-  if (version !== CURRENT_PROJECT_SCHEMA_VERSION) {
+  if (version !== 1 && version !== CURRENT_PROJECT_SCHEMA_VERSION) {
     throw new ProjectSnapshotError("UNSUPPORTED_PROJECT_SCHEMA_VERSION", `Project snapshot schema ${version} has no supported migration path.`);
   }
-  // When schema 2 exists, add a deterministic 1->2 migration here and preserve the original raw payload first.
-  return validateSnapshot(snapshot);
+  // v1 had only bleed/corners/cut-guide settings; the effective geometry defaults
+  // are materialized once and serialized as v2 on the next save.
+  return validateSnapshot(snapshot, version === 1);
 }

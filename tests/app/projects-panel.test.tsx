@@ -11,11 +11,11 @@ function project(id: string, revision: number): ProjectDto {
   return {
     id,
     name: "Project teste",
-    projectSchemaVersion: 1,
+    projectSchemaVersion: 2,
     revision,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
-    snapshot: { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+    snapshot: { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
     templateSelection: null,
   };
 }
@@ -44,8 +44,8 @@ describe("Projects panel", () => {
       ...canonical,
       recovery: {
         baseRevision: 4,
-        projectSchemaVersion: 1,
-        snapshot: { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        projectSchemaVersion: 2,
+        snapshot: { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
         templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },
@@ -73,8 +73,8 @@ describe("Projects panel", () => {
       ...canonical,
       recovery: {
         baseRevision: choice === "copy" ? 3 : 4,
-        projectSchemaVersion: 1,
-        snapshot: { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        projectSchemaVersion: 2,
+        snapshot: { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
         templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },
@@ -112,8 +112,8 @@ describe("Projects panel", () => {
       ...project("project-1", 6),
       recovery: {
         baseRevision: 4,
-        projectSchemaVersion: 1,
-        snapshot: { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        projectSchemaVersion: 2,
+        snapshot: { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
         templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },
@@ -140,8 +140,8 @@ describe("Projects panel", () => {
       ...project("project-1", 6),
       recovery: {
         baseRevision: 4,
-        projectSchemaVersion: 1,
-        snapshot: { projectSchemaVersion: 1, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        projectSchemaVersion: 2,
+        snapshot: { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
         templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },

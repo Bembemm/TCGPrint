@@ -5,6 +5,7 @@ import {
   parseTemplateMetadata,
   validateTemplateFile,
 } from "../../templates/validation";
+import { createDefaultRegistrationConfig } from "../../core/registration";
 
 const metadataInput = {
   name: "  A4 Standard  ",
@@ -33,6 +34,54 @@ describe("template metadata and original validation", () => {
     });
   });
 
+  it("stores bounded registration geometry as part of the exact immutable template version", () => {
+    const config = createDefaultRegistrationConfig("three-point", "landscape", { insetXMm: 11 });
+    const metadata = parseTemplateMetadata({ ...metadataInput, registrationConfig: config });
+
+    expect(metadata.registrationConfig).toEqual(config);
+    expect(calculateTemplatePackageHash(metadata, [])).not.toBe(calculateTemplatePackageHash(parseTemplateMetadata(metadataInput), []));
+  });
+
+  it("validates and hashes exact bounded template slot geometry as immutable version metadata", () => {
+    const templateGeometry = {
+      orientation: "landscape",
+      cardOrientation: "portrait",
+      pageSizeMm: { widthMm: 297, heightMm: 210 },
+      cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+      rows: 1,
+      columns: 2,
+      slots: [
+        { index: 0, row: 0, column: 0, xMm: 10, yMm: 10 },
+        { index: 1, row: 0, column: 1, xMm: 80, yMm: 10 },
+      ],
+    };
+    const metadata = parseTemplateMetadata({ ...metadataInput, templateGeometry });
+
+    expect(metadata.templateGeometry).toEqual(templateGeometry);
+    expect(calculateTemplatePackageHash(metadata, [])).not.toBe(calculateTemplatePackageHash(parseTemplateMetadata(metadataInput), []));
+  });
+
+  it("rejects out-of-bounds, overlapping, and excessive template slot metadata", () => {
+    const valid = {
+      orientation: "landscape",
+      pageSizeMm: { widthMm: 297, heightMm: 210 },
+      cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+      rows: 1,
+      columns: 1,
+      slots: [{ index: 0, row: 0, column: 0, xMm: 10, yMm: 10 }],
+    };
+    const malformed = [
+      { ...valid, slots: [{ ...valid.slots[0], xMm: 250 }] },
+      { ...valid, columns: 2, slots: [{ ...valid.slots[0] }, { ...valid.slots[0], index: 1, column: 1 }] },
+      { ...valid, rows: 2_000, columns: 2_000 },
+    ];
+
+    for (const templateGeometry of malformed) {
+      expect(() => parseTemplateMetadata({ ...metadataInput, templateGeometry }))
+        .toThrowError(expect.objectContaining({ code: "TEMPLATE_METADATA_INVALID" }));
+    }
+  });
+
   it.each([
     ["unknown metadata", { ...metadataInput, localPath: "/srv/private/template.studio3" }],
     ["empty name", { ...metadataInput, name: "  " }],
@@ -40,6 +89,7 @@ describe("template metadata and original validation", () => {
     ["unsupported card format", { ...metadataInput, cardFormat: "unknown" }],
     ["unsupported orientation", { ...metadataInput, orientation: "diagonal" }],
     ["unsupported registration type", { ...metadataInput, registrationType: "automatic" }],
+    ["registration type mismatch", { ...metadataInput, registrationConfig: createDefaultRegistrationConfig("four-point") }],
     ["non-finite bleed", { ...metadataInput, recommendedBleedMm: Number.NaN }],
     ["bleed above the physical limit", { ...metadataInput, recommendedBleedMm: 3.001 }],
   ])("rejects %s with a clear validation error", (_description, value) => {

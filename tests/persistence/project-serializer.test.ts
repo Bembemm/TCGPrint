@@ -38,14 +38,14 @@ describe("project snapshot serializer", () => {
     }
   });
 
-  it("round-trips a single-face v1 project and omits transient WorkingCard metadata", () => {
+  it("round-trips a single-face current project and omits transient WorkingCard metadata", () => {
     const card = singleFaceCard();
 
     const encoded = serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS);
     const snapshot = deserializeProjectSnapshot(encoded);
 
     expect(snapshot).toEqual({
-      projectSchemaVersion: 1,
+      projectSchemaVersion: 2,
       cards: [{
         id: "working-card-1",
         quantity: 1,
@@ -67,12 +67,81 @@ describe("project snapshot serializer", () => {
           trim: { enabled: false, extentMm: 1, color: "blue" },
           external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
         },
+        pageOrientation: "portrait",
+        cardOrientation: "portrait",
+        paperFormat: DEFAULT_PROJECT_SETTINGS.paperFormat,
+        cardFormat: DEFAULT_PROJECT_SETTINGS.cardFormat,
+        marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+        horizontalGapMm: 0,
+        verticalGapMm: 0,
+        registration: { type: "none", orientation: "portrait" },
+        layout: { skippedSlotIndices: [] },
       },
     });
   });
 
+  it("migrates a legacy v1 project deterministically to v2 defaults", () => {
+    const legacy = {
+      projectSchemaVersion: 1,
+      cards: [],
+      settings: {
+        bleedMm: DEFAULT_PROJECT_SETTINGS.bleedMm,
+        roundedCorners: DEFAULT_PROJECT_SETTINGS.roundedCorners,
+        cutGuides: DEFAULT_PROJECT_SETTINGS.cutGuides,
+      },
+    };
+
+    expect(deserializeProjectSnapshot(legacy)).toMatchObject({
+      projectSchemaVersion: 2,
+      settings: {
+        pageOrientation: "portrait",
+        cardOrientation: "portrait",
+        registration: { type: "none", orientation: "portrait" },
+        layout: { skippedSlotIndices: [] },
+      },
+    });
+  });
+
+  it("persists registration orientation, custom geometry, and skipped slot settings", () => {
+    const settings = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      pageOrientation: "landscape" as const,
+      cardOrientation: "portrait" as const,
+      marginsMm: { top: 5, right: 6, bottom: 7, left: 8 },
+      horizontalGapMm: 2.5,
+      verticalGapMm: 3,
+      registration: {
+        type: "custom" as const,
+        orientation: "landscape" as const,
+        marks: [[{ type: "line" as const, x1Mm: 10, y1Mm: 10, x2Mm: 20, y2Mm: 10, strokeWidthMm: 0.5 }]],
+        reservedZones: [{ xMm: 8, yMm: 8, widthMm: 14, heightMm: 4 }],
+      },
+      layout: {
+        skippedSlotIndices: [0],
+        templateGeometry: {
+          orientation: "portrait" as const,
+          cardOrientation: "portrait" as const,
+          pageSizeMm: { widthMm: 210, heightMm: 297 },
+          cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+          rows: 1,
+          columns: 1,
+          slots: [{ index: 0, row: 0, column: 0, xMm: 73.25, yMm: 104.05 }],
+        },
+      },
+    };
+
+    expect(deserializeProjectSnapshot(serializeProjectSnapshot([], settings)).settings).toEqual(settings);
+  });
+
+  it("requires skipped slots to have a fixed grid or versioned template geometry", () => {
+    expect(() => serializeProjectSnapshot([], {
+      ...DEFAULT_PROJECT_SETTINGS,
+      layout: { skippedSlotIndices: [0] },
+    })).toThrow(/skipped slots require .*fixed grid/i);
+  });
+
   it("rejects a future logical snapshot version with an explicit version error", () => {
-    expect(() => deserializeProjectSnapshot({ projectSchemaVersion: 2, cards: [], settings: {} }))
+    expect(() => deserializeProjectSnapshot({ projectSchemaVersion: 3, cards: [], settings: {} }))
       .toThrowError(expect.objectContaining({ code: "FUTURE_PROJECT_SCHEMA_VERSION" }));
   });
 
@@ -391,6 +460,7 @@ describe("project snapshot serializer", () => {
       ],
     };
     const settings = {
+      ...DEFAULT_PROJECT_SETTINGS,
       bleedMm: 3,
       roundedCorners: true,
       cutGuides: {

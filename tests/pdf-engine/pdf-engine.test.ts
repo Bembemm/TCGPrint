@@ -5,11 +5,12 @@ import { join } from "node:path";
 import { PDFDict, PDFDocument, PDFName, PDFRawStream } from "@pdfme/pdf-lib";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { calculateGridPlacement, MAGIC_STANDARD_CARD, type CardFormat } from "../../core/geometry";
+import { calculateGridPlacement, MAGIC_STANDARD_CARD, PAPER_FORMATS, type CardFormat } from "../../core/geometry";
 import { mmToPoints, pointsToMm } from "../../core/units";
 import { BleedEngine } from "../../image-engine/bleed";
 import type { CutGuideConfig, GuideColor } from "../../core/geometry/cut-guides";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
+import { createDefaultRegistrationConfig, generateRegistrationGeometry } from "../../core/registration";
 
 const FIXTURES = join(process.cwd(), "tests", "fixtures", "pdf");
 const A4_WIDTH_POINTS = 595.2755905511812;
@@ -260,6 +261,277 @@ describe("LosslessPdfEngine", () => {
     expect(pointsToMm(mediaBox.height)).toBeCloseTo(297, 10);
   });
 
+  it("adds independent landscape registration vectors to a landscape sheet without changing portrait card trim", async () => {
+    const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const registration = createDefaultRegistrationConfig("three-point", "landscape");
+    const pdf = await engine.generate({
+      images: [jpeg],
+      pageOrientation: "landscape",
+      cardOrientation: "portrait",
+      registration,
+    });
+    const parsed = await parsePdf(pdf);
+    const page = parsed.document.getPages()[0];
+    const mediaBox = page.getMediaBox();
+    const segments = getVectorSegments(parsed.content);
+    const geometry = generateRegistrationGeometry(registration, { widthMm: 297, heightMm: 210 });
+    const layout = calculateGridPlacement({
+      paper: { ...PAPER_FORMATS.A4 },
+      pageOrientation: "landscape",
+      card: MAGIC_STANDARD_CARD,
+      cardOrientation: "portrait",
+      count: 1,
+      bleedMm: 0,
+    });
+
+    expect(mediaBox.width).toBeCloseTo(A4_HEIGHT_POINTS, 10);
+    expect(mediaBox.height).toBeCloseTo(A4_WIDTH_POINTS, 10);
+    expect(parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"))).toHaveLength(1);
+    expect(segments).toHaveLength(4);
+    expect(geometry.marks).toHaveLength(3);
+    assertMatrixContainsSize(parsed.content, MAGIC_CARD_WIDTH_POINTS, MAGIC_CARD_HEIGHT_POINTS);
+    const expectedCardPositionMatrix = [
+      1,
+      0,
+      0,
+      1,
+      mmToPoints(layout.slots[0]!.trim.xMm),
+      mmToPoints(210 - layout.slots[0]!.trim.yMm - layout.cardSizeMm.heightMm),
+    ];
+    expect(getDrawMatrices(parsed.content).some((matrix) =>
+      matrix.every((value, index) => Math.abs(value - expectedCardPositionMatrix[index]!) < 1e-8),
+    )).toBe(true);
+    assertMatrixContainsSize(parsed.content, MAGIC_CARD_WIDTH_POINTS, MAGIC_CARD_HEIGHT_POINTS);
+    const expectedSegments = geometry.marks.flatMap(({ primitives }) => primitives)
+      .filter((primitive) => primitive.type === "line")
+      .map((primitive) => [
+        mmToPoints(primitive.x1Mm),
+        mmToPoints(210 - primitive.y1Mm),
+        mmToPoints(primitive.x2Mm),
+        mmToPoints(210 - primitive.y2Mm),
+      ]);
+    segments.forEach((segment, index) => {
+      expectedSegments[index]!.forEach((value, coordinateIndex) => {
+        expect(segment[coordinateIndex]).toBeCloseTo(value, 8);
+      });
+    });
+    for (const [x1, y1, x2, y2] of segments) {
+      expect(x1).toBeGreaterThanOrEqual(0);
+      expect(x2).toBeLessThanOrEqual(mediaBox.width);
+      expect(y1).toBeGreaterThanOrEqual(0);
+      expect(y2).toBeLessThanOrEqual(mediaBox.height);
+    }
+  });
+
+  it("keeps a portrait sheet and portrait card while landscape registration rotates independently", async () => {
+    const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const registration = createDefaultRegistrationConfig("three-point", "landscape");
+    const parsed = await parsePdf(await engine.generate({
+      images: [jpeg],
+      pageOrientation: "portrait",
+      cardOrientation: "portrait",
+      registration,
+    }));
+    const mediaBox = parsed.document.getPages()[0]!.getMediaBox();
+    const expectedGeometry = generateRegistrationGeometry(registration, { widthMm: 210, heightMm: 297 });
+    const expectedSegments = expectedGeometry.marks.flatMap(({ primitives }) => primitives)
+      .filter((primitive) => primitive.type === "line")
+      .map((primitive) => [
+        mmToPoints(primitive.x1Mm),
+        mmToPoints(297 - primitive.y1Mm),
+        mmToPoints(primitive.x2Mm),
+        mmToPoints(297 - primitive.y2Mm),
+      ]);
+
+    expect(mediaBox.width).toBeCloseTo(A4_WIDTH_POINTS, 10);
+    expect(mediaBox.height).toBeCloseTo(A4_HEIGHT_POINTS, 10);
+    expect(getVectorSegments(parsed.content)).toHaveLength(4);
+    getVectorSegments(parsed.content).forEach((segment, index) => {
+      expectedSegments[index]!.forEach((value, coordinateIndex) => {
+        expect(segment[coordinateIndex]).toBeCloseTo(value, 8);
+      });
+    });
+    assertMatrixContainsSize(parsed.content, MAGIC_CARD_WIDTH_POINTS, MAGIC_CARD_HEIGHT_POINTS);
+  });
+
+  it("rotates portrait artwork clockwise into an explicitly landscape card trim", async () => {
+    const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const pdf = await engine.generate({
+      images: [jpeg],
+      registration: { type: "none", orientation: "portrait" },
+      cardOrientation: "landscape",
+    });
+    const parsed = await parsePdf(pdf);
+    const layout = calculateGridPlacement({
+      paper: { ...PAPER_FORMATS.A4 },
+      card: MAGIC_STANDARD_CARD,
+      cardOrientation: "landscape",
+      count: 1,
+      bleedMm: 0,
+    });
+    const trim = layout.slots[0]!.trim;
+    const sourceWidth = mmToPoints(MAGIC_STANDARD_CARD.widthMm);
+    const sourceHeight = mmToPoints(MAGIC_STANDARD_CARD.heightMm);
+    const expectedRotation = [
+      0,
+      -1,
+      1,
+      0,
+      mmToPoints(trim.xMm),
+      mmToPoints(297 - trim.yMm - layout.cardSizeMm.heightMm) + sourceWidth,
+    ];
+
+    expect(parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"))).toHaveLength(1);
+    expect(getDrawMatrices(parsed.content).some((matrix) =>
+      matrix.every((value, index) => Math.abs(value - expectedRotation[index]!) < 1e-8),
+    )).toBe(true);
+    assertMatrixContainsSize(parsed.content, sourceWidth, sourceHeight);
+    expect(layout.cardSizeMm.widthMm).toBe(88.9);
+    expect(layout.cardSizeMm.heightMm).toBe(63.5);
+  });
+
+  it("adds no registration vectors for registration none", async () => {
+    const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const pdf = await engine.generate({
+      images: [jpeg],
+      registration: { type: "none", orientation: "landscape" },
+    });
+    const parsed = await parsePdf(pdf);
+
+    expect(getVectorSegments(parsed.content)).toHaveLength(0);
+    expect(parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"))).toHaveLength(1);
+    assertMatrixContainsSize(parsed.content, MAGIC_CARD_WIDTH_POINTS, MAGIC_CARD_HEIGHT_POINTS);
+  });
+
+  it("keeps a skipped slot in its stable position and exports cards only into active slots", async () => {
+    const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const layout = calculateGridPlacement({
+      paper: { ...PAPER_FORMATS.A4 },
+      card: MAGIC_STANDARD_CARD,
+      count: 2,
+      bleedMm: 0,
+      rows: 1,
+      columns: 3,
+      skippedSlotIndices: [1],
+    });
+    const pdf = await engine.generate({
+      images: [jpeg, jpeg],
+      layoutRows: 1,
+      layoutColumns: 3,
+      skippedSlotIndices: [1],
+      registration: { type: "none", orientation: "portrait" },
+    });
+    const parsed = await parsePdf(pdf);
+    const cardMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d]) =>
+      Math.abs(a - MAGIC_CARD_WIDTH_POINTS) < 1e-8 && Math.abs(b) < 1e-8 && Math.abs(c) < 1e-8 && Math.abs(d - MAGIC_CARD_HEIGHT_POINTS) < 1e-8);
+    const positionMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d, x]) =>
+      Math.abs(a - 1) < 1e-10 && Math.abs(b) < 1e-10 && Math.abs(c) < 1e-10 && Math.abs(d - 1) < 1e-10 && Math.abs(x) > 1e-10);
+    const actualX = positionMatrices.map(([, , , , x]) => pointsToMm(x)).sort((a, b) => a - b);
+    const expectedX = layout.slots.map(({ trim }) => trim.xMm).sort((a, b) => a - b);
+
+    expect(parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"))).toHaveLength(2);
+    expect(cardMatrices).toHaveLength(2);
+    expect(positionMatrices).toHaveLength(2);
+    expect(actualX).toEqual(expectedX);
+    expect(actualX).not.toContain(layout.gridSlots[1]!.trim.xMm);
+  });
+
+  it("exports images at exact template slot coordinates while omitting the template's skipped slot", async () => {
+    const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const templateGeometry = {
+      orientation: "landscape" as const,
+      cardOrientation: "portrait" as const,
+      pageSizeMm: { widthMm: 297, heightMm: 210 },
+      cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+      rows: 1,
+      columns: 3,
+      slots: [
+        { index: 0, row: 0, column: 0, xMm: 10, yMm: 10 },
+        { index: 1, row: 0, column: 1, xMm: 80, yMm: 10 },
+        { index: 2, row: 0, column: 2, xMm: 150, yMm: 10 },
+      ],
+    };
+    const layout = calculateGridPlacement({
+      paper: PAPER_FORMATS.A4,
+      card: MAGIC_STANDARD_CARD,
+      count: 2,
+      bleedMm: 0,
+      skippedSlotIndices: [1],
+      pageOrientation: "landscape",
+      templateGeometry,
+    });
+    const parsed = await parsePdf(await engine.generate({
+      images: [jpeg, jpeg],
+      pageOrientation: "landscape",
+      skippedSlotIndices: [1],
+      templateGeometry,
+      registration: { type: "none", orientation: "portrait" },
+    }));
+    const cardMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d]) =>
+      Math.abs(a - MAGIC_CARD_WIDTH_POINTS) < 1e-8 && Math.abs(b) < 1e-8 && Math.abs(c) < 1e-8 && Math.abs(d - MAGIC_CARD_HEIGHT_POINTS) < 1e-8);
+    const positionMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d, x]) =>
+      Math.abs(a - 1) < 1e-10 && Math.abs(b) < 1e-10 && Math.abs(c) < 1e-10 && Math.abs(d - 1) < 1e-10 && Math.abs(x) > 1e-10);
+    const actualX = positionMatrices.map(([, , , , x]) => pointsToMm(x)).sort((a, b) => a - b);
+
+    expect(parsed.document.getPages()[0]!.getMediaBox()).toEqual({ x: 0, y: 0, width: mmToPoints(297), height: mmToPoints(210) });
+    expect(parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"))).toHaveLength(2);
+    expect(cardMatrices).toHaveLength(2);
+    expect(positionMatrices).toHaveLength(2);
+    expect(actualX).toEqual(layout.slots.map(({ trim }) => trim.xMm).sort((a, b) => a - b));
+    expect(actualX).not.toContain(templateGeometry.slots[1]!.xMm);
+  });
+
+  it("applies page margins and per-axis gaps in vector positions while preserving trim size", async () => {
+    const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const marginsMm = { top: 10, right: 5, bottom: 15, left: 20 };
+    const layout = calculateGridPlacement({
+      paper: PAPER_FORMATS.A4,
+      card: MAGIC_STANDARD_CARD,
+      count: 2,
+      bleedMm: 0,
+      rows: 1,
+      columns: 2,
+      marginsMm,
+      horizontalGapMm: 10,
+      verticalGapMm: 6,
+    });
+    const parsed = await parsePdf(await engine.generate({
+      images: [jpeg, jpeg],
+      layoutRows: 1,
+      layoutColumns: 2,
+      marginsMm,
+      horizontalGapMm: 10,
+      verticalGapMm: 6,
+      registration: { type: "none", orientation: "portrait" },
+    }));
+    const positions = getDrawMatrices(parsed.content).filter(([a, b, c, d, e, f]) =>
+      Math.abs(a - 1) < 1e-10 && Math.abs(b) < 1e-10 && Math.abs(c) < 1e-10
+      && Math.abs(d - 1) < 1e-10 && (Math.abs(e) > 1e-10 || Math.abs(f) > 1e-10));
+    const actualPositions = positions.map(([, , , , x, y]) => [pointsToMm(x), pointsToMm(y)])
+      .sort(([leftX, leftY], [rightX, rightY]) => leftX - rightX || leftY - rightY);
+    const expectedPositions = layout.slots.map(({ trim }) => [trim.xMm, 297 - trim.yMm - trim.heightMm])
+      .sort(([leftX, leftY], [rightX, rightY]) => leftX - rightX || leftY - rightY);
+
+    actualPositions.forEach((position, index) => {
+      expect(position[0]).toBeCloseTo(expectedPositions[index]![0]!, 10);
+      expect(position[1]).toBeCloseTo(expectedPositions[index]![1]!, 10);
+    });
+    expect(actualPositions[1]![0] - actualPositions[0]![0] - 63.5).toBeCloseTo(10, 10);
+    expect(parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"))).toHaveLength(2);
+    assertMatrixContainsSize(parsed.content, MAGIC_CARD_WIDTH_POINTS, MAGIC_CARD_HEIGHT_POINTS);
+  });
+
+  it.each([
+    ["four-point", { type: "four-point", orientation: "portrait", insetXMm: 10, insetYMm: 10, armLengthMm: 5, lineThicknessMm: 1, squareSizeMm: 5, reservedZoneClearanceMm: 0 }, 8],
+    ["custom", { type: "custom", orientation: "portrait", marks: [[{ type: "line", x1Mm: 20, y1Mm: 20, x2Mm: 30, y2Mm: 20, strokeWidthMm: 0.5 }]], reservedZones: [] }, 1],
+  ] as const)("draws %s registration primitives as PDF vectors", async (_type, registration, expectedSegments) => {
+    const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const parsed = await parsePdf(await engine.generate({ images: [jpeg], registration }));
+
+    expect(getVectorSegments(parsed.content)).toHaveLength(expectedSegments);
+    expect(parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"))).toHaveLength(1);
+  });
+
   it("places a Magic Standard card at exactly 63.5 × 88.9 mm using the PDF matrix", async () => {
     const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const pdf = await engine.generate({ images: [jpeg] });
@@ -329,6 +601,42 @@ describe("LosslessPdfEngine", () => {
     expect(imageDraws[1].clip!.width).toBeCloseTo(requestedBleedPoints, 10);
     expect(imageDraws[2].clip!.height).toBeCloseTo(requestedBleedPoints, 10);
     expect(imageDraws[3].clip!.height).toBeCloseTo(requestedBleedPoints, 10);
+  });
+
+  it("rotates bleed derivatives with the landscape card while keeping the original JPEG XObject", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
+    const parsed = await parsePdf(await engine.generate({
+      images: [original],
+      bleedResults: [bleed],
+      cardOrientation: "landscape",
+    }));
+    const placement = calculateGridPlacement({
+      paper: PAPER_FORMATS.A4,
+      card: MAGIC_STANDARD_CARD,
+      cardOrientation: "landscape",
+      count: 1,
+      bleedMm: 0.625,
+    });
+    const trim = placement.slots[0]!.trim;
+    const sourceWidth = mmToPoints(MAGIC_STANDARD_CARD.widthMm);
+    const sourceHeight = mmToPoints(MAGIC_STANDARD_CARD.heightMm);
+    const expectedRotation = [
+      0,
+      -1,
+      1,
+      0,
+      mmToPoints(trim.xMm),
+      mmToPoints(297 - trim.yMm - placement.cardSizeMm.heightMm) + sourceWidth,
+    ];
+
+    expect(parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"))).toHaveLength(1);
+    expect(getDrawMatrices(parsed.content).some((matrix) =>
+      matrix.every((value, index) => Math.abs(value - expectedRotation[index]!) < 1e-8),
+    )).toBe(true);
+    expect(placement.cardSizeMm).toEqual({ widthMm: 88.9, heightMm: 63.5 });
+    expect(sourceWidth).toBe(MAGIC_CARD_WIDTH_POINTS);
+    expect(sourceHeight).toBeCloseTo(MAGIC_CARD_HEIGHT_POINTS, 10);
   });
 
   it("places a rounded-corner derivative inside the unchanged physical trim when bleed is zero", async () => {

@@ -7,13 +7,13 @@ function project(revision: number, bleedMm: number): ProjectDto {
   return {
     id: "project-1",
     name: "Project teste",
-    projectSchemaVersion: 1,
+    projectSchemaVersion: 2,
     revision,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     templateSelection: null,
     snapshot: {
-      projectSchemaVersion: 1,
+      projectSchemaVersion: 2,
       cards: [],
       settings: { ...DEFAULT_PROJECT_SETTINGS, bleedMm },
     },

@@ -4,6 +4,7 @@ import { openProjectDatabase } from "../../persistence/projects/database";
 import { TemplateRepository } from "../../persistence/templates/repository";
 import { calculateTemplatePackageHash, parseTemplateMetadata } from "../../templates/validation";
 import type { TemplateMetadata } from "../../templates/types";
+import { createDefaultRegistrationConfig } from "../../core/registration";
 
 const now = "2026-09-30T10:00:00.000Z";
 const fileBytes = new Uint8Array([0, 255, 1, 2]);
@@ -66,6 +67,41 @@ describe("template repository", () => {
       byteLength: 4,
     });
     expect(second).toMatchObject({ templateId: first.templateId, created: true, version: { version: "v6", packageHash: v6Hash } });
+  });
+
+  it("round-trips versioned registration geometry without borrowing another version's parameters", () => {
+    database = openProjectDatabase(":memory:");
+    const repository = new TemplateRepository(database, { idFactory: () => "template-geometry", now: () => now });
+    const version = parseTemplateMetadata({
+      ...metadata("v5"),
+      registrationConfig: createDefaultRegistrationConfig("three-point", "landscape", { insetXMm: 12 }),
+    });
+    const packageHash = calculateTemplatePackageHash(version, [{ relativePath: "template.studio3", contentHash: fileHash, byteLength: 4 }]);
+    const inserted = repository.addVersion({ metadata: version, packageHash, files: files() });
+
+    expect(repository.getVersion(inserted.templateId, "v5")?.registrationConfig).toEqual(version.registrationConfig);
+  });
+
+  it("round-trips exact slot positions as immutable metadata for the selected template version", () => {
+    database = openProjectDatabase(":memory:");
+    const repository = new TemplateRepository(database, { idFactory: () => "template-layout", now: () => now });
+    const version = parseTemplateMetadata({
+      ...metadata("v5"),
+      templateGeometry: {
+        orientation: "landscape",
+        cardOrientation: "portrait",
+        pageSizeMm: { widthMm: 297, heightMm: 210 },
+        cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+        rows: 1,
+        columns: 1,
+        slots: [{ index: 0, row: 0, column: 0, xMm: 116.75, yMm: 60.55 }],
+      },
+    });
+    const packageHash = calculateTemplatePackageHash(version, [{ relativePath: "template.studio3", contentHash: fileHash, byteLength: 4 }]);
+    const inserted = repository.addVersion({ metadata: version, packageHash, files: files() });
+
+    expect(repository.getVersion(inserted.templateId, "v5")?.templateGeometry).toEqual(version.templateGeometry);
+    expect(repository.getVersion(inserted.templateId, "v5")?.packageHash).toBe(packageHash);
   });
 
   it("treats a byte-identical same-version import as idempotent and rejects changed content", () => {

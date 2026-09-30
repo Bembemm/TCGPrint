@@ -8,6 +8,9 @@ import { openProjectDatabase } from "../../persistence/projects/database";
 import { ProjectRepository } from "../../persistence/projects/repository";
 import { DEFAULT_PROJECT_SETTINGS, deserializeProjectSnapshot, serializeProjectSnapshot } from "../../persistence/projects/serializer";
 import { openArtworkDatabase } from "../../persistence/sqlite";
+import { createDefaultRegistrationConfig } from "../../core/registration";
+import { TemplateRepository } from "../../persistence/templates/repository";
+import { calculateTemplatePackageHash, parseTemplateMetadata } from "../../templates/validation";
 
 describe("project repository", () => {
   let directory: string | undefined;
@@ -45,18 +48,27 @@ describe("project repository", () => {
     expect(created).toEqual({
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 1,
+      projectSchemaVersion: 2,
       revision: 1,
       snapshot: {
-        projectSchemaVersion: 1,
+        projectSchemaVersion: 2,
         cards: [],
         settings: {
           bleedMm: 0.625,
           roundedCorners: false,
           cutGuides: {
             trim: { enabled: false, extentMm: 1, color: "blue" },
-            external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
-          },
+          external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
+        },
+        pageOrientation: "portrait",
+        cardOrientation: "portrait",
+        paperFormat: { name: "A4", widthMm: 210, heightMm: 297 },
+        cardFormat: { id: "magic-standard", name: "Magic Standard", widthMm: 63.5, heightMm: 88.9, cornerRadiusMm: 3.175 },
+        marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+        horizontalGapMm: 0,
+        verticalGapMm: 0,
+        registration: { type: "none", orientation: "portrait" },
+        layout: { skippedSlotIndices: [] },
         },
       },
       templateSelection: null,
@@ -67,7 +79,7 @@ describe("project repository", () => {
     expect(projects.list()).toEqual([{
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 1,
+      projectSchemaVersion: 2,
       revision: 1,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -75,6 +87,139 @@ describe("project repository", () => {
     }]);
     expect(projects.open("project-1")).toEqual(created);
     expect(projects.get("missing-project")).toBeUndefined();
+  });
+
+  it("persists registration and skipped-slot settings through save, reopen, duplicate, and recovery promotion", async () => {
+    const projects = await setup();
+    const settings = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      pageOrientation: "landscape" as const,
+      cardOrientation: "portrait" as const,
+      marginsMm: { top: 4, right: 5, bottom: 6, left: 7 },
+      horizontalGapMm: 2,
+      verticalGapMm: 3,
+      registration: createDefaultRegistrationConfig("four-point", "landscape", { insetXMm: 13 }),
+      layout: {
+        rows: 1,
+        columns: 2,
+        skippedSlotIndices: [1],
+        templateGeometry: {
+          orientation: "landscape" as const,
+          cardOrientation: "portrait" as const,
+          pageSizeMm: { widthMm: 297, heightMm: 210 },
+          cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+          rows: 1,
+          columns: 2,
+          slots: [
+            { index: 0, row: 0, column: 0, xMm: 20, yMm: 60.55 },
+            { index: 1, row: 0, column: 1, xMm: 100, yMm: 60.55 },
+          ],
+        },
+      },
+    };
+    const initial = deserializeProjectSnapshot(serializeProjectSnapshot([], settings));
+    const created = projects.create(initial);
+    const saved = projects.save(created.id, created.revision, initial);
+    const reopened = projects.open(saved.id);
+
+    expect(reopened.snapshot.settings).toEqual(settings);
+    const duplicate = projects.duplicate(reopened.id);
+    expect(duplicate.snapshot.settings).toEqual(settings);
+    const staged = projects.stageRecovery(reopened.id, reopened.revision, initial);
+    expect(projects.promoteRecovery(reopened.id).snapshot.settings).toEqual(staged.snapshot.settings);
+  });
+
+  it("binds Project template geometry to the exact selected package version across save and recovery", async () => {
+    const projects = await setup();
+    let templateId = 0;
+    const templates = new TemplateRepository(database!, { idFactory: () => `template-${++templateId}` });
+    const geometry = (xMm: number) => ({
+      orientation: "portrait" as const,
+      cardOrientation: "portrait" as const,
+      pageSizeMm: { widthMm: 210, heightMm: 297 },
+      cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+      rows: 1,
+      columns: 1,
+      slots: [{ index: 0, row: 0, column: 0, xMm, yMm: 104.05 }],
+    });
+    const addVersion = (version: string, templateGeometry: ReturnType<typeof geometry> | undefined) => {
+      const metadata = parseTemplateMetadata({
+        name: "Version-bound geometry",
+        source: "test fixture",
+        version,
+        paper: "a4",
+        cardFormat: "standard",
+        orientation: "portrait",
+        registrationType: "none",
+        ...(templateGeometry ? { templateGeometry } : {}),
+      });
+      const packageHashFiles = [{ relativePath: "template.svg", contentHash: "a".repeat(64), byteLength: 1 }];
+      const packageHash = calculateTemplatePackageHash(metadata, packageHashFiles);
+      const result = templates.addVersion({
+        metadata,
+        packageHash,
+        files: [{
+          ...packageHashFiles[0]!,
+          fileName: "template.svg",
+          extension: "svg",
+          mediaType: "image/svg+xml",
+        }],
+      });
+      return { ...result, packageHash };
+    };
+    const v5 = addVersion("v5", geometry(73.25));
+    const v5Selection = { templateId: v5.templateId, version: "v5", packageHash: v5.packageHash };
+    const v5Snapshot = deserializeProjectSnapshot(serializeProjectSnapshot([], {
+      ...DEFAULT_PROJECT_SETTINGS,
+      layout: { skippedSlotIndices: [], templateGeometry: geometry(73.25) },
+    }));
+    const created = projects.create(v5Snapshot, v5Selection);
+    const legacySnapshotJson = serializeProjectSnapshot([], DEFAULT_PROJECT_SETTINGS);
+    database!.prepare("UPDATE projects SET snapshot_json = ? WHERE id = ?").run(legacySnapshotJson, created.id);
+    addVersion("v6", geometry(74.25));
+
+    expect(projects.open(created.id)?.snapshot.settings.layout.templateGeometry).toEqual(geometry(73.25));
+    expect(database!.prepare("SELECT snapshot_json FROM projects WHERE id = ?").get(created.id)).toEqual({ snapshot_json: legacySnapshotJson });
+    const v6Snapshot = deserializeProjectSnapshot(serializeProjectSnapshot([], {
+      ...DEFAULT_PROJECT_SETTINGS,
+      layout: { skippedSlotIndices: [], templateGeometry: geometry(74.25) },
+    }));
+    expect(() => projects.save(created.id, created.revision, v6Snapshot))
+      .toThrowError(expect.objectContaining({ code: "PROJECT_TEMPLATE_GEOMETRY_MISMATCH" }));
+    expect(() => projects.stageRecovery(created.id, created.revision, v6Snapshot, v5Selection))
+      .toThrowError(expect.objectContaining({ code: "PROJECT_TEMPLATE_GEOMETRY_MISMATCH" }));
+
+    const v4 = addVersion("v4", undefined);
+    const v4Selection = { templateId: v4.templateId, version: "v4", packageHash: v4.packageHash };
+    const projectWithoutVersionGeometry = projects.create(undefined, v4Selection);
+    expect(() => projects.save(projectWithoutVersionGeometry.id, projectWithoutVersionGeometry.revision, v6Snapshot))
+      .toThrowError(expect.objectContaining({ code: "PROJECT_TEMPLATE_GEOMETRY_MISMATCH" }));
+    expect(() => projects.stageRecovery(projectWithoutVersionGeometry.id, projectWithoutVersionGeometry.revision, v6Snapshot, v4Selection))
+      .toThrowError(expect.objectContaining({ code: "PROJECT_TEMPLATE_GEOMETRY_MISMATCH" }));
+  });
+
+  it("opens legacy v1 snapshots with explicit v2 defaults without rewriting the stored bytes", async () => {
+    const projects = await setup();
+    const created = projects.create();
+    const legacy = JSON.stringify({
+      projectSchemaVersion: 1,
+      cards: [],
+      settings: {
+        bleedMm: 1.25,
+        roundedCorners: true,
+        cutGuides: DEFAULT_PROJECT_SETTINGS.cutGuides,
+      },
+    });
+    database!.prepare("UPDATE projects SET project_schema_version = 1, snapshot_json = ? WHERE id = ?").run(legacy, created.id);
+
+    const opened = projects.open(created.id);
+
+    expect(opened.projectSchemaVersion).toBe(2);
+    expect(opened.snapshot).toMatchObject({
+      projectSchemaVersion: 2,
+      settings: { bleedMm: 1.25, roundedCorners: true, registration: { type: "none", orientation: "portrait" } },
+    });
+    expect(database!.prepare("SELECT snapshot_json FROM projects WHERE id = ?").get(created.id)).toEqual({ snapshot_json: legacy });
   });
 
   it("creates and saves a project with a confirmed custom card identity", async () => {
@@ -94,7 +239,7 @@ describe("project repository", () => {
       faceAssociations: [],
     };
     const initialSnapshot = {
-      projectSchemaVersion: 1 as const,
+      projectSchemaVersion: 2 as const,
       cards: [customCard],
       settings: DEFAULT_PROJECT_SETTINGS,
     };
@@ -142,9 +287,9 @@ describe("project repository", () => {
     const projects = await setup();
     const future = projects.create();
     const corrupt = projects.create();
-    const futureJson = JSON.stringify({ projectSchemaVersion: 2, cards: [], settings: {} });
+    const futureJson = JSON.stringify({ projectSchemaVersion: 3, cards: [], settings: {} });
     const corruptJson = "{";
-    database!.prepare("UPDATE projects SET project_schema_version = 2, snapshot_json = ? WHERE id = ?").run(futureJson, future.id);
+    database!.prepare("UPDATE projects SET project_schema_version = 3, snapshot_json = ? WHERE id = ?").run(futureJson, future.id);
     database!.prepare("UPDATE projects SET snapshot_json = ? WHERE id = ?").run(corruptJson, corrupt.id);
     const readRaw = (projectId: string) => database!.prepare("SELECT project_schema_version, revision, snapshot_json FROM projects WHERE id = ?").get(projectId);
     const futureBefore = readRaw(future.id);
@@ -265,7 +410,7 @@ describe("project repository", () => {
     expect(staged).toEqual({
       projectId: canonical.id,
       baseRevision: 1,
-      projectSchemaVersion: 1,
+      projectSchemaVersion: 2,
       snapshot: candidate,
       templateSelection: null,
       createdAt: "2026-01-01T00:00:01.000Z",

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { migrateProjectDatabase } from "../projects/migrations";
 import { calculateTemplatePackageHash, parseTemplateMetadata, TemplateValidationError } from "../../templates/validation";
+import { parseRegistrationConfig } from "../../core/registration";
+import { parseTemplateLayoutGeometry } from "../../core/geometry";
 import type {
   TemplateCardFormat,
   TemplateFileExtension,
@@ -104,6 +106,8 @@ interface TemplateVersionRow {
   readonly orientation: TemplateOrientation;
   readonly recommended_bleed_mm: number | null;
   readonly registration_type: TemplateRegistrationType;
+  readonly registration_config_json: string | null;
+  readonly template_geometry_json: string | null;
   readonly created_at: string;
 }
 
@@ -207,7 +211,8 @@ export class TemplateRepository {
     const result = this.database.prepare(`
       SELECT t.id, t.name, t.source, t.created_at AS template_created_at, t.updated_at AS template_updated_at,
         v.template_id, v.version, v.package_hash, v.paper, v.card_format, v.orientation,
-        v.recommended_bleed_mm, v.registration_type, v.created_at
+        v.recommended_bleed_mm, v.registration_type, v.created_at,
+        v.registration_config_json, v.template_geometry_json
       FROM templates t
       INNER JOIN template_versions v ON v.template_id = t.id
       WHERE t.id = ? AND v.version = ?
@@ -272,6 +277,8 @@ export class TemplateRepository {
           || current.orientation !== metadata.orientation
           || current.recommended_bleed_mm !== (metadata.recommendedBleedMm ?? null)
           || current.registration_type !== metadata.registrationType
+        || current.registration_config_json !== (metadata.registrationConfig === undefined ? null : JSON.stringify(metadata.registrationConfig))
+          || current.template_geometry_json !== (metadata.templateGeometry === undefined ? null : JSON.stringify(metadata.templateGeometry))
           || !this.sameVersionFiles(templateId, metadata.version, files)) {
           throw new TemplateRepositoryError("TEMPLATE_VERSION_CONFLICT", `Template ${templateId} version ${metadata.version} already exists with different content.`);
         }
@@ -280,8 +287,8 @@ export class TemplateRepository {
 
       this.database.prepare(`
         INSERT INTO template_versions
-          (template_id, version, package_hash, paper, card_format, orientation, recommended_bleed_mm, registration_type, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (template_id, version, package_hash, paper, card_format, orientation, recommended_bleed_mm, registration_type, registration_config_json, template_geometry_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         templateId,
         metadata.version,
@@ -291,6 +298,8 @@ export class TemplateRepository {
         metadata.orientation,
         metadata.recommendedBleedMm ?? null,
         metadata.registrationType,
+        metadata.registrationConfig === undefined ? null : JSON.stringify(metadata.registrationConfig),
+        metadata.templateGeometry === undefined ? null : JSON.stringify(metadata.templateGeometry),
         timestamp,
       );
       for (const file of files) {
@@ -327,6 +336,16 @@ export class TemplateRepository {
 
   private versionFromRow(template: TemplateRow, row: TemplateVersionRow): TemplateVersionRecord {
     if (template.id !== row.template_id) throw new TemplateRepositoryError("TEMPLATE_INVALID", "Template and version IDs do not match.");
+    let registrationConfig: ReturnType<typeof parseRegistrationConfig> | undefined;
+    let templateGeometry: ReturnType<typeof parseTemplateLayoutGeometry> | undefined;
+    if (row.registration_config_json !== null) {
+      try { registrationConfig = parseRegistrationConfig(JSON.parse(row.registration_config_json) as unknown); }
+      catch (error) { throw new TemplateRepositoryError("TEMPLATE_INVALID", `Stored registration geometry is invalid: ${error instanceof Error ? error.message : "invalid JSON"}`); }
+    }
+    if (row.template_geometry_json !== null) {
+      try { templateGeometry = parseTemplateLayoutGeometry(JSON.parse(row.template_geometry_json) as unknown); }
+      catch (error) { throw new TemplateRepositoryError("TEMPLATE_INVALID", `Stored template layout geometry is invalid: ${error instanceof Error ? error.message : "invalid JSON"}`); }
+    }
     return {
       templateId: template.id,
       name: template.name,
@@ -337,6 +356,8 @@ export class TemplateRepository {
       orientation: row.orientation,
       ...(row.recommended_bleed_mm !== null ? { recommendedBleedMm: row.recommended_bleed_mm } : {}),
       registrationType: row.registration_type,
+      ...(registrationConfig !== undefined ? { registrationConfig } : {}),
+      ...(templateGeometry !== undefined ? { templateGeometry } : {}),
       packageHash: row.package_hash,
       createdAt: this.readTimestamp(row.created_at),
       files: (this.database.prepare("SELECT * FROM template_files WHERE template_id = ? AND version = ? ORDER BY relative_path COLLATE NOCASE, relative_path")

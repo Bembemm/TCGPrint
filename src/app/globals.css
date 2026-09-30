@@ -261,6 +261,26 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .phase5-export .panel-heading { margin-bottom: 8px; }
 .phase5-export h3 { margin: 0 0 3px; font-size: 14px; }
 .phase5-export .muted { margin: 8px 0 0; }
+.registration-layout-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 8px; margin: 10px 0; border: 1px solid #d5dce2; border-radius: 4px; padding: 10px; background: #f8fafc; }
+.registration-layout-controls label { display: grid; align-content: start; gap: 4px; color: #44515e; font-size: 10px; }
+.registration-layout-controls input, .registration-layout-controls select, .registration-layout-controls textarea { min-width: 0; border: 1px solid #aeb9c4; border-radius: 3px; padding: 6px; background: #fff; color: #263544; font: inherit; }
+.registration-layout-controls textarea { grid-column: 1 / -1; width: 100%; font-family: ui-monospace, monospace; }
+.registration-layout-controls p { grid-column: 1 / -1; margin: 0; color: #586675; font-size: 10px; }
+.registration-preview { margin-top: 12px; border: 1px solid #d5dce2; border-radius: 4px; padding: 10px; background: #f8fafc; }
+.registration-preview-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; color: #4a5865; font-size: 10px; }
+.registration-preview-heading h4, .registration-preview > h4 { margin: 0 0 3px; color: #263544; font-size: 12px; }
+.registration-preview-heading p { margin: 0; }
+.registration-sheet-preview { display: block; width: min(100%, 760px); max-height: 72vh; margin: auto; border: 1px solid #cbd5df; background: #fff; box-shadow: 0 2px 8px #17212b20; }
+.registration-preview-slot { cursor: pointer; }
+.registration-preview-slot:focus-visible { outline: 2px solid #7e22ce; outline-offset: 1px; }
+.registration-preview-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; color: #4a5865; font-size: 10px; }
+.registration-preview-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.registration-preview-legend i { display: inline-block; width: 12px; height: 8px; border: 1px solid; }
+.legend-bleed { border-color: #f97316 !important; background: #fff7ed; }
+.legend-trim { border-color: #1d4ed8 !important; background: #eff6ff; }
+.legend-reserved { border-color: #dc2626 !important; background: #fecaca; }
+.legend-skipped { border-color: #7e22ce !important; background: #f3e8ff; }
+.legend-mark { border-color: #111827 !important; background: #111827; }
 
 @media (max-width: 700px) {
   .workbench { width: min(100% - 24px, 1120px); padding-top: 18px; }

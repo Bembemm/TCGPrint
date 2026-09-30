@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const PROJECT_DATABASE_SCHEMA_VERSION = 2;
+export const PROJECT_DATABASE_SCHEMA_VERSION = 4;
 
 function migrateToV1(database: Database.Database): void {
   database.exec(`
@@ -92,6 +92,14 @@ function migrateToV2(database: Database.Database): void {
   `);
 }
 
+function migrateToV3(database: Database.Database): void {
+  database.exec(`ALTER TABLE template_versions ADD COLUMN registration_config_json TEXT;`);
+}
+
+function migrateToV4(database: Database.Database): void {
+  database.exec(`ALTER TABLE template_versions ADD COLUMN template_geometry_json TEXT;`);
+}
+
 /** Applies deterministic, transactional migrations for the separate projects database. */
 export function migrateProjectDatabase(database: Database.Database): number {
   let version = Number(database.pragma("user_version", { simple: true }));
@@ -115,6 +123,16 @@ export function migrateProjectDatabase(database: Database.Database): number {
       migrateToV2(database);
       database.pragma("user_version = 2");
       version = 2;
+    }
+    if (version < 3) {
+      migrateToV3(database);
+      database.pragma("user_version = 3");
+      version = 3;
+    }
+    if (version < 4) {
+      migrateToV4(database);
+      database.pragma("user_version = 4");
+      version = 4;
     }
   });
   migrate.immediate();

@@ -1,0 +1,66 @@
+{
+  "fixtureId": "tcgprint-registration-physical-reference",
+  "fixtureVersion": "fixture-1",
+  "templateSelection": null,
+  "templateNote": "Synthetic reference geometry. Import and select the exact real Silhouette template version before physical approval.",
+  "paper": {
+    "id": "a4",
+    "widthMm": 210,
+    "heightMm": 297,
+    "orientation": "portrait"
+  },
+  "card": {
+    "orientation": "portrait",
+    "widthMm": 50,
+    "heightMm": 65
+  },
+  "marginsMm": {
+    "top": 0,
+    "right": 0,
+    "bottom": 0,
+    "left": 0
+  },
+  "gapsMm": {
+    "horizontal": 0,
+    "vertical": 0
+  },
+  "registration": {
+    "type": "three-point",
+    "orientation": "portrait",
+    "insetXMm": 10,
+    "insetYMm": 10,
+    "armLengthMm": 5,
+    "lineThicknessMm": 1,
+    "squareSizeMm": 5,
+    "reservedZoneClearanceMm": 0
+  },
+  "registrationReservedZonesMm": [
+    {
+      "xMm": 9.5,
+      "yMm": 9.5,
+      "widthMm": 6,
+      "heightMm": 6
+    },
+    {
+      "xMm": 7,
+      "yMm": 284,
+      "widthMm": 6,
+      "heightMm": 6
+    },
+    {
+      "xMm": 194.5,
+      "yMm": 281.5,
+      "widthMm": 6,
+      "heightMm": 6
+    }
+  ],
+  "layout": {
+    "rows": 3,
+    "columns": 3,
+    "skippedSlotIndices": [
+      4
+    ]
+  },
+  "calibrationBarMm": 10,
+  "requiredPrintScale": 1
+}

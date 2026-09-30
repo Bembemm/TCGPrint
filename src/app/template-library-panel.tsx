@@ -4,10 +4,22 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import type { TemplateRecord, TemplateVersionRecord } from "../../persistence/templates/repository";
 import type { TemplateSelection } from "../../templates/types";
 import type { TemplateSelectionInspection } from "../../services/template-library";
+import { createDefaultRegistrationConfig, type RegistrationConfig } from "../../core/registration";
+import { templatePhysicalFormats } from "../../templates/physical-formats";
+import type { CardFormat, PaperFormat, TemplateLayoutGeometryMm } from "../../core/geometry";
+
+export interface TemplateRegistrationDefaults {
+  readonly pageOrientation: "portrait" | "landscape";
+  readonly cardOrientation: "portrait" | "landscape";
+  readonly paperFormat: PaperFormat;
+  readonly cardFormat: CardFormat;
+  readonly registration: RegistrationConfig;
+  readonly templateGeometry?: TemplateLayoutGeometryMm;
+}
 
 interface TemplateLibraryPanelProps {
   readonly selection: TemplateSelection | null;
-  readonly onSelect: (selection: TemplateSelection | null) => void;
+  readonly onSelect: (selection: TemplateSelection | null, defaults?: TemplateRegistrationDefaults) => void;
   readonly disabled?: boolean;
 }
 
@@ -16,6 +28,7 @@ interface ApiErrorBody { readonly message?: string; }
 const DEFAULT_METADATA = {
   name: "", source: "Local", version: "1", paper: "a4", cardFormat: "standard",
   orientation: "portrait", recommendedBleedMm: "", registrationType: "none",
+  registrationConfigJson: "", templateGeometryJson: "",
 };
 
 function errorText(error: unknown): string {
@@ -101,6 +114,8 @@ export default function TemplateLibraryPanel({ selection, onSelect, disabled = f
         orientation: metadata.orientation,
         ...(bleed ? { recommendedBleedMm: Number(bleed) } : {}),
         registrationType: metadata.registrationType,
+        ...(metadata.registrationConfigJson.trim() ? { registrationConfig: JSON.parse(metadata.registrationConfigJson) as unknown } : {}),
+        ...(metadata.templateGeometryJson.trim() ? { templateGeometry: JSON.parse(metadata.templateGeometryJson) as unknown } : {}),
       }));
       if (selectedTemplateId) form.set("templateId", selectedTemplateId);
       for (const file of files) form.append("files", file, file.name);
@@ -168,6 +183,12 @@ export default function TemplateLibraryPanel({ selection, onSelect, disabled = f
             <option value="none">None</option><option value="three-point">Three-point</option><option value="four-point">Four-point</option><option value="custom">Custom</option>
           </select></label>
         </div>
+        <label>Registration geometry JSON (mm; opcional para 3/4 pontos, obrigatório para custom)
+          <textarea rows={4} maxLength={65_536} value={metadata.registrationConfigJson} disabled={disabled || busy} onChange={(event) => setMetadata({ ...metadata, registrationConfigJson: event.currentTarget.value })} />
+        </label>
+        <label>Template layout geometry JSON (mm; posições exatas dos slots, opcional)
+          <textarea rows={5} maxLength={131_072} value={metadata.templateGeometryJson} disabled={disabled || busy} onChange={(event) => setMetadata({ ...metadata, templateGeometryJson: event.currentTarget.value })} />
+        </label>
         <label className="template-files-field">Arquivos associados (.studio3, .dxf, .svg, .json, .zip)
           <input type="file" multiple accept=".studio3,.dxf,.svg,.json,.zip" disabled={disabled || busy} onChange={(event) => setFiles(Array.from(event.currentTarget.files ?? []))} />
         </label>
@@ -201,7 +222,17 @@ export default function TemplateLibraryPanel({ selection, onSelect, disabled = f
                   <span>{file.byteLength.toLocaleString()} bytes · SHA-256 {file.contentHash}</span>
                 </li>)}</ul>
               </div>
-              <button className={`button ${selectedVersion(selection, template, version) ? "primary" : "secondary"}`} type="button" disabled={disabled || busy} aria-pressed={selectedId === versionKey} onClick={() => onSelect({ templateId: template.id, version: version.version, packageHash: version.packageHash })}>
+              <button className={`button ${selectedVersion(selection, template, version) ? "primary" : "secondary"}`} type="button" disabled={disabled || busy} aria-pressed={selectedId === versionKey} onClick={() => onSelect(
+                { templateId: template.id, version: version.version, packageHash: version.packageHash },
+                {
+                  pageOrientation: version.orientation,
+                  cardOrientation: version.templateGeometry?.cardOrientation ?? "portrait",
+                  paperFormat: templatePhysicalFormats(version).paper,
+                  cardFormat: templatePhysicalFormats(version).card,
+                  registration: version.registrationConfig ?? createDefaultRegistrationConfig(version.registrationType === "custom" ? "none" : version.registrationType, "portrait"),
+                  ...(version.templateGeometry === undefined ? {} : { templateGeometry: version.templateGeometry }),
+                },
+              )}>
                 {selectedVersion(selection, template, version) ? "Associado" : "Associar ao Project"}
               </button>
             </div>;

@@ -20,10 +20,11 @@ describe("project database", () => {
     await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
   });
 
-  it("creates the version-two relational schema in a real SQLite database", () => {
+  it("creates the version-four relational schema in a real SQLite database", () => {
     database = openProjectDatabase(":memory:");
 
-    expect(database.pragma("user_version", { simple: true })).toBe(2);
+    expect(database.pragma("user_version", { simple: true })).toBe(4);
+    expect(database.prepare("PRAGMA table_info(template_versions)").all()).toContainEqual(expect.objectContaining({ name: "template_geometry_json" }));
     expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
       .toEqual([
         { name: "project_recovery" },
@@ -61,8 +62,8 @@ describe("project database", () => {
       PRAGMA user_version = 1;
     `);
 
-    expect(migrateProjectDatabase(database)).toBe(2);
-    expect(database.pragma("user_version", { simple: true })).toBe(2);
+    expect(migrateProjectDatabase(database)).toBe(4);
+    expect(database.pragma("user_version", { simple: true })).toBe(4);
     expect(database.prepare("SELECT id, name, revision, snapshot_json FROM projects").get())
       .toEqual({ id: "project-1", name: "Preservado", revision: 3, snapshot_json: '{"projectSchemaVersion":1}' });
     expect(database.prepare("SELECT project_id, base_revision, snapshot_json FROM project_recovery").get())
@@ -104,13 +105,13 @@ describe("project database", () => {
     temporaryDirectories.push(directory);
     const path = join(directory, "projects.sqlite");
     const futureDatabase = new Database(path);
-    futureDatabase.exec("CREATE TABLE future_marker (value TEXT NOT NULL); INSERT INTO future_marker VALUES ('preserve'); PRAGMA user_version = 3;");
+    futureDatabase.exec("CREATE TABLE future_marker (value TEXT NOT NULL); INSERT INTO future_marker VALUES ('preserve'); PRAGMA user_version = 5;");
     futureDatabase.close();
 
     expect(() => openProjectDatabase(path)).toThrow(/newer than this application supports/);
 
     const unchanged = new Database(path);
-    expect(unchanged.pragma("user_version", { simple: true })).toBe(3);
+    expect(unchanged.pragma("user_version", { simple: true })).toBe(5);
     expect(unchanged.prepare("SELECT value FROM future_marker").get()).toEqual({ value: "preserve" });
     expect(unchanged.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get()).toBeUndefined();
     unchanged.close();
@@ -141,8 +142,8 @@ describe("project database", () => {
     });
 
     try {
-      expect(migrateProjectDatabase(migratingDatabase)).toBe(2);
-      expect(migratingDatabase.pragma("user_version", { simple: true })).toBe(2);
+      expect(migrateProjectDatabase(migratingDatabase)).toBe(4);
+      expect(migratingDatabase.pragma("user_version", { simple: true })).toBe(4);
       expect(migratingDatabase.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
         .toContainEqual({ name: "templates" });
     } finally {

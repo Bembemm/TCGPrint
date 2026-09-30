@@ -35,10 +35,15 @@ import { clearRequestCache, createRequestCache, getOrCreateCachedRequest, update
 import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
 import ProjectSettingsControls from "./project-settings-controls";
 import { runIfProjectInteractionUnlocked } from "./project-interaction-lock";
-import type { GuideColor } from "../../core/geometry";
+import type { GuideColor, PageMarginsMm, PageOrientation } from "../../core/geometry";
+import type { CardFormat, PaperFormat, TemplateLayoutGeometryMm } from "../../core/geometry";
+import { createDefaultRegistrationConfig, type RegistrationConfig } from "../../core/registration";
 import type { ProjectDto } from "../../services/project-api";
-import type { ProjectSettingsV1 } from "../../persistence/projects/serializer";
+import { DEFAULT_PROJECT_SETTINGS, type ProjectSettingsV2 } from "../../persistence/projects/serializer";
 import ProjectsPanel from "./projects-panel";
+import type { TemplateRegistrationDefaults } from "./template-library-panel";
+import RegistrationLayoutPreview from "./registration-layout-preview";
+import { applyTemplateLayoutDefaults } from "./template-layout-defaults";
 import { createProjectRestoreLookupGate, runProjectRestoreProviderLookup } from "./project-restore-provider-gate";
 
 type ArtworkFilter = "all" | "scryfall" | "mpc" | "upload";
@@ -464,6 +469,18 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [externalGuideEnabled, setExternalGuideEnabled] = useState(false);
   const [externalGuideStrokeWidthPt, setExternalGuideStrokeWidthPt] = useState("0.3");
   const [externalGuideColor, setExternalGuideColor] = useState<GuideColor>("black");
+  const [pageOrientation, setPageOrientation] = useState<PageOrientation>("portrait");
+  const [cardOrientation, setCardOrientation] = useState<PageOrientation>("portrait");
+  const [paperFormat, setPaperFormat] = useState<PaperFormat>(DEFAULT_PROJECT_SETTINGS.paperFormat);
+  const [cardFormat, setCardFormat] = useState<CardFormat>(DEFAULT_PROJECT_SETTINGS.cardFormat);
+  const [marginsMm, setMarginsMm] = useState<PageMarginsMm>({ top: 0, right: 0, bottom: 0, left: 0 });
+  const [horizontalGapMm, setHorizontalGapMm] = useState(0);
+  const [verticalGapMm, setVerticalGapMm] = useState(0);
+  const [registration, setRegistration] = useState<RegistrationConfig>(() => createDefaultRegistrationConfig("none", "portrait"));
+  const [layoutRows, setLayoutRows] = useState("");
+  const [layoutColumns, setLayoutColumns] = useState("");
+  const [skippedSlotIndices, setSkippedSlotIndices] = useState<readonly number[]>([]);
+  const [templateGeometry, setTemplateGeometry] = useState<TemplateLayoutGeometryMm | undefined>();
   const [busy, setBusy] = useState(false);
   const [projectOpenPending, setProjectOpenPending] = useState(false);
   const [projectRestoreVersion, setProjectRestoreVersion] = useState(0);
@@ -486,18 +503,38 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   function updateProjectSetting(update: () => void) {
     runIfProjectInteractionUnlocked(projectOpenPendingRef.current, update);
   }
-  const projectSettings = useMemo<ProjectSettingsV1>(() => ({
-    bleedMm: Number(bleedMm),
-    roundedCorners,
-    cutGuides: buildCutGuideConfig(
+  const projectSettings = useMemo<ProjectSettingsV2>(() => {
+    const rowCount = layoutRows.trim() ? Number(layoutRows) : undefined;
+    const columnCount = layoutColumns.trim() ? Number(layoutColumns) : undefined;
+    const fixedGrid = rowCount !== undefined && columnCount !== undefined
+      && Number.isSafeInteger(rowCount) && Number.isSafeInteger(columnCount)
+      && rowCount > 0 && columnCount > 0 && rowCount * columnCount <= 1_128;
+    return {
+      bleedMm: Number(bleedMm),
+      roundedCorners,
+      cutGuides: buildCutGuideConfig(
       trimGuideEnabled,
       trimGuideExtentMm,
       externalGuideEnabled,
       externalGuideStrokeWidthPt,
       trimGuideColor,
       externalGuideColor,
-    ),
-  }), [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor]);
+      ),
+      pageOrientation,
+      cardOrientation,
+      paperFormat,
+      cardFormat,
+      marginsMm,
+      horizontalGapMm,
+      verticalGapMm,
+      registration,
+      layout: {
+        ...(fixedGrid ? { rows: rowCount, columns: columnCount } : {}),
+        skippedSlotIndices,
+        ...(templateGeometry ? { templateGeometry } : {}),
+      },
+    };
+  }, [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor, pageOrientation, cardOrientation, paperFormat, cardFormat, marginsMm, horizontalGapMm, verticalGapMm, registration, layoutRows, layoutColumns, skippedSlotIndices, templateGeometry]);
 
   function clearProblem(cardId: string | null = null) {
     setProblem("");
@@ -767,15 +804,28 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   async function exportPdf() {
     if (!workingCards.length) return;
     setBleedDiagnostics(null);
-    setBusy(true); clearProblem(); setStatus("Compondo quantidade física e gerando PDF A4…");
+    setBusy(true); clearProblem(); setStatus(`Compondo quantidade física e gerando PDF ${paperFormat.name}…`);
     try {
       const response = await fetch("/api/cards/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cards: workingCards, options: buildBleedExportOptions(
-          bleedMm,
-          buildCutGuideConfig(trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor),
-          roundedCorners,
-        ) }),
+        body: JSON.stringify({ cards: workingCards, options: {
+          ...buildBleedExportOptions(
+            bleedMm,
+            buildCutGuideConfig(trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor),
+            roundedCorners,
+          ),
+          pageOrientation,
+          cardOrientation,
+          paperFormat,
+          cardFormat,
+          marginsMm,
+          horizontalGapMm,
+          verticalGapMm,
+          registration,
+          ...(templateGeometry ? { templateGeometry } : {}),
+          ...(projectSettings.layout.rows !== undefined ? { layoutRows: projectSettings.layout.rows, layoutColumns: projectSettings.layout.columns } : {}),
+          skippedSlotIndices,
+        } }),
       });
       if (!response.ok) {
         const body = await response.json() as ApiErrorBody;
@@ -805,6 +855,18 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     setExternalGuideEnabled(settings.cutGuides.external.enabled);
     setExternalGuideStrokeWidthPt(String(settings.cutGuides.external.strokeWidthPt));
     setExternalGuideColor(settings.cutGuides.external.color);
+    setPageOrientation(settings.pageOrientation);
+    setCardOrientation(settings.cardOrientation);
+    setPaperFormat(settings.paperFormat);
+    setCardFormat(settings.cardFormat);
+    setMarginsMm(settings.marginsMm);
+    setHorizontalGapMm(settings.horizontalGapMm);
+    setVerticalGapMm(settings.verticalGapMm);
+    setRegistration(settings.registration);
+    setLayoutRows(settings.layout.rows === undefined ? "" : String(settings.layout.rows));
+    setLayoutColumns(settings.layout.columns === undefined ? "" : String(settings.layout.columns));
+    setSkippedSlotIndices(settings.layout.skippedSlotIndices);
+    setTemplateGeometry(settings.layout.templateGeometry);
 
     setArtworkCandidates([]);
     setArtworkProblem(null);
@@ -845,6 +907,28 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         cards={workingCards}
         settings={projectSettings}
         onProjectOpen={restoreProject}
+        onTemplateDefaults={(defaults: TemplateRegistrationDefaults | null) => {
+          if (!defaults) {
+            updateProjectSetting(() => {
+              const layout = applyTemplateLayoutDefaults({ rows: layoutRows, columns: layoutColumns, skippedSlotIndices }, undefined);
+              setTemplateGeometry(undefined);
+              setSkippedSlotIndices(layout.skippedSlotIndices);
+            });
+            return;
+          }
+          updateProjectSetting(() => {
+            setPageOrientation(defaults.pageOrientation);
+            setCardOrientation(defaults.cardOrientation);
+            setPaperFormat(defaults.paperFormat);
+            setCardFormat(defaults.cardFormat);
+            setRegistration(defaults.registration);
+            const layout = applyTemplateLayoutDefaults({ rows: layoutRows, columns: layoutColumns, skippedSlotIndices }, defaults.templateGeometry);
+            setTemplateGeometry(layout.templateGeometry);
+            setLayoutRows(layout.rows);
+            setLayoutColumns(layout.columns);
+            setSkippedSlotIndices(layout.skippedSlotIndices);
+          });
+        }}
         onProjectInteractionLockChange={setProjectInteractionLocked}
         disabled={busy}
       />
@@ -958,7 +1042,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       </div>}
 
       {workingCards.length > 0 && <div className="phase5-export">
-        <div className="panel-heading"><div><h3>Export PDF</h3><p>PDF A4 · Magic Standard 63,5 × 88,9 mm · quantities expandidas somente na composição.</p></div></div>
+        <div className="panel-heading"><div><h3>Export PDF</h3><p>PDF {paperFormat.name} · {cardFormat.name} {cardFormat.widthMm} × {cardFormat.heightMm} mm · quantities expandidas somente na composição.</p></div></div>
         <div className="pdf-controls">
           <ProjectSettingsControls
             bleedMm={bleedMm}
@@ -969,6 +1053,16 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             externalGuideEnabled={externalGuideEnabled}
             externalGuideStrokeWidthPt={externalGuideStrokeWidthPt}
             externalGuideColor={externalGuideColor}
+            pageOrientation={pageOrientation}
+            cardOrientation={cardOrientation}
+            marginsMm={marginsMm}
+            horizontalGapMm={horizontalGapMm}
+            verticalGapMm={verticalGapMm}
+            registration={registration}
+            layoutRows={layoutRows}
+            layoutColumns={layoutColumns}
+            templateGeometryActive={Boolean(templateGeometry)}
+            skippedSlotIndices={skippedSlotIndices}
             disabled={interactionBusy}
             onBleedMmChange={(value) => updateProjectSetting(() => setBleedMm(value))}
             onRoundedCornersChange={(value) => updateProjectSetting(() => setRoundedCorners(value))}
@@ -978,7 +1072,16 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             onExternalGuideEnabledChange={(value) => updateProjectSetting(() => setExternalGuideEnabled(value))}
             onExternalGuideStrokeWidthPtChange={(value) => updateProjectSetting(() => setExternalGuideStrokeWidthPt(value))}
             onExternalGuideColorChange={(value) => updateProjectSetting(() => setExternalGuideColor(value))}
+            onPageOrientationChange={(value) => updateProjectSetting(() => setPageOrientation(value))}
+            onCardOrientationChange={(value) => updateProjectSetting(() => setCardOrientation(value))}
+            onMarginChange={(side, value) => updateProjectSetting(() => setMarginsMm((current) => ({ ...current, [side]: value })))}
+            onHorizontalGapChange={(value) => updateProjectSetting(() => setHorizontalGapMm(value))}
+            onVerticalGapChange={(value) => updateProjectSetting(() => setVerticalGapMm(value))}
+            onRegistrationChange={(value) => updateProjectSetting(() => setRegistration(value))}
+            onLayoutRowsChange={(value) => updateProjectSetting(() => setLayoutRows(value))}
+            onLayoutColumnsChange={(value) => updateProjectSetting(() => setLayoutColumns(value))}
           />
+          <RegistrationLayoutPreview settings={projectSettings} cardCount={physicalCardCount} onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))} />
           <button className="button primary" type="button" disabled={interactionBusy || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
           {pdfUrl && <a className="download-link" href={pdfUrl} download="tcgprint-cards.pdf">Baixar PDF</a>}
         </div>

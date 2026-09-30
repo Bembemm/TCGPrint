@@ -3,6 +3,8 @@ export type TemplateCardFormat = "standard" | "poker" | "bridge" | "tarot" | "cu
 export type TemplateOrientation = "portrait" | "landscape";
 export type TemplateRegistrationType = "three-point" | "four-point" | "custom" | "none";
 export type TemplateFileExtension = "studio3" | "dxf" | "svg" | "json" | "zip";
+import type { RegistrationConfig } from "../core/registration";
+import type { TemplateLayoutGeometryMm } from "../core/geometry";
 
 export interface TemplateMetadata {
   readonly name: string;
@@ -13,6 +15,10 @@ export interface TemplateMetadata {
   readonly orientation: TemplateOrientation;
   readonly recommendedBleedMm?: number;
   readonly registrationType: TemplateRegistrationType;
+  /** Optional immutable per-version geometry; absent means use the explicit generic type preset. */
+  readonly registrationConfig?: RegistrationConfig;
+  /** Optional explicit slot coordinates; never inferred from opaque .studio3 bytes. */
+  readonly templateGeometry?: TemplateLayoutGeometryMm;
 }
 
 export interface TemplateSelection {

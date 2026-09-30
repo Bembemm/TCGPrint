@@ -88,6 +88,111 @@ function jsonRequest(url: string, value: unknown): Request {
 }
 
 describe("card APIs", () => {
+  it("validates registration input and forwards independent orientations and slot skips to PDF export", async () => {
+    const malformed = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES, registration: { type: "custom", orientation: "portrait", marks: [], reservedZones: [] } },
+    }), testWorkbench());
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({ code: "INVALID_REGISTRATION" });
+
+    const bytes = new Uint8Array(await sharp({ create: { width: 127, height: 178, channels: 3, background: { r: 48, g: 126, b: 214 } } }).png().toBuffer());
+    const workbench = testWorkbench({
+      getArtworkOriginal: vi.fn(async () => ({
+        artworkId: "a".repeat(64), contentHash: "b".repeat(64), extension: "png", format: "png",
+        byteLength: bytes.byteLength, widthPx: 127, heightPx: 178, createdAt: new Date(0).toISOString(), provenance: [], bytes,
+      })),
+    });
+    const generate = vi.spyOn(LosslessPdfEngine.prototype, "generate");
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: {
+        bleedMm: 0,
+        cutGuides: NO_CUT_GUIDES,
+        pageOrientation: "landscape",
+        cardOrientation: "landscape",
+        paperFormat: { id: "a4-landscape", name: "A4 landscape", widthMm: 297, heightMm: 210 },
+        cardFormat: { id: "magic-standard", name: "Magic Standard", widthMm: 63.5, heightMm: 88.9, cornerRadiusMm: 3.175 },
+        registration: { type: "three-point", orientation: "landscape" },
+        marginsMm: { top: 1, right: 2, bottom: 3, left: 4 },
+        horizontalGapMm: 5,
+        verticalGapMm: 6,
+        layoutRows: 1,
+        layoutColumns: 2,
+        skippedSlotIndices: [1],
+      },
+    }), workbench);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({
+      pageOrientation: "landscape",
+      cardOrientation: "landscape",
+      paperFormat: { name: "A4 landscape", widthMm: 297, heightMm: 210 },
+      cardFormat: { id: "magic-standard", name: "Magic Standard", widthMm: 63.5, heightMm: 88.9, cornerRadiusMm: 3.175 },
+      registration: expect.objectContaining({ type: "three-point", orientation: "landscape" }),
+      marginsMm: { top: 1, right: 2, bottom: 3, left: 4 },
+      horizontalGapMm: 5,
+      verticalGapMm: 6,
+      layoutRows: 1,
+      layoutColumns: 2,
+      skippedSlotIndices: [1],
+    }));
+    generate.mockRestore();
+  });
+
+  it("forwards safe immutable template geometry through the export API", async () => {
+    const bytes = new Uint8Array(await sharp({ create: { width: 127, height: 178, channels: 3, background: { r: 48, g: 126, b: 214 } } }).png().toBuffer());
+    const workbench = testWorkbench({
+      getArtworkOriginal: vi.fn(async () => ({
+        artworkId: "a".repeat(64), contentHash: "c".repeat(64), extension: "png", format: "png",
+        byteLength: bytes.byteLength, widthPx: 127, heightPx: 178, createdAt: new Date(0).toISOString(), provenance: [], bytes,
+      })),
+    });
+    const templateGeometry = {
+      orientation: "portrait",
+      cardOrientation: "portrait",
+      pageSizeMm: { widthMm: 210, heightMm: 297 },
+      cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+      rows: 1,
+      columns: 1,
+      slots: [{ index: 0, row: 0, column: 0, xMm: 73.25, yMm: 104.05 }],
+    };
+    const generate = vi.spyOn(LosslessPdfEngine.prototype, "generate");
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES, templateGeometry },
+    }), workbench);
+
+    expect(response.status).toBe(200);
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ templateGeometry }));
+    generate.mockRestore();
+  });
+
+  it.each([
+    { horizontalGapMm: "2" },
+    { verticalGapMm: 2_001 },
+    { marginsMm: { top: 1, right: 1, bottom: 1 } },
+  ])("rejects invalid physical layout measurements at the API boundary", async (layout) => {
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES, ...layout },
+    }), testWorkbench());
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_LAYOUT" });
+  });
+
+  it("rejects skipped slots without fixed dimensions or versioned template geometry", async () => {
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES, skippedSlotIndices: [0] },
+    }), testWorkbench());
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_LAYOUT", message: expect.stringMatching(/skipped slots require .*fixed grid/i) });
+  });
+
   it.each(["full", "none"])("rejects legacy cut guide mode %s at the export API boundary", async (cutGuides) => {
     const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
       cards: [card],

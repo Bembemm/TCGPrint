@@ -13,6 +13,7 @@ import {
   PDFName,
   popGraphicsState,
   pushGraphicsState,
+  rgb,
   rectangle,
   setLineCap,
   setLineWidth,
@@ -33,9 +34,13 @@ import {
   type CutGuideCardMm,
   type CutGuideGeometry,
   type CardFormat,
+  type PageMarginsMm,
+  type PageOrientation,
   type PaperFormat,
+  type TemplateLayoutGeometryMm,
 } from "../../core/geometry";
 import { mmToPoints } from "../../core/units";
+import { generateRegistrationGeometry, type RegistrationConfig, type RegistrationPrimitive } from "../../core/registration";
 
 export interface LosslessPdfRequest {
   /** Image bytes read from local files. Repeated entries produce repeated cards. */
@@ -46,13 +51,33 @@ export interface LosslessPdfRequest {
   readonly cutGuides?: CutGuideConfig;
   readonly paperFormat?: PaperFormat;
   readonly cardFormat?: CardFormat;
+  readonly pageOrientation?: PageOrientation;
+  readonly cardOrientation?: PageOrientation;
+  readonly marginsMm?: PageMarginsMm;
+  readonly horizontalGapMm?: number;
+  readonly verticalGapMm?: number;
+  readonly registration?: RegistrationConfig;
+  readonly templateGeometry?: TemplateLayoutGeometryMm;
+  readonly layoutRows?: number;
+  readonly layoutColumns?: number;
+  readonly skippedSlotIndices?: readonly number[];
 }
 
 export interface LosslessPdfFileRequest {
   readonly imagePaths: readonly string[];
   readonly paperFormat?: PaperFormat;
   readonly cardFormat?: CardFormat;
+  readonly pageOrientation?: PageOrientation;
+  readonly cardOrientation?: PageOrientation;
+  readonly marginsMm?: PageMarginsMm;
+  readonly horizontalGapMm?: number;
+  readonly verticalGapMm?: number;
   readonly cutGuides?: CutGuideConfig;
+  readonly registration?: RegistrationConfig;
+  readonly templateGeometry?: TemplateLayoutGeometryMm;
+  readonly layoutRows?: number;
+  readonly layoutColumns?: number;
+  readonly skippedSlotIndices?: readonly number[];
 }
 
 type SupportedImageFormat = "jpeg" | "png" | "svg";
@@ -747,6 +772,46 @@ function drawCutGuides(
   drawSegments(geometry.externalSegments, GUIDE_COLOR_HEX[normalizedConfig.external.color], normalizedConfig.external.strokeWidthPt);
 }
 
+function drawRegistrationMarks(
+  page: ReturnType<PDFDocument["addPage"]>,
+  pageSizeMm: { readonly widthMm: number; readonly heightMm: number },
+  registration: RegistrationConfig | undefined,
+): void {
+  const geometry = generateRegistrationGeometry(
+    registration ?? { type: "none", orientation: "portrait" },
+    pageSizeMm,
+  );
+  const black = rgb(0, 0, 0);
+  const drawPrimitive = (primitive: RegistrationPrimitive) => {
+    if (primitive.type === "line") {
+      page.drawLine({
+        start: { x: mmToPoints(primitive.x1Mm), y: mmToPoints(pageSizeMm.heightMm - primitive.y1Mm) },
+        end: { x: mmToPoints(primitive.x2Mm), y: mmToPoints(pageSizeMm.heightMm - primitive.y2Mm) },
+        thickness: mmToPoints(primitive.strokeWidthMm),
+        color: black,
+      });
+    } else if (primitive.type === "rect") {
+      page.drawRectangle({
+        x: mmToPoints(primitive.xMm),
+        y: mmToPoints(pageSizeMm.heightMm - primitive.yMm - primitive.heightMm),
+        width: mmToPoints(primitive.widthMm),
+        height: mmToPoints(primitive.heightMm),
+        ...(primitive.fill ? { color: black } : {}),
+        ...(primitive.strokeWidthMm > 0 ? { borderColor: black, borderWidth: mmToPoints(primitive.strokeWidthMm) } : {}),
+      });
+    } else {
+      page.drawCircle({
+        x: mmToPoints(primitive.cxMm),
+        y: mmToPoints(pageSizeMm.heightMm - primitive.cyMm),
+        size: mmToPoints(primitive.radiusMm),
+        ...(primitive.fill ? { color: black } : {}),
+        ...(primitive.strokeWidthMm > 0 ? { borderColor: black, borderWidth: mmToPoints(primitive.strokeWidthMm) } : {}),
+      });
+    }
+  };
+  for (const mark of geometry.marks) for (const primitive of mark.primitives) drawPrimitive(primitive);
+}
+
 export class LosslessPdfEngine {
   async generate(request: LosslessPdfRequest): Promise<Uint8Array> {
     if (request.bleedResults && request.bleedResults.length !== request.images.length) {
@@ -755,6 +820,36 @@ export class LosslessPdfEngine {
 
     const paper = request.paperFormat ?? PAPER_FORMATS.A4;
     const card = request.cardFormat ?? MAGIC_STANDARD_CARD;
+    const sourceCardIsLandscape = card.widthMm > card.heightMm;
+    const requestedCardIsLandscape = request.cardOrientation === undefined
+      ? sourceCardIsLandscape
+      : request.cardOrientation === "landscape";
+    const rotateCardArtwork = sourceCardIsLandscape !== requestedCardIsLandscape;
+    const pageIsLandscape = paper.widthMm > paper.heightMm;
+    const pageShouldBeLandscape = request.pageOrientation === undefined
+      ? pageIsLandscape
+      : request.pageOrientation === "landscape";
+    const effectivePaper = pageIsLandscape === pageShouldBeLandscape
+      ? paper
+      : { ...paper, widthMm: paper.heightMm, heightMm: paper.widthMm };
+    const registrationGeometry = generateRegistrationGeometry(
+      request.registration ?? { type: "none", orientation: "portrait" },
+      { widthMm: effectivePaper.widthMm, heightMm: effectivePaper.heightMm },
+    );
+    const placementOptions = {
+      paper,
+      pageOrientation: request.pageOrientation,
+      card,
+      cardOrientation: request.cardOrientation,
+      marginsMm: request.marginsMm,
+      horizontalGapMm: request.horizontalGapMm,
+      verticalGapMm: request.verticalGapMm,
+      ...(request.templateGeometry ? { templateGeometry: request.templateGeometry } : {}),
+      reservedZonesMm: registrationGeometry.reservedZones,
+      ...(request.skippedSlotIndices ? { skippedSlotIndices: request.skippedSlotIndices } : {}),
+      ...(request.layoutRows !== undefined ? { rows: request.layoutRows } : {}),
+      ...(request.layoutColumns !== undefined ? { columns: request.layoutColumns } : {}),
+    } as const;
     const bleedByImageMm = request.images.map((_image, index) => {
       const bleed = request.bleedResults?.[index];
       if (bleed?.status !== "derived") return 0;
@@ -764,7 +859,7 @@ export class LosslessPdfEngine {
       }
       return bleed.bleedMm;
     });
-    const zeroBleedGrid = calculateGridPlacement({ paper, card, count: 0, bleedMm: 0 });
+    const zeroBleedGrid = calculateGridPlacement({ ...placementOptions, count: 0, bleedMm: 0 });
     const pagePlacements: Array<{
       readonly startCardIndex: number;
       readonly endCardIndex: number;
@@ -774,7 +869,7 @@ export class LosslessPdfEngine {
       pagePlacements.push({
         startCardIndex: 0,
         endCardIndex: 0,
-        placement: calculateGridPlacement({ paper, card, count: 0, bleedMm: 0 }),
+        placement: zeroBleedGrid,
       });
     } else {
       let startCardIndex = 0;
@@ -787,8 +882,7 @@ export class LosslessPdfEngine {
         for (let candidateCount = maximumCandidate; candidateCount > 0; candidateCount -= 1) {
           try {
             selectedPlacement = calculateGridPlacement({
-              paper,
-              card,
+              ...placementOptions,
               count: candidateCount,
               bleedMm: 0,
               bleedByCardMm: bleedByImageMm.slice(startCardIndex, startCardIndex + candidateCount),
@@ -804,8 +898,7 @@ export class LosslessPdfEngine {
 
         if (!selectedPlacement) {
           calculateGridPlacement({
-            paper,
-            card,
+            ...placementOptions,
             count: 1,
             bleedMm: 0,
             bleedByCardMm: [bleedByImageMm[startCardIndex]],
@@ -822,11 +915,12 @@ export class LosslessPdfEngine {
     }
 
     const pdf = await PDFDocument.create();
-    const widthPoints = mmToPoints(card.widthMm);
-    const heightPoints = mmToPoints(card.heightMm);
+    const sourceWidthPoints = mmToPoints(card.widthMm);
+    const sourceHeightPoints = mmToPoints(card.heightMm);
 
     for (const { startCardIndex, endCardIndex, placement: pagePlacement } of pagePlacements) {
-      const page = pdf.addPage([mmToPoints(paper.widthMm), mmToPoints(paper.heightMm)]);
+      const pageSizeMm = pagePlacement.pageSizeMm;
+      const page = pdf.addPage([mmToPoints(pageSizeMm.widthMm), mmToPoints(pageSizeMm.heightMm)]);
 
       for (let imageIndex = startCardIndex; imageIndex < endCardIndex; imageIndex += 1) {
         const imageBytes = request.images[imageIndex];
@@ -840,9 +934,22 @@ export class LosslessPdfEngine {
         const xMm = trim.xMm;
         const topMm = trim.yMm;
         const xPoints = mmToPoints(xMm);
-        const yPoints = mmToPoints(paper.heightMm - topMm - card.heightMm);
+        const yPoints = mmToPoints(pagePlacement.pageSizeMm.heightMm - topMm - pagePlacement.cardSizeMm.heightMm);
+        const artworkXPoints = rotateCardArtwork ? 0 : xPoints;
+        const artworkYPoints = rotateCardArtwork ? 0 : yPoints;
+        const artworkTransform = rotateCardArtwork
+          ? sourceCardIsLandscape
+            ? [0, 1, -1, 0, xPoints + sourceHeightPoints, yPoints] as const
+            : [0, -1, 1, 0, xPoints, yPoints + sourceWidthPoints] as const
+          : undefined;
         const exactBytes = copyBytes(imageBytes);
 
+        if (artworkTransform) {
+          const [a, b, c, d, e, f] = artworkTransform;
+          page.pushOperators(pushGraphicsState(), concatTransformationMatrix(a, b, c, d, e, f));
+        }
+
+        try {
         const bleed = request.bleedResults?.[imageIndex];
         if (bleed?.status === "derived") {
           if (!Number.isFinite(bleed.bleedMm) || bleed.bleedMm < 0 || bleed.bleedMm > 3
@@ -854,7 +961,8 @@ export class LosslessPdfEngine {
           if (originalSha256 !== bleed.originalSha256) {
             throw new PdfExportError("The bleed derivative original image hash does not match the PDF input image.");
           }
-          if (bleed.trimSizeMm.widthMm !== card.widthMm || bleed.trimSizeMm.heightMm !== card.heightMm) {
+          if (bleed.trimSizeMm.widthMm !== card.widthMm
+            || bleed.trimSizeMm.heightMm !== card.heightMm) {
             throw new PdfExportError("The bleed derivative trim size does not match the PDF card format.");
           }
           if (bleed.preview.mimeType !== "image/png" || !bleed.preview.trimRectPx) {
@@ -889,15 +997,15 @@ export class LosslessPdfEngine {
           if (bleed.bleedMm > 0 && (
             xMm - bleed.bleedMm < -epsilonMm
             || topMm - bleed.bleedMm < -epsilonMm
-            || xMm + card.widthMm + bleed.bleedMm > paper.widthMm + epsilonMm
-            || topMm + card.heightMm + bleed.bleedMm > paper.heightMm + epsilonMm
+            || xMm + pagePlacement.cardSizeMm.widthMm + bleed.bleedMm > pageSizeMm.widthMm + epsilonMm
+            || topMm + pagePlacement.cardSizeMm.heightMm + bleed.bleedMm > pageSizeMm.heightMm + epsilonMm
           )) {
             throw new PdfExportError("The requested bleed would extend beyond the PDF page bounds.");
           }
 
           const bleedPoints = mmToPoints(bleed.bleedMm);
-          const pointsPerSourcePixelX = widthPoints / trimRectPx.width;
-          const pointsPerSourcePixelY = heightPoints / trimRectPx.height;
+          const pointsPerSourcePixelX = sourceWidthPoints / trimRectPx.width;
+          const pointsPerSourcePixelY = sourceHeightPoints / trimRectPx.height;
           if (bleed.bleedMm > 0 && (
             Math.min(trimRectPx.x, rightPaddingPx) * pointsPerSourcePixelX < bleedPoints - mmToPoints(epsilonMm)
             || Math.min(trimRectPx.y, bottomPaddingPx) * pointsPerSourcePixelY < bleedPoints - mmToPoints(epsilonMm)
@@ -906,17 +1014,17 @@ export class LosslessPdfEngine {
           }
           const expandedWidthPoints = previewWidthPx * pointsPerSourcePixelX;
           const expandedHeightPoints = previewHeightPx * pointsPerSourcePixelY;
-          const imageXPoints = xPoints - trimRectPx.x * pointsPerSourcePixelX;
-          const imageYPoints = yPoints - bottomPaddingPx * pointsPerSourcePixelY;
+          const imageXPoints = artworkXPoints - trimRectPx.x * pointsPerSourcePixelX;
+          const imageYPoints = artworkYPoints - bottomPaddingPx * pointsPerSourcePixelY;
           const clipRegions = [
             ...(bleed.bleedMm > 0 ? makeBleedClipRegions(
-              xPoints,
-              yPoints,
-              widthPoints,
-              heightPoints,
+              artworkXPoints,
+              artworkYPoints,
+              sourceWidthPoints,
+              sourceHeightPoints,
               bleedPoints,
             ) : []),
-            ...(bleed.roundedCorners ? [{ x: xPoints, y: yPoints, width: widthPoints, height: heightPoints }] : []),
+            ...(bleed.roundedCorners ? [{ x: artworkXPoints, y: artworkYPoints, width: sourceWidthPoints, height: sourceHeightPoints }] : []),
           ];
           if (clipRegions.length > 0) {
             await drawClippedBleedRaster(
@@ -939,10 +1047,10 @@ export class LosslessPdfEngine {
         if (format === "jpeg") {
           const image = await pdf.embedJpg(exactBytes);
           page.drawImage(image, {
-            x: xPoints,
-            y: yPoints,
-            width: widthPoints,
-            height: heightPoints,
+            x: artworkXPoints,
+            y: artworkYPoints,
+            width: sourceWidthPoints,
+            height: sourceHeightPoints,
           });
           continue;
         }
@@ -950,16 +1058,16 @@ export class LosslessPdfEngine {
         if (format === "png") {
           const png16 = parsePng16(exactBytes);
           if (png16) {
-            drawPng16(pdf, page, png16, imageIndex, xPoints, yPoints, widthPoints, heightPoints);
+            drawPng16(pdf, page, png16, imageIndex, artworkXPoints, artworkYPoints, sourceWidthPoints, sourceHeightPoints);
             continue;
           }
 
           const image = await pdf.embedPng(exactBytes);
           page.drawImage(image, {
-            x: xPoints,
-            y: yPoints,
-            width: widthPoints,
-            height: heightPoints,
+            x: artworkXPoints,
+            y: artworkYPoints,
+            width: sourceWidthPoints,
+            height: sourceHeightPoints,
           });
           continue;
         }
@@ -969,12 +1077,12 @@ export class LosslessPdfEngine {
         const warnings: string[] = [];
         drawSvg(
           page,
-          normalizeSvgForPhysicalSize(svg, widthPoints, heightPoints),
-          xPoints,
-          yPoints,
+          normalizeSvgForPhysicalSize(svg, sourceWidthPoints, sourceHeightPoints),
+          artworkXPoints,
+          artworkYPoints,
           {
-            width: widthPoints,
-            height: heightPoints,
+            width: sourceWidthPoints,
+            height: sourceHeightPoints,
             warningCallback: (message) => warnings.push(message),
           },
         );
@@ -982,12 +1090,15 @@ export class LosslessPdfEngine {
         if (warnings.length > 0) {
           throw new PdfExportError(`SVG contains unsupported content: ${warnings.join("; ")}`);
         }
+        } finally {
+          if (artworkTransform) page.pushOperators(popGraphicsState());
+        }
       }
 
       if (request.cutGuides) {
         drawCutGuides(
           page,
-          paper,
+          { ...effectivePaper, widthMm: pageSizeMm.widthMm, heightMm: pageSizeMm.heightMm },
           request.cutGuides,
           pagePlacement.slots.map((slot, localCardIndex) => ({
             trim: slot.trim,
@@ -995,6 +1106,7 @@ export class LosslessPdfEngine {
           })),
         );
       }
+      drawRegistrationMarks(page, pageSizeMm, request.registration);
     }
 
     return pdf.save();
@@ -1007,7 +1119,17 @@ export class LosslessPdfEngine {
       images,
       paperFormat: request.paperFormat,
       cardFormat: request.cardFormat,
+      pageOrientation: request.pageOrientation,
+      cardOrientation: request.cardOrientation,
+      marginsMm: request.marginsMm,
+      horizontalGapMm: request.horizontalGapMm,
+      verticalGapMm: request.verticalGapMm,
       cutGuides: request.cutGuides,
+      registration: request.registration,
+      templateGeometry: request.templateGeometry,
+      layoutRows: request.layoutRows,
+      layoutColumns: request.layoutColumns,
+      skippedSlotIndices: request.skippedSlotIndices,
     });
   }
 }

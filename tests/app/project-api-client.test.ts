@@ -5,7 +5,7 @@ describe("project API client", () => {
   it("creates a Project from a local snapshot without changing the empty-create call", async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ id: "project-1", revision: 1 }));
     const client = createProjectApiClient(fetcher as typeof fetch);
-    const snapshot = { projectSchemaVersion: 1, cards: [], settings: {} } as never;
+    const snapshot = { projectSchemaVersion: 2, cards: [], settings: {} } as never;
 
     await client.create(snapshot);
 
@@ -36,7 +36,7 @@ describe("project API client", () => {
     ));
     const client = createProjectApiClient(fetcher as typeof fetch);
 
-    await expect(client.save("project-1", 4, { projectSchemaVersion: 1, cards: [], settings: {} } as never))
+    await expect(client.save("project-1", 4, { projectSchemaVersion: 2, cards: [], settings: {} } as never))
       .rejects.toMatchObject<Partial<ProjectApiClientError>>({
         name: "ProjectApiClientError",
         code: "PROJECT_REVISION_CONFLICT",
@@ -47,7 +47,7 @@ describe("project API client", () => {
   it("uses the Project recovery endpoints for stage, promote, discard, and copy", async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ id: "project-1" }));
     const client = createProjectApiClient(fetcher as typeof fetch);
-    const snapshot = { projectSchemaVersion: 1, cards: [], settings: {} } as never;
+    const snapshot = { projectSchemaVersion: 2, cards: [], settings: {} } as never;
 
     await client.stageRecovery("project/one", 4, snapshot);
     await client.promoteRecovery("project/one");

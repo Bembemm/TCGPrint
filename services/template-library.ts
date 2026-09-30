@@ -120,6 +120,8 @@ function templateMetadata(metadata: TemplateMetadata): TemplateMetadata {
     orientation: metadata.orientation,
     ...(metadata.recommendedBleedMm === undefined ? {} : { recommendedBleedMm: metadata.recommendedBleedMm }),
     registrationType: metadata.registrationType,
+    ...(metadata.registrationConfig === undefined ? {} : { registrationConfig: metadata.registrationConfig }),
+    ...(metadata.templateGeometry === undefined ? {} : { templateGeometry: metadata.templateGeometry }),
   };
 }
 
@@ -133,6 +135,8 @@ function metadataForHash(version: TemplateVersionRecord): TemplateMetadata {
     orientation: version.orientation,
     ...(version.recommendedBleedMm === undefined ? {} : { recommendedBleedMm: version.recommendedBleedMm }),
     registrationType: version.registrationType,
+    ...(version.registrationConfig === undefined ? {} : { registrationConfig: version.registrationConfig }),
+    ...(version.templateGeometry === undefined ? {} : { templateGeometry: version.templateGeometry }),
   };
 }
 

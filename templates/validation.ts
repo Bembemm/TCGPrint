@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import { parseSafeXml } from "../import-engine/importers/xml";
 import { IMPORT_LIMITS } from "../import-engine/limits";
 import { sanitizeRelativeImportPath } from "../import-engine/source-path";
+import { parseRegistrationConfig } from "../core/registration";
+import { parseTemplateLayoutGeometry } from "../core/geometry";
+import { templatePhysicalFormats } from "./physical-formats";
 import type {
   TemplateCardFormat,
   TemplateFileExtension,
@@ -18,7 +21,7 @@ export const MAX_TEMPLATE_ARCHIVE_BYTES = 100 * 1024 * 1024;
 export const MAX_TEMPLATE_JSON_BYTES = 8 * 1024 * 1024;
 
 const METADATA_FIELDS = new Set([
-  "name", "source", "version", "paper", "cardFormat", "orientation", "recommendedBleedMm", "registrationType",
+  "name", "source", "version", "paper", "cardFormat", "orientation", "recommendedBleedMm", "registrationType", "registrationConfig", "templateGeometry",
 ]);
 const EXTENSIONS = new Set<TemplateFileExtension>(["studio3", "dxf", "svg", "json", "zip"]);
 const PAPERS = new Set<TemplatePaper>(["a4", "a3", "letter", "legal", "tabloid", "custom"]);
@@ -78,16 +81,41 @@ export function parseTemplateMetadata(value: unknown): TemplateMetadata {
   if (bleed !== undefined && (typeof bleed !== "number" || !Number.isFinite(bleed) || bleed < 0 || bleed > 3)) {
     invalidMetadata("Template metadata recommendedBleedMm must be a finite number between 0 and 3.");
   }
-  return {
+  const registrationType = enumValue(source.registrationType, "registrationType", REGISTRATION_TYPES);
+  const orientation = enumValue(source.orientation, "orientation", ORIENTATIONS);
+  let registrationConfig;
+  if (source.registrationConfig !== undefined) {
+    try { registrationConfig = parseRegistrationConfig(source.registrationConfig); }
+    catch (error) { invalidMetadata(`Template metadata registrationConfig is invalid. ${error instanceof Error ? error.message : ""}`); }
+    if (registrationConfig.type !== registrationType) {
+      invalidMetadata("Template metadata registrationConfig.type must match registrationType.");
+    }
+  } else if (registrationType === "custom") {
+    invalidMetadata("Template metadata custom registrationType requires explicit registrationConfig geometry.");
+  }
+  let templateGeometry;
+  if (source.templateGeometry !== undefined) {
+    try { templateGeometry = parseTemplateLayoutGeometry(source.templateGeometry); }
+    catch (error) { invalidMetadata(`Template metadata templateGeometry is invalid. ${error instanceof Error ? error.message : ""}`); }
+    if (templateGeometry.orientation !== orientation) {
+      invalidMetadata("Template metadata orientation must match templateGeometry.orientation.");
+    }
+  }
+  const metadata: TemplateMetadata = {
     name: cleanMetadataText(source.name, "name", 160),
     source: cleanMetadataText(source.source, "source", 240),
     version: cleanMetadataText(source.version, "version", 80),
     paper: enumValue(source.paper, "paper", PAPERS),
     cardFormat: enumValue(source.cardFormat, "cardFormat", CARD_FORMATS),
-    orientation: enumValue(source.orientation, "orientation", ORIENTATIONS),
+    orientation,
     ...(bleed !== undefined ? { recommendedBleedMm: bleed } : {}),
-    registrationType: enumValue(source.registrationType, "registrationType", REGISTRATION_TYPES),
+    registrationType,
+    ...(registrationConfig !== undefined ? { registrationConfig } : {}),
+    ...(templateGeometry !== undefined ? { templateGeometry } : {}),
   };
+  try { templatePhysicalFormats(metadata); }
+  catch (error) { invalidMetadata(error instanceof Error ? error.message : "Template physical formats are invalid."); }
+  return metadata;
 }
 
 function safeTemplateFileName(value: string): string {

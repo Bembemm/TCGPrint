@@ -10,7 +10,9 @@ import {
   type BleedDerivativeResult,
   type BleedResult,
 } from "../image-engine/bleed";
-import { MAGIC_STANDARD_CARD, PAPER_FORMATS, type CutGuideConfig } from "../core/geometry";
+import { MAGIC_STANDARD_CARD, PAPER_FORMATS, type CardFormat, type CutGuideConfig, type PaperFormat, type TemplateLayoutGeometryMm } from "../core/geometry";
+import type { PageMarginsMm, PageOrientation } from "../core/geometry";
+import type { RegistrationConfig } from "../core/registration";
 import { LosslessPdfEngine, PdfExportError } from "../pdf-engine/document";
 import { mpcArtworkCandidateId } from "../core/cards/ids";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../core/cards/limits";
@@ -21,6 +23,18 @@ export interface CardExportOptions {
   readonly bleedMm: number;
   readonly cutGuides: CutGuideConfig;
   readonly roundedCorners?: boolean;
+  readonly pageOrientation?: PageOrientation;
+  readonly cardOrientation?: PageOrientation;
+  readonly paperFormat?: PaperFormat;
+  readonly cardFormat?: CardFormat;
+  readonly marginsMm?: PageMarginsMm;
+  readonly horizontalGapMm?: number;
+  readonly verticalGapMm?: number;
+  readonly registration?: RegistrationConfig;
+  readonly templateGeometry?: TemplateLayoutGeometryMm;
+  readonly layoutRows?: number;
+  readonly layoutColumns?: number;
+  readonly skippedSlotIndices?: readonly number[];
 }
 
 export interface CardExportBleedDiagnostic {
@@ -117,6 +131,15 @@ export async function exportWorkingCardsWithDiagnostics(
   const bleedDiagnostics: CardExportBleedDiagnostic[] = [];
   const bleedEngine = new BleedEngine();
   const pdfEngine = new LosslessPdfEngine();
+  const paperFormat = options.paperFormat ?? PAPER_FORMATS.A4;
+  const cardFormat = options.cardFormat ?? MAGIC_STANDARD_CARD;
+  // Bleed is generated in the source artwork's coordinate frame. The PDF
+  // engine rotates the finished artwork and derivative together for card
+  // orientation, so these dimensions must remain the unrotated CardFormat.
+  const trimSizeMm = { widthMm: cardFormat.widthMm, heightMm: cardFormat.heightMm };
+  if (roundedCorners && cardFormat.cornerRadiusMm === undefined) {
+    throw new CardExportServiceError("INVALID_ROUNDED_CORNERS", "Rounded-corner bleed needs a card format with an explicit physical corner radius.");
+  }
 
   for (const card of [...cards].sort((a, b) => a.order - b.order)) {
     if (signal?.aborted) throw new CardExportServiceError("EXPORT_FAILED", "PDF export was cancelled.");
@@ -161,8 +184,7 @@ export async function exportWorkingCardsWithDiagnostics(
         throw new CardExportServiceError("UNSUPPORTED_FORMAT", "SVG artwork stays vector; raster bleed and rounded-corner derivatives are not supported for SVG.");
       }
       const policy = resolveBleedSourcePolicy({ source: candidate.source, format: original.format, metadata: candidate.metadata });
-      const trimSizeMm = { widthMm: MAGIC_STANDARD_CARD.widthMm, heightMm: MAGIC_STANDARD_CARD.heightMm };
-      const cornerRadiusMm = MAGIC_STANDARD_CARD.cornerRadiusMm;
+      const cornerRadiusMm = cardFormat.cornerRadiusMm;
       const key = createBleedCacheKey({
         originalSha256: hash,
         bleedMm: options.bleedMm,
@@ -219,8 +241,18 @@ export async function exportWorkingCardsWithDiagnostics(
       images: composedImages,
       bleedResults: composedBleeds,
       cutGuides: options.cutGuides,
-      paperFormat: PAPER_FORMATS.A4,
-      cardFormat: MAGIC_STANDARD_CARD,
+      paperFormat,
+      cardFormat,
+      pageOrientation: options.pageOrientation,
+      cardOrientation: options.cardOrientation,
+      marginsMm: options.marginsMm,
+      horizontalGapMm: options.horizontalGapMm,
+      verticalGapMm: options.verticalGapMm,
+      templateGeometry: options.templateGeometry,
+      registration: options.registration,
+      layoutRows: options.layoutRows,
+      layoutColumns: options.layoutColumns,
+      skippedSlotIndices: options.skippedSlotIndices,
     });
     return { pdfBytes, bleedDiagnostics };
   } catch (error) {
