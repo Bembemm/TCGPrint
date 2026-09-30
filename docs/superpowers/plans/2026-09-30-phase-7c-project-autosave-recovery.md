@@ -97,15 +97,15 @@
 - [x] Integrate queue lifecycle with project activation/deletion and use snapshots from the existing serializer.
 - [x] Present recovery choice before loading project cards/settings; use the existing restore gate after the user chooses.
 - [x] Run all focused Project tests, including API client, repository, service, session, panel, and restore gate.
-- [ ] Commit: `feat(projects): integrate autosave and recovery UX`.
+- [x] Commit: `feat(projects): integrate autosave and recovery UX` (`96a51e1`).
 
 ### Task 4: Full validation and branch audit
 
 **Files:**
 - Review the complete branch diff; change files only for findings that violate the spec or block acceptance.
 
-- [ ] Run the focused Project tests and the full `npm test` suite.
-- [ ] Run `npm run typecheck`, `npm run build`, and `git diff --check`.
-- [ ] Start the local app and perform a browser smoke of create/edit/autosave/reload/recovery/open; capture observable evidence where the runtime permits.
-- [ ] Review the complete diff against the plan, ADRs, and preserved 7A/7B guarantees; fix blocking findings before completion.
-- [ ] Commit any final fix separately and rerun the relevant gates.
+- [x] Run the focused Project tests and the full `npm test` suite (53 files passed; 601 tests passed, 1 skipped).
+- [x] Run `npm run typecheck`, `npm run build`, and `git diff --check`.
+- [x] Start the local app and perform a browser smoke of create/edit/autosave/reload/recovery/open; verify recovery decisions and absence of provider requests on open.
+- [x] Review the complete diff against the plan, ADRs, and preserved 7A/7B guarantees; blocking findings were fixed before completion.
+- [x] No additional final fix was required after the review; all gates passed on the implementation commit.
