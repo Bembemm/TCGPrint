@@ -155,9 +155,9 @@
 
 **Files:** Review the entire Phase 8 diff; add only fixes required by findings.
 
-- [ ] Run focused URL adapter tests.
-- [ ] Run `npm test`, `npm run typecheck`, `npm run build`, and `git diff --check`; record exact results.
-- [ ] Smoke live Scryfall link parsing and, where reachable, Archidekt, CubeCobra, MTGTop8, mtg.wtf, and a direct image/TXT URL; report any transient external failures accurately.
-- [ ] Review the full diff against `IMPLEMENTATION_PLAN.md`, ADRs, Importer/Provider separation, and phase scope; fix blocking findings.
-- [ ] Confirm `main` remains at `cdcb69c1dce8a48254189fc74a1d29c7a1df7a24`, feature branch only contains coherent commits, and no merge was made.
+- [x] Run focused URL adapter tests.
+- [x] Run `npm test` (62 files, 676 passed, 1 skipped), `npm run typecheck`, `git diff --check`, and production build. Default Turbopack build hit the environment's `Operation not permitted` port-binding failure; `npm run build -- --webpack` completed successfully with the existing Tesseract `createRequire` bundling warning.
+- [x] Smoke live Scryfall link parsing, Archidekt, CubeCobra, MTGTop8, mtg.wtf, and a direct image URL; all returned zero import errors. A separate direct plain-text URL was not live-smoked; deterministic TXT fallback tests pass.
+- [x] Review the full diff against `IMPLEMENTATION_PLAN.md`, ADRs, Importer/Provider separation, and phase scope; fix blocking findings.
+- [x] Confirm `main` remains at `cdcb69c1dce8a48254189fc74a1d29c7a1df7a24`, feature branch only contains coherent commits, and no merge was made.
 - [ ] Push only `feature/fase-8-url-adapters` to `origin`.

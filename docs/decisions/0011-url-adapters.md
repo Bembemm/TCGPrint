@@ -20,7 +20,7 @@ The requested sites do not expose one common protocol. Live, unauthenticated GET
 - Uploaded file `Content-Type` is passed to the existing detector as evidence alongside the bytes and filename.
 - Match adapters by exact host and an explicit path grammar. A known host with an unsupported route returns a typed, user-readable import error.
 - A URL adapter is an importer: it identifies or parses user-selected content and returns existing import entries or normalized source bytes for existing importers. It never searches/downloading card artwork and never implements `ArtworkProvider`.
-- The shared transport is GET-only and bounds timeout, redirects, response bytes, and body reads. A failing URL becomes an error for that source; sibling files and text continue.
+- The shared transport is GET-only and bounds timeout, redirects, response bytes, and body reads. It resolves and validates public addresses, then pins the Node HTTP connection to those addresses while preserving the URL host for TLS. Requests send an identifying TCGPrint User-Agent. A failing URL becomes an error for that source; sibling files and text continue.
 - For unknown hosts, attempt only a direct import file. Route by response bytes and `Content-Type`; an extension can refine the filename but cannot decide the importer by itself.
 - Accept supported raster/SVG, TXT, CSV/TSV, JSON, XML, and ZIP payloads through existing importers. Reject HTML clearly unless an explicit adapter owns that site and protocol.
 - Keep HTTP probes out of CI. Adapter tests use synthetic payloads and injected fetch/DNS implementations.
@@ -54,7 +54,7 @@ These domains are still identified explicitly so the user gets a clear unsupport
 
 ## Live probe evidence
 
-Low-volume GET-only probes used an identifiable `TCGPrint/0.1` User-Agent, no cookies, credentials, writes, or challenge bypass. Sample URLs and response summaries:
+Low-volume GET-only probes used an identifiable TCGPrint User-Agent, no cookies, credentials, writes, or challenge bypass. Sample URLs and response summaries:
 
 | Service | Probe | Observation |
 | --- | --- | --- |
@@ -63,9 +63,12 @@ Low-volume GET-only probes used an identifiable `TCGPrint/0.1` User-Agent, no co
 | CubeCobra | `GET /cube/api/cubeJSON/obc` | 200, `application/json`, 1,540,533 bytes, board objects present |
 | MTGTop8 | `GET /dec?d=298009&f=Limited_WB_by_captainobv` | 200, `text/plain;charset=ISO-8859-1`, attachment `.mwDeck` |
 | mtg.wtf | `GET /deck/m19/red-white-deck/download` | 200, `text/plain; charset=utf-8`, decklist |
+| Scryfall direct image | `GET /cards/m21/265`, then direct `image_uris.normal` | 200 API JSON; direct URL imported as 200 `image/jpeg` with the TCGPrint User-Agent |
 | Moxfield | public API deck GET | 403, HTML Cloudflare challenge |
 | Deckstats | public deck GET | 403, HTML Cloudflare challenge |
 | MTGGoldfish | public deck GET | 403, HTML Cloudflare challenge |
 | TappedOut | public deck GET | 403, HTML Cloudflare challenge |
 
-The evidence establishes behavior only at probe time, not an availability or schema guarantee. Synthetic fixtures are used for deterministic CI tests; no live commercial deck payload is committed.
+The live import smoke completed on 2026-09-30 through `importFiles`: Scryfall produced 1 card hint; Archidekt produced 81 entries; CubeCobra produced 594 entries; MTGTop8 produced 23 entries; mtg.wtf produced 26 entries; and the unknown-host direct image URL produced one JPEG custom-card asset. Every smoke input returned zero import errors. The Scryfall image host rejected Node's generic User-Agent with HTTP 400; it accepted the identifying TCGPrint User-Agent used by the final transport.
+
+The evidence establishes behavior only at probe time, not an availability or schema guarantee. The public direct image URL was smoke-tested; no separate unknown-host plain-text file URL was used for live smoke. TXT routing and related response MIME cases are covered by synthetic fixtures. Synthetic fixtures are used for deterministic CI tests; no live commercial deck payload is committed.

@@ -1,5 +1,8 @@
 import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { Readable } from "node:stream";
 import { ImportCancelledError, ImportFailureError } from "../errors";
 import type { UrlAdapterContext } from "./types";
 
@@ -100,7 +103,7 @@ function normalizedHost(url: URL): string {
   return url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
 }
 
-async function assertPublicHost(url: URL, resolver: UrlAdapterContext["resolveHost"], signal: AbortSignal, isRedirect: boolean): Promise<void> {
+async function assertPublicHost(url: URL, resolver: UrlAdapterContext["resolveHost"], signal: AbortSignal, isRedirect: boolean): Promise<readonly string[]> {
   const blockedCode = isRedirect ? "URL_REDIRECT_BLOCKED" : "URL_HOST_BLOCKED";
   const hostname = normalizedHost(url);
   if (!hostname || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) {
@@ -108,7 +111,7 @@ async function assertPublicHost(url: URL, resolver: UrlAdapterContext["resolveHo
   }
   if (isIP(hostname)) {
     if (!ipPublic(hostname)) throw urlFailure(blockedCode, "URL points to a private or reserved IP address, which is blocked.");
-    return;
+    return [hostname];
   }
 
   let addresses: readonly string[];
@@ -124,6 +127,46 @@ async function assertPublicHost(url: URL, resolver: UrlAdapterContext["resolveHo
   if (addresses.length === 0 || addresses.some((address) => !ipPublic(address))) {
     throw urlFailure(blockedCode, "URL resolves to a private or reserved IP address, which is blocked.");
   }
+  return addresses;
+}
+
+function fetchPinned(url: URL, init: RequestInit, vettedAddresses: readonly string[]): Promise<Response> {
+  return new Promise<Response>((resolve, reject) => {
+    const addresses = vettedAddresses.map((address) => ({ address, family: isIP(address) }));
+    const lookupPinned: LookupFunction = (_hostname, options, callback) => {
+      if (options.all) callback(null, addresses);
+      else callback(null, addresses[0]!.address, addresses[0]!.family);
+    };
+    const requestOptions = {
+      method: init.method ?? "GET",
+      headers: Object.fromEntries(new Headers(init.headers).entries()),
+      lookup: lookupPinned,
+    };
+    const receive = (incoming: import("node:http").IncomingMessage) => {
+      const status = incoming.statusCode ?? 502;
+      if (status === 101) {
+        incoming.destroy();
+        request.destroy(new Error("Remote server attempted an unsupported protocol upgrade."));
+        return;
+      }
+      const headers = new Headers();
+      for (const [key, value] of Object.entries(incoming.headers)) {
+        if (value === undefined) continue;
+        headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+      }
+      const body = [204, 205, 304].includes(status) ? null : Readable.toWeb(incoming) as ReadableStream<Uint8Array>;
+      resolve(new Response(body, { status, statusText: incoming.statusMessage, headers }));
+    };
+    const request = url.protocol === "https:"
+      ? httpsRequest(url, requestOptions, receive)
+      : httpRequest(url, requestOptions, receive);
+    const abort = () => request.destroy(new DOMException("Aborted", "AbortError"));
+    if (init.signal?.aborted) abort();
+    else init.signal?.addEventListener("abort", abort, { once: true });
+    request.once("error", reject);
+    request.once("close", () => init.signal?.removeEventListener("abort", abort));
+    request.end();
+  });
 }
 
 function withSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -199,21 +242,29 @@ export async function fetchUrlPayload(value: string | URL, context: UrlAdapterCo
   const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
   const abortFromCaller = () => controller.abort();
   context.signal?.addEventListener("abort", abortFromCaller, { once: true });
-  const fetchImpl = context.fetchImpl ?? fetch;
   let current = initial;
   let isRedirect = false;
 
   try {
     for (let redirects = 0; ; redirects += 1) {
-      await withSignal(assertPublicHost(current, context.resolveHost, controller.signal, isRedirect), controller.signal);
+      const vettedAddresses = await withSignal(assertPublicHost(current, context.resolveHost, controller.signal, isRedirect), controller.signal);
       let response: Response;
       try {
-        response = await withSignal(fetchImpl(current, {
+        const requestOptions: RequestInit = {
           method: "GET",
-          headers: { accept: "text/html, application/xhtml+xml, image/*, text/plain, text/csv, text/tab-separated-values, application/json, application/xml, text/xml, application/zip, application/octet-stream;q=0.9" },
+          headers: {
+            accept: "text/html, application/xhtml+xml, image/*, text/plain, text/csv, text/tab-separated-values, application/json, application/xml, text/xml, application/zip, application/octet-stream;q=0.9",
+            "user-agent": "TCGPrint/0.1.0 (+https://github.com/Bembemm/TCGPrint)",
+          },
           redirect: "manual",
           signal: controller.signal,
-        }), controller.signal);
+        };
+        response = await withSignal(
+          context.fetchImpl
+            ? context.fetchImpl(current, requestOptions)
+            : fetchPinned(current, requestOptions, vettedAddresses),
+          controller.signal,
+        );
       } catch (error) {
         if (controller.signal.aborted) throw error;
         throw urlFailure("URL_HTTP_ERROR", "The remote server could not be reached.", error);

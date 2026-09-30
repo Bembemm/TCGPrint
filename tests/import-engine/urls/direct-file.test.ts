@@ -90,6 +90,17 @@ describe("direct URL file imports", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it("sends an application-identifying User-Agent for public file hosts", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async (_input, init) => {
+      expect(new Headers(init?.headers).get("User-Agent")).toBe("TCGPrint/0.1.0 (+https://github.com/Bembemm/TCGPrint)");
+      return new Response("1 Sol Ring", { headers: { "content-type": "text/plain" } });
+    });
+    const result = await importFiles({ text: "https://files.example.invalid/deck.txt" }, urlOptions(fetchImpl));
+
+    expect(result.report.errors).toEqual([]);
+    expect(result.entries[0]?.cardHint?.name).toBe("Sol Ring");
+  });
+
   it("reports HTTP failures and keeps sibling file imports available", async () => {
     const fetchImpl = fakeFetch(new Response("blocked", { status: 403, headers: { "content-type": "text/plain" } }));
     const result = await importFiles({
