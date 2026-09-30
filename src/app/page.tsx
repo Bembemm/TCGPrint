@@ -168,7 +168,7 @@ export default function HomePage() {
         <div className="panel-heading">
           <div>
             <h2 id="inputs-heading">Entradas</h2>
-            <p>Imagens, listas, arquivos estruturados, ZIPs ou texto colado.</p>
+            <p>Imagens, listas, arquivos estruturados, ZIPs, texto colado, URLs de sites suportados e arquivos diretos.</p>
           </div>
           <button className="button secondary" type="button" onClick={() => {
             setFiles([]);
@@ -183,7 +183,7 @@ export default function HomePage() {
           }}>Limpar</button>
         </div>
 
-        <label className="field-label" htmlFor="decklist">Cole uma decklist</label>
+        <label className="field-label" htmlFor="decklist">Cole uma decklist ou URL</label>
         <textarea
           id="decklist"
           value={text}

@@ -329,6 +329,7 @@ export async function handleCardImport(request: Request, workbench: CardWorkbenc
       return {
         filename: file.name.split(/[\\/]/).pop() || "upload",
         bytes: new Uint8Array(await file.arrayBuffer()),
+        ...(file.type ? { mediaType: file.type.slice(0, 128) } : {}),
         ...(sourcePath ? { sourcePath, kind: "folder-file" as const } : {}),
       };
     }));

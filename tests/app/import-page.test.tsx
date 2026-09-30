@@ -7,7 +7,8 @@ import CardIdentityWorkbench from "../../src/app/card-identity-workbench";
 describe("import workbench page", () => {
   it("exposes paste, file, folder, report and local PDF controls", () => {
     const markup = renderToStaticMarkup(createElement(HomePage));
-    expect(markup).toContain("Cole uma decklist");
+    expect(markup).toContain("Cole uma decklist ou URL");
+    expect(markup).toContain("URLs de sites suportados e arquivos diretos");
     expect(markup).toContain("Selecionar arquivos");
     expect(markup).toContain("Selecionar pasta");
     expect(markup).toContain("Arraste arquivos aqui");

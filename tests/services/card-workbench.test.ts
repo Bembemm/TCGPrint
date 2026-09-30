@@ -124,6 +124,21 @@ describe("card workbench services", () => {
     expect(result.workingCards).toHaveLength(3);
   });
 
+  it("imports a Scryfall card URL through the Working Set route without calling an artwork provider", async () => {
+    const fetchImpl = vi.fn(async () => new Response("unexpected network request", { status: 500 }));
+    const { workbench } = await setup(fetchImpl as typeof fetch);
+    const form = new FormData();
+    form.set("text", "https://scryfall.com/card/m21/265/island");
+
+    const response = await handleCardImport(new Request("http://localhost/api/cards/import", { method: "POST", body: form }), workbench);
+    expect(response.status).toBe(200);
+    const imported = await response.json() as WorkingSetImportResult;
+
+    expect(imported.workingCards[0]).toMatchObject({ quantity: 1, identityHints: { setCode: "m21", collectorNumber: "265" } });
+    expect(imported.report.sources[0]).toMatchObject({ kind: "url", adapterId: "scryfall", sourceUrl: "https://scryfall.com/card/m21/265/island" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("registers upload bytes once by SHA-256 and returns path-free WorkingCard DTOs", async () => {
     const { root, workbench } = await setup();
     const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());

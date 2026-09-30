@@ -34,6 +34,7 @@ export async function POST(request: Request): Promise<Response> {
       return {
         filename: file.name.split(/[\\/]/).pop() || file.name,
         bytes: new Uint8Array(await file.arrayBuffer()),
+        ...(file.type ? { mediaType: file.type.slice(0, 128) } : {}),
         ...(sourcePath ? { sourcePath, kind: "folder-file" as const } : {}),
       };
     }));

@@ -38,6 +38,16 @@ export interface SafeImportIssue {
 
 export interface SafeImportReport {
   readonly summary: ImportReport["summary"];
+  readonly sources: readonly {
+    readonly id: string;
+    readonly kind: string;
+    readonly filename?: string;
+    readonly originalFormat?: string;
+    readonly mediaType?: string;
+    readonly sourceUrl?: string;
+    readonly adapterId?: string;
+    readonly sizeBytes: number;
+  }[];
   readonly selectedImporters: readonly { readonly sourceId: string; readonly kind: string }[];
   readonly warnings: readonly SafeImportIssue[];
   readonly errors: readonly SafeImportIssue[];
@@ -97,7 +107,26 @@ function fileBaseName(value?: string): string | undefined {
   return name || undefined;
 }
 
-function safeReport(report: ImportReport): SafeImportReport {
+function safeReportUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/(?:password|passwd|token|secret|signature|^sig$|auth|api[_-]?key|access[_-]?key|credential|session|bearer)/i.test(key)) {
+        url.searchParams.set(key, "[redacted]");
+      }
+    }
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeReport(result: ImportResult): SafeImportReport {
+  const { report } = result;
   const safeMessage = (message: string) => message
     .replace(/[A-Za-z]:[\\/][^\s,;]+/g, "[caminho]")
     .replace(/(^|[\s,(])(?:\.\.?[\\/]|[^\s,;]+[\\/])[^\s,;]+/g, "$1[asset]")
@@ -111,6 +140,19 @@ function safeReport(report: ImportReport): SafeImportReport {
   });
   return {
     summary: report.summary,
+    sources: result.sources.map((source) => {
+      const sourceUrl = source.sourceUrl ? safeReportUrl(source.sourceUrl) : undefined;
+      return {
+        id: source.id,
+        kind: source.kind,
+        ...(fileBaseName(source.filename) ? { filename: fileBaseName(source.filename) } : {}),
+        ...(source.originalFormat ? { originalFormat: source.originalFormat.slice(0, 80) } : {}),
+        ...(source.mediaType ? { mediaType: source.mediaType.slice(0, 128) } : {}),
+        ...(sourceUrl ? { sourceUrl } : {}),
+        ...(source.adapterId ? { adapterId: source.adapterId.slice(0, 64) } : {}),
+        sizeBytes: source.sizeBytes,
+      };
+    }),
     selectedImporters: report.selectedImporters.map((item) => ({ ...item })),
     warnings: report.warnings.map(issue),
     errors: report.errors.map(issue),
@@ -326,6 +368,7 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
           return {
             filename: fileBaseName(file.filename) ?? "upload",
             bytes: file.bytes,
+            ...(file.mediaType ? { mediaType: file.mediaType.slice(0, 128) } : {}),
             ...(sourcePath ? { sourcePath, kind: "folder-file" as const } : {}),
           };
         }) } : {}),
@@ -335,7 +378,10 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
         ...(request.csvMappings ? { csvMappings: request.csvMappings } : {}),
         ...(request.jsonMappings ? { jsonMappings: request.jsonMappings } : {}),
       };
-      const result = await importFiles(sanitizedRequest, { signal: callOptions.signal });
+      const result = await importFiles(sanitizedRequest, {
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+        ...(callOptions.signal ? { signal: callOptions.signal } : {}),
+      });
       const uploadByImportId = new Map<string, ArtworkCandidate>();
       for (const asset of listImportedAssets(result.entries)) {
         if (!asset.originalBytes) continue;
@@ -348,7 +394,7 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
         uploadByImportId.set(asset.id, candidate);
       }
       const workingCards = createWorkingSet(result).map((card) => remapImportedIds(card, uploadByImportId));
-      return { workingCards, report: safeReport(result.report), providerHealth: catalog.getProviderHealth() };
+      return { workingCards, report: safeReport(result), providerHealth: catalog.getProviderHealth() };
     },
 
     async autocompleteCards(query, callOptions = {}) {

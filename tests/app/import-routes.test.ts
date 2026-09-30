@@ -207,6 +207,48 @@ describe("minimal import workbench API", () => {
     expect(JSON.stringify(json)).not.toContain("originalBytes");
   });
 
+  it("imports a pasted Scryfall URL through the existing preview input and redacts its query", async () => {
+    const form = new FormData();
+    form.set("text", "https://scryfall.com/card/m21/265/island?token=private#fragment");
+    const response = await previewPost(new Request("http://localhost/api/import/preview", { method: "POST", body: form }));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+
+    expect(json.sources[0]).toMatchObject({
+      kind: "url",
+      adapterId: "scryfall",
+      sourceUrl: "https://scryfall.com/card/m21/265/island?token=%5Bredacted%5D",
+    });
+    expect(json.entries[0]).toMatchObject({ kind: "deck-card", cardHint: { setCode: "m21", collectorNumber: "265" } });
+    expect(JSON.stringify(json)).not.toContain("private");
+    expect(JSON.stringify(json)).not.toContain("fragment");
+  });
+
+  it("isolates an unsupported site URL beside a valid uploaded decklist", async () => {
+    const form = new FormData();
+    form.set("text", "https://www.moxfield.com/decks/example");
+    form.append("files", new File(["1 Sol Ring\n2 Island"], "valid.txt", { type: "text/plain" }));
+    const response = await previewPost(new Request("http://localhost/api/import/preview", { method: "POST", body: form }));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+
+    expect(json.report.errors).toMatchObject([{ code: "URL_UNSUPPORTED" }]);
+    expect(json.entries.map((entry: { cardHint?: { name?: string } }) => entry.cardHint?.name)).toEqual(["Sol Ring", "Island"]);
+    expect(json.report.summary).toMatchObject({ totalInputs: 2, deckEntries: 2, errors: 1 });
+  });
+
+  it("passes uploaded Content-Type to the generic importer and source preview", async () => {
+    const form = new FormData();
+    form.append("files", new File(['{"cards":[{"name":"Sol Ring","quantity":1}]}'], "cards.bin", { type: "application/json" }));
+    const response = await previewPost(new Request("http://localhost/api/import/preview", { method: "POST", body: form }));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+
+    expect(json.sources[0]).toMatchObject({ kind: "file", filename: "cards.bin", mediaType: "application/json" });
+    expect(json.report.selectedImporters[0]).toMatchObject({ kind: "json" });
+    expect(json.entries[0]).toMatchObject({ kind: "deck-card", cardHint: { name: "Sol Ring" } });
+  });
+
   it("returns image metadata without echoing original upload bytes", async () => {
     const form = new FormData();
     const fileBuffer = new ArrayBuffer(svgBytes.byteLength);
