@@ -201,6 +201,38 @@ describe("direct URL file imports", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks direct requests to the reserved 192.0.2.0/24 range before fetching", async () => {
+    const { result, fetchImpl } = await importUrl(
+      "http://192.0.2.1/deck.txt",
+      new Response("1 Sol Ring", { headers: { "content-type": "text/plain" } }),
+    );
+
+    expect(result.report.errors).toMatchObject([{ code: "URL_HOST_BLOCKED" }]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("blocks redirects to the reserved 192.0.2.0/24 range before following them", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, {
+      status: 302,
+      headers: { location: "http://192.0.2.1/admin" },
+    })) as unknown as typeof fetch;
+    const { result } = await importUrl("https://files.example.invalid/deck.txt", new Response(), { fetchImpl });
+
+    expect(result.report.errors).toMatchObject([{ code: "URL_REDIRECT_BLOCKED" }]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows a direct-file request to a public IPv4 address", async () => {
+    const { result, fetchImpl } = await importUrl(
+      "http://93.184.216.34/deck.txt",
+      new Response("1 Sol Ring", { headers: { "content-type": "text/plain" } }),
+    );
+
+    expect(result.report.errors).toEqual([]);
+    expect(result.entries[0]?.cardHint?.name).toBe("Sol Ring");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("blocks private DNS answers for direct-file hosts", async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     const result = await importFiles({ text: "https://files.example.invalid/deck.txt" }, {
