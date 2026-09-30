@@ -3,21 +3,26 @@ import { resolveUrlAdapter } from "../../../import-engine/urls/registry";
 import { ImportFailureError } from "../../../import-engine/errors";
 import type { UrlAdapter } from "../../../import-engine/urls/types";
 
-const knownSites = [
-  ["https://scryfall.com/card/war/235", "scryfall"],
+const knownUnsupportedSites = [
   ["https://www.moxfield.com/decks/abc", "moxfield"],
   ["https://archidekt.com/decks/7031486", "archidekt"],
   ["https://cubecobra.com/cube/overview/obc", "cubecobra"],
   ["https://deckstats.net/decks/1/0", "deckstats"],
   ["https://www.mtggoldfish.com/deck/844544", "mtggoldfish"],
-  ["https://www.mtgtop8.com/event?d=298009", "mtgtop8"],
   ["https://tappedout.net/mtg-decks/example/", "tappedout"],
-  ["https://mtg.wtf/deck/m19/red-white-deck", "mtg-wtf"],
 ] as const;
 
 describe("URL adapter registry", () => {
-  it.each(knownSites)("recognizes the known site %s", (value, siteId) => {
+  it.each(knownUnsupportedSites)("recognizes the known unsupported site %s", (value, siteId) => {
     expect(resolveUrlAdapter(value)).toMatchObject({ kind: "known-unsupported", siteId });
+  });
+
+  it.each([
+    ["https://scryfall.com/card/war/235", "scryfall"],
+    ["https://mtg.wtf/deck/m19/red-white-deck", "mtg-wtf"],
+    ["https://www.mtgtop8.com/event?d=298009", "mtgtop8"],
+  ])("resolves an implemented protocol for %s", (value, adapterId) => {
+    expect(resolveUrlAdapter(value)).toMatchObject({ kind: "adapter", adapter: { id: adapterId } });
   });
 
   it("matches a supported adapter only on its explicit hostname and path", () => {
@@ -42,6 +47,8 @@ describe("URL adapter registry", () => {
 
   it("treats unknown HTTP hosts as possible direct files", () => {
     expect(resolveUrlAdapter("https://files.example.invalid/cards.csv")).toEqual({ kind: "direct-file" });
+    expect(resolveUrlAdapter("https://scryfall.com.attacker.invalid/card/war/235")).toEqual({ kind: "direct-file" });
+    expect(resolveUrlAdapter("https://api.scryfall.com/cards/war/235")).toMatchObject({ kind: "known-unsupported", siteId: "scryfall" });
   });
 
   it.each(["https://", "https://[::1", "not a URL"])("rejects malformed URL %s with a typed failure", (value) => {

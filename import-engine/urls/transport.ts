@@ -210,7 +210,7 @@ export async function fetchUrlPayload(value: string | URL, context: UrlAdapterCo
       try {
         response = await withSignal(fetchImpl(current, {
           method: "GET",
-          headers: { accept: "image/*, text/plain, text/csv, text/tab-separated-values, application/json, application/xml, text/xml, application/zip, application/octet-stream;q=0.9" },
+          headers: { accept: "text/html, application/xhtml+xml, image/*, text/plain, text/csv, text/tab-separated-values, application/json, application/xml, text/xml, application/zip, application/octet-stream;q=0.9" },
           redirect: "manual",
           signal: controller.signal,
         }), controller.signal);

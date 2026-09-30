@@ -10,6 +10,8 @@ import { importGenericXml, importMpcAutofillXml } from "./importers/xml";
 import { expandZipSource } from "./zip";
 import { importDirectFileUrl } from "./urls/direct-file";
 import { resolveUrlAdapter } from "./urls/registry";
+import { URL_ADAPTERS } from "./urls/adapters";
+import { DEFAULT_MAX_URL_RESPONSE_BYTES, sanitizeUrlForReport } from "./urls/transport";
 import type {
   ImportCandidate,
   ImportDetection,
@@ -263,21 +265,58 @@ export async function importFiles(
       try {
         const sourceUrl = source.originalText?.trim();
         if (!sourceUrl) throw new ImportFailureError("URL input must contain a complete URL string.", "URL_INVALID", source.id);
-        const resolution = resolveUrlAdapter(sourceUrl);
+        const resolution = resolveUrlAdapter(sourceUrl, URL_ADAPTERS);
         if (resolution.kind === "known-unsupported") {
           throw new ImportFailureError(resolution.message, "URL_UNSUPPORTED", source.id);
         }
-        const result = await importDirectFileUrl(sourceUrl, {
+        const context = {
           ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
           ...(options.resolveHost ? { resolveHost: options.resolveHost } : {}),
           ...(options.signal ? { signal: options.signal } : {}),
           ...(options.urlTimeoutMs !== undefined ? { timeoutMs: options.urlTimeoutMs } : {}),
           ...(options.maxUrlResponseBytes !== undefined ? { maxResponseBytes: options.maxUrlResponseBytes } : {}),
           sourceId: source.id,
-        });
-        if (result.kind !== "source") {
-          throw new ImportFailureError("Direct URL response did not produce a file source.", "URL_ADAPTER_PAYLOAD", source.id);
+        };
+        const result = resolution.kind === "adapter"
+          ? await resolution.adapter.import(new URL(sourceUrl), context)
+          : await importDirectFileUrl(sourceUrl, context);
+        const reportedSourceUrl = sanitizeUrlForReport(result.sourceUrl);
+        if (reportedSourceUrl === "[invalid URL]") {
+          throw new ImportFailureError("URL adapter returned an invalid source URL.", "URL_ADAPTER_PAYLOAD", source.id);
         }
+        if (result.kind === "entries") {
+          const metadata: Readonly<Record<string, unknown>> = { ...(result.metadata ?? {}), ...(resolution.kind === "adapter" ? { adapterId: resolution.adapter.id } : {}) };
+          const filename = typeof metadata.sourceFilename === "string" ? metadata.sourceFilename : `${resolution.kind === "adapter" ? resolution.adapter.id : "url"}-import`;
+          const mediaType = typeof metadata.responseMediaType === "string" ? metadata.responseMediaType : undefined;
+          const responseBytes = metadata.responseBytes;
+          if (responseBytes !== undefined && (!Number.isSafeInteger(responseBytes) || (responseBytes as number) < 0 || (responseBytes as number) > (options.maxUrlResponseBytes ?? DEFAULT_MAX_URL_RESPONSE_BYTES))) {
+            throw new ImportFailureError("URL adapter returned an invalid or oversized response size.", "URL_ADAPTER_PAYLOAD", source.id);
+          }
+          currentSource = {
+            id: source.id,
+            kind: "url",
+            filename,
+            order: source.order,
+            originalFormat: typeof metadata.importer === "string" ? metadata.importer : resolution.kind === "adapter" ? resolution.adapter.id : "url",
+            ...(mediaType ? { mediaType } : {}),
+            sourceUrl: reportedSourceUrl,
+            ...(resolution.kind === "adapter" ? { adapterId: resolution.adapter.id } : {}),
+            sizeBytes: typeof metadata.responseBytes === "number" ? metadata.responseBytes : source.sizeBytes,
+            metadata,
+          };
+          if (result.entries.length === 0 || result.entries.length > limits.maxCsvRows || new Set(result.entries.map((entry) => entry.id)).size !== result.entries.length || result.entries.some((entry) => !entry.id || entry.sourceId !== source.id || !Number.isSafeInteger(entry.quantity) || entry.quantity <= 0)) {
+            throw new ImportFailureError("URL adapter returned entries outside the Universal Import contract.", "URL_ADAPTER_PAYLOAD", source.id);
+          }
+          const sourceIndex = allSources.findIndex((candidateSource) => candidateSource.id === source.id);
+          if (sourceIndex >= 0) allSources[sourceIndex] = currentSource;
+          detections.push(detection);
+          selectedImporters.push({ sourceId: source.id, kind: "url" });
+          for (const entry of result.entries) entries.push({ ...entry, order: entries.length });
+          warnings.push(...(result.warnings ?? []).map((item) => ({ ...item, sourceId: source.id, sourceFilename: filename })));
+          return;
+        }
+        const adapterId = resolution.kind === "adapter" ? resolution.adapter.id : undefined;
+        const metadata = { ...(result.metadata ?? {}), ...(adapterId ? { adapterId } : {}) };
         currentSource = {
           id: source.id,
           kind: "url",
@@ -285,11 +324,12 @@ export async function importFiles(
           order: source.order,
           originalFormat: sourceExtension(result.filename),
           mediaType: result.mediaType,
-          sourceUrl: result.sourceUrl,
+          sourceUrl: reportedSourceUrl,
+          ...(adapterId ? { adapterId } : {}),
           sizeBytes: result.bytes.byteLength,
           originalBytes: result.bytes,
           sha256: hashBytes(result.bytes),
-          metadata: result.metadata,
+          metadata,
         };
         const sourceIndex = allSources.findIndex((candidateSource) => candidateSource.id === source.id);
         if (sourceIndex >= 0) allSources[sourceIndex] = currentSource;
@@ -299,7 +339,10 @@ export async function importFiles(
         if (error instanceof ImportCancelledError) throw error;
         detections.push(detection);
         selectedImporters.push({ sourceId: source.id, kind: "url" });
-        errors.push(errorFrom(error, source));
+        const urlError = error instanceof ImportFailureError
+          ? error
+          : new ImportFailureError("URL adapter failed while validating or parsing its response.", "URL_ADAPTER_PAYLOAD", source.id, undefined, error instanceof Error ? { cause: error } : undefined);
+        errors.push(errorFrom(urlError, source));
         return;
       }
     }
