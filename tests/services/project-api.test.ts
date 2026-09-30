@@ -390,7 +390,7 @@ describe("project API service", () => {
     const projects = setup();
     const created = projects.create(snapshot());
     const compactBody = new TextEncoder().encode(JSON.stringify({ expectedRevision: 1, snapshot: snapshot() }));
-    const bytes = new Uint8Array(MAX_PROJECT_SNAPSHOT_BYTES + 50);
+    const bytes = new Uint8Array(MAX_PROJECT_SNAPSHOT_BYTES + 1_024);
     bytes.set(compactBody);
     bytes.fill(0x20, compactBody.byteLength);
     let offset = 0;

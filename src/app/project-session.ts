@@ -1,6 +1,7 @@
 import type { WorkingCard } from "../../core/cards/types";
-import type { ProjectDto, ProjectSummaryDto } from "../../services/project-api";
+import type { ProjectDto, ProjectSaveState, ProjectSummaryDto } from "../../services/project-api";
 import { serializeProjectSnapshot, type ProjectSettingsV1, type ProjectSnapshotV1 } from "../../persistence/projects/serializer";
+import type { TemplateSelection } from "../../templates/types";
 
 export type ProjectSaveStatus = "Dirty" | "Salvando" | "Salvo" | "Erro" | "Conflito";
 
@@ -37,7 +38,7 @@ export type ProjectSessionAction =
   | { readonly type: "request-failed"; readonly message: string };
 
 function summary(project: ProjectDto): ProjectSummaryDto {
-  const { snapshot: _snapshot, ...metadata } = project;
+  const { snapshot: _snapshot, templateSelection: _templateSelection, ...metadata } = project;
   return metadata;
 }
 
@@ -69,12 +70,29 @@ export function createProjectSessionState(currentSnapshotKey: string | null): Pr
   });
 }
 
-export function projectSnapshotKey(cards: readonly WorkingCard[], settings: ProjectSettingsV1): string {
-  return serializeProjectSnapshot(cards, settings);
+export function projectSnapshotDocument(
+  cards: readonly WorkingCard[],
+  settings: ProjectSettingsV1,
+  templateSelection: TemplateSelection | null = null,
+): ProjectSaveState {
+  const snapshotJson = serializeProjectSnapshot(cards, settings);
+  return { snapshot: JSON.parse(snapshotJson) as ProjectSnapshotV1, templateSelection };
 }
 
-export function projectSnapshotValue(snapshot: ProjectSnapshotV1): string {
-  return serializeProjectSnapshot(snapshot.cards, snapshot.settings);
+export function projectSnapshotKey(
+  cards: readonly WorkingCard[],
+  settings: ProjectSettingsV1,
+  templateSelection: TemplateSelection | null = null,
+): string {
+  return projectSaveStateValue(projectSnapshotDocument(cards, settings, templateSelection));
+}
+
+export function projectSnapshotValue(snapshot: ProjectSnapshotV1, templateSelection: TemplateSelection | null = null): string {
+  return projectSaveStateValue({ snapshot, templateSelection });
+}
+
+export function projectSaveStateValue(state: ProjectSaveState): string {
+  return JSON.stringify({ snapshot: JSON.parse(serializeProjectSnapshot(state.snapshot.cards, state.snapshot.settings)), templateSelection: state.templateSelection });
 }
 
 export function projectSessionReducer(state: ProjectSessionState, action: ProjectSessionAction): ProjectSessionState {
@@ -82,7 +100,7 @@ export function projectSessionReducer(state: ProjectSessionState, action: Projec
     case "projects-loaded":
       return { ...state, projects: [...action.projects], error: undefined };
     case "activate-project": {
-      const savedSnapshotKey = projectSnapshotValue(action.project.snapshot);
+      const savedSnapshotKey = projectSnapshotValue(action.project.snapshot, action.project.templateSelection);
       return withStatus({
         ...state,
         projects: withProjectSummary(state.projects, action.project),
@@ -141,7 +159,7 @@ export function projectSessionReducer(state: ProjectSessionState, action: Projec
         projects: withProjectSummary(state.projects, action.project),
         activeProject: action.project,
         currentSnapshotKey: action.currentSnapshotKey,
-        savedSnapshotKey: projectSnapshotValue(action.project.snapshot),
+        savedSnapshotKey: projectSnapshotValue(action.project.snapshot, action.project.templateSelection),
         saving: null,
         saveError: {
           projectId: action.project.id,

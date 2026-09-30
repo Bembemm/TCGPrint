@@ -11,6 +11,7 @@ function project(revision: number, bleedMm: number): ProjectDto {
     revision,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
+    templateSelection: null,
     snapshot: {
       projectSchemaVersion: 1,
       cards: [],
@@ -21,7 +22,7 @@ function project(revision: number, bleedMm: number): ProjectDto {
 
 describe("saveProjectWithRecovery", () => {
   it("reconciles a lost promotion response by reading the committed canonical snapshot", async () => {
-    const snapshot = project(1, 2).snapshot;
+    const state = { snapshot: project(1, 2).snapshot, templateSelection: null };
     const open = vi.fn(async () => ({ ...project(2, 2), recovery: null }) satisfies ProjectOpenDto);
     const api = {
       stageRecovery: vi.fn(async () => ({ recovery: {} as never })),
@@ -29,10 +30,10 @@ describe("saveProjectWithRecovery", () => {
       open,
     };
 
-    const saved = await saveProjectWithRecovery(api, "project-1", 1, snapshot);
+    const saved = await saveProjectWithRecovery(api, "project-1", 1, state);
 
-    expect(saved).toMatchObject({ revision: 2, snapshot });
-    expect(api.stageRecovery).toHaveBeenCalledWith("project-1", 1, snapshot);
+    expect(saved).toMatchObject({ revision: 2, snapshot: state.snapshot });
+    expect(api.stageRecovery).toHaveBeenCalledWith("project-1", 1, state.snapshot, null);
     expect(api.promoteRecovery).toHaveBeenCalledTimes(1);
     expect(open).toHaveBeenCalledWith("project-1");
   });
@@ -45,20 +46,20 @@ describe("saveProjectWithRecovery", () => {
       open: vi.fn(async () => ({ ...project(1, 1), recovery: null }) satisfies ProjectOpenDto),
     };
 
-    await expect(saveProjectWithRecovery(api, "project-1", 1, project(1, 2).snapshot)).rejects.toBe(promotionError);
+    await expect(saveProjectWithRecovery(api, "project-1", 1, { snapshot: project(1, 2).snapshot, templateSelection: null })).rejects.toBe(promotionError);
   });
 
   it("reconciles a prior committed save when a retry hits the old revision during staging", async () => {
-    const snapshot = project(1, 2).snapshot;
+    const state = { snapshot: project(1, 2).snapshot, templateSelection: null };
     const api = {
       stageRecovery: vi.fn(async () => { throw Object.assign(new Error("revision conflict"), { status: 409 }); }),
       promoteRecovery: vi.fn(async () => project(3, 2)),
       open: vi.fn(async () => ({ ...project(2, 2), recovery: null }) satisfies ProjectOpenDto),
     };
 
-    const saved = await saveProjectWithRecovery(api, "project-1", 1, snapshot);
+    const saved = await saveProjectWithRecovery(api, "project-1", 1, state);
 
-    expect(saved).toMatchObject({ revision: 2, snapshot });
+    expect(saved).toMatchObject({ revision: 2, snapshot: state.snapshot });
     expect(api.promoteRecovery).not.toHaveBeenCalled();
     expect(api.open).toHaveBeenCalledWith("project-1");
   });

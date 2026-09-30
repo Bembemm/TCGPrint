@@ -1,5 +1,6 @@
 import type { ProjectDto, ProjectOpenDto, ProjectRecoveryDto, ProjectSummaryDto } from "../../services/project-api";
 import type { ProjectSnapshotV1 } from "../../persistence/projects/serializer";
+import type { TemplateSelection } from "../../templates/types";
 
 interface ProjectApiErrorBody {
   readonly code?: string;
@@ -46,17 +47,25 @@ export function createProjectApiClient(fetcher: typeof fetch = fetch) {
       const result = await responseJson<{ projects: ProjectSummaryDto[] }>(await fetcher("/api/projects", { cache: "no-store" }));
       return result.projects;
     },
-    async create(snapshot?: ProjectSnapshotV1): Promise<ProjectDto> {
-      return responseJson<ProjectDto>(await fetcher("/api/projects", json("POST", snapshot === undefined ? undefined : { snapshot })));
+    async create(snapshot?: ProjectSnapshotV1, templateSelection?: TemplateSelection | null): Promise<ProjectDto> {
+      const body = snapshot === undefined && templateSelection === undefined ? undefined : {
+        ...(snapshot === undefined ? {} : { snapshot }),
+        ...(templateSelection === undefined ? {} : { templateSelection }),
+      };
+      return responseJson<ProjectDto>(await fetcher("/api/projects", json("POST", body)));
     },
     async open(projectId: string): Promise<ProjectOpenDto> {
       return responseJson<ProjectOpenDto>(await fetcher(projectUrl(projectId), { cache: "no-store" }));
     },
-    async save(projectId: string, expectedRevision: number, snapshot: ProjectSnapshotV1): Promise<ProjectDto> {
-      return responseJson<ProjectDto>(await fetcher(projectUrl(projectId), json("PUT", { expectedRevision, snapshot })));
+    async save(projectId: string, expectedRevision: number, snapshot: ProjectSnapshotV1, templateSelection?: TemplateSelection | null): Promise<ProjectDto> {
+      return responseJson<ProjectDto>(await fetcher(projectUrl(projectId), json("PUT", {
+        expectedRevision, snapshot, ...(templateSelection === undefined ? {} : { templateSelection }),
+      })));
     },
-    async stageRecovery(projectId: string, expectedRevision: number, snapshot: ProjectSnapshotV1): Promise<{ readonly recovery: ProjectRecoveryDto }> {
-      return responseJson<{ recovery: ProjectRecoveryDto }>(await fetcher(`${projectUrl(projectId)}/recovery`, json("POST", { expectedRevision, snapshot })));
+    async stageRecovery(projectId: string, expectedRevision: number, snapshot: ProjectSnapshotV1, templateSelection?: TemplateSelection | null): Promise<{ readonly recovery: ProjectRecoveryDto }> {
+      return responseJson<{ recovery: ProjectRecoveryDto }>(await fetcher(`${projectUrl(projectId)}/recovery`, json("POST", {
+        expectedRevision, snapshot, ...(templateSelection === undefined ? {} : { templateSelection }),
+      })));
     },
     async promoteRecovery(projectId: string): Promise<ProjectDto> {
       return responseJson<ProjectDto>(await fetcher(`${projectUrl(projectId)}/recovery/promote`, json("POST")));

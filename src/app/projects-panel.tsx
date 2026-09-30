@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { WorkingCard } from "../../core/cards/types";
-import { deserializeProjectSnapshot, type ProjectSettingsV1, type ProjectSnapshotV1 } from "../../persistence/projects/serializer";
-import type { ProjectDto, ProjectOpenDto } from "../../services/project-api";
+import type { ProjectSettingsV1 } from "../../persistence/projects/serializer";
+import type { ProjectDto, ProjectOpenDto, ProjectSaveState } from "../../services/project-api";
+import type { TemplateSelection } from "../../templates/types";
 import { createProjectApiClient, ProjectApiClientError } from "./project-api-client";
 import { createProjectListRequestGuard } from "./project-list-request-guard";
 import { ProjectAutosaveQueue } from "./project-autosave";
 import { saveProjectWithRecovery } from "./project-autosave-persistence";
+import TemplateLibraryPanel from "./template-library-panel";
 import { resolveProjectRecoveryChoice, type ProjectRecoveryChoice } from "./project-recovery-decision";
 import {
   createProjectOpenInteractionLock,
@@ -18,7 +20,8 @@ import {
 import {
   createProjectSessionState,
   projectSessionReducer,
-  projectSnapshotKey,
+  projectSnapshotDocument,
+  projectSaveStateValue,
   projectSnapshotValue,
 } from "./project-session";
 
@@ -42,15 +45,23 @@ export default function ProjectsPanel({
   onProjectInteractionLockChange,
   disabled = false,
 }: ProjectsPanelProps) {
+  const [templateSelection, setTemplateSelection] = useState<TemplateSelection | null>(null);
   const currentSnapshot = useMemo(() => {
     try {
-      return { key: projectSnapshotKey(cards, settings), error: undefined };
+      const document = projectSnapshotDocument(cards, settings, templateSelection);
+      return {
+        key: projectSaveStateValue(document),
+        document,
+        error: undefined,
+      };
     } catch (error) {
-      return { key: null, error: errorMessage(error) };
+      return { key: null, document: null, error: errorMessage(error) };
     }
-  }, [cards, settings]);
+  }, [cards, settings, templateSelection]);
   const currentSnapshotKeyRef = useRef(currentSnapshot.key);
   currentSnapshotKeyRef.current = currentSnapshot.key;
+  const currentSnapshotDocumentRef = useRef(currentSnapshot.document);
+  currentSnapshotDocumentRef.current = currentSnapshot.document;
   const currentSnapshotErrorRef = useRef(currentSnapshot.error);
   currentSnapshotErrorRef.current = currentSnapshot.error;
   const api = useMemo(() => createProjectApiClient(), []);
@@ -90,7 +101,7 @@ export default function ProjectsPanel({
     }
   }, [api, dispatchSession]);
 
-  const autosave = useMemo(() => new ProjectAutosaveQueue<ProjectSnapshotV1, ProjectDto>({
+  const autosave = useMemo(() => new ProjectAutosaveQueue<ProjectSaveState, ProjectDto>({
     save: ({ projectId, expectedRevision, snapshot }) => saveProjectWithRecovery(api, projectId, expectedRevision, snapshot),
     onSaveStarted: ({ projectId, expectedRevision, snapshotKey }) => {
       dispatchSession({ type: "save-started", projectId, expectedRevision, snapshotKey });
@@ -122,16 +133,17 @@ export default function ProjectsPanel({
   useEffect(() => () => autosave.dispose(), [autosave]);
 
   useEffect(() => {
-    if (session.activeProject && currentSnapshot.key !== null) {
-      autosave.observe(currentSnapshot.key, deserializeProjectSnapshot(currentSnapshot.key));
+    if (session.activeProject && currentSnapshot.key !== null && currentSnapshot.document !== null) {
+      autosave.observe(currentSnapshot.key, currentSnapshot.document);
     }
-  }, [autosave, currentSnapshot.key, session.activeProject?.id]);
+  }, [autosave, currentSnapshot.key, currentSnapshot.document, session.activeProject?.id]);
 
   function activateProject(project: ProjectDto, currentSnapshotKey: string | null) {
+    setTemplateSelection(project.templateSelection);
     autosave.activate({
       projectId: project.id,
       revision: project.revision,
-      savedSnapshotKey: projectSnapshotValue(project.snapshot),
+      savedSnapshotKey: projectSnapshotValue(project.snapshot, project.templateSelection),
     });
     dispatchSession({ type: "activate-project", project, currentSnapshotKey });
   }
@@ -140,12 +152,14 @@ export default function ProjectsPanel({
     if (!session.activeProject) return;
     const snapshotKey = currentSnapshotKeyRef.current;
     if (snapshotKey === null) throw new Error(currentSnapshotErrorRef.current ?? "O Working Set atual não forma um snapshot válido.");
+    const document = currentSnapshotDocumentRef.current;
+    if (document === null) throw new Error("O Working Set atual não forma um snapshot válido.");
     const context = autosave.getContext();
     if (!context || context.projectId !== session.activeProject.id) {
       throw new Error("O autosave deste Project não está ativo. O Working Set local foi mantido.");
     }
     if (snapshotKey === context.savedSnapshotKey) return;
-    autosave.observe(snapshotKey, deserializeProjectSnapshot(snapshotKey));
+    autosave.observe(snapshotKey, document);
     const result = await autosave.flushNow();
     if (result === "error" || result === "conflict") {
       throw new Error(result === "conflict"
@@ -164,7 +178,7 @@ export default function ProjectsPanel({
     setOperation("creating");
     try {
       await flushActiveProject();
-      const project = await api.create();
+      const project = await api.create(undefined, templateSelection);
       activateProject(project, currentSnapshotKeyRef.current);
       void refreshProjects();
     } catch (error) {
@@ -187,7 +201,7 @@ export default function ProjectsPanel({
         (opened) => opened.recovery !== null,
         (opened) => {
           onProjectOpen(opened);
-          activateProject(opened, projectSnapshotValue(opened.snapshot));
+          activateProject(opened, projectSnapshotValue(opened.snapshot, opened.templateSelection));
         },
       );
       if (result.recoveryPending) setRecoveryDecision(result.project);
@@ -217,7 +231,9 @@ export default function ProjectsPanel({
     }
     setOperation("creating");
     try {
-      const copy = await api.create(deserializeProjectSnapshot(snapshotKey));
+      const document = currentSnapshotDocumentRef.current;
+      if (document === null) throw new Error(currentSnapshotErrorRef.current ?? "O Working Set atual não forma um snapshot válido.");
+      const copy = await api.create(document.snapshot, document.templateSelection);
       activateProject(copy, snapshotKey);
       setRecoveryDecision(null);
       void refreshProjects();
@@ -245,7 +261,7 @@ export default function ProjectsPanel({
         () => resolveProjectRecoveryChoice(pending, choice, api),
         (project) => {
           onProjectOpen(project);
-          activateProject(project, projectSnapshotValue(project.snapshot));
+          activateProject(project, projectSnapshotValue(project.snapshot, project.templateSelection));
           setRecoveryDecision(null);
         },
       );
@@ -308,7 +324,7 @@ export default function ProjectsPanel({
         try {
           const latest = await api.open(projectId);
           const currentKey = currentSnapshotKeyRef.current;
-          const canonicalKey = projectSnapshotValue(latest.snapshot);
+          const canonicalKey = projectSnapshotValue(latest.snapshot, latest.templateSelection);
           if (latest.recovery) {
             projectOpenLock.recoveryFound();
             setRecoveryDecision(latest);
@@ -377,6 +393,8 @@ export default function ProjectsPanel({
           </div>
         </li>)}
       </ul> : <p className="muted">Nenhum Project salvo.</p>}
+
+      <TemplateLibraryPanel selection={templateSelection} onSelect={setTemplateSelection} disabled={projectActionsDisabled} />
 
       {(session.status === "Conflito" || session.status === "Erro") && session.activeProject && <section className="project-conflict" aria-label={session.status === "Conflito" ? "Conflito de revisão" : "Falha no autosave"}>
         <p role="alert">{session.status === "Conflito"

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { ProjectSnapshotV1 } from "./serializer";
+import type { TemplateSelection } from "../../templates/types";
 import {
   CURRENT_PROJECT_SCHEMA_VERSION,
   DEFAULT_PROJECT_SETTINGS,
@@ -24,6 +25,7 @@ export interface ProjectMetadata {
 
 export interface ProjectRecord extends ProjectMetadata {
   readonly snapshot: ProjectSnapshotV1;
+  readonly templateSelection: TemplateSelection | null;
 }
 
 export interface ProjectRecoveryRecord {
@@ -31,6 +33,7 @@ export interface ProjectRecoveryRecord {
   readonly baseRevision: number;
   readonly projectSchemaVersion: number;
   readonly snapshot: ProjectSnapshotV1;
+  readonly templateSelection: TemplateSelection | null;
   readonly createdAt: string;
 }
 
@@ -41,6 +44,7 @@ export class ProjectRepositoryError extends Error {
       | "PROJECT_REVISION_CONFLICT"
       | "PROJECT_RECOVERY_NOT_FOUND"
       | "PROJECT_RECOVERY_EXISTS"
+      | "PROJECT_TEMPLATE_NOT_FOUND"
       | "INVALID_PROJECT_TIMESTAMP",
     message: string,
     readonly expectedRevision?: number,
@@ -115,14 +119,14 @@ export class ProjectRepository {
     return project;
   }
 
-  create(initialSnapshot: ProjectSnapshotV1 = emptySnapshot()): ProjectRecord {
-    return this.insertFreshProject(DEFAULT_PROJECT_NAME, initialSnapshot);
+  create(initialSnapshot: ProjectSnapshotV1 = emptySnapshot(), templateSelection: TemplateSelection | null = null): ProjectRecord {
+    return this.insertFreshProject(DEFAULT_PROJECT_NAME, initialSnapshot, templateSelection);
   }
 
   duplicate(projectId: string): ProjectRecord {
     return this.database.transaction(() => {
       const original = this.open(projectId);
-      const duplicate = this.freshProjectRecord(`${original.name} (cópia)`, original.snapshot);
+      const duplicate = this.freshProjectRecord(`${original.name} (cópia)`, original.snapshot, original.templateSelection);
       this.insertProject(duplicate);
       return duplicate;
     }).immediate();
@@ -135,7 +139,12 @@ export class ProjectRepository {
     }).immediate();
   }
 
-  stageRecovery(projectId: string, baseRevision: number, candidateSnapshot: ProjectSnapshotV1): ProjectRecoveryRecord {
+  stageRecovery(
+    projectId: string,
+    baseRevision: number,
+    candidateSnapshot: ProjectSnapshotV1,
+    candidateSelection?: TemplateSelection | null,
+  ): ProjectRecoveryRecord {
     if (!Number.isSafeInteger(baseRevision) || baseRevision < 1) {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", "Recovery base revision must be a positive integer.");
     }
@@ -147,7 +156,7 @@ export class ProjectRepository {
         FROM projects WHERE id = ?
       `).get(projectId) as ProjectRow | undefined;
       if (!project) throw this.notFound(projectId);
-      this.recordFromRow(project);
+      const canonical = this.recordFromRow(project);
       if (project.revision !== baseRevision) {
         throw new ProjectRepositoryError(
           "PROJECT_REVISION_CONFLICT",
@@ -160,17 +169,21 @@ export class ProjectRepository {
         SELECT project_id, base_revision, project_schema_version, snapshot_json, created_at
         FROM project_recovery WHERE project_id = ?
       `).get(projectId) as ProjectRecoveryRow | undefined;
+      const selection = candidateSelection === undefined ? canonical.templateSelection : candidateSelection;
       if (existing) {
         const recovery = this.recoveryFromRow(existing);
-        if (recovery.baseRevision === baseRevision && existing.snapshot_json === snapshotJson) return recovery;
+        if (recovery.baseRevision === baseRevision && existing.snapshot_json === snapshotJson
+          && this.sameSelection(recovery.templateSelection, selection)) return recovery;
         throw new ProjectRepositoryError("PROJECT_RECOVERY_EXISTS", `Project ${projectId} already has a staged recovery candidate.`);
       }
+      this.validateTemplateSelection(selection);
       const createdAt = this.timestamp();
       this.database.prepare(`
         INSERT INTO project_recovery (project_id, base_revision, project_schema_version, snapshot_json, created_at)
         VALUES (?, ?, ?, ?, ?)
       `).run(projectId, baseRevision, snapshot.projectSchemaVersion, snapshotJson, createdAt);
-      return { projectId, baseRevision, projectSchemaVersion: snapshot.projectSchemaVersion, snapshot, createdAt };
+      this.writeRecoveryTemplateSelection(projectId, selection);
+      return { projectId, baseRevision, projectSchemaVersion: snapshot.projectSchemaVersion, snapshot, templateSelection: selection, createdAt };
     }).immediate();
   }
 
@@ -210,6 +223,7 @@ export class ProjectRepository {
       }
       const now = this.timestamp();
       const revision = recovery.baseRevision + 1;
+      this.writeProjectTemplateSelection(projectId, recovery.templateSelection);
       const update = this.database.prepare(`
         UPDATE projects
         SET project_schema_version = ?, revision = ?, snapshot_json = ?, updated_at = ?, autosaved_at = ?
@@ -229,6 +243,7 @@ export class ProjectRepository {
         projectSchemaVersion: recovery.projectSchemaVersion,
         revision,
         snapshot: recovery.snapshot,
+        templateSelection: recovery.templateSelection,
         updatedAt: now,
         autosavedAt: now,
       };
@@ -264,7 +279,7 @@ export class ProjectRepository {
         throw new ProjectRepositoryError("PROJECT_RECOVERY_NOT_FOUND", `Project ${projectId} has no staged recovery candidate.`);
       }
       const recovery = this.recoveryFromRow(staged);
-      const copy = this.freshProjectRecord(`${source.name} (recuperado)`, recovery.snapshot);
+      const copy = this.freshProjectRecord(`${source.name} (recuperado)`, recovery.snapshot, recovery.templateSelection);
       this.insertProject(copy);
       const removed = this.database.prepare(`
         DELETE FROM project_recovery WHERE project_id = ? AND base_revision = ?
@@ -276,13 +291,13 @@ export class ProjectRepository {
     }).immediate();
   }
 
-  private insertFreshProject(name: string, snapshot: ProjectSnapshotV1): ProjectRecord {
-    const project = this.freshProjectRecord(name, snapshot);
+  private insertFreshProject(name: string, snapshot: ProjectSnapshotV1, templateSelection: TemplateSelection | null): ProjectRecord {
+    const project = this.freshProjectRecord(name, snapshot, templateSelection);
     this.database.transaction(() => this.insertProject(project)).immediate();
     return project;
   }
 
-  private freshProjectRecord(name: string, snapshot: ProjectSnapshotV1): ProjectRecord {
+  private freshProjectRecord(name: string, snapshot: ProjectSnapshotV1, templateSelection: TemplateSelection | null = null): ProjectRecord {
     const validatedSnapshot = deserializeProjectSnapshot(snapshot);
     const id = this.newProjectId();
     const now = this.timestamp();
@@ -292,6 +307,7 @@ export class ProjectRepository {
       projectSchemaVersion: validatedSnapshot.projectSchemaVersion,
       revision: INITIAL_PROJECT_REVISION,
       snapshot: validatedSnapshot,
+      templateSelection,
       createdAt: now,
       updatedAt: now,
       autosavedAt: now,
@@ -299,6 +315,7 @@ export class ProjectRepository {
   }
 
   private insertProject(project: ProjectRecord): void {
+    this.validateTemplateSelection(project.templateSelection);
     const snapshotJson = serializeProjectSnapshot(project.snapshot.cards, project.snapshot.settings);
     this.database.prepare(`
       INSERT INTO projects
@@ -314,9 +331,15 @@ export class ProjectRepository {
       project.updatedAt,
       project.autosavedAt,
     );
+    this.writeProjectTemplateSelection(project.id, project.templateSelection);
   }
 
-  save(projectId: string, expectedRevision: number, nextSnapshot: ProjectSnapshotV1): ProjectRecord {
+  save(
+    projectId: string,
+    expectedRevision: number,
+    nextSnapshot: ProjectSnapshotV1,
+    nextSelection?: TemplateSelection | null,
+  ): ProjectRecord {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", "Expected project revision must be a positive integer.");
     }
@@ -337,7 +360,9 @@ export class ProjectRepository {
           row.revision,
         );
       }
-      this.recordFromRow(row);
+      const current = this.recordFromRow(row);
+      const selection = nextSelection === undefined ? current.templateSelection : nextSelection;
+      this.validateTemplateSelection(selection);
       const now = this.timestamp();
       const nextRevision = row.revision + 1;
       const result = this.database.prepare(`
@@ -350,11 +375,13 @@ export class ProjectRepository {
         if (!current) throw this.notFound(projectId);
         throw new ProjectRepositoryError("PROJECT_REVISION_CONFLICT", `Project ${projectId} changed during save.`, expectedRevision, current.revision);
       }
+      this.writeProjectTemplateSelection(projectId, selection);
       return {
         ...metadata,
         projectSchemaVersion: snapshot.projectSchemaVersion,
         revision: nextRevision,
         snapshot,
+        templateSelection: selection,
         updatedAt: now,
         autosavedAt: now,
       };
@@ -370,7 +397,7 @@ export class ProjectRepository {
     if (row.project_schema_version !== snapshot.projectSchemaVersion) {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.id} database and snapshot schema versions do not match.`);
     }
-    return { ...metadata, snapshot };
+    return { ...metadata, snapshot, templateSelection: this.readProjectTemplateSelection(row.id) };
   }
 
   private recoveryFromRow(row: ProjectRecoveryRow): ProjectRecoveryRecord {
@@ -389,8 +416,65 @@ export class ProjectRepository {
       baseRevision: row.base_revision,
       projectSchemaVersion: row.project_schema_version,
       snapshot,
+      templateSelection: this.readRecoveryTemplateSelection(row.project_id),
       createdAt: this.readTimestamp(row.created_at),
     };
+  }
+
+  private readProjectTemplateSelection(projectId: string): TemplateSelection | null {
+    const row = this.database.prepare(`
+      SELECT template_id, version, package_hash FROM project_template_selections WHERE project_id = ?
+    `).get(projectId) as { template_id: string; version: string; package_hash: string } | undefined;
+    return row ? { templateId: row.template_id, version: row.version, packageHash: row.package_hash } : null;
+  }
+
+  private readRecoveryTemplateSelection(projectId: string): TemplateSelection | null {
+    const row = this.database.prepare(`
+      SELECT template_id, version, package_hash FROM project_recovery_template_selections WHERE project_id = ?
+    `).get(projectId) as { template_id: string; version: string; package_hash: string } | undefined;
+    return row ? { templateId: row.template_id, version: row.version, packageHash: row.package_hash } : null;
+  }
+
+  private validateTemplateSelection(selection: TemplateSelection | null): void {
+    if (selection === null) return;
+    if (!selection || typeof selection.templateId !== "string" || !selection.templateId
+      || typeof selection.version !== "string" || !selection.version
+      || !/^[a-f0-9]{64}$/.test(selection.packageHash)) {
+      throw new ProjectRepositoryError("PROJECT_TEMPLATE_NOT_FOUND", "Project template selection is invalid.");
+    }
+    const exists = this.database.prepare(`
+      SELECT 1 FROM template_versions WHERE template_id = ? AND version = ? AND package_hash = ?
+    `).get(selection.templateId, selection.version, selection.packageHash);
+    if (!exists) {
+      throw new ProjectRepositoryError("PROJECT_TEMPLATE_NOT_FOUND", "The selected template ID, version, and hash are not present in the library.");
+    }
+  }
+
+  private writeProjectTemplateSelection(projectId: string, selection: TemplateSelection | null): void {
+    if (selection === null) {
+      this.database.prepare("DELETE FROM project_template_selections WHERE project_id = ?").run(projectId);
+      return;
+    }
+    this.database.prepare(`
+      INSERT INTO project_template_selections (project_id, template_id, version, package_hash) VALUES (?, ?, ?, ?)
+      ON CONFLICT(project_id) DO UPDATE SET template_id = excluded.template_id, version = excluded.version, package_hash = excluded.package_hash
+    `).run(projectId, selection.templateId, selection.version, selection.packageHash);
+  }
+
+  private writeRecoveryTemplateSelection(projectId: string, selection: TemplateSelection | null): void {
+    if (selection === null) {
+      this.database.prepare("DELETE FROM project_recovery_template_selections WHERE project_id = ?").run(projectId);
+      return;
+    }
+    this.database.prepare(`
+      INSERT INTO project_recovery_template_selections (project_id, template_id, version, package_hash) VALUES (?, ?, ?, ?)
+      ON CONFLICT(project_id) DO UPDATE SET template_id = excluded.template_id, version = excluded.version, package_hash = excluded.package_hash
+    `).run(projectId, selection.templateId, selection.version, selection.packageHash);
+  }
+
+  private sameSelection(left: TemplateSelection | null, right: TemplateSelection | null): boolean {
+    return left === null ? right === null : right !== null
+      && left.templateId === right.templateId && left.version === right.version && left.packageHash === right.packageHash;
   }
 
   private metadataFromRow(row: ProjectRow): ProjectMetadata {

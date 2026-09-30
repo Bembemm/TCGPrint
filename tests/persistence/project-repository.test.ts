@@ -59,6 +59,7 @@ describe("project repository", () => {
           },
         },
       },
+      templateSelection: null,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
       autosavedAt: "2026-01-01T00:00:00.000Z",
@@ -266,6 +267,7 @@ describe("project repository", () => {
       baseRevision: 1,
       projectSchemaVersion: 1,
       snapshot: candidate,
+      templateSelection: null,
       createdAt: "2026-01-01T00:00:01.000Z",
     });
     expect(projects.open(canonical.id)).toEqual(canonical);

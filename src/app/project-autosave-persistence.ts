@@ -1,9 +1,8 @@
-import type { ProjectDto, ProjectOpenDto } from "../../services/project-api";
-import type { ProjectSnapshotV1 } from "../../persistence/projects/serializer";
+import type { ProjectDto, ProjectOpenDto, ProjectSaveState } from "../../services/project-api";
 import { projectSnapshotValue } from "./project-session";
 
 export interface ProjectAutosaveRecoveryApi {
-  stageRecovery(projectId: string, expectedRevision: number, snapshot: ProjectSnapshotV1): Promise<unknown>;
+  stageRecovery(projectId: string, expectedRevision: number, snapshot: ProjectSaveState["snapshot"], templateSelection: ProjectSaveState["templateSelection"]): Promise<unknown>;
   promoteRecovery(projectId: string): Promise<ProjectDto>;
   open(projectId: string): Promise<ProjectOpenDto>;
 }
@@ -13,19 +12,20 @@ export async function saveProjectWithRecovery(
   api: ProjectAutosaveRecoveryApi,
   projectId: string,
   expectedRevision: number,
-  snapshot: ProjectSnapshotV1,
+  state: ProjectSaveState,
 ): Promise<ProjectDto> {
-  const snapshotKey = projectSnapshotValue(snapshot);
+  const snapshotKey = projectSnapshotValue(state.snapshot, state.templateSelection);
   const reconcileCommittedSave = async (): Promise<ProjectDto | null> => {
     try {
       const latest = await api.open(projectId);
-      if (latest.revision === expectedRevision + 1 && projectSnapshotValue(latest.snapshot) === snapshotKey) return latest;
+      if (latest.revision === expectedRevision + 1
+        && projectSnapshotValue(latest.snapshot, latest.templateSelection) === snapshotKey) return latest;
     } catch { /* The queue can retry while retaining this snapshot. */ }
     return null;
   };
 
   try {
-    await api.stageRecovery(projectId, expectedRevision, snapshot);
+    await api.stageRecovery(projectId, expectedRevision, state.snapshot, state.templateSelection);
   } catch (stageError) {
     const reconciled = await reconcileCommittedSave();
     if (reconciled) return reconciled;

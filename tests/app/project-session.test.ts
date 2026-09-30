@@ -5,6 +5,7 @@ import {
   createProjectSessionState,
   projectSessionReducer,
   projectSnapshotKey,
+  projectSnapshotValue,
 } from "../../src/app/project-session";
 import type { WorkingCard } from "../../core/cards/types";
 
@@ -21,13 +22,26 @@ function project(id: string, revision = 1, snapshot = emptySnapshot()): ProjectD
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     snapshot,
+    templateSelection: null,
   };
 }
 
 function summary(value: ProjectDto): ProjectSummaryDto {
-  const { snapshot: _snapshot, ...metadata } = value;
+  const { snapshot: _snapshot, templateSelection: _templateSelection, ...metadata } = value;
   return metadata;
 }
+
+describe("Project autosave snapshot identity", () => {
+  it("includes template ID, version, and package hash in the dirty-state key", () => {
+    const snapshot = emptySnapshot();
+    const v5 = { templateId: "template-a4", version: "5", packageHash: "5".repeat(64) };
+    const v6 = { templateId: "template-a4", version: "6", packageHash: "6".repeat(64) };
+
+    expect(projectSnapshotValue(snapshot, v5)).not.toBe(projectSnapshotValue(snapshot, v6));
+    expect(projectSnapshotValue(snapshot, v5)).not.toBe(projectSnapshotValue(snapshot, { ...v5, packageHash: "f".repeat(64) }));
+    expect(projectSnapshotKey([], DEFAULT_PROJECT_SETTINGS, v5)).not.toBe(projectSnapshotKey([], DEFAULT_PROJECT_SETTINGS, null));
+  });
+});
 
 function card(id: string, order: number): WorkingCard {
   return {

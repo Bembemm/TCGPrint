@@ -11,6 +11,7 @@ import {
   deserializeProjectSnapshot,
   type ProjectSnapshotV1,
 } from "../persistence/projects/serializer";
+import type { TemplateSelection } from "../templates/types";
 
 export interface ProjectSummaryDto {
   readonly id: string;
@@ -21,14 +22,21 @@ export interface ProjectSummaryDto {
   readonly updatedAt: string;
 }
 
+export interface ProjectSaveState {
+  readonly snapshot: ProjectSnapshotV1;
+  readonly templateSelection: TemplateSelection | null;
+}
+
 export interface ProjectDto extends ProjectSummaryDto {
   readonly snapshot: ProjectSnapshotV1;
+  readonly templateSelection: TemplateSelection | null;
 }
 
 export interface ProjectRecoveryDto {
   readonly baseRevision: number;
   readonly projectSchemaVersion: number;
   readonly snapshot: ProjectSnapshotV1;
+  readonly templateSelection: TemplateSelection | null;
   readonly createdAt: string;
 }
 
@@ -38,7 +46,9 @@ export interface ProjectOpenDto extends ProjectDto {
 
 // Bound the transport allowance to the compact wrapper with the largest valid revision.
 const MAX_PROJECT_SAVE_ENVELOPE_BYTES = new TextEncoder().encode(
-  JSON.stringify({ expectedRevision: Number.MAX_SAFE_INTEGER, snapshot: null }),
+  JSON.stringify({ expectedRevision: Number.MAX_SAFE_INTEGER, snapshot: null, templateSelection: {
+    templateId: "i".repeat(180), version: "v".repeat(80), packageHash: "a".repeat(64),
+  } }),
 ).byteLength - new TextEncoder().encode("null").byteLength;
 const MAX_PROJECT_SAVE_REQUEST_BYTES = MAX_PROJECT_SNAPSHOT_BYTES + MAX_PROJECT_SAVE_ENVELOPE_BYTES;
 
@@ -61,7 +71,7 @@ function projectSummaryDto(project: ProjectMetadata): ProjectSummaryDto {
 }
 
 function projectDto(project: ProjectRecord): ProjectDto {
-  return { ...projectSummaryDto(project), snapshot: project.snapshot };
+  return { ...projectSummaryDto(project), snapshot: project.snapshot, templateSelection: project.templateSelection };
 }
 
 function projectRecoveryDto(recovery: ProjectRecoveryRecord): ProjectRecoveryDto {
@@ -69,6 +79,7 @@ function projectRecoveryDto(recovery: ProjectRecoveryRecord): ProjectRecoveryDto
     baseRevision: recovery.baseRevision,
     projectSchemaVersion: recovery.projectSchemaVersion,
     snapshot: recovery.snapshot,
+    templateSelection: recovery.templateSelection,
     createdAt: recovery.createdAt,
   };
 }
@@ -169,18 +180,44 @@ function invalidRequest(message = "The project request is invalid."): Response {
   return Response.json({ code: "INVALID_PROJECT_REQUEST", message }, { status: 400 });
 }
 
-function expectedRevisionSnapshotFields(body: unknown): { readonly expectedRevision: number; readonly snapshot: unknown } {
+function parseTemplateSelectionField(fields: Record<string, unknown>): TemplateSelection | null | undefined {
+  if (!Object.prototype.hasOwnProperty.call(fields, "templateSelection")) return undefined;
+  const selection = fields.templateSelection;
+  if (selection === null) return null;
+  if (!selection || typeof selection !== "object" || Array.isArray(selection)) {
+    throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "templateSelection must be null or an object.");
+  }
+  const candidate = selection as Record<string, unknown>;
+  if (Object.keys(candidate).length !== 3
+    || Object.keys(candidate).some((key) => !["templateId", "version", "packageHash"].includes(key))
+    || typeof candidate.templateId !== "string" || candidate.templateId.length < 1 || candidate.templateId.length > 180
+    || typeof candidate.version !== "string" || candidate.version.length < 1 || candidate.version.length > 80
+    || typeof candidate.packageHash !== "string" || !/^[a-f0-9]{64}$/.test(candidate.packageHash)) {
+    throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "templateSelection must contain a valid template ID, version, and SHA-256 package hash.");
+  }
+  return { templateId: candidate.templateId, version: candidate.version, packageHash: candidate.packageHash };
+}
+
+function expectedRevisionSnapshotFields(body: unknown): {
+  readonly expectedRevision: number;
+  readonly snapshot: unknown;
+  readonly templateSelection?: TemplateSelection | null;
+} {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "Project snapshot request body must be an object.");
   }
   const fields = body as Record<string, unknown>;
-  if (Object.keys(fields).some((key) => key !== "expectedRevision" && key !== "snapshot")) {
-    throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "Project snapshot request accepts only expectedRevision and snapshot.");
+  if (Object.keys(fields).some((key) => key !== "expectedRevision" && key !== "snapshot" && key !== "templateSelection")) {
+    throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "Project save accepts only expectedRevision, snapshot, and templateSelection.");
   }
   if (!Number.isSafeInteger(fields.expectedRevision) || (fields.expectedRevision as number) < 1) {
     throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "expectedRevision must be a positive integer.");
   }
-  return { expectedRevision: fields.expectedRevision as number, snapshot: fields.snapshot };
+  return {
+    expectedRevision: fields.expectedRevision as number,
+    snapshot: fields.snapshot,
+    templateSelection: parseTemplateSelectionField(fields),
+  };
 }
 
 export async function handleProjectList(_request: Request, projects: ProjectRepository): Promise<Response> {
@@ -197,11 +234,14 @@ export async function handleProjectCreate(request: Request, projects: ProjectRep
     const body = await parseProjectSaveBody(request, true);
     if (body === undefined) return Response.json(projectDto(projects.create()), { status: 201 });
     if (!body || typeof body !== "object" || Array.isArray(body)
-      || Object.keys(body).length !== 1 || !("snapshot" in body)) {
-      throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "Project creation accepts only a snapshot field.");
+      || Object.keys(body).some((key) => key !== "snapshot" && key !== "templateSelection")) {
+      throw new ProjectApiRequestError(400, "INVALID_PROJECT_REQUEST", "Project creation accepts a snapshot and optional template selection.");
     }
-    const snapshot = deserializeProjectSnapshot((body as { readonly snapshot: unknown }).snapshot);
-    return Response.json(projectDto(projects.create(snapshot)), { status: 201 });
+    const fields = body as Record<string, unknown>;
+    const snapshot = Object.prototype.hasOwnProperty.call(fields, "snapshot")
+      ? deserializeProjectSnapshot(fields.snapshot)
+      : undefined;
+    return Response.json(projectDto(projects.create(snapshot, parseTemplateSelectionField(fields) ?? null)), { status: 201 });
   } catch (error) {
     return errorResponse(error);
   }
@@ -233,7 +273,7 @@ export async function handleProjectSave(request: Request, projectId: string, pro
   try {
     const fields = expectedRevisionSnapshotFields(body);
     const snapshot = deserializeProjectSnapshot(fields.snapshot);
-    return Response.json(projectDto(projects.save(projectId, fields.expectedRevision, snapshot)));
+    return Response.json(projectDto(projects.save(projectId, fields.expectedRevision, snapshot, fields.templateSelection)));
   } catch (error) {
     return errorResponse(error);
   }
@@ -250,7 +290,7 @@ export async function handleProjectStageRecovery(request: Request, projectId: st
   try {
     const fields = expectedRevisionSnapshotFields(body);
     const snapshot = deserializeProjectSnapshot(fields.snapshot);
-    const recovery = projects.stageRecovery(projectId, fields.expectedRevision, snapshot);
+    const recovery = projects.stageRecovery(projectId, fields.expectedRevision, snapshot, fields.templateSelection);
     return Response.json({ recovery: projectRecoveryDto(recovery) });
   } catch (error) {
     return errorResponse(error);
