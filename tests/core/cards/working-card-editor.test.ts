@@ -35,6 +35,8 @@ function card(id: string, order: number, quantity = 1): WorkingCard {
     identityResolution: { status: "resolved", method: "manual", candidates: [], confirmed: true },
     faces: [{ id: "front", side: "front", name: "Delver of Secrets" }, { id: "back", side: "back", name: "Insectile Aberration" }],
     selectedArtworkByFace: { front: frontArtwork, back: backArtwork },
+    backMode: "manual",
+    backModeSelectionPolicy: "explicit",
     localArtworkIds: ["upload:shared-original"],
     mpcReferences: [mpcReference],
     sharedMpcCardback: { importedAssetId: "shared-cardback", originalFormat: "png", availableLocally: true, provenance: { sourceId: "cardback-source" } },

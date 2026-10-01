@@ -15,7 +15,7 @@ import { appDataPaths } from "../artwork/storage/paths";
 import { ArtworkRepository } from "../artwork/storage/repository";
 import { ArtworkThumbnailStore } from "../artwork/storage/thumbnail-store";
 import type { ArtworkCatalogSource, ArtworkPreview, ProviderHealth } from "../artwork/types";
-import { confirmIdentity, IdentityResolver, keepCustom, reconcileArtworkAfterIdentityChange, selectDefaultArtworkForFace, selectResolvedPrintingArtwork } from "../core/cards/identity-resolver";
+import { confirmIdentity, IdentityResolver, isDoubleFacedIdentity, keepCustom, reconcileArtworkAfterIdentityChange, restoreAutomaticBackSelection, selectDefaultArtworkForFace, selectResolvedPrintingArtwork } from "../core/cards/identity-resolver";
 import { selectArtwork as updateSelectedArtwork, createWorkingSet } from "../core/cards/working-set";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
 import { ScryfallClient } from "../providers/scryfall/client";
@@ -217,6 +217,12 @@ function getIdentity(cache: ArtworkMetadataCache, identityId: string): CardIdent
 }
 
 function applyIdentityFaces(card: WorkingCard, identity: CardIdentity): WorkingCard {
+  if (!isDoubleFacedIdentity(identity)) {
+    if (card.backMode === "auto" && card.backModeSelectionPolicy === "automatic") {
+      return { ...card, backMode: "project-default" };
+    }
+    return card;
+  }
   const identityFaces = Array.isArray(identity.metadata?.faces)
     ? identity.metadata.faces.flatMap((item): Array<{ name?: string }> => {
       if (!item || typeof item !== "object") return [];
@@ -224,7 +230,7 @@ function applyIdentityFaces(card: WorkingCard, identity: CardIdentity): WorkingC
       return name === undefined || typeof name === "string" ? [{ ...(typeof name === "string" ? { name } : {}) }] : [];
     })
     : [];
-  if (identityFaces.length < 2) return card;
+  if (identityFaces.length !== 2) return card;
   const faces: WorkingCard["faces"][number][] = (["front", "back"] as const).map((side, index) => {
     const existing = card.faces.find((face) => face.side === side);
     return {
@@ -232,7 +238,11 @@ function applyIdentityFaces(card: WorkingCard, identity: CardIdentity): WorkingC
       ...(identityFaces[index].name ? { name: identityFaces[index].name } : existing?.name ? { name: existing.name } : {}),
     };
   });
-  return { ...card, faces };
+  return {
+    ...card,
+    faces,
+    ...(card.backModeSelectionPolicy === "automatic" ? { backMode: "auto" as const } : {}),
+  };
 }
 
 function remapImportedIds(card: WorkingCard, uploadByImportId: ReadonlyMap<string, ArtworkCandidate>): WorkingCard {
@@ -502,13 +512,14 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     async restoreDefaultArtwork(card, faceId, callOptions = {}) {
       if (callOptions.signal?.aborted) throw new ScryfallError("aborted", "The Scryfall request was cancelled.");
       if (!card.identity || !card.faces.some((face) => face.side === faceId)) return undefined;
+      const resetCard = faceId === "back" ? restoreAutomaticBackSelection(card) : card;
       const candidates = await catalog.search(card.identity, { source: "scryfall", faceId, signal: callOptions.signal });
-      const selected = selectDefaultArtworkForFace(card, faceId, candidates);
+      const selected = selectDefaultArtworkForFace(resetCard, faceId, candidates);
       if (!selected) {
         const health = catalog.getProviderHealth().scryfall;
         if (health?.degraded) throw new ScryfallError("network", health.message ?? "Scryfall is unavailable; the default artwork could not be checked.");
       }
-      return selected;
+      return selected ?? (faceId === "back" ? resetCard : undefined);
     },
 
     async listArtworkCandidates(identityId, faceId, source, callOptions = {}) {

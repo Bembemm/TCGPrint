@@ -30,6 +30,56 @@ function fakeClient(overrides: Partial<Record<"lookupById" | "lookupBySetCollect
 const uploadSelection = { front: { candidateId: "upload:hash", source: "upload" as const, identityId: null, faceId: "front" as const } };
 
 describe("identity resolver", () => {
+  it("resolves explicit back modes without borrowing MPC shared cardbacks", () => {
+    const helpers = identityResolver as unknown as {
+      resolveEffectiveCardBack?: (card: unknown, projectDefault?: { assetId: string; sha256: string; format: "jpeg" | "png" }) => unknown;
+      isDoubleFacedIdentity?: (identity: CardIdentity | null) => boolean;
+    };
+    expect(helpers.isDoubleFacedIdentity).toBeTypeOf("function");
+    expect(helpers.resolveEffectiveCardBack).toBeTypeOf("function");
+    if (!helpers.isDoubleFacedIdentity || !helpers.resolveEffectiveCardBack) return;
+
+    const identity: CardIdentity = {
+      id: "scryfall:oracle:dfc",
+      provider: "scryfall",
+      name: "Front // Back",
+      resolutionMethod: "scryfall-id",
+      confidence: 1,
+      metadata: { layout: "transform", faces: [{ name: "Front" }, { name: "Back" }] },
+    };
+    const front = card({ name: "Front" });
+    const dfc = {
+      ...front,
+      identity,
+      faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }],
+      selectedArtworkByFace: {
+        back: { candidateId: "scryfall:dfc:back", source: "scryfall" as const, identityId: identity.id, faceId: "back" as const },
+      },
+      backMode: "auto" as const,
+    };
+    const generic = { assetId: "back:asset-id", sha256: "a".repeat(64), format: "png" as const };
+    const normal = {
+      ...front,
+      sharedMpcCardback: {
+        importedAssetId: "mpc-root-cardback",
+        originalFormat: "png",
+        availableLocally: true,
+        provenance: { sourceId: "order.xml" },
+      },
+      backMode: "project-default" as const,
+    };
+    const manual = { ...normal, backMode: "manual" as const, manualBackAsset: generic };
+    const noBack = { ...normal, backMode: "none" as const };
+
+    expect(helpers.isDoubleFacedIdentity(identity)).toBe(true);
+    expect(helpers.isDoubleFacedIdentity({ ...identity, metadata: { layout: "split", faces: [{ name: "Fire" }, { name: "Ice" }] } })).toBe(false);
+    expect(helpers.resolveEffectiveCardBack(dfc)).toMatchObject({ mode: "auto", status: "available", source: "dfc-face", artwork: { candidateId: "scryfall:dfc:back" } });
+    expect(helpers.resolveEffectiveCardBack(normal, generic)).toMatchObject({ mode: "project-default", status: "available", source: "project-default", asset: generic });
+    expect(helpers.resolveEffectiveCardBack(manual)).toMatchObject({ mode: "manual", status: "available", source: "manual-library", asset: generic });
+    expect(helpers.resolveEffectiveCardBack(noBack, generic)).toMatchObject({ mode: "none", status: "intentional-none", source: "none" });
+    expect(helpers.resolveEffectiveCardBack(normal)).toMatchObject({ mode: "project-default", status: "missing", source: "project-default" });
+  });
+
   it("resolves explicit Scryfall ID before set, name, filename, OCR, or fuzzy work", async () => {
     const api = fakeClient();
     const resolver = new IdentityResolver(api);

@@ -2,9 +2,12 @@ import type {
   CardFace,
   CardFaceSide,
   CardIdentity,
+  BackLibraryAssetReference,
   IdentityResolution,
   SelectedArtwork,
   WorkingCard,
+  WorkingCardBackMode,
+  WorkingCardBackModeSelectionPolicy,
   WorkingCardMpcReference,
   WorkingCardSharedMpcCardback,
 } from "../../core/cards/types";
@@ -14,8 +17,10 @@ import { validateCardIdentityMetadata } from "../../core/cards/safe-identity-met
 import { DEFAULT_CUT_GUIDE_CONFIG, GUIDE_COLOR_OPTIONS, MAGIC_STANDARD_CARD, PAPER_FORMATS, parseTemplateLayoutGeometry, type CardFormat, type CutGuideConfig, type GuideColor, type PageOrientation, type PaperFormat, type TemplateLayoutGeometryMm } from "../../core/geometry";
 import { parseRegistrationConfig, type RegistrationConfig } from "../../core/registration";
 import type { CutSourceSelection, DxfUnitsOverride } from "../../core/cut";
+import { isDoubleFacedIdentity } from "../../core/cards/back-selection";
+import type { DuplexFlipMode } from "../../core/duplex";
 
-export const CURRENT_PROJECT_SCHEMA_VERSION = 3;
+export const CURRENT_PROJECT_SCHEMA_VERSION = 4;
 
 /** 16 MiB bounds a 500-entry resolved Working Set without ever embedding artwork bytes. */
 export const MAX_PROJECT_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -47,6 +52,16 @@ export interface ProjectSettingsV3 {
   };
 }
 
+export type ExportContentMode = "front-only" | "back-only" | "front-back-separated" | "duplex";
+export type MissingBackPolicy = "use-project-default" | "blank" | "warn-and-continue" | "block";
+
+export interface ProjectSettingsV4 extends ProjectSettingsV3 {
+  readonly exportContentMode: ExportContentMode;
+  readonly missingBackPolicy: MissingBackPolicy;
+  readonly duplexFlipMode: DuplexFlipMode;
+  readonly projectDefaultBack: BackLibraryAssetReference | null;
+}
+
 export interface LegacyProjectSettingsV1 {
   readonly bleedMm: number;
   readonly roundedCorners: boolean;
@@ -54,16 +69,16 @@ export interface LegacyProjectSettingsV1 {
 }
 
 /** @deprecated Source-compatible name retained for existing UI modules. */
-export type ProjectSettingsV2 = ProjectSettingsV3;
+export type ProjectSettingsV2 = ProjectSettingsV4;
 /** @deprecated Source-compatible name retained for existing UI modules. */
-export type ProjectSettingsV1 = ProjectSettingsV3;
-export type ProjectSettingsInput = ProjectSettingsV3 | LegacyProjectSettingsV1;
+export type ProjectSettingsV1 = ProjectSettingsV4;
+export type ProjectSettingsInput = ProjectSettingsV4 | ProjectSettingsV3 | LegacyProjectSettingsV1;
 
 export interface ProjectSnapshotV1 {
-  /** Legacy v1/v2 snapshots are accepted and promoted to the current v3 shape on read. */
+  /** Legacy v1/v2/v3 snapshots are accepted and promoted to the current v4 shape on read. */
   readonly projectSchemaVersion: number;
   readonly cards: readonly PersistedWorkingCard[];
-  readonly settings: ProjectSettingsV2;
+  readonly settings: ProjectSettingsV4;
 }
 
 export class ProjectSnapshotError extends Error {
@@ -95,6 +110,10 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettingsV1 = Object.freeze({
   registration: Object.freeze({ type: "none", orientation: "portrait" }),
   registrationOverride: false,
   cutSourceSelection: null,
+  exportContentMode: "front-only",
+  missingBackPolicy: "use-project-default",
+  duplexFlipMode: "long-edge",
+  projectDefaultBack: null,
   layout: Object.freeze({ skippedSlotIndices: Object.freeze([]) }),
 });
 
@@ -354,6 +373,17 @@ function sharedMpcCardback(value: unknown, path: string): WorkingCardSharedMpcCa
   };
 }
 
+function backLibraryAssetReference(value: unknown, path: string): BackLibraryAssetReference {
+  const source = object(value, path, ["assetId", "sha256", "format"], ["assetId", "sha256", "format"]);
+  const sha256 = string(source.sha256, `${path}.sha256`, 64);
+  if (!/^[a-f0-9]{64}$/.test(sha256)) invalid(`${path}.sha256`, "must be a lowercase SHA-256 hex digest.");
+  const assetId = string(source.assetId, `${path}.assetId`, 100);
+  if (assetId !== `back:${sha256}`) invalid(`${path}.assetId`, "must be the immutable content-addressed ID for its SHA-256.");
+  const format = string(source.format, `${path}.format`, 8);
+  if (format !== "jpeg" && format !== "png") invalid(`${path}.format`, "must be jpeg or png.");
+  return Object.freeze({ assetId, sha256, format });
+}
+
 function faceAssociation(value: unknown, path: string): WorkingCard["faceAssociations"][number] {
   const source = object(value, path,
     ["slot", "frontAssetId", "backAssetId", "confidence", "reason", "accepted"],
@@ -373,10 +403,12 @@ function faceAssociation(value: unknown, path: string): WorkingCard["faceAssocia
   };
 }
 
-function persistedCard(value: unknown, index: number): PersistedWorkingCard {
+function persistedCard(value: unknown, index: number, schemaVersion = CURRENT_PROJECT_SCHEMA_VERSION): PersistedWorkingCard {
   const path = `snapshot.cards[${index}]`;
+  const legacyCardKeys = ["id", "quantity", "order", "section", "importSource", "identityHints", "identity", "identityResolution", "faces", "selectedArtworkByFace", "localArtworkIds", "mpcReferences", "sharedMpcCardback", "faceAssociations"];
+  const backKeys = ["backMode", "backModeSelectionPolicy", "manualBackAsset"];
   const source = object(value, path,
-    ["id", "quantity", "order", "section", "importSource", "identityHints", "identity", "identityResolution", "faces", "selectedArtworkByFace", "localArtworkIds", "mpcReferences", "sharedMpcCardback", "faceAssociations"],
+    schemaVersion >= 4 ? [...legacyCardKeys, ...backKeys] : legacyCardKeys,
     ["id", "quantity", "order", "importSource", "identityHints", "identity", "identityResolution", "faces", "selectedArtworkByFace", "localArtworkIds", "mpcReferences", "faceAssociations"]);
   const id = string(source.id, `${path}.id`, 180);
   if (!Number.isSafeInteger(source.quantity) || (source.quantity as number) < 1 || (source.quantity as number) > 999) invalid(`${path}.quantity`, "must be a positive integer no greater than 999.");
@@ -417,6 +449,31 @@ function persistedCard(value: unknown, index: number): PersistedWorkingCard {
       if (!faceSides.includes(parsedReference.faceId as CardFaceSide)) invalid(`${referencePath}.faceId`, "must reference a face on this card.");
       return parsedReference;
     });
+  let backMode: WorkingCardBackMode;
+  if (source.backMode === undefined) {
+    // Legacy user-selected face artwork already carried an explicit policy; all
+    // other old cards safely inherit the Project default unless provider layout
+    // metadata identifies an automatic DFC face pair.
+    backMode = selectedArtworkByFace.back?.selectionPolicy === "user-selected"
+      ? "manual"
+      : isDoubleFacedIdentity(currentIdentity) ? "auto" : "project-default";
+  } else {
+    const mode = string(source.backMode, `${path}.backMode`, 32);
+    if (mode !== "auto" && mode !== "project-default" && mode !== "manual" && mode !== "none") {
+      invalid(`${path}.backMode`, "must be auto, project-default, manual, or none.");
+    }
+    backMode = mode;
+  }
+  const backModeSelectionPolicy: WorkingCardBackModeSelectionPolicy = source.backModeSelectionPolicy === undefined
+    ? backMode === "manual" ? "explicit" : "automatic"
+    : (() => {
+      const policy = string(source.backModeSelectionPolicy, `${path}.backModeSelectionPolicy`, 24);
+      if (policy !== "automatic" && policy !== "explicit") invalid(`${path}.backModeSelectionPolicy`, "must be automatic or explicit.");
+      return policy;
+    })();
+  const manualBackAsset = source.manualBackAsset === undefined
+    ? undefined
+    : backLibraryAssetReference(source.manualBackAsset, `${path}.manualBackAsset`);
   const cardback = source.sharedMpcCardback === undefined ? undefined : sharedMpcCardback(source.sharedMpcCardback, `${path}.sharedMpcCardback`);
   const associations = array(source.faceAssociations, `${path}.faceAssociations`, 200)
     .map((association, associationIndex) => faceAssociation(association, `${path}.faceAssociations[${associationIndex}]`));
@@ -436,6 +493,9 @@ function persistedCard(value: unknown, index: number): PersistedWorkingCard {
     identityResolution: resolution,
     faces,
     selectedArtworkByFace,
+    backMode,
+    backModeSelectionPolicy,
+    ...(manualBackAsset !== undefined ? { manualBackAsset } : {}),
     localArtworkIds,
     mpcReferences,
     ...(cardback !== undefined ? { sharedMpcCardback: cardback } : {}),
@@ -462,15 +522,19 @@ function cutSourceSelection(value: unknown): CutSourceSelection | null {
   return Object.freeze({ fileId, fileHash, ...(units ? { dxfUnitsOverride: units } : {}) });
 }
 
-function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_VERSION): ProjectSettingsV3 {
+function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_VERSION): ProjectSettingsV4 {
   const legacy = schemaVersion === 1;
   const baseKeys = ["bleedMm", "roundedCorners", "cutGuides"];
   const v2Keys = [...baseKeys, "pageOrientation", "cardOrientation", "paperFormat", "cardFormat", "marginsMm", "horizontalGapMm", "verticalGapMm", "registration", "registrationOverride", "layout"];
-  const currentKeys = [...v2Keys, "cutSourceSelection"];
+  const v3Keys = [...v2Keys, "cutSourceSelection"];
+  const v4Keys = [...v3Keys, "exportContentMode", "missingBackPolicy", "duplexFlipMode", "projectDefaultBack"];
+  const allowedKeys = legacy ? baseKeys : schemaVersion === 2 ? v2Keys : schemaVersion === 3 ? v3Keys : v4Keys;
   const source = object(value, "snapshot.settings", legacy
     ? baseKeys
-    : schemaVersion === 2 ? v2Keys : currentKeys,
-  legacy ? undefined : (schemaVersion === 2 ? v2Keys : currentKeys).filter((key) => key !== "registrationOverride" && key !== "cutSourceSelection"));
+    : allowedKeys,
+  legacy ? undefined : allowedKeys.filter((key) => key !== "registrationOverride"
+    && key !== "cutSourceSelection"
+    && (schemaVersion >= 4 && ["exportContentMode", "missingBackPolicy", "duplexFlipMode", "projectDefaultBack"].includes(key))));
   const guides = object(source.cutGuides, "snapshot.settings.cutGuides", ["trim", "external"]);
   const trim = object(guides.trim, "snapshot.settings.cutGuides.trim", ["enabled", "extentMm", "color"]);
   const external = object(guides.external, "snapshot.settings.cutGuides.external", ["enabled", "strokeWidthPt", "color"]);
@@ -566,6 +630,34 @@ function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_
   if (skippedSlotIndices.length > 0 && rows === undefined && templateGeometry === undefined) {
     invalid("snapshot.settings.layout.skippedSlotIndices", "skipped slots require a fixed grid or versioned template geometry.");
   }
+  let exportContentMode: ExportContentMode = "front-only";
+  let missingBackPolicy: MissingBackPolicy = "use-project-default";
+  let duplexFlipMode: DuplexFlipMode = "long-edge";
+  let projectDefaultBack: BackLibraryAssetReference | null = null;
+  if (schemaVersion >= 4) {
+    if (source.exportContentMode !== undefined) {
+      const mode = string(source.exportContentMode, "snapshot.settings.exportContentMode", 32);
+      if (mode !== "front-only" && mode !== "back-only" && mode !== "front-back-separated" && mode !== "duplex") {
+        invalid("snapshot.settings.exportContentMode", "must be front-only, back-only, front-back-separated, or duplex.");
+      }
+      exportContentMode = mode;
+    }
+    if (source.missingBackPolicy !== undefined) {
+      const policy = string(source.missingBackPolicy, "snapshot.settings.missingBackPolicy", 32);
+      if (policy !== "use-project-default" && policy !== "blank" && policy !== "warn-and-continue" && policy !== "block") {
+        invalid("snapshot.settings.missingBackPolicy", "must be use-project-default, blank, warn-and-continue, or block.");
+      }
+      missingBackPolicy = policy;
+    }
+    if (source.duplexFlipMode !== undefined) {
+      const flip = string(source.duplexFlipMode, "snapshot.settings.duplexFlipMode", 24);
+      if (flip !== "long-edge" && flip !== "short-edge") invalid("snapshot.settings.duplexFlipMode", "must be long-edge or short-edge.");
+      duplexFlipMode = flip;
+    }
+    if (source.projectDefaultBack !== undefined && source.projectDefaultBack !== null) {
+      projectDefaultBack = backLibraryAssetReference(source.projectDefaultBack, "snapshot.settings.projectDefaultBack");
+    }
+  }
   return {
     ...base,
     pageOrientation,
@@ -578,6 +670,10 @@ function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_
     registration,
     registrationOverride,
     cutSourceSelection: schemaVersion >= 3 ? cutSourceSelection(source.cutSourceSelection) : null,
+    exportContentMode,
+    missingBackPolicy,
+    duplexFlipMode,
+    projectDefaultBack,
     layout: {
       ...(rows !== undefined ? { rows, columns } : {}),
       skippedSlotIndices,
@@ -588,7 +684,7 @@ function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_
 
 function validateSnapshot(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_VERSION): ProjectSnapshotV1 {
   const source = object(value, "snapshot", ["projectSchemaVersion", "cards", "settings"]);
-  const cards = array(source.cards, "snapshot.cards", MAX_PROJECT_CARDS).map((card, index) => persistedCard(card, index));
+  const cards = array(source.cards, "snapshot.cards", MAX_PROJECT_CARDS).map((card, index) => persistedCard(card, index, schemaVersion));
   if (new Set(cards.map(({ id }) => id)).size !== cards.length) invalid("snapshot.cards", "must not contain duplicate WorkingCard IDs.");
   if (cards.reduce((total, card) => total + card.quantity, 0) > MAX_PHYSICAL_CARDS_PER_EXPORT) {
     invalid("snapshot.cards", `must contain at most ${MAX_PHYSICAL_CARDS_PER_EXPORT} physical cards.`);
@@ -624,7 +720,7 @@ export function serializeProjectSnapshot(cards: readonly WorkingCard[], settings
   return serialized;
 }
 
-/** Dispatches logical Project snapshot versions; v1 is validated losslessly and future versions are read-only errors. */
+/** Dispatches logical Project snapshot versions; v1-v3 migrate in memory and future versions remain read-only errors. */
 export function deserializeProjectSnapshot(value: string | unknown): ProjectSnapshotV1 {
   let snapshot: unknown = value;
   if (typeof value === "string") {
@@ -652,9 +748,9 @@ export function deserializeProjectSnapshot(value: string | unknown): ProjectSnap
   if (version > CURRENT_PROJECT_SCHEMA_VERSION) {
     throw new ProjectSnapshotError("FUTURE_PROJECT_SCHEMA_VERSION", `Project snapshot schema ${version} is newer than this application supports (${CURRENT_PROJECT_SCHEMA_VERSION}).`);
   }
-  if (version !== 1 && version !== 2 && version !== CURRENT_PROJECT_SCHEMA_VERSION) {
+  if (version !== 1 && version !== 2 && version !== 3 && version !== CURRENT_PROJECT_SCHEMA_VERSION) {
     throw new ProjectSnapshotError("UNSUPPORTED_PROJECT_SCHEMA_VERSION", `Project snapshot schema ${version} has no supported migration path.`);
   }
-  // v1/v2 snapshots migrate in memory; autosave serializes them as the v3 shape.
+  // v1/v2/v3 snapshots migrate in memory; autosave serializes them as the v4 shape.
   return validateSnapshot(snapshot, version);
 }

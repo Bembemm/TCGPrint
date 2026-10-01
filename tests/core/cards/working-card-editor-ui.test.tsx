@@ -20,6 +20,8 @@ const card: WorkingCard = {
   identityResolution: { status: "unresolved", candidates: [], confirmed: false },
   faces: [{ id: "front", side: "front", name: "Sol Ring" }],
   selectedArtworkByFace: { front: { candidateId: "scryfall:sol-ring", source: "scryfall", identityId: null, faceId: "front" } },
+  backMode: "project-default",
+  backModeSelectionPolicy: "automatic",
   localArtworkIds: [],
   mpcReferences: [],
   faceAssociations: [],

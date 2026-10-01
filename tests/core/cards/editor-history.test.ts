@@ -22,6 +22,8 @@ function card(id: string, order: number, quantity = 1): WorkingCard {
     identityResolution: { status: "unresolved", candidates: [], confirmed: false },
     faces: [{ id: "front", side: "front", name: id }],
     selectedArtworkByFace: { front: { candidateId: `${id}-art`, source: "upload", identityId: null, faceId: "front" } },
+    backMode: "project-default",
+    backModeSelectionPolicy: "automatic",
     localArtworkIds: [],
     mpcReferences: [],
     faceAssociations: [],

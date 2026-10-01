@@ -84,6 +84,8 @@ function card(id: string, order: number): WorkingCard {
     identityResolution: { status: "unresolved", candidates: [], confirmed: false },
     faces: [{ id: "front", side: "front", name: id }, { id: "back", side: "back", name: `${id} back` }],
     selectedArtworkByFace: {},
+    backMode: "project-default",
+    backModeSelectionPolicy: "automatic",
     localArtworkIds: [],
     mpcReferences: [],
     faceAssociations: [],

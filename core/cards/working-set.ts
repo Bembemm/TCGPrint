@@ -138,6 +138,9 @@ export function createWorkingSet(result: ImportResult, options: CreateWorkingSet
         candidates: [],
         confirmed: false,
       };
+      const faces = createFaces(entry);
+      const selectedArtworkByFace = getSelectedByFace(entry);
+      const hasExplicitBackSelection = faces.some((face) => face.side === "back") && Boolean(selectedArtworkByFace.back);
       return {
         id: options.idFactory?.(entry, index) ?? randomUUID(),
         quantity: entry.quantity,
@@ -158,8 +161,10 @@ export function createWorkingSet(result: ImportResult, options: CreateWorkingSet
         },
         identity: null,
         identityResolution,
-        faces: createFaces(entry),
-        selectedArtworkByFace: getSelectedByFace(entry),
+        faces,
+        selectedArtworkByFace,
+        backMode: hasExplicitBackSelection ? "manual" : "project-default",
+        backModeSelectionPolicy: hasExplicitBackSelection ? "explicit" : "automatic",
         localArtworkIds: [...new Set(allImportedAssets(entry).filter((asset) => asset.originalBytes).map((asset) => asset.id))],
         mpcReferences: mpcReferences(entry),
         ...(entry.cardbackAsset ? { sharedMpcCardback: sharedMpcCardback(entry) } : {}),
@@ -184,8 +189,11 @@ export function createWorkingSet(result: ImportResult, options: CreateWorkingSet
 export function selectArtwork(card: WorkingCard, side: CardFaceSide, artwork: SelectedArtwork): WorkingCard {
   if (artwork.faceId !== side) throw new Error(`Artwork face ${artwork.faceId} does not match selected face ${side}.`);
   if (!card.faces.some((face) => face.side === side)) throw new Error(`Working card ${card.id} has no ${side} face.`);
-  return {
+  const next = {
     ...card,
     selectedArtworkByFace: { ...card.selectedArtworkByFace, [side]: artwork },
   };
+  if (side === "front") return next;
+  const { manualBackAsset: _manualBackAsset, ...withoutGenericBack } = next;
+  return { ...withoutGenericBack, backMode: "manual", backModeSelectionPolicy: "explicit" };
 }

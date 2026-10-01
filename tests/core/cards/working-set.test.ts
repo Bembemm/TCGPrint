@@ -46,6 +46,10 @@ describe("session Working Set", () => {
       ["working-entry-a", 1, 1, "Mainboard"],
       ["working-entry-b", 2, 6, "Sideboard"],
     ]);
+    expect(cards.map((card) => [card.backMode, card.backModeSelectionPolicy])).toEqual([
+      ["project-default", "automatic"],
+      ["project-default", "automatic"],
+    ]);
     expect(cards[1].identityHints).toEqual({ name: "Island", setCode: "M21", collectorNumber: "265", scryfallId: "scryfall-island", language: "en" });
     expect(createWorkingSet(result(entries), { idFactory: (entry) => `working-${entry.id}` })[1].id).toBe(cards[1].id);
   });
@@ -90,6 +94,8 @@ describe("session Working Set", () => {
     ]);
     expect(card.selectedArtworkByFace.front).toMatchObject({ source: "mpc", providerAssetId: "front-provider", selectedArtworkId: "front-selected" });
     expect(card.selectedArtworkByFace.back).toMatchObject({ source: "mpc", providerAssetId: "back-provider", selectedArtworkId: "back-selected" });
+    expect(card.backMode).toBe("manual");
+    expect(card.backModeSelectionPolicy).toBe("explicit");
     expect(card.mpcReferences.every((reference) => reference.availableLocally === false)).toBe(true);
 
     const withIdentity = { ...card, identity };
@@ -97,6 +103,8 @@ describe("session Working Set", () => {
     const withBackScryfall = selectArtwork(withFrontUpload, "back", artwork("scryfall:xyz", "scryfall", "back"));
     expect(withBackScryfall.id).toBe(card.id);
     expect(withBackScryfall.identity?.id).toBe(identity.id);
+    expect(withBackScryfall.backMode).toBe("manual");
+    expect(withBackScryfall.backModeSelectionPolicy).toBe("explicit");
     expect(withBackScryfall.selectedArtworkByFace).toMatchObject({ front: { source: "upload" }, back: { source: "scryfall" } });
     expect(withBackScryfall.mpcReferences).toEqual(card.mpcReferences);
   });

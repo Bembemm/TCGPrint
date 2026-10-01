@@ -19,6 +19,8 @@ function singleFaceCard(): WorkingCard {
     identityResolution: { status: "unresolved", candidates: [], confirmed: false },
     faces: [{ id: "front", side: "front", name: "Sol Ring" }],
     selectedArtworkByFace: {},
+    backMode: "project-default",
+    backModeSelectionPolicy: "automatic",
     localArtworkIds: [],
     mpcReferences: [],
     faceAssociations: [],
@@ -45,7 +47,7 @@ describe("project snapshot serializer", () => {
     const snapshot = deserializeProjectSnapshot(encoded);
 
     expect(snapshot).toEqual({
-      projectSchemaVersion: 3,
+      projectSchemaVersion: 4,
       cards: [{
         id: "working-card-1",
         quantity: 1,
@@ -56,6 +58,8 @@ describe("project snapshot serializer", () => {
         identityResolution: { status: "unresolved", candidates: [], confirmed: false },
         faces: [{ id: "front", side: "front", name: "Sol Ring" }],
         selectedArtworkByFace: {},
+        backMode: "project-default",
+        backModeSelectionPolicy: "automatic",
         localArtworkIds: [],
         mpcReferences: [],
         faceAssociations: [],
@@ -77,12 +81,16 @@ describe("project snapshot serializer", () => {
         registration: { type: "none", orientation: "portrait" },
         registrationOverride: false,
         cutSourceSelection: null,
+        exportContentMode: "front-only",
+        missingBackPolicy: "use-project-default",
+        duplexFlipMode: "long-edge",
+        projectDefaultBack: null,
         layout: { skippedSlotIndices: [] },
       },
     });
   });
 
-  it("migrates a legacy v1 project deterministically to v3 defaults", () => {
+  it("migrates a legacy v1 project deterministically to v4 defaults", () => {
     const legacy = {
       projectSchemaVersion: 1,
       cards: [],
@@ -94,22 +102,33 @@ describe("project snapshot serializer", () => {
     };
 
     expect(deserializeProjectSnapshot(legacy)).toMatchObject({
-      projectSchemaVersion: 3,
+      projectSchemaVersion: 4,
       settings: {
         pageOrientation: "portrait",
         cardOrientation: "portrait",
         registration: { type: "none", orientation: "portrait" },
         registrationOverride: false,
         cutSourceSelection: null,
+        exportContentMode: "front-only",
+        missingBackPolicy: "use-project-default",
+        duplexFlipMode: "long-edge",
+        projectDefaultBack: null,
         layout: { skippedSlotIndices: [] },
       },
     });
   });
 
   it("migrates Phase 10 schema-2 snapshots without requiring a cut-source selection", () => {
-    const { cutSourceSelection: _cutSourceSelection, ...phase10Settings } = DEFAULT_PROJECT_SETTINGS;
+    const {
+      cutSourceSelection: _cutSourceSelection,
+      exportContentMode: _exportContentMode,
+      missingBackPolicy: _missingBackPolicy,
+      duplexFlipMode: _duplexFlipMode,
+      projectDefaultBack: _projectDefaultBack,
+      ...phase10Settings
+    } = DEFAULT_PROJECT_SETTINGS;
     expect(deserializeProjectSnapshot({ projectSchemaVersion: 2, cards: [], settings: phase10Settings })).toMatchObject({
-      projectSchemaVersion: 3,
+      projectSchemaVersion: 4,
       settings: { cutSourceSelection: null, registrationOverride: false },
     });
   });
@@ -155,6 +174,76 @@ describe("project snapshot serializer", () => {
     expect(deserializeProjectSnapshot(serializeProjectSnapshot([], currentSettings)).settings.registrationOverride).toBe(true);
   });
 
+  it("round-trips a manual back lock and immutable Project default reference", () => {
+    const asset = { assetId: `back:${"a".repeat(64)}`, sha256: "a".repeat(64), format: "png" as const };
+    const card: WorkingCard = {
+      ...singleFaceCard(),
+      faces: [{ id: "front", side: "front" }, { id: "back", side: "back" }],
+      selectedArtworkByFace: {
+        back: {
+          candidateId: `mpc:${"b".repeat(64)}`,
+          source: "mpc",
+          identityId: "scryfall:oracle:dfc",
+          faceId: "back",
+          providerAssetId: "provider-face-back",
+          selectedArtworkId: "selected-back",
+          selectionPolicy: "user-selected",
+        },
+      },
+      backMode: "manual",
+      backModeSelectionPolicy: "explicit",
+      manualBackAsset: asset,
+    };
+    const settings = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      exportContentMode: "duplex" as const,
+      duplexFlipMode: "short-edge" as const,
+      projectDefaultBack: asset,
+    };
+
+    expect(deserializeProjectSnapshot(serializeProjectSnapshot([card], settings))).toMatchObject({
+      projectSchemaVersion: 4,
+      cards: [{
+        backMode: "manual",
+        backModeSelectionPolicy: "explicit",
+        manualBackAsset: asset,
+        selectedArtworkByFace: { back: { providerAssetId: "provider-face-back", selectedArtworkId: "selected-back", faceId: "back" } },
+      }],
+      settings: {
+        exportContentMode: "duplex",
+        duplexFlipMode: "short-edge",
+        projectDefaultBack: asset,
+      },
+    });
+  });
+
+  it("migrates a genuine schema-3 snapshot to safe front-only duplex defaults", () => {
+    const current = JSON.parse(serializeProjectSnapshot([singleFaceCard()], DEFAULT_PROJECT_SETTINGS)) as {
+      projectSchemaVersion: number;
+      cards: Array<Record<string, unknown>>;
+      settings: Record<string, unknown>;
+    };
+    current.projectSchemaVersion = 3;
+    delete current.cards[0].backMode;
+    delete current.cards[0].backModeSelectionPolicy;
+    delete current.cards[0].manualBackAsset;
+    delete current.settings.exportContentMode;
+    delete current.settings.missingBackPolicy;
+    delete current.settings.duplexFlipMode;
+    delete current.settings.projectDefaultBack;
+
+    expect(deserializeProjectSnapshot(current)).toMatchObject({
+      projectSchemaVersion: 4,
+      cards: [{ backMode: "project-default", backModeSelectionPolicy: "automatic" }],
+      settings: {
+        exportContentMode: "front-only",
+        missingBackPolicy: "use-project-default",
+        duplexFlipMode: "long-edge",
+        projectDefaultBack: null,
+      },
+    });
+  });
+
   it("requires skipped slots to have a fixed grid or versioned template geometry", () => {
     expect(() => serializeProjectSnapshot([], {
       ...DEFAULT_PROJECT_SETTINGS,
@@ -163,7 +252,7 @@ describe("project snapshot serializer", () => {
   });
 
   it("rejects a future logical snapshot version with an explicit version error", () => {
-    expect(() => deserializeProjectSnapshot({ projectSchemaVersion: 4, cards: [], settings: {} }))
+    expect(() => deserializeProjectSnapshot({ projectSchemaVersion: 5, cards: [], settings: {} }))
       .toThrowError(expect.objectContaining({ code: "FUTURE_PROJECT_SCHEMA_VERSION" }));
   });
 

@@ -58,7 +58,7 @@ describe("Project template API persistence", () => {
     expect(created.templateSelection).toEqual(v5);
 
     const snapshot: ProjectSnapshotV1 = {
-      projectSchemaVersion: 3,
+      projectSchemaVersion: 4,
       cards: [],
       settings: { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 1.25 },
     };

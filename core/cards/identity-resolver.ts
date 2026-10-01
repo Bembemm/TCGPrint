@@ -3,6 +3,7 @@ import { ScryfallError } from "../../providers/scryfall/errors";
 import type { OcrRecognizer } from "../../providers/ocr/types";
 import type { ScryfallCard } from "../../providers/scryfall/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, IdentityResolutionMethod, SelectedArtwork, WorkingCard } from "./types";
+import { isDoubleFacedIdentity } from "./back-selection";
 import { DEFAULT_ARTWORK_POLICY_ID, IDENTITY_RESOLUTION_POLICY } from "./identity-policy";
 import { normalizeArtworkFilename } from "./filename-resolver";
 import { fuzzyMatchName } from "./fuzzy-matcher";
@@ -192,13 +193,18 @@ export function selectResolvedPrintingArtwork(workingCard: WorkingCard, candidat
   const printingId = candidates[0].scryfallId ?? candidates[0].providerAssetId;
 
   for (const side of ["front", "back"] as const) {
-    if (selectedArtworkByFace[side] || !workingCard.faces.some((face) => face.side === side)) continue;
+    const existing = selectedArtworkByFace[side];
+    if (!workingCard.faces.some((face) => face.side === side)) continue;
+    if (side === "front" && existing) continue;
+    if (side === "back" && (!isDoubleFacedIdentity(workingCard.identity)
+      || workingCard.backMode === "manual"
+      || existing?.selectionPolicy === "user-selected")) continue;
     const candidate = candidates.find((item) => item.source === "scryfall"
       && item.identityId === workingCard.identity?.id
       && item.faceId === side
       && item.originalAvailable
       && (item.scryfallId ?? item.providerAssetId) === printingId);
-    if (candidate) {
+    if (candidate && (side === "back" || !existing)) {
       selectedArtworkByFace[side] = selected(candidate);
       changed = true;
     }
@@ -212,6 +218,7 @@ export function reconcileArtworkAfterIdentityChange(workingCard: WorkingCard, id
   for (const side of ["front", "back"] as const) {
     const selected = selectedArtworkByFace[side];
     if (!selected || selected.source === "upload" || selected.selectionPolicy === "user-selected") continue;
+    if (side === "back" && workingCard.backMode === "manual") continue;
     if (selected.identityId !== null && selected.identityId !== identityId) {
       delete selectedArtworkByFace[side];
       changed = true;
@@ -255,6 +262,9 @@ export function selectDefaultArtworkForFace(workingCard: WorkingCard, side: Card
   selectedArtworkByFace[side] = selected(candidate);
   return { ...workingCard, selectedArtworkByFace };
 }
+
+export { isDoubleFacedIdentity, resolveEffectiveCardBack, restoreAutomaticBackSelection, selectManualBackLibraryAsset, setWorkingCardBackMode } from "./back-selection";
+export type { EffectiveCardBack } from "./back-selection";
 
 export function confirmIdentity(workingCard: WorkingCard, candidate: CardIdentity): WorkingCard {
   const confirmed: WorkingCard = {

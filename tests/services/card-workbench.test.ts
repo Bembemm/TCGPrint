@@ -347,6 +347,8 @@ describe("card workbench services", () => {
 
     expect(bothSelected.selectedArtworkByFace.front?.selectionPolicy).toBe("user-selected");
     expect(bothSelected.selectedArtworkByFace.back?.selectionPolicy).toBe("user-selected");
+    expect(bothSelected.backMode).toBe("manual");
+    expect(bothSelected.backModeSelectionPolicy).toBe("explicit");
 
     const frontReset = await workbench.restoreDefaultArtwork(bothSelected, "front");
     const backReset = frontReset && await workbench.restoreDefaultArtwork(frontReset, "back");
@@ -364,6 +366,7 @@ describe("card workbench services", () => {
       front: frontReset?.selectedArtworkByFace.front,
       back: { candidateId: backCandidate.id, selectionPolicy: "newest-en-highres-nondigital-v1" },
     });
+    expect(backReset).toMatchObject({ backMode: "auto", backModeSelectionPolicy: "automatic" });
     expect(fake.lookupById).toHaveBeenCalledTimes(lookupsBeforeReset);
     expect(fake.listPrintings).toHaveBeenCalledTimes(printingsBeforeReset);
   });
@@ -874,7 +877,118 @@ describe("card workbench services", () => {
     expect(result.identity?.id).toBe(`scryfall:oracle:${delverCard.oracle_id}`);
     expect(result.selectedArtworkByFace.front).toMatchObject({ candidateId: localId, source: "upload", identityId: result.identity?.id });
     expect(result.selectedArtworkByFace.back).toMatchObject({ source: "scryfall", faceId: "back", candidateId: `scryfall:${delverCard.id}:back` });
+    expect(result.backMode).toBe("auto");
+    expect(result.backModeSelectionPolicy).toBe("automatic");
     expect(requestPaths).toEqual(["/cards/named"]);
     expect(await workbench.getArtworkOriginal(localId)).toMatchObject({ bytes });
+  });
+
+  it("does not interpret two provider faces as a DFC when the Scryfall layout is split", async () => {
+    const doubleFaced = mapScryfallCard(delverCard);
+    const split = { ...doubleFaced, name: "Fire // Ice", layout: "split" };
+    const fake = fakeScryfallClient([split]);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
+    const source = imported.workingCards[0];
+    const resolved = await workbench.resolveWorkingCards([{
+      ...source,
+      identityHints: { ...source.identityHints, scryfallId: split.id },
+    }]);
+
+    expect(resolved.workingCards[0]).toMatchObject({
+      backMode: "project-default",
+      backModeSelectionPolicy: "automatic",
+      faces: [{ side: "front" }],
+    });
+    expect(resolved.workingCards[0].selectedArtworkByFace.back).toBeUndefined();
+  });
+
+  it("supports mixed face providers and keeps a manual DFC back after provider re-resolution", async () => {
+    const identityCard = mapScryfallCard(delverCard);
+    const initial = fakeScryfallClient([identityCard]);
+    const { workbench } = await setup(undefined, undefined, initial.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
+    const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
+    const [scryfallBack] = await workbench.listArtworkCandidates(identified.identity!.id, "back", "scryfall");
+    const mpcBack = {
+      id: `mpc:${"c".repeat(64)}`,
+      source: "mpc" as const,
+      identityId: identified.identity!.id,
+      faceId: "back",
+      providerAssetId: "dfc-back-provider-id",
+      selectedArtworkId: "dfc-back-selected-id",
+      originalAvailable: true,
+    };
+    const mpcFront = {
+      ...mpcBack,
+      id: `mpc:${"d".repeat(64)}`,
+      faceId: "front",
+      providerAssetId: "dfc-front-provider-id",
+      selectedArtworkId: "dfc-front-selected-id",
+    };
+    const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
+    const upload = await workbench.importForWorkingSet({ files: [{ filename: "face.png", bytes }] });
+    const uploadCandidate = await workbench.getArtworkCandidate(upload.workingCards[0].localArtworkIds[0]);
+    if (!scryfallBack || !uploadCandidate) throw new Error("Expected Scryfall and validated upload face candidates.");
+
+    const scryfallFrontMpcBack = workbench.selectArtwork(identified, "back", mpcBack);
+    const mpcFrontUploadBack = workbench.selectArtwork(
+      workbench.selectArtwork(identified, "front", mpcFront),
+      "back",
+      uploadCandidate,
+    );
+    const uploadFrontScryfallBack = workbench.selectArtwork(
+      workbench.selectArtwork(identified, "front", uploadCandidate),
+      "back",
+      scryfallBack,
+    );
+
+    expect(scryfallFrontMpcBack.selectedArtworkByFace).toMatchObject({
+      front: { source: "scryfall", faceId: "front", identityId: identified.identity!.id },
+      back: { source: "mpc", faceId: "back", providerAssetId: "dfc-back-provider-id", selectedArtworkId: "dfc-back-selected-id" },
+    });
+    expect(mpcFrontUploadBack.selectedArtworkByFace).toMatchObject({
+      front: { source: "mpc", faceId: "front", providerAssetId: "dfc-front-provider-id", selectedArtworkId: "dfc-front-selected-id" },
+      back: { source: "upload", faceId: "back", identityId: identified.identity!.id },
+    });
+    expect(uploadFrontScryfallBack.selectedArtworkByFace).toMatchObject({
+      front: { source: "upload", faceId: "front", identityId: identified.identity!.id },
+      back: { source: "scryfall", faceId: "back", identityId: identified.identity!.id },
+    });
+    expect([scryfallFrontMpcBack, mpcFrontUploadBack, uploadFrontScryfallBack].map((card) => card.backMode)).toEqual([
+      "manual", "manual", "manual",
+    ]);
+
+    const updatedDfc = {
+      ...identityCard,
+      faces: identityCard.faces.map((face, index) => index === 1 ? { ...face, name: "Insectile Aberration Updated" } : face),
+    };
+    const refreshedRoot = await mkdtemp(join(tmpdir(), "tcgprint-dfc-refresh-"));
+    roots.push(refreshedRoot);
+    const refreshedWorkbench = await createCardWorkbench({
+      dataDirectory: refreshedRoot,
+      scryfallClient: fakeScryfallClient([updatedDfc]).client,
+      minIntervalMs: 0,
+    });
+    workbenches.push(refreshedWorkbench);
+    const refreshed = await refreshedWorkbench.reresolveWorkingCard({
+      ...scryfallFrontMpcBack,
+      identityHints: { ...scryfallFrontMpcBack.identityHints, scryfallId: identityCard.id },
+    });
+
+    expect(refreshed).toMatchObject({
+      identity: { id: identified.identity!.id },
+      backMode: "manual",
+      backModeSelectionPolicy: "explicit",
+      selectedArtworkByFace: {
+        back: {
+          candidateId: `mpc:${"c".repeat(64)}`,
+          providerAssetId: "dfc-back-provider-id",
+          selectedArtworkId: "dfc-back-selected-id",
+          faceId: "back",
+          selectionPolicy: "user-selected",
+        },
+      },
+    });
   });
 });

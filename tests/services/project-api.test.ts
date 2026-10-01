@@ -111,6 +111,8 @@ describe("project API service", () => {
             selectionPolicy: "newest-en-highres-nondigital-v1",
           },
         },
+        backMode: "manual",
+        backModeSelectionPolicy: "explicit",
         localArtworkIds: [`upload:${"a".repeat(64)}`],
         mpcReferences: [{
           faceId: "back",
@@ -144,6 +146,8 @@ describe("project API service", () => {
           { id: "back", side: "back", name: "Emeria, Shattered Skyclave" },
         ],
         selectedArtworkByFace: {},
+        backMode: "auto",
+        backModeSelectionPolicy: "automatic",
         localArtworkIds: [],
         mpcReferences: [],
         faceAssociations: [],
@@ -180,10 +184,10 @@ describe("project API service", () => {
     expect(created).toMatchObject({
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 3,
+      projectSchemaVersion: 4,
       revision: 1,
       snapshot: {
-        projectSchemaVersion: 3,
+        projectSchemaVersion: 4,
         cards: [],
         settings: DEFAULT_PROJECT_SETTINGS,
       },
@@ -194,7 +198,7 @@ describe("project API service", () => {
     expect(await listResponse.json()).toEqual({ projects: [{
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 3,
+      projectSchemaVersion: 4,
       revision: 1,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -270,7 +274,7 @@ describe("project API service", () => {
     expect(opened.snapshot).toEqual(canonical.snapshot);
     expect(opened.recovery).toMatchObject({
       baseRevision: 1,
-      projectSchemaVersion: 3,
+      projectSchemaVersion: 4,
       snapshot: candidate,
     });
   });
@@ -378,7 +382,7 @@ describe("project API service", () => {
     const projects = setup();
     projects.create();
 
-    const response = await handleProjectSave(request("PUT", { expectedRevision: 1, snapshot: { projectSchemaVersion: 4 } }), "project-1", projects);
+    const response = await handleProjectSave(request("PUT", { expectedRevision: 1, snapshot: { projectSchemaVersion: 5 } }), "project-1", projects);
     const opened = projects.open("project-1");
 
     expect(response.status).toBe(400);

@@ -48,10 +48,10 @@ describe("project repository", () => {
     expect(created).toEqual({
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 3,
+      projectSchemaVersion: 4,
       revision: 1,
       snapshot: {
-        projectSchemaVersion: 3,
+        projectSchemaVersion: 4,
         cards: [],
         settings: {
           bleedMm: 0.625,
@@ -70,6 +70,10 @@ describe("project repository", () => {
         registration: { type: "none", orientation: "portrait" },
         registrationOverride: false,
         cutSourceSelection: null,
+        exportContentMode: "front-only",
+        missingBackPolicy: "use-project-default",
+        duplexFlipMode: "long-edge",
+        projectDefaultBack: null,
         layout: { skippedSlotIndices: [] },
         },
       },
@@ -81,7 +85,7 @@ describe("project repository", () => {
     expect(projects.list()).toEqual([{
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 3,
+      projectSchemaVersion: 4,
       revision: 1,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -275,9 +279,9 @@ describe("project repository", () => {
 
     const opened = projects.open(created.id);
 
-    expect(opened.projectSchemaVersion).toBe(3);
+    expect(opened.projectSchemaVersion).toBe(4);
     expect(opened.snapshot).toMatchObject({
-      projectSchemaVersion: 3,
+      projectSchemaVersion: 4,
       settings: { bleedMm: 1.25, roundedCorners: true, registration: { type: "none", orientation: "portrait" } },
     });
     expect(database!.prepare("SELECT snapshot_json FROM projects WHERE id = ?").get(created.id)).toEqual({ snapshot_json: legacy });
@@ -295,12 +299,14 @@ describe("project repository", () => {
       identityResolution: { status: "custom", method: "custom", candidates: [], confirmed: true },
       faces: [{ id: "front", side: "front", name: "Custom card" }],
       selectedArtworkByFace: {},
+      backMode: "project-default",
+      backModeSelectionPolicy: "automatic",
       localArtworkIds: [],
       mpcReferences: [],
       faceAssociations: [],
     };
     const initialSnapshot = {
-      projectSchemaVersion: 3 as const,
+      projectSchemaVersion: 4 as const,
       cards: [customCard],
       settings: DEFAULT_PROJECT_SETTINGS,
     };
@@ -348,9 +354,9 @@ describe("project repository", () => {
     const projects = await setup();
     const future = projects.create();
     const corrupt = projects.create();
-    const futureJson = JSON.stringify({ projectSchemaVersion: 4, cards: [], settings: {} });
+    const futureJson = JSON.stringify({ projectSchemaVersion: 5, cards: [], settings: {} });
     const corruptJson = "{";
-    database!.prepare("UPDATE projects SET project_schema_version = 4, snapshot_json = ? WHERE id = ?").run(futureJson, future.id);
+    database!.prepare("UPDATE projects SET project_schema_version = 5, snapshot_json = ? WHERE id = ?").run(futureJson, future.id);
     database!.prepare("UPDATE projects SET snapshot_json = ? WHERE id = ?").run(corruptJson, corrupt.id);
     const readRaw = (projectId: string) => database!.prepare("SELECT project_schema_version, revision, snapshot_json FROM projects WHERE id = ?").get(projectId);
     const futureBefore = readRaw(future.id);
@@ -375,6 +381,8 @@ describe("project repository", () => {
       identityResolution: { status: "unresolved", candidates: [], confirmed: false },
       faces: [{ id: "front", side: "front", name: "Island" }],
       selectedArtworkByFace: {},
+      backMode: "project-default",
+      backModeSelectionPolicy: "automatic",
       localArtworkIds: [`upload:${"b".repeat(64)}`],
       mpcReferences: [],
       faceAssociations: [],
@@ -471,7 +479,7 @@ describe("project repository", () => {
     expect(staged).toEqual({
       projectId: canonical.id,
       baseRevision: 1,
-      projectSchemaVersion: 3,
+      projectSchemaVersion: 4,
       snapshot: candidate,
       templateSelection: null,
       createdAt: "2026-01-01T00:00:01.000Z",
@@ -580,6 +588,8 @@ describe("project repository", () => {
           selectionPolicy: "user-selected",
         },
       },
+      backMode: "project-default",
+      backModeSelectionPolicy: "automatic",
       localArtworkIds: [`upload:${"a".repeat(64)}`],
       mpcReferences: [],
       faceAssociations: [],

@@ -1,8 +1,9 @@
 import { artworkQualityFromCandidate, type CardWorkbench } from "./card-workbench";
 import { CardExportServiceError, exportWorkingCardsWithDiagnostics, type CardExportBleedDiagnostic } from "./card-export";
 import type { ArtworkCatalogSource } from "../artwork/types";
-import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
+import type { ArtworkCandidate, BackLibraryAssetReference, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardBackMode, WorkingCardBackModeSelectionPolicy, WorkingCardMpcReference } from "../core/cards/types";
 import { isSafeArtworkCandidateId } from "../core/cards/ids";
+import { isDoubleFacedIdentity } from "../core/cards/back-selection";
 import { sanitizeCardIdentityMetadata } from "../core/cards/safe-identity-metadata";
 import type { UniversalImportRequest } from "../import-engine/types";
 import { sanitizeRelativeImportPath } from "../import-engine/source-path";
@@ -22,6 +23,8 @@ const FORBIDDEN_PROPERTIES = new Set(["originalBytes", "bytes", "sourcePath", "l
 const SOURCES = new Set(["scryfall", "upload", "mpc", "url", "custom"]);
 const RESOLUTION_STATUSES = new Set(["resolved", "suggested", "ambiguous", "unresolved", "custom"]);
 const RESOLUTION_METHODS = new Set(["scryfall-id", "set-collector", "name", "filename", "ocr", "fuzzy", "manual", "custom"]);
+const BACK_MODES = new Set<WorkingCardBackMode>(["auto", "project-default", "manual", "none"]);
+const BACK_MODE_SELECTION_POLICIES = new Set<WorkingCardBackModeSelectionPolicy>(["automatic", "explicit"]);
 
 class ApiRequestError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); this.name = "ApiRequestError"; }
@@ -50,6 +53,17 @@ function requiredString(value: unknown, key: string, maximum = 256): string {
 function optionalString(value: unknown, key: string, maximum = 256): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   return requiredString(value, key, maximum);
+}
+
+function parseBackLibraryReference(value: unknown): BackLibraryAssetReference | undefined {
+  if (value === undefined || value === null) return undefined;
+  const input = record(value);
+  if (!input) throw new ApiRequestError(400, "INVALID_REQUEST", "manualBackAsset must be an immutable Back Library reference.");
+  const sha256 = requiredString(input.sha256, "manualBackAsset.sha256", 64);
+  if (!/^[a-f0-9]{64}$/.test(sha256) || input.assetId !== `back:${sha256}` || (input.format !== "jpeg" && input.format !== "png")) {
+    throw new ApiRequestError(400, "INVALID_REQUEST", "manualBackAsset must include a content-addressed asset ID, SHA-256, and supported format.");
+  }
+  return { assetId: input.assetId, sha256, format: input.format };
 }
 
 function optionalOrientation(value: unknown, key: string): PageOrientation | undefined {
@@ -209,6 +223,26 @@ export function parseWorkingCards(value: unknown): WorkingCard[] {
       ...(safeSelection(selections.front, "front") ? { front: safeSelection(selections.front, "front") } : {}),
       ...(safeSelection(selections.back, "back") ? { back: safeSelection(selections.back, "back") } : {}),
     };
+    const manualBackAsset = parseBackLibraryReference(input.manualBackAsset);
+    const backModeValue = input.backMode;
+    if (backModeValue !== undefined && (typeof backModeValue !== "string" || !BACK_MODES.has(backModeValue as WorkingCardBackMode))) {
+      throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}].backMode is invalid.`);
+    }
+    const legacyManualSelection = backModeValue === undefined && selectedArtworkByFace.back?.selectionPolicy === "user-selected";
+    const backMode: WorkingCardBackMode = backModeValue as WorkingCardBackMode | undefined
+      ?? (manualBackAsset || legacyManualSelection ? "manual" : isDoubleFacedIdentity(identity) ? "auto" : "project-default");
+    const selectionPolicyValue = input.backModeSelectionPolicy;
+    if (selectionPolicyValue !== undefined && (typeof selectionPolicyValue !== "string" || !BACK_MODE_SELECTION_POLICIES.has(selectionPolicyValue as WorkingCardBackModeSelectionPolicy))) {
+      throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}].backModeSelectionPolicy is invalid.`);
+    }
+    const backModeSelectionPolicy: WorkingCardBackModeSelectionPolicy = selectionPolicyValue as WorkingCardBackModeSelectionPolicy | undefined
+      ?? (manualBackAsset || legacyManualSelection ? "explicit" : "automatic");
+    if (backMode === "manual" && !manualBackAsset && !selectedArtworkByFace.back) {
+      throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}] manual back requires a selected back face or Back Library asset.`);
+    }
+    if (manualBackAsset && backMode !== "manual") {
+      throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}] manualBackAsset requires manual back mode.`);
+    }
     const localArtworkIds = Array.isArray(input.localArtworkIds) ? [...new Set(input.localArtworkIds.slice(0, 200).map((id) => requiredString(id, "localArtworkId", 80)))].filter((id) => /^upload:[a-f0-9]{64}$/.test(id)) : [];
     const mpcReferences: WorkingCardMpcReference[] = Array.isArray(input.mpcReferences) ? input.mpcReferences.slice(0, 200).flatMap((item): WorkingCardMpcReference[] => {
       const ref = record(item);
@@ -269,6 +303,9 @@ export function parseWorkingCards(value: unknown): WorkingCard[] {
       identityResolution: safeResolution(input.identityResolution, identity),
       faces,
       selectedArtworkByFace,
+      backMode,
+      backModeSelectionPolicy,
+      ...(manualBackAsset ? { manualBackAsset } : {}),
       localArtworkIds,
       mpcReferences,
       ...(sharedMpcCardback ? { sharedMpcCardback } : {}),

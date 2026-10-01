@@ -1,5 +1,7 @@
 export type ArtworkSource = "scryfall" | "upload" | "mpc" | "url" | "custom";
 export type CardFaceSide = "front" | "back";
+export type WorkingCardBackMode = "auto" | "project-default" | "manual" | "none";
+export type WorkingCardBackModeSelectionPolicy = "automatic" | "explicit";
 export type IdentityResolutionStatus = "resolved" | "suggested" | "ambiguous" | "unresolved" | "custom";
 export type IdentityResolutionMethod = "scryfall-id" | "set-collector" | "name" | "filename" | "ocr" | "fuzzy" | "manual" | "custom";
 
@@ -60,6 +62,13 @@ export interface SelectedArtwork {
   readonly providerAssetId?: string;
   readonly selectedArtworkId?: string;
   readonly selectionPolicy?: string;
+}
+
+/** Immutable, path-free reference to a validated generic cardback in Back Library. */
+export interface BackLibraryAssetReference {
+  readonly assetId: string;
+  readonly sha256: string;
+  readonly format: "jpeg" | "png";
 }
 
 export interface IdentityResolutionCandidate {
@@ -125,6 +134,12 @@ export interface WorkingCard {
   readonly identityResolution: IdentityResolution;
   readonly faces: readonly CardFace[];
   readonly selectedArtworkByFace: Readonly<Partial<Record<CardFaceSide, SelectedArtwork>>>;
+  /** Explicit source policy for this card's effective physical back. */
+  readonly backMode: WorkingCardBackMode;
+  /** Explicit user/import choice remains stable when identity metadata is refreshed. */
+  readonly backModeSelectionPolicy: WorkingCardBackModeSelectionPolicy;
+  /** Only used when backMode is manual and the cardback is a generic library asset. */
+  readonly manualBackAsset?: BackLibraryAssetReference;
   readonly localArtworkIds: readonly string[];
   readonly mpcReferences: readonly WorkingCardMpcReference[];
   readonly sharedMpcCardback?: WorkingCardSharedMpcCardback;

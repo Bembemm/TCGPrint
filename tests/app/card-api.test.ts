@@ -36,6 +36,8 @@ const card: WorkingCard = {
   identityResolution: { status: "resolved", method: "manual", query: "Sol Ring", confidence: 1, candidates: [], confirmed: true },
   faces: [{ id: "front", side: "front", name: "Sol Ring" }],
   selectedArtworkByFace: { front: { candidateId, source: "upload", identityId: identity.id, faceId: "front" } },
+  backMode: "project-default",
+  backModeSelectionPolicy: "automatic",
   localArtworkIds: [candidateId],
   mpcReferences: [],
   faceAssociations: [],
@@ -317,6 +319,28 @@ describe("card APIs", () => {
     expect(() => parseWorkingCards([{ ...card, localOriginalPath: "/tmp/card.png" }])).toThrow(/localOriginalPath/);
     expect(() => parseWorkingCards([{ ...card, identityHints: { ...card.identityHints, imageUrl: "https://evil.test/card.png" } }])).toThrow(/imageUrl/);
     expect(() => parseWorkingCards([{ ...card, selectedArtworkByFace: { front: { ...card.selectedArtworkByFace.front, candidateId: "https://evil.test/a.jpg" } } }])).toThrow(/selected artwork reference/);
+  });
+
+  it("parses explicit back policy without treating the shared MPC cardback as a card face", () => {
+    const generic = parseWorkingCards([{ ...card, sharedMpcCardback: {
+      importedAssetId: "shared-mpc-back", originalFormat: "png", availableLocally: true,
+      provenance: { sourceId: "mpc-order" },
+    } }])[0];
+    expect(generic.backMode).toBe("project-default");
+
+    const dfc: WorkingCard = {
+      ...card,
+      identity: { ...identity, metadata: { layout: "transform", faces: [{ name: "Front" }, { name: "Back" }] } },
+      faces: [{ id: "front", side: "front", name: "Front" }, { id: "back", side: "back", name: "Back" }],
+      selectedArtworkByFace: {},
+      backMode: "auto",
+      backModeSelectionPolicy: "automatic",
+    };
+    expect(parseWorkingCards([dfc])[0].backMode).toBe("auto");
+    const hash = "c".repeat(64);
+    const manual = parseWorkingCards([{ ...dfc, backMode: "manual", backModeSelectionPolicy: "explicit", manualBackAsset: { assetId: `back:${hash}`, sha256: hash, format: "png" } }])[0];
+    expect(manual).toMatchObject({ backMode: "manual", backModeSelectionPolicy: "explicit", manualBackAsset: { sha256: hash } });
+    expect(() => parseWorkingCards([{ ...dfc, backMode: "bogus" }])).toThrow(/backMode is invalid/);
   });
 
   it("keeps the API CardIdentity metadata allowlist and sanitization behavior", () => {

@@ -41,7 +41,9 @@ import type { CutSourceSelection } from "../../core/cut";
 import type { CutPreviewDto } from "../../services/cut-api";
 import { createDefaultRegistrationConfig, type RegistrationConfig } from "../../core/registration";
 import type { ProjectDto } from "../../services/project-api";
-import { DEFAULT_PROJECT_SETTINGS, type ProjectSettingsV2 } from "../../persistence/projects/serializer";
+import { DEFAULT_PROJECT_SETTINGS, type ExportContentMode, type MissingBackPolicy, type ProjectSettingsV2 } from "../../persistence/projects/serializer";
+import type { BackLibraryAssetReference } from "../../core/cards/types";
+import type { DuplexFlipMode } from "../../core/duplex";
 import ProjectsPanel from "./projects-panel";
 import type { TemplateRegistrationDefaults } from "./template-library-panel";
 import {
@@ -480,6 +482,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [cardOrientation, setCardOrientation] = useState<PageOrientation>("portrait");
   const [paperFormat, setPaperFormat] = useState<PaperFormat>(DEFAULT_PROJECT_SETTINGS.paperFormat);
   const [cardFormat, setCardFormat] = useState<CardFormat>(DEFAULT_PROJECT_SETTINGS.cardFormat);
+  const [exportContentMode, setExportContentMode] = useState<ExportContentMode>(DEFAULT_PROJECT_SETTINGS.exportContentMode);
+  const [missingBackPolicy, setMissingBackPolicy] = useState<MissingBackPolicy>(DEFAULT_PROJECT_SETTINGS.missingBackPolicy);
+  const [duplexFlipMode, setDuplexFlipMode] = useState<DuplexFlipMode>(DEFAULT_PROJECT_SETTINGS.duplexFlipMode);
+  const [projectDefaultBack, setProjectDefaultBack] = useState<BackLibraryAssetReference | null>(DEFAULT_PROJECT_SETTINGS.projectDefaultBack);
   const [marginsMm, setMarginsMm] = useState<PageMarginsMm>({ top: 0, right: 0, bottom: 0, left: 0 });
   const [horizontalGapMm, setHorizontalGapMm] = useState(0);
   const [verticalGapMm, setVerticalGapMm] = useState(0);
@@ -537,6 +543,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       cardOrientation,
       paperFormat,
       cardFormat,
+      exportContentMode,
+      missingBackPolicy,
+      duplexFlipMode,
+      projectDefaultBack,
       marginsMm,
       horizontalGapMm,
       verticalGapMm,
@@ -549,7 +559,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         ...(templateGeometry ? { templateGeometry } : {}),
       },
     };
-  }, [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor, pageOrientation, cardOrientation, paperFormat, cardFormat, marginsMm, horizontalGapMm, verticalGapMm, registration, registrationOverride, cutSourceSelection, layoutRows, layoutColumns, skippedSlotIndices, templateGeometry]);
+  }, [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor, pageOrientation, cardOrientation, paperFormat, cardFormat, exportContentMode, missingBackPolicy, duplexFlipMode, projectDefaultBack, marginsMm, horizontalGapMm, verticalGapMm, registration, registrationOverride, cutSourceSelection, layoutRows, layoutColumns, skippedSlotIndices, templateGeometry]);
 
   function clearProblem(cardId: string | null = null) {
     setProblem("");
@@ -889,6 +899,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     setCardOrientation(settings.cardOrientation);
     setPaperFormat(settings.paperFormat);
     setCardFormat(settings.cardFormat);
+    setExportContentMode(settings.exportContentMode);
+    setMissingBackPolicy(settings.missingBackPolicy);
+    setDuplexFlipMode(settings.duplexFlipMode);
+    setProjectDefaultBack(settings.projectDefaultBack);
     setMarginsMm(settings.marginsMm);
     setHorizontalGapMm(settings.horizontalGapMm);
     setVerticalGapMm(settings.verticalGapMm);
