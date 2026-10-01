@@ -1,0 +1,24 @@
+export type CalibrationErrorCode =
+  | "INVALID_CALIBRATION"
+  | "CALIBRATION_OUT_OF_BOUNDS"
+  | "CALIBRATION_SINGULAR"
+  | "CALIBRATION_PAGE_SIZE_INVALID"
+  | "CALIBRATION_MEASUREMENTS_INSUFFICIENT"
+  | "CALIBRATION_MEASUREMENTS_DUPLICATE"
+  | "CALIBRATION_MEASUREMENTS_DEGENERATE"
+  | "CALIBRATION_UNSTABLE"
+  | "CALIBRATED_CONTENT_OUT_OF_BOUNDS"
+  | "PROFILE_NOT_FOUND"
+  | "PROFILE_VERSION_MISMATCH"
+  | "PROFILE_INCOMPATIBLE"
+  | "PROFILE_REVISION_CONFLICT"
+  | "PROFILE_ID_EXISTS"
+  | "PROFILE_IMPORT_INVALID"
+  | "PROFILE_IMPORT_TOO_LARGE";
+
+export class CalibrationError extends Error {
+  constructor(readonly code: CalibrationErrorCode, message: string) {
+    super(message);
+    this.name = "CalibrationError";
+  }
+}

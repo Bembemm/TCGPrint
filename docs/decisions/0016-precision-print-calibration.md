@@ -43,7 +43,7 @@ The order is nominal layout → existing duplex slot reflection/artwork orientat
 
 The PDF engine brackets all printable page content (images, registration vectors, and cut guides) in one optional `q … cm … Q` graphics-state transform. It never changes MediaBox/CropBox and applies one transform per page, not once per card. Registration configuration, reserved zones, template geometry, trim, bleed, and artwork originals remain nominal. Registration marks are transformed with the printable page content; reserved zones remain layout constraints. SVG/DXF Cut Export and Template Library source IDs, versions, hashes, and paths remain nominal and do not consume calibration.
 
-After transforming required printable bounds, content outside the physical page by more than 0.01 mm blocks export with `CALIBRATION_CONTENT_OUT_OF_BOUNDS`; content remaining inside but within 0.5 mm of an edge returns an explicit warning. Calibration never auto-scales content to fit.
+After transforming required card artwork/bleed and registration bounds, content more than 0.001 mm outside the physical page blocks export with `CALIBRATED_CONTENT_OUT_OF_BOUNDS`; the 0.001 mm guard only absorbs floating-point boundary noise. Content remaining inside but within 0.5 mm of an edge returns a bounded export warning. That 0.5 mm value is geometric edge clearance, not a printer-accuracy pass criterion. Calibration never clips or auto-scales content to fit.
 
 ### Printer profiles, immutable revisions, and compatibility
 
@@ -57,13 +57,13 @@ Compatibility checks compare paper name and base dimensions and page orientation
 
 ### Solver and measurement contract
 
-Measurements are `delta/error = observed printed coordinate - nominal target coordinate`, in integer µm, with positive Y physically up. They are not absolute measured positions. Standard targets are the center and four page corners. Simple mode directly validates and packages X, Y, and rotation entered by the user.
+Measurements are `delta/error = observed printed coordinate - nominal target coordinate`, in integer µm, with positive Y physically up. They are not absolute measured positions. Standard targets are the center and four inset corners: inset is `min(15 mm, page width / 10, page height / 10)` from the top-left page frame; the sheet, preview, and solver share these exact points. Simple mode directly validates and packages X, Y, and rotation entered by the user.
 
 Advanced mode fits an affine printer map from at least four unique, non-collinear target/error pairs using deterministic least squares in normalized page-center coordinates. The correction is the inverse fitted map. The solver decomposes it into rotation, positive independent scales, and X shear; Y shear remains zero because this decomposition is sufficient for any nonsingular 2×2 affine correction near identity. It returns measured-point residuals and mean/min/max magnitude without a pass/fail tolerance. Fewer than four valid points, duplicate points, non-finite inputs, near-zero geometry, an ill-conditioned fit (normalized QR condition estimate above 1e5), singular inversion, or a result outside calibration bounds returns a specific `CalibrationError`; unsupported parameters remain identity rather than being guessed.
 
 ### Calibration and verification sheets
 
-Calibration and verification sheets are vector-only PDFs generated from bounded requests; no card artwork or client-supplied matrix is accepted. Sheets include a center cross, four corner targets, X/Y rulers and grid, 10/50/100 mm bars, rotation marks, `FRONT`/`BACK` identifiers, print-at-100% instructions, fit/shrink/borderless/driver-scaling warnings, and a diagram/text for the selected manual flip. Front and back use complementary crosses/rings with matching target IDs. Sheet metadata identifies session ID, draft profile ID, paper, orientation, duplex mode, side, and schema version. Verification sheets use the validated solved transform. Generating one changes status only to `verification-generated`; only recorded physical measurements can set `physically-verified`.
+Calibration and verification sheets are vector-only PDFs generated from bounded requests; no card artwork or client-supplied matrix is accepted. Sheets include a center cross, four inset targets, X/Y rulers and grid, 10/50/100 mm bars, rotation marks, `FRONT`/`BACK` identifiers, print-at-100% instructions, fit/shrink/borderless/driver-scaling warnings, and the selected manual flip diagram. Automatic duplex sheets say to use the driver's selected binding and not reinsert manually. Front and back use complementary crosses/rings with matching target IDs. Sheet metadata identifies session ID, draft profile ID, paper, orientation, duplex mode, side, and schema version. Verification sheets use the validated solved transform. Generating a sheet does not mutate a saved profile or claim physical validation. Profile creation and recalibration cannot set physical verification status or replace its evidence. A separate operation requires explicit user attestation and records one through five user-entered signed residual measurements in a new immutable `physically-verified` revision with derived mean/min/max magnitudes; no pass/fail tolerance is applied. Importing a profile that carries physical evidence requires a separate explicit acceptance and is treated as user-provided evidence, not hardware-confirmed data. Recalibrating or duplicating resets the new profile revision to `software-only`.
 
 ### Preview and export diagnostics
 
@@ -71,7 +71,7 @@ Preview offers nominal and calibrated rendering using the canonical transform's 
 
 ### Physical validation boundary
 
-Software tests and generated artifacts establish math, persistence, compatibility, PDF fidelity, and deterministic vector-sheet geometry only. They do not establish a printer's repeatability or a universal tolerance. A profile is never marked physically verified merely because a sheet was generated. No numeric physical pass/fail threshold is defined by this ADR.
+Software tests and generated artifacts establish math, persistence, compatibility, PDF fidelity, and vector-sheet geometry only. They do not establish a printer's repeatability or a universal tolerance. A profile is never marked physically verified merely because a sheet was generated; that status requires explicit user attestation and stored physical residual measurements. No numeric physical pass/fail threshold is defined by this ADR.
 
 ## Consequences
 

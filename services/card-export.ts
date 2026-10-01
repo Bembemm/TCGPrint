@@ -14,7 +14,7 @@ import {
 import { MAGIC_STANDARD_CARD, PAPER_FORMATS, type CardFormat, type CutGuideConfig, type PaperFormat, type TemplateLayoutGeometryMm } from "../core/geometry";
 import { createDuplexPagePairing, DuplexPairingError, type DuplexPagePairingPlan, type DuplexFlipMode } from "../core/duplex";
 import type { PageMarginsMm, PageOrientation } from "../core/geometry";
-import type { RegistrationConfig } from "../core/registration";
+import { generateRegistrationGeometry, transformRegistrationGeometry, type RegistrationConfig } from "../core/registration";
 import type { GridPlacementPage } from "../core/geometry/page-placement";
 import { LosslessPdfEngine, PdfExportError } from "../pdf-engine/document";
 import { mpcArtworkCandidateId } from "../core/cards/ids";
@@ -28,6 +28,7 @@ import { BackLibraryError } from "./back-library";
 import type { ExportContentMode, MissingBackPolicy } from "../persistence/projects/serializer";
 import { calculateSharedPagePlacements } from "../core/duplex/shared-placement";
 import type { DuplexBackPageTransform } from "../core/duplex";
+import { createPrintCalibrationTransform, getCalibrationPageOverflowMm, type CalibrationSide, type PrinterProfileSnapshot, type SideCalibration } from "../core/calibration";
 
 export interface CardExportOptions {
   readonly bleedMm: number;
@@ -56,6 +57,11 @@ export interface CardExportOptions {
   readonly missingBackPolicy?: MissingBackPolicy;
   readonly projectDefaultBack?: BackLibraryAssetReference | null;
   readonly projectRevision?: number | null;
+  /** Validated immutable Project profile snapshot used to select each physical side correction. */
+  readonly printerProfileSelection?: PrinterProfileSnapshot | null;
+  /** Low-level page-engine option for direct engine callers; project exports use the profile snapshot. */
+  readonly printCalibration?: SideCalibration;
+  readonly calibrationSide?: CalibrationSide;
 }
 
 export interface CardExportBleedDiagnostic {
@@ -79,7 +85,19 @@ export interface CardExportBleedDiagnostic {
 export interface CardExportResult {
   readonly pdfBytes: Uint8Array;
   readonly bleedDiagnostics: readonly CardExportBleedDiagnostic[];
+  readonly calibrationBoundsWarnings: readonly CalibrationBoundsWarning[];
 }
+
+export interface CalibrationBoundsWarning {
+  readonly code: "CALIBRATION_NEAR_PAGE_EDGE";
+  readonly side: CalibrationSide;
+  readonly pageNumber: number;
+  readonly content: string;
+  readonly nearestEdgeClearanceMm: number;
+}
+
+const CALIBRATION_EDGE_WARNING_CLEARANCE_MM = 0.5;
+const MAX_CALIBRATION_BOUNDS_WARNINGS = 20;
 
 export interface BackExportPreflightItem {
   readonly cardId: string;
@@ -127,6 +145,18 @@ export interface SeparatePdfManifest {
       readonly reserved: boolean;
     }[];
   }[];
+  readonly calibration?: CalibrationExportDiagnostic;
+  readonly calibrationBoundsWarnings?: readonly CalibrationBoundsWarning[];
+}
+
+export interface CalibrationExportDiagnostic {
+  readonly profileId: string;
+  readonly profileVersion: number;
+  readonly profileHash: string;
+  readonly effectiveSides: readonly {
+    readonly side: CalibrationSide;
+    readonly parameters: SideCalibration;
+  }[];
 }
 
 export interface CardExportModeResult {
@@ -139,6 +169,8 @@ export interface CardExportModeResult {
   readonly pagePairingPlan?: DuplexPagePairingPlan;
   readonly pageOrder?: readonly string[];
   readonly preflight: BackExportPreflight;
+  readonly calibration?: CalibrationExportDiagnostic;
+  readonly calibrationBoundsWarnings?: readonly CalibrationBoundsWarning[];
 }
 
 export class CardExportServiceError extends Error {
@@ -332,6 +364,47 @@ export async function exportWorkingCardsWithDiagnostics(
     }
   }
 
+  const pagePlacements = options.pagePlacements ?? calculateSharedPagePlacements(total, options).pages;
+  const calibrationBoundsWarnings: CalibrationBoundsWarning[] = [];
+  if (options.printCalibration) {
+    const side = options.calibrationSide ?? "front";
+    const addWarning = (pageNumber: number, content: string, minimumClearanceMm: number) => {
+      if (minimumClearanceMm > 0.001 && minimumClearanceMm <= CALIBRATION_EDGE_WARNING_CLEARANCE_MM
+        && calibrationBoundsWarnings.length < MAX_CALIBRATION_BOUNDS_WARNINGS) {
+        calibrationBoundsWarnings.push({
+          code: "CALIBRATION_NEAR_PAGE_EDGE", side, pageNumber, content,
+          nearestEdgeClearanceMm: Number(minimumClearanceMm.toFixed(3)),
+        });
+      }
+    };
+    for (const page of pagePlacements) {
+      const pageSizeMm = page.placement.pageSizeMm;
+      const transform = createPrintCalibrationTransform(pageSizeMm, options.printCalibration, side);
+      if (transform.isIdentity) continue;
+      for (let imageIndex = page.startCardIndex; imageIndex < page.endCardIndex; imageIndex += 1) {
+        if (options.skipImageIndexes?.has(imageIndex)) continue;
+        const slot = page.placement.slots.find((item) => item.cardIndex === imageIndex - page.startCardIndex);
+        if (!slot) continue;
+        const bleedMm = composedBleeds[imageIndex]?.status === "derived" ? composedBleeds[imageIndex]!.bleedMm : 0;
+        const bounds = getCalibrationPageOverflowMm(pageSizeMm, {
+          xMm: slot.trim.xMm - bleedMm,
+          yMm: slot.trim.yMm - bleedMm,
+          widthMm: page.placement.cardSizeMm.widthMm + 2 * bleedMm,
+          heightMm: page.placement.cardSizeMm.heightMm + 2 * bleedMm,
+        }, transform.matrix);
+        addWarning(page.pageIndex + 1, `card ${imageIndex + 1}`, bounds.minimumClearanceMm);
+      }
+      const registration = generateRegistrationGeometry(options.registration ?? { type: "none", orientation: "portrait" }, pageSizeMm);
+      const pageRegistration = options.duplexBackPageTransform
+        ? transformRegistrationGeometry(registration, pageSizeMm, options.duplexBackPageTransform.registrationReflectionAxis)
+        : registration;
+      for (const mark of pageRegistration.marks) {
+        const bounds = getCalibrationPageOverflowMm(pageSizeMm, mark.bounds, transform.matrix);
+        addWarning(page.pageIndex + 1, `registration mark ${mark.id}`, bounds.minimumClearanceMm);
+      }
+    }
+  }
+
   try {
     const pdfBytes = await pdfEngine.generate({
       images: composedImages,
@@ -349,11 +422,12 @@ export async function exportWorkingCardsWithDiagnostics(
       layoutRows: options.layoutRows,
       layoutColumns: options.layoutColumns,
       skippedSlotIndices: options.skippedSlotIndices,
-      ...(options.pagePlacements ? { pagePlacements: options.pagePlacements } : {}),
+      pagePlacements,
       ...(options.duplexBackPageTransform ? { duplexBackPageTransform: options.duplexBackPageTransform } : {}),
       ...(options.skipImageIndexes ? { skipImageIndexes: options.skipImageIndexes } : {}),
+      ...(options.printCalibration ? { printCalibration: options.printCalibration, calibrationSide: options.calibrationSide ?? "front" } : {}),
     });
-    return { pdfBytes, bleedDiagnostics };
+    return { pdfBytes, bleedDiagnostics, calibrationBoundsWarnings: Object.freeze(calibrationBoundsWarnings) };
   } catch (error) {
     if (error instanceof PdfExportError) throw new CardExportServiceError("EXPORT_FAILED", error.message, { cause: error });
     throw error;
@@ -375,6 +449,25 @@ export interface CardExportContentOptions extends CardExportOptions {
   readonly missingBackPolicy?: MissingBackPolicy;
   readonly projectDefaultBack?: BackLibraryAssetReference | null;
   readonly projectRevision?: number | null;
+}
+
+function optionsForSide(options: CardExportContentOptions, side: CalibrationSide): CardExportOptions {
+  const profile = options.printerProfileSelection;
+  return {
+    ...options,
+    ...(profile ? { printCalibration: profile[side], calibrationSide: side } : {}),
+  };
+}
+
+function calibrationDiagnostic(options: CardExportContentOptions, sides: readonly CalibrationSide[]): CalibrationExportDiagnostic | undefined {
+  const profile = options.printerProfileSelection;
+  if (!profile) return undefined;
+  return {
+    profileId: profile.id,
+    profileVersion: profile.version,
+    profileHash: profile.profileHash,
+    effectiveSides: sides.map((side) => ({ side, parameters: profile[side] })),
+  };
 }
 
 export interface BackLibraryOriginalSource {
@@ -456,6 +549,8 @@ function separateManifest(
   backPdfBytes: Uint8Array,
   projectRevision: number | null,
   cardOrientation: PageOrientation,
+  calibration?: CalibrationExportDiagnostic,
+  calibrationBoundsWarnings: readonly CalibrationBoundsWarning[] = [],
 ): SeparatePdfManifest {
   return {
     schemaVersion: 1,
@@ -479,6 +574,8 @@ function separateManifest(
         reserved: slot.reserved,
       })),
     })),
+    ...(calibration ? { calibration } : {}),
+    ...(calibrationBoundsWarnings.length ? { calibrationBoundsWarnings } : {}),
   };
 }
 
@@ -532,12 +629,14 @@ export async function exportWorkingCardsByContentMode(
   };
   const emptyBackCounts = { auto: 0, projectDefault: 0, manual: 0, noneOrMissing: 0 };
   if (contentMode === "front-only") {
-    const front = await exportWorkingCardsWithDiagnostics(catalog, cards, options, signal);
+    const front = await exportWorkingCardsWithDiagnostics(catalog, cards, optionsForSide(options, "front"), signal);
     return {
       contentMode,
       pdfBytes: front.pdfBytes,
       bleedDiagnostics: front.bleedDiagnostics,
       preflight: { ...commonPreflight, backs: emptyBackCounts, missing: [], warnings: [] },
+      ...(calibrationDiagnostic(options, ["front"]) ? { calibration: calibrationDiagnostic(options, ["front"]) } : {}),
+      ...(front.calibrationBoundsWarnings.length ? { calibrationBoundsWarnings: front.calibrationBoundsWarnings } : {}),
     };
   }
   if (options.duplexFlipMode !== undefined && options.duplexFlipMode !== "long-edge" && options.duplexFlipMode !== "short-edge") {
@@ -666,7 +765,7 @@ export async function exportWorkingCardsByContentMode(
   const backPlacements = pairingPlan.pagePairs.map(({ backPlacement }) => backPlacement);
   const duplexBackPageTransform = pairingPlan.pagePairs[0]!.backPageTransform;
   const renderOptions: CardExportOptions = {
-    ...options,
+    ...optionsForSide(options, "back"),
     pagePlacements: backPlacements,
     duplexBackPageTransform,
     skipImageIndexes: blankIndexes,
@@ -675,15 +774,21 @@ export async function exportWorkingCardsByContentMode(
   try {
     if (contentMode === "back-only") {
       const back = await exportWorkingCardsWithDiagnostics(memoCatalog, backCards, renderOptions, signal);
-      return { contentMode, pdfBytes: back.pdfBytes, bleedDiagnostics: back.bleedDiagnostics, pagePairingPlan: pairingPlan, preflight };
+      return {
+        contentMode, pdfBytes: back.pdfBytes, bleedDiagnostics: back.bleedDiagnostics, pagePairingPlan: pairingPlan, preflight,
+        ...(calibrationDiagnostic(options, ["back"]) ? { calibration: calibrationDiagnostic(options, ["back"]) } : {}),
+        ...(back.calibrationBoundsWarnings.length ? { calibrationBoundsWarnings: back.calibrationBoundsWarnings } : {}),
+      };
     }
-    const front = await exportWorkingCardsWithDiagnostics(memoCatalog, cards, { ...options, pagePlacements: pages }, signal);
+    const front = await exportWorkingCardsWithDiagnostics(memoCatalog, cards, { ...optionsForSide(options, "front"), pagePlacements: pages }, signal);
     const back = await exportWorkingCardsWithDiagnostics(memoCatalog, backCards, renderOptions, signal);
+    const calibration = calibrationDiagnostic(options, ["front", "back"]);
+    const calibrationBoundsWarnings = [...front.calibrationBoundsWarnings, ...back.calibrationBoundsWarnings].slice(0, MAX_CALIBRATION_BOUNDS_WARNINGS);
     if (contentMode === "front-back-separated") {
       const effectiveCardOrientation = options.cardOrientation
         ?? ((options.cardFormat ?? MAGIC_STANDARD_CARD).widthMm > (options.cardFormat ?? MAGIC_STANDARD_CARD).heightMm ? "landscape" : "portrait");
-      const manifest = separateManifest(pairingPlan, front.pdfBytes, back.pdfBytes, options.projectRevision ?? null, effectiveCardOrientation);
-      return { contentMode, frontPdfBytes: front.pdfBytes, backPdfBytes: back.pdfBytes, bleedDiagnostics: [...front.bleedDiagnostics, ...back.bleedDiagnostics], manifest, pagePairingPlan: pairingPlan, preflight };
+      const manifest = separateManifest(pairingPlan, front.pdfBytes, back.pdfBytes, options.projectRevision ?? null, effectiveCardOrientation, calibration, calibrationBoundsWarnings);
+      return { contentMode, frontPdfBytes: front.pdfBytes, backPdfBytes: back.pdfBytes, bleedDiagnostics: [...front.bleedDiagnostics, ...back.bleedDiagnostics], manifest, pagePairingPlan: pairingPlan, preflight, ...(calibration ? { calibration } : {}), ...(calibrationBoundsWarnings.length ? { calibrationBoundsWarnings } : {}) };
     }
     const pdfBytes = await interleavePdfPages(front.pdfBytes, back.pdfBytes, pairingPlan);
     return {
@@ -693,6 +798,8 @@ export async function exportWorkingCardsByContentMode(
       pagePairingPlan: pairingPlan,
       pageOrder: pairingPlan.pagePairs.flatMap(({ frontPageNumber, backPageNumber }) => [`front:${frontPageNumber}`, `back:${backPageNumber}`]),
       preflight,
+      ...(calibration ? { calibration } : {}),
+      ...(calibrationBoundsWarnings.length ? { calibrationBoundsWarnings } : {}),
     };
   } catch (error) {
     if (error instanceof CardExportServiceError) throw error;

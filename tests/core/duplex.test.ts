@@ -5,6 +5,7 @@ import { calculateGridPagePlacements } from "../../core/geometry/page-placement"
 import { calculateSharedPagePlacements, createDuplexPagePairing, getDuplexPageReflectionMatrix, getDuplexPreviewOverlayMatrix, transformPointByDuplexMatrix } from "../../core/duplex";
 import { generateRegistrationGeometry, transformRegistrationGeometry } from "../../core/registration";
 import type { DuplexFlipMode } from "../../core/duplex";
+import { applyCalibrationMatrix, createIdentitySideCalibration, createPrintCalibrationTransform, parseSideCalibration } from "../../core/calibration";
 
 const numberedFixture = JSON.parse(readFileSync(new URL("../fixtures/duplex/numbered-slot-fixture.json", import.meta.url), "utf8")) as Record<string, unknown>;
 const smallCard = { id: "fixture-card", name: "Fixture card", widthMm: 20, heightMm: 30 };
@@ -65,6 +66,34 @@ describe("physical duplex page pairing", () => {
     expect(physicalFlipUpVector).toEqual({ x: 0, y: 1 });
     expect(page.frontPageNumber).toBe(1);
     expect(page.backPageNumber).toBe(1);
+  });
+
+  it.each([
+    ["portrait", "long-edge"],
+    ["portrait", "short-edge"],
+    ["landscape", "long-edge"],
+    ["landscape", "short-edge"],
+  ] as const)("applies +Y as physical up after unchanged %s + %s pairing", (orientation, flipMode) => {
+    const pairing = pair(3, 3, 9, orientation, flipMode);
+    const page = pairing.pagePairs[0]!;
+    const pageSize = page.frontPlacement.placement.pageSizeMm;
+    const calibration = parseSideCalibration({ offsetXUm: -683, offsetYUm: 247, rotationDeg: 0, scaleX: 1, scaleY: 1 });
+    const frontTransform = createPrintCalibrationTransform(pageSize, createIdentitySideCalibration(), "front");
+    const backTransform = createPrintCalibrationTransform(pageSize, calibration, "back");
+    const cardPair = page.slots.find(({ physicalCardIndex }) => physicalCardIndex === 0)!;
+    const backSlot = page.backPlacement.placement.gridSlots.find(({ index }) => index === cardPair.backSlotIndex)!;
+    const before = {
+      xMm: backSlot.trim.xMm + backSlot.trim.widthMm / 2,
+      yMm: pageSize.heightMm - backSlot.trim.yMm - backSlot.trim.heightMm / 2,
+    };
+    const after = applyCalibrationMatrix(before, backTransform.matrix);
+
+    expect(cardPair).toMatchObject({ physicalCardIndex: 0, frontSlotIndex: 0 });
+    expect(backSlot.cardIndex).toBe(0);
+    expect(frontTransform.matrix).toEqual({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
+    expect(after.xMm - before.xMm).toBeCloseTo(-0.683, 10);
+    expect(after.yMm - before.yMm).toBeCloseTo(0.247, 10);
+    expect(pair(3, 3, 9, orientation, flipMode).pagePairs[0]!.slots).toEqual(page.slots);
   });
 
   it.each([

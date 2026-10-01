@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { parseTemplateLayoutGeometry, type TemplateLayoutGeometryMm } from "../../core/geometry";
 import type { ProjectSnapshotV1 } from "./serializer";
 import type { TemplateSelection } from "../../templates/types";
+import { verifyPrinterProfileSnapshot } from "../printer-profiles/hash";
 import {
   CURRENT_PROJECT_SCHEMA_VERSION,
   DEFAULT_PROJECT_SETTINGS,
@@ -152,6 +153,7 @@ export class ProjectRepository {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", "Recovery base revision must be a positive integer.");
     }
     const snapshot = deserializeProjectSnapshot(candidateSnapshot);
+    this.validateCalibrationSelection(snapshot);
     const snapshotJson = serializeProjectSnapshot(snapshot.cards, snapshot.settings);
     return this.database.transaction(() => {
       const project = this.database.prepare(`
@@ -303,6 +305,7 @@ export class ProjectRepository {
 
   private freshProjectRecord(name: string, snapshot: ProjectSnapshotV1, templateSelection: TemplateSelection | null = null): ProjectRecord {
     const validatedSnapshot = deserializeProjectSnapshot(snapshot);
+    this.validateCalibrationSelection(validatedSnapshot);
     const id = this.newProjectId();
     const now = this.timestamp();
     return {
@@ -348,6 +351,7 @@ export class ProjectRepository {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", "Expected project revision must be a positive integer.");
     }
     const snapshot = deserializeProjectSnapshot(nextSnapshot);
+    this.validateCalibrationSelection(snapshot);
     const snapshotJson = serializeProjectSnapshot(snapshot.cards, snapshot.settings);
     return this.database.transaction(() => {
       const row = this.database.prepare(`
@@ -398,7 +402,8 @@ export class ProjectRepository {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.id} snapshot must be stored as JSON text.`);
     }
     let snapshot = deserializeProjectSnapshot(row.snapshot_json);
-    if (row.project_schema_version !== snapshot.projectSchemaVersion && row.project_schema_version !== 1 && row.project_schema_version !== 2) {
+    this.validateCalibrationSelection(snapshot);
+    if (row.project_schema_version !== snapshot.projectSchemaVersion && (row.project_schema_version < 1 || row.project_schema_version > 4)) {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.id} database and snapshot schema versions do not match.`);
     }
     const templateSelection = this.readProjectTemplateSelection(row.id);
@@ -414,7 +419,8 @@ export class ProjectRepository {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", "Project recovery metadata is invalid.");
     }
     let snapshot = deserializeProjectSnapshot(row.snapshot_json);
-    if (row.project_schema_version !== snapshot.projectSchemaVersion && row.project_schema_version !== 1 && row.project_schema_version !== 2) {
+    this.validateCalibrationSelection(snapshot);
+    if (row.project_schema_version !== snapshot.projectSchemaVersion && (row.project_schema_version < 1 || row.project_schema_version > 4)) {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.project_id} recovery schema versions do not match.`);
     }
     const templateSelection = this.readRecoveryTemplateSelection(row.project_id);
@@ -441,6 +447,10 @@ export class ProjectRepository {
       SELECT template_id, version, package_hash FROM project_recovery_template_selections WHERE project_id = ?
     `).get(projectId) as { template_id: string; version: string; package_hash: string } | undefined;
     return row ? { templateId: row.template_id, version: row.version, packageHash: row.package_hash } : null;
+  }
+
+  private validateCalibrationSelection(snapshot: ProjectSnapshotV1): void {
+    if (snapshot.settings.printerProfileSelection) verifyPrinterProfileSnapshot(snapshot.settings.printerProfileSelection);
   }
 
   private validateTemplateSelection(selection: TemplateSelection | null, snapshot: ProjectSnapshotV1): void {
@@ -548,7 +558,7 @@ export class ProjectRepository {
     return {
       id: row.id,
       name: row.name,
-      projectSchemaVersion: row.project_schema_version <= 2 ? CURRENT_PROJECT_SCHEMA_VERSION : row.project_schema_version,
+      projectSchemaVersion: row.project_schema_version <= 4 ? CURRENT_PROJECT_SCHEMA_VERSION : row.project_schema_version,
       revision: row.revision,
       createdAt: this.readTimestamp(row.created_at),
       updatedAt: this.readTimestamp(row.updated_at),

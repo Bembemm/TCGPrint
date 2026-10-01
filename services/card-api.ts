@@ -22,6 +22,8 @@ import type { ExportContentMode, MissingBackPolicy } from "../persistence/projec
 import type { DuplexFlipMode } from "../core/duplex";
 import type { BackLibraryOriginalSource } from "./card-export";
 import { createSeparatePdfArchive } from "./separate-pdf-archive";
+import { CalibrationError, checkPrinterProfileCompatibility, type PrinterProfileSnapshot } from "../core/calibration";
+import { verifyPrinterProfileSnapshot } from "../persistence/printer-profiles/hash";
 
 const FORBIDDEN_PROPERTIES = new Set(["originalBytes", "bytes", "sourcePath", "localOriginalPath", "originalUri", "previewUri", "filePaths", "absolutePath", "filesystemPath"]);
 const SOURCES = new Set(["scryfall", "upload", "mpc", "url", "custom"]);
@@ -354,6 +356,12 @@ async function parseJsonRequest(request: Request, maximumBytes = 1_000_000): Pro
 
 function respondError(error: unknown): Response {
   if (error instanceof ApiRequestError) return Response.json({ code: error.code, message: error.message }, { status: error.status });
+  if (error instanceof CalibrationError) {
+    const status = error.code === "PROFILE_NOT_FOUND" ? 404
+      : error.code === "PROFILE_VERSION_MISMATCH" || error.code === "PROFILE_INCOMPATIBLE" || error.code === "PROFILE_REVISION_CONFLICT" ? 409
+        : error.code === "PROFILE_IMPORT_TOO_LARGE" ? 413 : 400;
+    return Response.json({ code: error.code, message: error.message }, { status });
+  }
   if (error instanceof ImportFailureError && error.code === "INVALID_SOURCE_PATH") return Response.json({ code: error.code, message: error.message }, { status: 400 });
   if (error instanceof CardExportServiceError) {
     const status = error.code === "INVALID_BLEED" || error.code === "INVALID_ROUNDED_CORNERS" || error.code === "INVALID_BACK_MODE" || error.code === "INVALID_DUPLEX_FLIP" || error.code === "INVALID_CARD_ID" ? 400
@@ -752,6 +760,7 @@ export async function handleCardExport(
     let derivedTemplateGeometry: TemplateLayoutGeometryMm | undefined;
     let exportCards = cards;
     let projectRevision: number | null = null;
+    let printerProfileSelection: PrinterProfileSnapshot | null = null;
     if (options.projectId !== undefined || options.expectedProjectRevision !== undefined) {
       if (typeof options.projectId !== "string" || !options.projectId.trim() || options.projectId.length > 180 || /[\u0000-\u001f]/.test(options.projectId)
         || !Number.isSafeInteger(options.expectedProjectRevision) || (options.expectedProjectRevision as number) < 1) {
@@ -811,6 +820,36 @@ export async function handleCardExport(
       if (canonicalJson(expectedBackOptions) !== canonicalJson(requestBackOptions) || canonicalJson(savedCards) !== canonicalJson(cards)) {
         throw new ApiRequestError(409, "STALE_PROJECT", "PDF request does not match the autosaved Project revision, card order, artwork selections, or duplex settings. Save the Project and retry.");
       }
+      const requestedCalibration = {
+        printerProfileSelection: options.printerProfileSelection ?? null,
+        printerDuplexMode: options.printerDuplexMode ?? "single-sided",
+      };
+      const savedCalibration = {
+        printerProfileSelection: saved.printerProfileSelection,
+        printerDuplexMode: saved.printerDuplexMode,
+      };
+      if (canonicalJson(requestedCalibration) !== canonicalJson(savedCalibration)) {
+        throw new ApiRequestError(409, "STALE_PROJECT", "PDF request calibration does not match the exact profile revision saved in the Project. Save the Project and retry.");
+      }
+      printerProfileSelection = saved.printerProfileSelection
+        ? verifyPrinterProfileSnapshot(saved.printerProfileSelection)
+        : null;
+      if (printerProfileSelection) {
+        const exportSides = exportContentMode === "front-only" ? ["front"] as const
+          : exportContentMode === "back-only" ? ["back"] as const : ["front", "back"] as const;
+        const compatibility = checkPrinterProfileCompatibility(printerProfileSelection, {
+          paperSize: saved.paperFormat.name,
+          paperWidthMm: saved.paperFormat.widthMm,
+          paperHeightMm: saved.paperFormat.heightMm,
+          pageOrientation: saved.pageOrientation,
+          duplexMode: saved.printerDuplexMode,
+          duplexFlipMode: saved.duplexFlipMode,
+          exportSides,
+        });
+        if (!compatibility.compatible) {
+          throw new ApiRequestError(409, "PROFILE_INCOMPATIBLE", `Printer profile ${printerProfileSelection.id} v${printerProfileSelection.version} is incompatible with this export: ${compatibility.reasons.join(", ")}.`);
+        }
+      }
       const resolved = await resolveProjectCutLayout(project.id, project.revision, projects, templateLibrary);
       derivedTemplateGeometry = resolved.layout.derivedTemplateGeometry;
       exportCards = savedCards;
@@ -835,6 +874,7 @@ export async function handleCardExport(
       duplexFlipMode,
       missingBackPolicy,
       projectDefaultBack,
+      printerProfileSelection,
       projectRevision,
     } as const;
     const result = await exportWorkingCardsByContentMode(workbench, backLibrary, exportCards, exportOptions, request.signal);
@@ -854,6 +894,12 @@ export async function handleCardExport(
       "X-TCGPrint-Bleed-Diagnostics-Mode": bleedReport.mode,
       "X-TCGPrint-Back-Preflight": backPreflight,
       "X-TCGPrint-Export-Content-Mode": result.contentMode,
+      ...(result.calibration ? {
+        "X-TCGPrint-Calibration": Buffer.from(JSON.stringify(result.calibration)).toString("base64url"),
+      } : {}),
+      ...(result.calibrationBoundsWarnings?.length ? {
+        "X-TCGPrint-Calibration-Warnings": Buffer.from(JSON.stringify(result.calibrationBoundsWarnings)).toString("base64url"),
+      } : {}),
       ...(result.pagePairingPlan ? {
         "X-TCGPrint-Duplex-Flip-Mode": result.pagePairingPlan.flipMode,
         "X-TCGPrint-Duplex-Page-Orientation": result.pagePairingPlan.pageOrientation,

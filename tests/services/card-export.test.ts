@@ -8,13 +8,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import normal from "../fixtures/scryfall/normal-card.json";
 import { createCardWorkbench } from "../../services/card-workbench";
 import { handleCardExport } from "../../services/card-api";
-import { exportWorkingCards, exportWorkingCardsWithDiagnostics } from "../../services/card-export";
+import { exportWorkingCards, exportWorkingCardsByContentMode, exportWorkingCardsWithDiagnostics } from "../../services/card-export";
 import { PAPER_FORMATS } from "../../core/geometry";
 import { createWorkingCardEditorState, deleteWorkingCard, duplicateWorkingCard, moveWorkingCard, setWorkingCardQuantity } from "../../core/cards/working-card-editor";
 import { commitEditorHistory, createEditorHistoryState, redoEditorHistory, undoEditorHistory } from "../../core/cards/editor-history";
 import { BleedEngine } from "../../image-engine/bleed";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 import type { ArtworkCandidate, WorkingCard } from "../../core/cards/types";
+import type { PrinterProfileSnapshot } from "../../core/calibration";
 import { FULL_TRIM_GUIDES, NO_CUT_GUIDES } from "../helpers/cut-guides";
 
 const roots: string[] = [];
@@ -26,6 +27,84 @@ afterEach(async () => {
 });
 
 describe("decklist → identity → Scryfall artwork → PDF", () => {
+  it("routes front/back and separate/duplex exports through the selected side corrections", async () => {
+    const bytes = new Uint8Array(await readFile(join(process.cwd(), "tests", "fixtures", "pdf", "synthetic-gradient.jpg")));
+    const contentHash = createHash("sha256").update(bytes).digest("hex");
+    const candidate: ArtworkCandidate = { id: "upload:calibration", source: "upload", identityId: null, faceId: "front", originalAvailable: true };
+    const catalog = {
+      getArtworkCandidate: async () => candidate,
+      getArtworkOriginal: async () => ({
+        artworkId: candidate.id, contentHash, extension: "jpg", format: "jpeg", byteLength: bytes.byteLength,
+        widthPx: 8, heightPx: 6, createdAt: "2026-10-01T12:00:00.000Z", bytes, provenance: [],
+      }),
+    };
+    const card: WorkingCard = {
+      id: "calibration-side-card", quantity: 1, order: 0,
+      importSource: { sourceId: "calibration-fixture", importKind: "synthetic", entryKind: "card" },
+      identityHints: {}, identity: null,
+      identityResolution: { status: "unresolved", candidates: [], confirmed: false },
+      faces: [{ id: "front", side: "front" }],
+      selectedArtworkByFace: { front: { candidateId: candidate.id, source: "upload", identityId: null, faceId: "front" } },
+      backMode: "none", backModeSelectionPolicy: "explicit", localArtworkIds: [], mpcReferences: [], faceAssociations: [],
+    };
+    const profile: PrinterProfileSnapshot = {
+      id: "profile-calibration-sides", name: "Side calibration",
+      front: { offsetXUm: 0, offsetYUm: 0, rotationDeg: 0, scaleX: 1, scaleY: 1 },
+      back: { offsetXUm: -683, offsetYUm: 247, rotationDeg: 0.031, scaleX: 1.00012, scaleY: 0.99987 },
+      paperSize: "A4", paperWidthMm: 210, paperHeightMm: 297, pageOrientation: "portrait", duplexMode: "manual-long-edge",
+      physicalValidationStatus: "software-only", physicalVerification: null, version: 3, profileHash: "c".repeat(64),
+    };
+    const options = {
+      bleedMm: 0, cutGuides: NO_CUT_GUIDES, paperFormat: PAPER_FORMATS.A4, cardFormat: { id: "small", name: "small", widthMm: 20, heightMm: 30 },
+      pageOrientation: "portrait" as const, cardOrientation: "portrait" as const,
+      printerProfileSelection: profile, duplexFlipMode: "long-edge" as const,
+      missingBackPolicy: "warn-and-continue" as const,
+    };
+
+    const frontOnly = await exportWorkingCardsByContentMode(catalog, undefined, [card], { ...options, exportContentMode: "front-only" });
+    const backOnly = await exportWorkingCardsByContentMode(catalog, undefined, [card], { ...options, exportContentMode: "back-only" });
+    const separate = await exportWorkingCardsByContentMode(catalog, undefined, [card], { ...options, exportContentMode: "front-back-separated" });
+    const duplex = await exportWorkingCardsByContentMode(catalog, undefined, [card], { ...options, exportContentMode: "duplex" });
+
+    expect(frontOnly.calibration?.effectiveSides).toEqual([{ side: "front", parameters: profile.front }]);
+    expect(backOnly.calibration?.effectiveSides).toEqual([{ side: "back", parameters: profile.back }]);
+    expect(separate.manifest?.calibration?.effectiveSides).toEqual([
+      { side: "front", parameters: profile.front }, { side: "back", parameters: profile.back },
+    ]);
+    expect(duplex.calibration?.effectiveSides).toEqual([
+      { side: "front", parameters: profile.front }, { side: "back", parameters: profile.back },
+    ]);
+    expect(duplex.pageOrder).toEqual(["front:1", "back:1"]);
+    expect((await PDFDocument.load(frontOnly.pdfBytes!)).getPages()).toHaveLength(1);
+    expect((await PDFDocument.load(backOnly.pdfBytes!)).getPages()).toHaveLength(1);
+    expect((await PDFDocument.load(separate.frontPdfBytes!)).getPages()).toHaveLength(1);
+    expect((await PDFDocument.load(separate.backPdfBytes!)).getPages()).toHaveLength(1);
+    expect((await PDFDocument.load(duplex.pdfBytes!)).getPages()).toHaveLength(2);
+
+    const nearEdgeOptions = {
+      bleedMm: 0, cutGuides: NO_CUT_GUIDES,
+      paperFormat: { name: "Custom", widthMm: 100, heightMm: 150 },
+      cardFormat: { id: "small", name: "small", widthMm: 20, heightMm: 30 },
+      pageOrientation: "portrait" as const,
+      templateGeometry: {
+        orientation: "portrait" as const, cardOrientation: "portrait" as const,
+        pageSizeMm: { widthMm: 100, heightMm: 150 }, cardSizeMm: { widthMm: 20, heightMm: 30 },
+        rows: 1, columns: 1,
+        slots: [{ index: 0, row: 0, column: 0, xMm: 0.65, yMm: 60 }],
+      },
+      printCalibration: { offsetXUm: -300, offsetYUm: 0, rotationDeg: 0, scaleX: 1, scaleY: 1 },
+      calibrationSide: "back" as const,
+    };
+    const nearEdge = await exportWorkingCardsWithDiagnostics(catalog, [card], nearEdgeOptions);
+    expect(nearEdge.calibrationBoundsWarnings).toContainEqual(expect.objectContaining({
+      code: "CALIBRATION_NEAR_PAGE_EDGE", side: "back", pageNumber: 1, content: "card 1",
+      nearestEdgeClearanceMm: 0.35,
+    }));
+    await expect(exportWorkingCardsWithDiagnostics(catalog, [card], {
+      ...nearEdgeOptions, printCalibration: { ...nearEdgeOptions.printCalibration, offsetXUm: -1_000 },
+    })).rejects.toMatchObject({ code: "CALIBRATED_CONTENT_OUT_OF_BOUNDS" });
+  });
+
   it("shares an edge-extension derivative for identical bytes across sources and metadata", async () => {
     const samples = new Uint8Array(127 * 178 * 3);
     for (let y = 0; y < 178; y += 1) {

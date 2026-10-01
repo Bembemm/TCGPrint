@@ -309,6 +309,53 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .legend-skipped { border-color: #7e22ce !important; background: #f3e8ff; }
 .legend-mark { border-color: #111827 !important; background: #111827; }
 
+.printer-calibration-panel { margin: 0 0 16px; padding: 16px; border: 1px solid #bdcbd7; border-radius: 5px; background: #fbfcfd; }
+.printer-calibration-panel > .panel-heading { align-items: center; margin-bottom: 12px; }
+.printer-calibration-panel .panel-heading h3 { margin: 2px 0 4px; font-size: 16px; }
+.printer-calibration-panel .panel-heading p { max-width: 760px; }
+.calibration-status-badge { flex: none; border: 1px solid #9fb1c0; border-radius: 4px; padding: 6px 9px; background: #fff; color: #334353; font-size: 11px; font-weight: 700; }
+.calibration-axis-convention { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
+.calibration-axis-convention strong { border-radius: 3px; padding: 5px 8px; background: #eaf1f6; color: #263f53; font-size: 11px; }
+.calibration-wizard-steps, .calibration-profile-actions, .calibration-mode-switch, .calibration-side-switch, .calibration-preview-controls, .calibration-wizard-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.calibration-wizard-steps { margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px solid #d8dee4; }
+.calibration-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(250px, .85fr); gap: 16px; align-items: start; }
+.calibration-controls, .calibration-preview-column { display: grid; min-width: 0; gap: 10px; }
+.calibration-profile-fields { display: grid; gap: 8px; padding: 10px; border: 1px solid #d7dfe5; border-radius: 4px; background: #fff; }
+.calibration-profile-fields label, .calibration-wizard-actions label, .calibration-preview-column > label { display: grid; min-width: 0; gap: 4px; color: #354452; font-size: 10px; font-weight: 650; }
+.calibration-profile-fields input, .calibration-profile-fields select, .calibration-numeric-fields input, .calibration-measurements input, .calibration-wizard-actions input { min-width: 0; min-height: 31px; border: 1px solid #aeb9c4; border-radius: 3px; padding: 6px 7px; background: #fff; color: #18212a; font-size: 11px; }
+.calibration-profile-fields > .muted, .calibration-profile-fields > p { margin: 0; line-height: 1.45; }
+.calibration-file-button { position: relative; overflow: hidden; }
+.calibration-file-button input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.calibration-mode-switch, .calibration-side-switch { padding: 7px; border: 1px solid #d7dfe5; border-radius: 4px; background: #f3f6f8; }
+.calibration-numeric-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.calibration-numeric-fields label { display: grid; min-width: 0; gap: 4px; color: #354452; font-size: 10px; font-weight: 650; }
+.calibration-controls > .muted { margin: -5px 0 0; line-height: 1.45; }
+.calibration-nudges { display: grid; gap: 5px; }
+.calibration-nudge-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 6px; border: 1px solid #d7dfe5; border-radius: 3px; background: #fff; }
+.calibration-nudge-row > strong { min-width: 142px; color: #354452; font-size: 10px; }
+.calibration-nudge-axis { display: inline-flex; align-items: center; gap: 4px; color: #536171; font-size: 10px; }
+.calibration-nudge-row .button { min-width: 28px; min-height: 27px; padding: 3px 7px; }
+.calibration-measurements { display: grid; gap: 7px; padding: 9px; border: 1px solid #c9d6e0; border-radius: 4px; background: #f7fafc; }
+.calibration-measurements h4, .calibration-measurements p { margin: 0; }
+.calibration-measurements h4 { color: #263544; font-size: 12px; }
+.calibration-measurements p { color: #536171; font-size: 10px; line-height: 1.45; }
+.calibration-measurement-row { display: grid; grid-template-columns: minmax(76px, .7fr) repeat(2, minmax(0, 1fr)); align-items: end; gap: 6px; }
+.calibration-measurement-row > strong { padding-bottom: 8px; color: #354452; font-size: 10px; }
+.calibration-measurement-row label { display: grid; gap: 3px; color: #536171; font-size: 9px; }
+.calibration-attestation { display: flex; align-items: flex-start; gap: 7px; color: #354452; font-size: 10px; line-height: 1.45; }
+.calibration-attestation input { flex: none; margin: 1px 0 0; }
+.calibration-preview-controls { justify-content: flex-start; }
+.calibration-preview-column > label { grid-template-columns: auto minmax(60px, 1fr); align-items: center; }
+.calibration-page-preview { display: block; width: min(100%, 350px); max-height: 430px; margin: 0 auto; border: 1px solid #cbd3db; background: #e9edf0; box-shadow: 0 2px 7px #17212a18; }
+.calibration-preview-column > .muted { margin: 0; line-height: 1.45; }
+.calibration-wizard-actions { align-items: end; padding-top: 9px; border-top: 1px solid #d8dee4; }
+.calibration-wizard-actions label { flex: 1 1 180px; }
+.calibration-wizard-actions .button { min-height: 30px; }
+.calibration-profile-fields .warning-message { padding: 8px; border: 1px solid #e7a743; border-radius: 4px; background: #fff8e8; color: #77561e; font-size: 10px; }
+.calibration-profile-fields .warning-message p { margin: 0 0 7px; }
+.calibration-profile-fields .status-message, .calibration-profile-fields .error-message { margin: 0; font-size: 10px; }
+.printer-calibration-panel > .status-message, .printer-calibration-panel > .error-message { overflow-wrap: anywhere; }
+
 @media (max-width: 700px) {
   .workbench { width: min(100% - 24px, 1120px); padding-top: 18px; }
   .page-header, .drop-zone { align-items: flex-start; flex-direction: column; }
@@ -332,4 +379,9 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
   .template-form-grid { grid-template-columns: 1fr; }
   .pdf-controls select { min-width: 0; }
   .action-row { align-items: flex-start; flex-direction: column; }
+  .calibration-layout { grid-template-columns: minmax(0, 1fr); }
+  .printer-calibration-panel > .panel-heading { align-items: flex-start; flex-direction: column; }
+  .calibration-numeric-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .calibration-nudge-row > strong { flex-basis: 100%; }
+  .calibration-wizard-actions { align-items: stretch; }
 }

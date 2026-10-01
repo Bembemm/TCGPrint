@@ -16,6 +16,7 @@ import { parseDxfCutGeometry } from "../../services/cut-geometry/dxf-parser";
 import { parseSvgCutGeometry } from "../../services/cut-geometry/svg-parser";
 import { compareCutGeometryMm, type CutSourceIdentity } from "../../core/cut";
 import type { WorkingCard } from "../../core/cards/types";
+import { PrinterProfileRepository } from "../../persistence/printer-profiles/repository";
 
 function projectCard(id: string, quantity: number, order: number): WorkingCard {
   return {
@@ -227,6 +228,27 @@ describe("cut preview and export API", () => {
     const dxfRoundTrip = parseDxfCutGeometry(dxfOutput, { source: activeSource, expectedPageSizeMm: { widthMm: 210, heightMm: 297 } });
     expect(dxfResponse.status).toBe(200);
     expect(compareCutGeometryMm(activeGeometry, dxfRoundTrip, 0.000001).equal).toBe(true);
+
+    const printerProfiles = new PrinterProfileRepository(database!);
+    const calibratedProfile = printerProfiles.create({
+      id: "cut-regression-printer",
+      name: "Cut regression printer",
+      front: { offsetXUm: 200, offsetYUm: -300, rotationDeg: 0.03, scaleX: 1.0001, scaleY: 0.9999 },
+      back: { offsetXUm: -683, offsetYUm: 247, rotationDeg: 0.031, scaleX: 1.00012, scaleY: 0.99987 },
+      paperSize: "A4", paperWidthMm: 210, paperHeightMm: 297, pageOrientation: "portrait",
+      duplexMode: "manual-short-edge", physicalValidationStatus: "software-only",
+    });
+    const calibratedProject = projects.save(project.id, project.revision, {
+      ...project.snapshot,
+      settings: { ...project.snapshot.settings, printerProfileSelection: calibratedProfile, printerDuplexMode: "manual-short-edge" },
+    });
+    body.expectedRevision = calibratedProject.revision;
+    const calibratedSvgResponse = await handleCutSvgExport(request(), projects, library);
+    const calibratedDxfResponse = await handleCutDxfExport(request(), projects, library);
+    expect(new Uint8Array(await calibratedSvgResponse.arrayBuffer())).toEqual(svgOutput);
+    expect(new Uint8Array(await calibratedDxfResponse.arrayBuffer())).toEqual(dxfOutput);
+    expect(calibratedSvgResponse.headers.get("x-tcgprint-template-identity")).toBe(svgResponse.headers.get("x-tcgprint-template-identity"));
+    expect(calibratedDxfResponse.headers.get("x-tcgprint-template-identity")).toBe(dxfResponse.headers.get("x-tcgprint-template-identity"));
 
     const originalPath = join(originalStorePath, svgFile.contentHash.slice(0, 2), svgFile.contentHash);
     await unlink(originalPath);

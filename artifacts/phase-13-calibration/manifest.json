@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 1,
+  "phase": "13-precision-print-calibration",
+  "softwareValidationStatus": "software-only",
+  "physicalMeasurementsRecorded": false,
+  "fixtureSessionId": "phase13-a4-manual-long-edge-fixture",
+  "profile": {
+    "id": "example-a4-manual-long-edge",
+    "version": 1,
+    "hash": "0d721db8517799712c2dc909a84e55d2c5fa350eee4ea70d44b42439e1f72cd7",
+    "values": {
+      "id": "example-a4-manual-long-edge",
+      "name": "Example A4 manual long-edge",
+      "front": {
+        "offsetXUm": 0,
+        "offsetYUm": 0,
+        "rotationDeg": 0,
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "back": {
+        "offsetXUm": -683,
+        "offsetYUm": 247,
+        "rotationDeg": 0.031,
+        "scaleX": 1.00012,
+        "scaleY": 0.99987
+      },
+      "paperSize": "A4",
+      "paperWidthMm": 210,
+      "paperHeightMm": 297,
+      "pageOrientation": "portrait",
+      "duplexMode": "manual-long-edge",
+      "mediaType": "Example matte card stock",
+      "printQualityProfile": "Actual Size / 100%",
+      "feedSource": "Manual feed",
+      "notes": "Software fixture only; no physical printer readings are included.",
+      "physicalValidationStatus": "software-only",
+      "physicalVerification": null,
+      "version": 1,
+      "profileHash": "0d721db8517799712c2dc909a84e55d2c5fa350eee4ea70d44b42439e1f72cd7"
+    }
+  },
+  "paper": {
+    "name": "A4",
+    "widthMm": 210,
+    "heightMm": 297,
+    "orientation": "portrait"
+  },
+  "duplexMode": "manual-long-edge",
+  "targetPointsMm": {
+    "center": {
+      "xMm": 105,
+      "yMm": 148.5
+    },
+    "top-left": {
+      "xMm": 15,
+      "yMm": 282
+    },
+    "top-right": {
+      "xMm": 195,
+      "yMm": 282
+    },
+    "bottom-left": {
+      "xMm": 15,
+      "yMm": 15
+    },
+    "bottom-right": {
+      "xMm": 195,
+      "yMm": 15
+    }
+  },
+  "expectedBackMatrixPdfYUp": {
+    "a": 1.000119853613769,
+    "b": 0.0005411169679655583,
+    "c": -0.0005409817049551283,
+    "d": 0.9998698536503613,
+    "e": -0.6152488462599038,
+    "f": 0.20950945128497278
+  },
+  "expectedBackMatrixSvgYDown": {
+    "a": 1.000119853613769,
+    "b": -0.0005411169679655583,
+    "c": 0.0005409817049551283,
+    "d": 0.9998698536503613,
+    "e": -0.775920412631577,
+    "f": -0.17085598544227754
+  },
+  "sheetManifests": {
+    "front": {
+      "schemaVersion": 1,
+      "softwareSchemaVersion": "phase-13-v1",
+      "kind": "calibration",
+      "sessionId": "phase13-a4-manual-long-edge-fixture",
+      "draftProfileId": "example-a4-manual-long-edge",
+      "pageFormat": {
+        "paperSize": "A4",
+        "pageOrientation": "portrait",
+        "widthMm": 210,
+        "heightMm": 297
+      },
+      "duplexMode": "manual-long-edge",
+      "side": "front",
+      "targetPointsMm": {
+        "center": {
+          "xMm": 105,
+          "yMm": 148.5
+        },
+        "top-left": {
+          "xMm": 15,
+          "yMm": 282
+        },
+        "top-right": {
+          "xMm": 195,
+          "yMm": 282
+        },
+        "bottom-left": {
+          "xMm": 15,
+          "yMm": 15
+        },
+        "bottom-right": {
+          "xMm": 195,
+          "yMm": 15
+        }
+      }
+    },
+    "back": {
+      "schemaVersion": 1,
+      "softwareSchemaVersion": "phase-13-v1",
+      "kind": "calibration",
+      "sessionId": "phase13-a4-manual-long-edge-fixture",
+      "draftProfileId": "example-a4-manual-long-edge",
+      "pageFormat": {
+        "paperSize": "A4",
+        "pageOrientation": "portrait",
+        "widthMm": 210,
+        "heightMm": 297
+      },
+      "duplexMode": "manual-long-edge",
+      "side": "back",
+      "targetPointsMm": {
+        "center": {
+          "xMm": 105,
+          "yMm": 148.5
+        },
+        "top-left": {
+          "xMm": 15,
+          "yMm": 282
+        },
+        "top-right": {
+          "xMm": 195,
+          "yMm": 282
+        },
+        "bottom-left": {
+          "xMm": 15,
+          "yMm": 15
+        },
+        "bottom-right": {
+          "xMm": 195,
+          "yMm": 15
+        }
+      }
+    },
+    "verification": {
+      "schemaVersion": 1,
+      "softwareSchemaVersion": "phase-13-v1",
+      "kind": "verification",
+      "sessionId": "phase13-a4-manual-long-edge-fixture",
+      "draftProfileId": "example-a4-manual-long-edge",
+      "pageFormat": {
+        "paperSize": "A4",
+        "pageOrientation": "portrait",
+        "widthMm": 210,
+        "heightMm": 297
+      },
+      "duplexMode": "manual-long-edge",
+      "side": "back",
+      "targetPointsMm": {
+        "center": {
+          "xMm": 105,
+          "yMm": 148.5
+        },
+        "top-left": {
+          "xMm": 15,
+          "yMm": 282
+        },
+        "top-right": {
+          "xMm": 195,
+          "yMm": 282
+        },
+        "bottom-left": {
+          "xMm": 15,
+          "yMm": 15
+        },
+        "bottom-right": {
+          "xMm": 195,
+          "yMm": 15
+        }
+      },
+      "calibration": {
+        "offsetXUm": -683,
+        "offsetYUm": 247,
+        "rotationDeg": 0.031,
+        "scaleX": 1.00012,
+        "scaleY": 0.99987
+      },
+      "transform": {
+        "a": 1.000119853613769,
+        "b": 0.0005411169679655583,
+        "c": -0.0005409817049551283,
+        "d": 0.9998698536503613,
+        "e": -0.6152488462599038,
+        "f": 0.20950945128497278
+      }
+    }
+  },
+  "artifacts": {
+    "calibration-front-a4-portrait.pdf": {
+      "sha256": "dfc5ecacacea386d16ae34ec25334f5ae7ac020084f28713ec7b1b9588a5f7e6",
+      "bytes": 3968
+    },
+    "calibration-back-a4-portrait.pdf": {
+      "sha256": "8bcc6cec397df5b9d4a46209bcf64409dc4e9b29fefaccaf992279cca7ad6d11",
+      "bytes": 4060
+    },
+    "verification-back-a4-portrait.pdf": {
+      "sha256": "4087c14f71b61d8e93c038a5ebea95cd020d7a7736996302f317a392812cd892",
+      "bytes": 4141
+    }
+  },
+  "profileExport": {
+    "file": "example-profile.json",
+    "sha256": "020e79db6182a7ef69413d842a3f4168367986d535b0ff490df4dae8815aed4c"
+  }
+}

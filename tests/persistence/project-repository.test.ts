@@ -11,6 +11,7 @@ import { openArtworkDatabase } from "../../persistence/sqlite";
 import { createDefaultRegistrationConfig } from "../../core/registration";
 import { TemplateRepository } from "../../persistence/templates/repository";
 import { calculateTemplatePackageHash, parseTemplateMetadata } from "../../templates/validation";
+import { PrinterProfileRepository } from "../../persistence/printer-profiles/repository";
 
 describe("project repository", () => {
   let directory: string | undefined;
@@ -48,10 +49,10 @@ describe("project repository", () => {
     expect(created).toEqual({
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 4,
+      projectSchemaVersion: 5,
       revision: 1,
       snapshot: {
-        projectSchemaVersion: 4,
+        projectSchemaVersion: 5,
         cards: [],
         settings: {
           bleedMm: 0.625,
@@ -74,6 +75,8 @@ describe("project repository", () => {
         missingBackPolicy: "use-project-default",
         duplexFlipMode: "long-edge",
         projectDefaultBack: null,
+        printerProfileSelection: null,
+        printerDuplexMode: "single-sided",
         layout: { skippedSlotIndices: [] },
         },
       },
@@ -85,7 +88,7 @@ describe("project repository", () => {
     expect(projects.list()).toEqual([{
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 4,
+      projectSchemaVersion: 5,
       revision: 1,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -194,6 +197,48 @@ describe("project repository", () => {
     expect(projects.promoteRecovery(reopened.id).snapshot.settings).toEqual(staged.snapshot.settings);
   });
 
+  it("pins a Project to an exact printer profile revision across autosave, reopen, duplicate, and recovery", async () => {
+    const projects = await setup();
+    const profiles = new PrinterProfileRepository(database!, { now: () => "2026-10-01T12:00:00.000Z" });
+    const v1 = profiles.create({
+      id: "project-printer-a4", name: "Project printer",
+      front: { offsetXUm: 0, offsetYUm: 0, rotationDeg: 0, scaleX: 1, scaleY: 1 },
+      back: { offsetXUm: -683, offsetYUm: 247, rotationDeg: 0.031, scaleX: 1, scaleY: 1 },
+      paperSize: "A4", paperWidthMm: 210, paperHeightMm: 297, pageOrientation: "portrait",
+      duplexMode: "manual-long-edge", physicalValidationStatus: "software-only",
+    });
+    const initial = deserializeProjectSnapshot(serializeProjectSnapshot([], {
+      ...DEFAULT_PROJECT_SETTINGS,
+      printerProfileSelection: v1,
+      printerDuplexMode: v1.duplexMode,
+    }));
+    const created = projects.create(initial);
+    const saved = projects.save(created.id, created.revision, created.snapshot);
+    const v2 = profiles.update(v1.id, v1.version, { ...v1, back: { ...v1.back, offsetXUm: -700 } });
+
+    const reopened = projects.open(saved.id);
+    expect(reopened.snapshot.settings.printerProfileSelection).toEqual(v1);
+    expect(projects.duplicate(saved.id).snapshot.settings.printerProfileSelection).toEqual(v1);
+
+    const recoverySnapshot = deserializeProjectSnapshot(serializeProjectSnapshot([], {
+      ...saved.snapshot.settings,
+      bleedMm: 1.125,
+    }));
+    projects.stageRecovery(saved.id, saved.revision, recoverySnapshot);
+    expect(projects.readRecovery(saved.id)?.snapshot.settings.printerProfileSelection).toEqual(v1);
+    expect(projects.copyRecovery(saved.id).snapshot.settings.printerProfileSelection).toEqual(v1);
+    projects.stageRecovery(saved.id, saved.revision, recoverySnapshot);
+    expect(projects.promoteRecovery(saved.id).snapshot.settings.printerProfileSelection).toEqual(v1);
+
+    const explicitlyUpdated = projects.open(saved.id);
+    const updated = projects.save(saved.id, explicitlyUpdated.revision, {
+      ...explicitlyUpdated.snapshot,
+      settings: { ...explicitlyUpdated.snapshot.settings, printerProfileSelection: v2 },
+    });
+    expect(updated.snapshot.settings.printerProfileSelection).toEqual(v2);
+    expect(profiles.open(v1.id, 1)).toEqual(v1);
+  });
+
   it("binds Project template geometry to the exact selected package version across save and recovery", async () => {
     const projects = await setup();
     let templateId = 0;
@@ -279,9 +324,9 @@ describe("project repository", () => {
 
     const opened = projects.open(created.id);
 
-    expect(opened.projectSchemaVersion).toBe(4);
+    expect(opened.projectSchemaVersion).toBe(5);
     expect(opened.snapshot).toMatchObject({
-      projectSchemaVersion: 4,
+      projectSchemaVersion: 5,
       settings: { bleedMm: 1.25, roundedCorners: true, registration: { type: "none", orientation: "portrait" } },
     });
     expect(database!.prepare("SELECT snapshot_json FROM projects WHERE id = ?").get(created.id)).toEqual({ snapshot_json: legacy });
@@ -306,7 +351,7 @@ describe("project repository", () => {
       faceAssociations: [],
     };
     const initialSnapshot = {
-      projectSchemaVersion: 4 as const,
+      projectSchemaVersion: 5 as const,
       cards: [customCard],
       settings: DEFAULT_PROJECT_SETTINGS,
     };
@@ -354,9 +399,9 @@ describe("project repository", () => {
     const projects = await setup();
     const future = projects.create();
     const corrupt = projects.create();
-    const futureJson = JSON.stringify({ projectSchemaVersion: 5, cards: [], settings: {} });
+    const futureJson = JSON.stringify({ projectSchemaVersion: 6, cards: [], settings: {} });
     const corruptJson = "{";
-    database!.prepare("UPDATE projects SET project_schema_version = 5, snapshot_json = ? WHERE id = ?").run(futureJson, future.id);
+    database!.prepare("UPDATE projects SET project_schema_version = 6, snapshot_json = ? WHERE id = ?").run(futureJson, future.id);
     database!.prepare("UPDATE projects SET snapshot_json = ? WHERE id = ?").run(corruptJson, corrupt.id);
     const readRaw = (projectId: string) => database!.prepare("SELECT project_schema_version, revision, snapshot_json FROM projects WHERE id = ?").get(projectId);
     const futureBefore = readRaw(future.id);
@@ -577,7 +622,7 @@ describe("project repository", () => {
     expect(staged).toEqual({
       projectId: canonical.id,
       baseRevision: 1,
-      projectSchemaVersion: 4,
+      projectSchemaVersion: 5,
       snapshot: candidate,
       templateSelection: null,
       createdAt: "2026-01-01T00:00:01.000Z",

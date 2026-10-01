@@ -348,7 +348,7 @@ describe("template library service", () => {
     database.prepare("INSERT INTO project_template_selections VALUES (?, ?, ?, ?)")
       .run("project-legacy", selected.templateId, version, packageHash);
 
-    expect(migrateProjectDatabase(database)).toBe(4);
+    expect(migrateProjectDatabase(database)).toBe(5);
     expect(database.prepare("SELECT paper, card_format, registration_type, registration_config_json, template_geometry_json FROM template_versions WHERE template_id = ? AND version = ?")
       .get(selected.templateId, version)).toEqual({ paper: "custom", card_format: "custom", registration_type: "custom", registration_config_json: null, template_geometry_json: null });
     const repository = new TemplateRepository(database);

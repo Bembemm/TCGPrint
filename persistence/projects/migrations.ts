@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const PROJECT_DATABASE_SCHEMA_VERSION = 4;
+export const PROJECT_DATABASE_SCHEMA_VERSION = 5;
 
 function migrateToV1(database: Database.Database): void {
   database.exec(`
@@ -100,6 +100,36 @@ function migrateToV4(database: Database.Database): void {
   database.exec(`ALTER TABLE template_versions ADD COLUMN template_geometry_json TEXT;`);
 }
 
+function migrateToV5(database: Database.Database): void {
+  database.exec(`
+    CREATE TABLE printer_profiles (
+      id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) BETWEEN 1 AND 128),
+      name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 160),
+      current_version INTEGER NOT NULL CHECK (current_version >= 1),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE printer_profile_versions (
+      profile_id TEXT NOT NULL REFERENCES printer_profiles(id) ON DELETE RESTRICT,
+      version INTEGER NOT NULL CHECK (version >= 1),
+      profile_hash TEXT NOT NULL CHECK (length(profile_hash) = 64 AND profile_hash NOT GLOB '*[^0-9a-f]*'),
+      profile_json TEXT NOT NULL CHECK (length(CAST(profile_json AS BLOB)) <= 65536),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (profile_id, version),
+      UNIQUE (profile_id, version, profile_hash)
+    );
+
+    CREATE INDEX printer_profile_versions_hash_idx ON printer_profile_versions(profile_hash);
+    CREATE TRIGGER printer_profile_versions_immutable_update
+      BEFORE UPDATE ON printer_profile_versions
+      BEGIN SELECT RAISE(ABORT, 'printer profile versions are immutable'); END;
+    CREATE TRIGGER printer_profile_versions_immutable_delete
+      BEFORE DELETE ON printer_profile_versions
+      BEGIN SELECT RAISE(ABORT, 'printer profile versions are immutable'); END;
+  `);
+}
+
 /** Applies deterministic, transactional migrations for the separate projects database. */
 export function migrateProjectDatabase(database: Database.Database): number {
   let version = Number(database.pragma("user_version", { simple: true }));
@@ -133,6 +163,11 @@ export function migrateProjectDatabase(database: Database.Database): number {
       migrateToV4(database);
       database.pragma("user_version = 4");
       version = 4;
+    }
+    if (version < 5) {
+      migrateToV5(database);
+      database.pragma("user_version = 5");
+      version = 5;
     }
   });
   migrate.immediate();

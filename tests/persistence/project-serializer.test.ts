@@ -8,6 +8,7 @@ import {
   deserializeProjectSnapshot,
   serializeProjectSnapshot,
 } from "../../persistence/projects/serializer";
+import { computePrinterProfileHash } from "../../persistence/printer-profiles/hash";
 
 function singleFaceCard(): WorkingCard {
   return {
@@ -48,7 +49,7 @@ describe("project snapshot serializer", () => {
     const snapshot = deserializeProjectSnapshot(encoded);
 
     expect(snapshot).toEqual({
-      projectSchemaVersion: 4,
+      projectSchemaVersion: 5,
       cards: [{
         id: "working-card-1",
         quantity: 1,
@@ -86,6 +87,8 @@ describe("project snapshot serializer", () => {
         missingBackPolicy: "use-project-default",
         duplexFlipMode: "long-edge",
         projectDefaultBack: null,
+        printerProfileSelection: null,
+        printerDuplexMode: "single-sided",
         layout: { skippedSlotIndices: [] },
       },
     });
@@ -103,7 +106,7 @@ describe("project snapshot serializer", () => {
     };
 
     expect(deserializeProjectSnapshot(legacy)).toMatchObject({
-      projectSchemaVersion: 4,
+      projectSchemaVersion: 5,
       settings: {
         pageOrientation: "portrait",
         cardOrientation: "portrait",
@@ -126,10 +129,12 @@ describe("project snapshot serializer", () => {
       missingBackPolicy: _missingBackPolicy,
       duplexFlipMode: _duplexFlipMode,
       projectDefaultBack: _projectDefaultBack,
+      printerProfileSelection: _printerProfileSelection,
+      printerDuplexMode: _printerDuplexMode,
       ...phase10Settings
     } = DEFAULT_PROJECT_SETTINGS;
     expect(deserializeProjectSnapshot({ projectSchemaVersion: 2, cards: [], settings: phase10Settings })).toMatchObject({
-      projectSchemaVersion: 4,
+      projectSchemaVersion: 5,
       settings: { cutSourceSelection: null, registrationOverride: false },
     });
   });
@@ -203,7 +208,7 @@ describe("project snapshot serializer", () => {
     };
 
     expect(deserializeProjectSnapshot(serializeProjectSnapshot([card], settings))).toMatchObject({
-      projectSchemaVersion: 4,
+      projectSchemaVersion: 5,
       cards: [{
         backMode: "manual",
         backModeSelectionPolicy: "explicit",
@@ -257,9 +262,11 @@ describe("project snapshot serializer", () => {
     delete current.settings.missingBackPolicy;
     delete current.settings.duplexFlipMode;
     delete current.settings.projectDefaultBack;
+    delete current.settings.printerProfileSelection;
+    delete current.settings.printerDuplexMode;
 
     expect(deserializeProjectSnapshot(current)).toMatchObject({
-      projectSchemaVersion: 4,
+      projectSchemaVersion: 5,
       cards: [{ backMode: "project-default", backModeSelectionPolicy: "automatic" }],
       settings: {
         exportContentMode: "front-only",
@@ -278,8 +285,49 @@ describe("project snapshot serializer", () => {
   });
 
   it("rejects a future logical snapshot version with an explicit version error", () => {
-    expect(() => deserializeProjectSnapshot({ projectSchemaVersion: 5, cards: [], settings: {} }))
+    expect(() => deserializeProjectSnapshot({ projectSchemaVersion: 6, cards: [], settings: {} }))
       .toThrowError(expect.objectContaining({ code: "FUTURE_PROJECT_SCHEMA_VERSION" }));
+  });
+
+  it("round-trips an exact immutable printer profile snapshot in Project v5", () => {
+    const profile = {
+      id: "profile-a4",
+      name: "A4 manual",
+      front: { offsetXUm: 0, offsetYUm: 0, rotationDeg: 0, scaleX: 1, scaleY: 1 },
+      back: { offsetXUm: -683, offsetYUm: 247, rotationDeg: 0.031, scaleX: 1.00012, scaleY: 0.99987 },
+      paperSize: "A4",
+      paperWidthMm: 210,
+      paperHeightMm: 297,
+      pageOrientation: "portrait" as const,
+      duplexMode: "manual-long-edge" as const,
+      physicalValidationStatus: "software-only" as const,
+    };
+    const printerProfileSelection = { ...profile, version: 2, profileHash: computePrinterProfileHash(profile, 2) };
+    const settings = { ...DEFAULT_PROJECT_SETTINGS, printerProfileSelection, printerDuplexMode: "manual-long-edge" as const };
+
+    const snapshot = deserializeProjectSnapshot(serializeProjectSnapshot([], settings));
+
+    expect(snapshot.projectSchemaVersion).toBe(5);
+    expect(snapshot.settings.printerProfileSelection).toEqual({
+      ...printerProfileSelection,
+      physicalVerification: null,
+    });
+    expect(snapshot.settings.printerDuplexMode).toBe("manual-long-edge");
+  });
+
+  it("migrates a genuine Project v4 snapshot to v5 with no calibration selection", () => {
+    const v4 = JSON.parse(serializeProjectSnapshot([], DEFAULT_PROJECT_SETTINGS)) as {
+      projectSchemaVersion: number;
+      settings: Record<string, unknown>;
+    };
+    v4.projectSchemaVersion = 4;
+    delete v4.settings.printerProfileSelection;
+    delete v4.settings.printerDuplexMode;
+
+    expect(deserializeProjectSnapshot(v4)).toMatchObject({
+      projectSchemaVersion: 5,
+      settings: { printerProfileSelection: null, printerDuplexMode: "single-sided" },
+    });
   });
 
   it("rejects version zero instead of treating it as an implicit migration source", () => {

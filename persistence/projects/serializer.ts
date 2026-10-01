@@ -20,8 +20,9 @@ import { parseRegistrationConfig, type RegistrationConfig } from "../../core/reg
 import type { CutSourceSelection, DxfUnitsOverride } from "../../core/cut";
 import { isDoubleFacedIdentity } from "../../core/cards/back-selection";
 import type { DuplexFlipMode } from "../../core/duplex";
+import { CalibrationError, parsePrinterProfileSnapshot, type PrinterDuplexMode, type PrinterProfileSnapshot } from "../../core/calibration";
 
-export const CURRENT_PROJECT_SCHEMA_VERSION = 4;
+export const CURRENT_PROJECT_SCHEMA_VERSION = 5;
 
 /** 16 MiB bounds a 500-entry resolved Working Set without ever embedding artwork bytes. */
 export const MAX_PROJECT_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -63,6 +64,13 @@ export interface ProjectSettingsV4 extends ProjectSettingsV3 {
   readonly projectDefaultBack: BackLibraryAssetReference | null;
 }
 
+export interface ProjectSettingsV5 extends ProjectSettingsV4 {
+  /** Self-contained immutable calibration revision; null preserves the nominal page path. */
+  readonly printerProfileSelection: PrinterProfileSnapshot | null;
+  /** Driver duplex setting captured with the Project for profile compatibility checks. */
+  readonly printerDuplexMode: PrinterDuplexMode;
+}
+
 export interface LegacyProjectSettingsV1 {
   readonly bleedMm: number;
   readonly roundedCorners: boolean;
@@ -70,16 +78,16 @@ export interface LegacyProjectSettingsV1 {
 }
 
 /** @deprecated Source-compatible name retained for existing UI modules. */
-export type ProjectSettingsV2 = ProjectSettingsV4;
+export type ProjectSettingsV2 = ProjectSettingsV5;
 /** @deprecated Source-compatible name retained for existing UI modules. */
-export type ProjectSettingsV1 = ProjectSettingsV4;
-export type ProjectSettingsInput = ProjectSettingsV4 | ProjectSettingsV3 | LegacyProjectSettingsV1;
+export type ProjectSettingsV1 = ProjectSettingsV5;
+export type ProjectSettingsInput = ProjectSettingsV5 | ProjectSettingsV4 | ProjectSettingsV3 | LegacyProjectSettingsV1;
 
 export interface ProjectSnapshotV1 {
   /** Legacy v1/v2/v3 snapshots are accepted and promoted to the current v4 shape on read. */
   readonly projectSchemaVersion: number;
   readonly cards: readonly PersistedWorkingCard[];
-  readonly settings: ProjectSettingsV4;
+  readonly settings: ProjectSettingsV5;
 }
 
 export class ProjectSnapshotError extends Error {
@@ -115,6 +123,8 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettingsV1 = Object.freeze({
   missingBackPolicy: "use-project-default",
   duplexFlipMode: "long-edge",
   projectDefaultBack: null,
+  printerProfileSelection: null,
+  printerDuplexMode: "single-sided",
   layout: Object.freeze({ skippedSlotIndices: Object.freeze([]) }),
 });
 
@@ -537,13 +547,14 @@ function cutSourceSelection(value: unknown): CutSourceSelection | null {
   return Object.freeze({ fileId, fileHash, ...(units ? { dxfUnitsOverride: units } : {}) });
 }
 
-function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_VERSION): ProjectSettingsV4 {
+function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_VERSION): ProjectSettingsV5 {
   const legacy = schemaVersion === 1;
   const baseKeys = ["bleedMm", "roundedCorners", "cutGuides"];
   const v2Keys = [...baseKeys, "pageOrientation", "cardOrientation", "paperFormat", "cardFormat", "marginsMm", "horizontalGapMm", "verticalGapMm", "registration", "registrationOverride", "layout"];
   const v3Keys = [...v2Keys, "cutSourceSelection"];
   const v4Keys = [...v3Keys, "exportContentMode", "missingBackPolicy", "duplexFlipMode", "projectDefaultBack"];
-  const allowedKeys = legacy ? baseKeys : schemaVersion === 2 ? v2Keys : schemaVersion === 3 ? v3Keys : v4Keys;
+  const v5Keys = [...v4Keys, "printerProfileSelection", "printerDuplexMode"];
+  const allowedKeys = legacy ? baseKeys : schemaVersion === 2 ? v2Keys : schemaVersion === 3 ? v3Keys : schemaVersion === 4 ? v4Keys : v5Keys;
   const source = object(value, "snapshot.settings", legacy
     ? baseKeys
     : allowedKeys,
@@ -649,6 +660,8 @@ function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_
   let missingBackPolicy: MissingBackPolicy = "use-project-default";
   let duplexFlipMode: DuplexFlipMode = "long-edge";
   let projectDefaultBack: BackLibraryAssetReference | null = null;
+  let printerProfileSelection: PrinterProfileSnapshot | null = null;
+  let printerDuplexMode: PrinterDuplexMode = "single-sided";
   if (schemaVersion >= 4) {
     if (source.exportContentMode !== undefined) {
       const mode = string(source.exportContentMode, "snapshot.settings.exportContentMode", 32);
@@ -673,6 +686,23 @@ function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_
       projectDefaultBack = backLibraryAssetReference(source.projectDefaultBack, "snapshot.settings.projectDefaultBack");
     }
   }
+  if (schemaVersion >= 5) {
+    if (source.printerDuplexMode !== undefined) {
+      const mode = string(source.printerDuplexMode, "snapshot.settings.printerDuplexMode", 32);
+      if (mode !== "manual-long-edge" && mode !== "manual-short-edge" && mode !== "automatic-long-edge"
+        && mode !== "automatic-short-edge" && mode !== "single-sided") {
+        invalid("snapshot.settings.printerDuplexMode", "must be a supported printer duplex mode.");
+      }
+      printerDuplexMode = mode;
+    }
+    if (source.printerProfileSelection !== undefined && source.printerProfileSelection !== null) {
+      try {
+        printerProfileSelection = parsePrinterProfileSnapshot(source.printerProfileSelection);
+      } catch (error) {
+        invalid("snapshot.settings.printerProfileSelection", error instanceof CalibrationError ? error.message : "must be an immutable printer profile revision.");
+      }
+    }
+  }
   return {
     ...base,
     pageOrientation,
@@ -689,6 +719,8 @@ function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_
     missingBackPolicy,
     duplexFlipMode,
     projectDefaultBack,
+    printerProfileSelection,
+    printerDuplexMode,
     layout: {
       ...(rows !== undefined ? { rows, columns } : {}),
       skippedSlotIndices,
@@ -735,7 +767,7 @@ export function serializeProjectSnapshot(cards: readonly WorkingCard[], settings
   return serialized;
 }
 
-/** Dispatches logical Project snapshot versions; v1-v3 migrate in memory and future versions remain read-only errors. */
+/** Dispatches logical Project snapshot versions; v1-v4 migrate in memory and future versions remain read-only errors. */
 export function deserializeProjectSnapshot(value: string | unknown): ProjectSnapshotV1 {
   let snapshot: unknown = value;
   if (typeof value === "string") {
@@ -763,9 +795,9 @@ export function deserializeProjectSnapshot(value: string | unknown): ProjectSnap
   if (version > CURRENT_PROJECT_SCHEMA_VERSION) {
     throw new ProjectSnapshotError("FUTURE_PROJECT_SCHEMA_VERSION", `Project snapshot schema ${version} is newer than this application supports (${CURRENT_PROJECT_SCHEMA_VERSION}).`);
   }
-  if (version !== 1 && version !== 2 && version !== 3 && version !== CURRENT_PROJECT_SCHEMA_VERSION) {
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== CURRENT_PROJECT_SCHEMA_VERSION) {
     throw new ProjectSnapshotError("UNSUPPORTED_PROJECT_SCHEMA_VERSION", `Project snapshot schema ${version} has no supported migration path.`);
   }
-  // v1/v2/v3 snapshots migrate in memory; autosave serializes them as the v4 shape.
+  // v1-v4 snapshots migrate in memory; autosave serializes them as the v5 shape.
   return validateSnapshot(snapshot, version);
 }

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "profile": {
+    "id": "example-a4-manual-long-edge",
+    "name": "Example A4 manual long-edge",
+    "front": {
+      "offsetXUm": 0,
+      "offsetYUm": 0,
+      "rotationDeg": 0,
+      "scaleX": 1,
+      "scaleY": 1
+    },
+    "back": {
+      "offsetXUm": -683,
+      "offsetYUm": 247,
+      "rotationDeg": 0.031,
+      "scaleX": 1.00012,
+      "scaleY": 0.99987
+    },
+    "paperSize": "A4",
+    "paperWidthMm": 210,
+    "paperHeightMm": 297,
+    "pageOrientation": "portrait",
+    "duplexMode": "manual-long-edge",
+    "mediaType": "Example matte card stock",
+    "printQualityProfile": "Actual Size / 100%",
+    "feedSource": "Manual feed",
+    "notes": "Software fixture only; no physical printer readings are included.",
+    "physicalValidationStatus": "software-only",
+    "physicalVerification": null,
+    "version": 1,
+    "profileHash": "0d721db8517799712c2dc909a84e55d2c5fa350eee4ea70d44b42439e1f72cd7"
+  }
+}

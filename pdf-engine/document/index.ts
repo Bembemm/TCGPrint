@@ -44,6 +44,7 @@ import { mmToPoints } from "../../core/units";
 import { generateRegistrationGeometry, type RegistrationConfig, type RegistrationPrimitive } from "../../core/registration";
 import { transformRegistrationGeometry } from "../../core/registration";
 import type { DuplexBackPageTransform } from "../../core/duplex";
+import { CalibrationError, createPrintCalibrationTransform, getCalibrationPageOverflowMm, parseSideCalibration, type CalibrationSide, type SideCalibration } from "../../core/calibration";
 
 export interface LosslessPdfRequest {
   /** Image bytes read from local files. Repeated entries produce repeated cards. */
@@ -70,6 +71,9 @@ export interface LosslessPdfRequest {
   readonly duplexBackPageTransform?: DuplexBackPageTransform;
   /** Physical image indexes intentionally left blank while their slots remain in the page plan. */
   readonly skipImageIndexes?: ReadonlySet<number>;
+  /** Optional physical page correction. It wraps the whole page after duplex pairing. */
+  readonly printCalibration?: SideCalibration;
+  readonly calibrationSide?: CalibrationSide;
 }
 
 export interface LosslessPdfFileRequest {
@@ -894,6 +898,43 @@ export class LosslessPdfEngine {
     for (const { startCardIndex, endCardIndex, placement: pagePlacement } of pagePlacements) {
       const pageSizeMm = pagePlacement.pageSizeMm;
       const page = pdf.addPage([mmToPoints(pageSizeMm.widthMm), mmToPoints(pageSizeMm.heightMm)]);
+      const pageRegistrationGeometry = request.duplexBackPageTransform
+        ? transformRegistrationGeometry(registrationGeometry, pageSizeMm, request.duplexBackPageTransform.registrationReflectionAxis)
+        : registrationGeometry;
+      let pageCalibrationApplied = false;
+      if (request.printCalibration !== undefined) {
+        const transform = createPrintCalibrationTransform(pageSizeMm, parseSideCalibration(request.printCalibration), request.calibrationSide ?? "front");
+        if (!transform.isIdentity) {
+          const overflowEpsilonMm = 0.001;
+          for (let imageIndex = startCardIndex; imageIndex < endCardIndex; imageIndex += 1) {
+            if (request.skipImageIndexes?.has(imageIndex)) continue;
+            const slot = pagePlacement.slots.find((item) => item.cardIndex === imageIndex - startCardIndex);
+            if (!slot) continue;
+            const bleedMm = bleedByImageMm[imageIndex] ?? 0;
+            const overflow = getCalibrationPageOverflowMm(pageSizeMm, {
+              xMm: slot.trim.xMm - bleedMm,
+              yMm: slot.trim.yMm - bleedMm,
+              widthMm: pagePlacement.cardSizeMm.widthMm + 2 * bleedMm,
+              heightMm: pagePlacement.cardSizeMm.heightMm + 2 * bleedMm,
+            }, transform.matrix);
+            if (overflow.maximumMm > overflowEpsilonMm) {
+              throw new CalibrationError("CALIBRATED_CONTENT_OUT_OF_BOUNDS", `Calibrated card ${imageIndex + 1} extends ${overflow.maximumMm.toFixed(3)} mm beyond the printable page bounds; change layout margins or calibration explicitly.`);
+            }
+          }
+          for (const mark of pageRegistrationGeometry.marks) {
+            const overflow = getCalibrationPageOverflowMm(pageSizeMm, mark.bounds, transform.matrix);
+            if (overflow.maximumMm > overflowEpsilonMm) {
+              throw new CalibrationError("CALIBRATED_CONTENT_OUT_OF_BOUNDS", `Calibrated registration mark ${mark.id} extends ${overflow.maximumMm.toFixed(3)} mm beyond the printable page bounds.`);
+            }
+          }
+          const { a, b, c, d, e, f } = transform.matrix;
+          page.pushOperators(
+            pushGraphicsState(),
+            concatTransformationMatrix(a, b, c, d, mmToPoints(e), mmToPoints(f)),
+          );
+          pageCalibrationApplied = true;
+        }
+      }
 
       for (let imageIndex = startCardIndex; imageIndex < endCardIndex; imageIndex += 1) {
         if (request.skipImageIndexes?.has(imageIndex)) continue;
@@ -1099,10 +1140,8 @@ export class LosslessPdfEngine {
           })),
         );
       }
-      const pageRegistrationGeometry = request.duplexBackPageTransform
-        ? transformRegistrationGeometry(registrationGeometry, pageSizeMm, request.duplexBackPageTransform.registrationReflectionAxis)
-        : registrationGeometry;
       drawRegistrationMarks(page, pageSizeMm, pageRegistrationGeometry);
+      if (pageCalibrationApplied) page.pushOperators(popGraphicsState());
     }
 
     return pdf.save();

@@ -15,6 +15,7 @@ import { createDefaultRegistrationConfig, generateRegistrationGeometry } from ".
 import { resolveCutLayout, resolveCutLayoutPages } from "../../services/cut-geometry/layout-sync";
 import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 import { parseSvgCutGeometry } from "../../services/cut-geometry/svg-parser";
+import { createPrintCalibrationTransform, parseSideCalibration } from "../../core/calibration";
 
 const FIXTURES = join(process.cwd(), "tests", "fixtures", "pdf");
 const CUT_FIXTURES = join(process.cwd(), "tests", "fixtures", "cut");
@@ -1527,6 +1528,73 @@ describe("LosslessPdfEngine", () => {
     expect(createHash("sha256").update(getPdfStreamBytes(jpegImage!)).digest("hex"))
       .toBe(createHash("sha256").update(original).digest("hex"));
   });
+
+  it("applies one page-scoped calibration CTM to JPEG and registration vectors without changing paper boxes", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const calibration = parseSideCalibration({ offsetXUm: -683, offsetYUm: 247, rotationDeg: 0.031, scaleX: 1.00012, scaleY: 0.99987, skewXDeg: 0.2 });
+    const expected = createPrintCalibrationTransform({ widthMm: 210, heightMm: 297 }, calibration, "back").matrix;
+    const pdf = await engine.generate({
+      images: [original],
+      paperFormat: PAPER_FORMATS.A4,
+      pageOrientation: "portrait",
+      registration: createDefaultRegistrationConfig("three-point", "portrait"),
+      cutGuides: { trim: { enabled: true, extentMm: 1, color: "blue" }, external: { enabled: false, strokeWidthPt: 0.3, color: "black" } },
+      printCalibration: calibration,
+      calibrationSide: "back",
+    });
+    const parsed = await parsePdf(pdf);
+    const matrix = getDrawMatrices(parsed.content).find(([a, b, c, d, e, f]) =>
+      Math.abs(a - expected.a) < 1e-9 && Math.abs(b - expected.b) < 1e-9
+      && Math.abs(c - expected.c) < 1e-9 && Math.abs(d - expected.d) < 1e-9
+      && Math.abs(e - mmToPoints(expected.e)) < 1e-7 && Math.abs(f - mmToPoints(expected.f)) < 1e-7);
+    const page = parsed.document.getPages()[0]!;
+    const jpeg = parsed.images.find((image) => image.dictionary.includes("/DCTDecode"));
+
+    expect(matrix).toBeDefined();
+    expect(page.getMediaBox()).toEqual({ x: 0, y: 0, width: mmToPoints(210), height: mmToPoints(297) });
+    expect(page.getCropBox()).toEqual({ x: 0, y: 0, width: mmToPoints(210), height: mmToPoints(297) });
+    expect(jpeg).toBeDefined();
+    expect(getPdfStreamBytes(jpeg!)).toEqual(Buffer.from(original));
+    expect(getVectorSegments(parsed.content).length).toBeGreaterThan(0);
+  });
+
+  it("blocks calibrated card content from silently leaving a trim-sized printable page", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    await expect(engine.generate({
+      images: [original],
+      paperFormat: { name: "trim-sized", widthMm: 63.5, heightMm: 88.9 },
+      cardFormat: MAGIC_STANDARD_CARD,
+      marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+      printCalibration: parseSideCalibration({ offsetXUm: 1_000, offsetYUm: 0, rotationDeg: 0, scaleX: 1, scaleY: 1 }),
+    })).rejects.toMatchObject({ name: "CalibrationError", code: "CALIBRATED_CONTENT_OUT_OF_BOUNDS" });
+  });
+
+  it.each([10, 100])("applies the same back page matrix to every one of %i card pages without accumulation", async (count) => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const calibration = parseSideCalibration({ offsetXUm: -683, offsetYUm: 247, rotationDeg: 0.031, scaleX: 1.00012, scaleY: 0.99987 });
+    const placements = calculateGridPagePlacements({
+      placement: { paper: PAPER_FORMATS.A4, pageOrientation: "portrait", card: MAGIC_STANDARD_CARD, cardOrientation: "portrait", bleedMm: 0 },
+      count,
+    });
+    const expected = createPrintCalibrationTransform({ widthMm: 210, heightMm: 297 }, calibration, "back").matrix;
+    const pdf = await engine.generate({
+      images: Array.from({ length: count }, () => original),
+      pagePlacements: placements,
+      printCalibration: calibration,
+      calibrationSide: "back",
+    });
+    const parsed = await parsePdf(pdf);
+    const matches = getDrawMatrices(parsed.content).filter(([a, b, c, d, e, f]) =>
+      Math.abs(a - expected.a) < 1e-9 && Math.abs(b - expected.b) < 1e-9
+      && Math.abs(c - expected.c) < 1e-9 && Math.abs(d - expected.d) < 1e-9
+      && Math.abs(e - mmToPoints(expected.e)) < 1e-7 && Math.abs(f - mmToPoints(expected.f)) < 1e-7);
+
+    expect(parsed.document.getPages()).toHaveLength(placements.length);
+    expect(matches).toHaveLength(placements.length);
+    for (const page of parsed.document.getPages()) {
+      expect(page.getMediaBox()).toEqual({ x: 0, y: 0, width: mmToPoints(210), height: mmToPoints(297) });
+    }
+  }, 30_000);
 
   it("preserves PNG RGB dimensions and every pixel sample losslessly", async () => {
     const source = decodeFixturePng(await readFile(join(FIXTURES, "synthetic-rgb.png")));

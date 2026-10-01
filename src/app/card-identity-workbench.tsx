@@ -45,7 +45,9 @@ import type { ProjectDto } from "../../services/project-api";
 import { DEFAULT_PROJECT_SETTINGS, type ExportContentMode, type MissingBackPolicy, type ProjectSettingsV2 } from "../../persistence/projects/serializer";
 import type { BackLibraryAssetReference } from "../../core/cards/types";
 import type { DuplexFlipMode } from "../../core/duplex";
+import type { PrinterDuplexMode, PrinterProfileSnapshot } from "../../core/calibration";
 import ProjectsPanel from "./projects-panel";
+import PrinterCalibrationPanel from "./printer-calibration-panel";
 import type { TemplateRegistrationDefaults } from "./template-library-panel";
 import {
   applyProjectRegistrationOverride,
@@ -96,6 +98,27 @@ function resolutionQualityLabel(value: CandidateDto["resolutionQuality"]): strin
 
 function displayCard(card: WorkingCard): string {
   return card.identity?.name ?? card.identityHints.name ?? card.importSource.filename ?? "Carta custom";
+}
+
+interface CalibrationBoundsWarningDto {
+  readonly side: "front" | "back";
+  readonly pageNumber: number;
+  readonly content: string;
+  readonly nearestEdgeClearanceMm: number;
+}
+
+function decodeCalibrationBoundsWarnings(header: string | null): readonly CalibrationBoundsWarningDto[] {
+  if (!header || header.length > 12_000) return [];
+  try {
+    const base64 = header.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(header.length / 4) * 4, "=");
+    const value = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(base64), (character) => character.charCodeAt(0)))) as unknown;
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is CalibrationBoundsWarningDto => Boolean(item && typeof item === "object"
+      && ((item as CalibrationBoundsWarningDto).side === "front" || (item as CalibrationBoundsWarningDto).side === "back")
+      && Number.isSafeInteger((item as CalibrationBoundsWarningDto).pageNumber)
+      && typeof (item as CalibrationBoundsWarningDto).content === "string"
+      && Number.isFinite((item as CalibrationBoundsWarningDto).nearestEdgeClearanceMm)));
+  } catch { return []; }
 }
 
 function statusLabel(card: WorkingCard): string {
@@ -506,6 +529,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [missingBackPolicy, setMissingBackPolicy] = useState<MissingBackPolicy>(DEFAULT_PROJECT_SETTINGS.missingBackPolicy);
   const [duplexFlipMode, setDuplexFlipMode] = useState<DuplexFlipMode>(DEFAULT_PROJECT_SETTINGS.duplexFlipMode);
   const [projectDefaultBack, setProjectDefaultBack] = useState<BackLibraryAssetReference | null>(DEFAULT_PROJECT_SETTINGS.projectDefaultBack);
+  const [printerProfileSelection, setPrinterProfileSelection] = useState<PrinterProfileSnapshot | null>(DEFAULT_PROJECT_SETTINGS.printerProfileSelection);
+  const [printerDuplexMode, setPrinterDuplexMode] = useState<PrinterDuplexMode>(DEFAULT_PROJECT_SETTINGS.printerDuplexMode);
   const [marginsMm, setMarginsMm] = useState<PageMarginsMm>({ top: 0, right: 0, bottom: 0, left: 0 });
   const [horizontalGapMm, setHorizontalGapMm] = useState(0);
   const [verticalGapMm, setVerticalGapMm] = useState(0);
@@ -569,6 +594,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       missingBackPolicy,
       duplexFlipMode,
       projectDefaultBack,
+      printerProfileSelection,
+      printerDuplexMode,
       marginsMm,
       horizontalGapMm,
       verticalGapMm,
@@ -581,7 +608,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         ...(templateGeometry ? { templateGeometry } : {}),
       },
     };
-  }, [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor, pageOrientation, cardOrientation, paperFormat, cardFormat, exportContentMode, missingBackPolicy, duplexFlipMode, projectDefaultBack, marginsMm, horizontalGapMm, verticalGapMm, registration, registrationOverride, cutSourceSelection, layoutRows, layoutColumns, skippedSlotIndices, templateGeometry]);
+  }, [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor, pageOrientation, cardOrientation, paperFormat, cardFormat, exportContentMode, missingBackPolicy, duplexFlipMode, projectDefaultBack, printerProfileSelection, printerDuplexMode, marginsMm, horizontalGapMm, verticalGapMm, registration, registrationOverride, cutSourceSelection, layoutRows, layoutColumns, skippedSlotIndices, templateGeometry]);
 
   function clearProblem(cardId: string | null = null) {
     setProblem("");
@@ -906,6 +933,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           missingBackPolicy,
           duplexFlipMode,
           projectDefaultBack,
+          printerProfileSelection,
+          printerDuplexMode,
           ...(templateGeometry ? { templateGeometry } : {}),
           ...(projectSettings.layout.rows !== undefined ? { layoutRows: projectSettings.layout.rows, layoutColumns: projectSettings.layout.columns } : {}),
           skippedSlotIndices,
@@ -917,10 +946,14 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         throw new Error(body.message ?? "Não foi possível gerar o PDF.");
       }
       setBleedDiagnostics(decodeBleedDiagnostics(response.headers.get("x-tcgprint-bleed-diagnostics")));
+      const calibrationWarnings = decodeCalibrationBoundsWarnings(response.headers.get("x-tcgprint-calibration-warnings"));
       const disposition = response.headers.get("content-disposition") ?? "";
       const downloadName = disposition.match(/filename="([^"]+)"/i)?.[1] ?? (exportContentMode === "front-back-separated" ? "tcgprint-front-back.zip" : "tcgprint-cards.pdf");
       const nextUrl = URL.createObjectURL(await response.blob());
-      setPdfUrl(nextUrl); setExportDownloadName(downloadName); setStatus(`${downloadName} pronto · ${physicalCardCount} slots físicos pareados · ${paperFormat.name} · ${pageOrientation}.`);
+      const boundsStatus = calibrationWarnings.length
+        ? ` Aviso de margem: ${calibrationWarnings.length} conteúdo(s) a até 0.5 mm da borda; menor folga ${Math.min(...calibrationWarnings.map(({ nearestEdgeClearanceMm }) => nearestEdgeClearanceMm)).toFixed(3)} mm.`
+        : "";
+      setPdfUrl(nextUrl); setExportDownloadName(downloadName); setStatus(`${downloadName} pronto · ${physicalCardCount} slots físicos pareados · ${paperFormat.name} · ${pageOrientation}.${boundsStatus}`);
     } catch (error) { setBleedDiagnostics(null); setProblem(error instanceof Error ? error.message : "Export falhou."); setStatus(""); }
     finally { setBusy(false); }
   }
@@ -952,6 +985,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     setMissingBackPolicy(settings.missingBackPolicy);
     setDuplexFlipMode(settings.duplexFlipMode);
     setProjectDefaultBack(settings.projectDefaultBack);
+    setPrinterProfileSelection(settings.printerProfileSelection);
+    setPrinterDuplexMode(settings.printerDuplexMode);
     setMarginsMm(settings.marginsMm);
     setHorizontalGapMm(settings.horizontalGapMm);
     setVerticalGapMm(settings.verticalGapMm);
@@ -1064,6 +1099,20 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         }}
         onProjectInteractionLockChange={setProjectInteractionLocked}
         disabled={busy}
+      />
+
+      <PrinterCalibrationPanel
+        paperFormat={paperFormat}
+        pageOrientation={pageOrientation}
+        printerProfileSelection={printerProfileSelection}
+        printerDuplexMode={printerDuplexMode}
+        exportContentMode={exportContentMode}
+        duplexFlipMode={duplexFlipMode}
+        disabled={interactionBusy}
+        onProjectSelectionChange={(selection, mode) => updateProjectSetting(() => {
+          setPrinterProfileSelection(selection);
+          setPrinterDuplexMode(mode);
+        })}
       />
 
       <div className="action-row phase5-actions">
