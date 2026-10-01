@@ -7,6 +7,7 @@ const MAX_DXF_PAIRS = 500_000;
 const MAX_DXF_LINE_LENGTH = 4_096;
 const MAX_DXF_ENTITIES = 2_048;
 const MAX_DXF_VERTICES = 20_000;
+const MAX_DXF_GROUP_CODE = 1_071;
 const EPSILON = 1e-12;
 
 interface DxfPair {
@@ -114,9 +115,12 @@ function pairsFromBytes(bytes: Uint8Array, limits: DxfCutLimits): DxfPair[] {
     const rawCode = lines[index]!;
     const value = lines[index + 1]!;
     if (rawCode.length > 16 || value.length > limits.maxLineLength) limit(`line ${index + 1} exceeds the line-length limit`);
-    if (!/^\s*\d{1,3}\s*$/.test(rawCode)) malformed(`has an invalid group code on line ${index + 1}.`);
+    // DXF uses four-digit XDATA group codes (1000–1071) as well as the
+    // ordinary shorter codes. Accept that lexical width, then enforce the
+    // exact numeric range below; XDATA is retained only as inert pair data.
+    if (!/^\s*\d{1,4}\s*$/.test(rawCode)) malformed(`has an invalid group code on line ${index + 1}; expected one to four decimal digits.`);
     const code = Number(rawCode.trim());
-    if (!Number.isSafeInteger(code) || code < 0 || code > 1071) malformed(`has an unsupported group code ${rawCode.trim()}.`);
+    if (!Number.isSafeInteger(code) || code < 0 || code > MAX_DXF_GROUP_CODE) malformed(`has an unsupported group code ${rawCode.trim()}.`);
     pairs.push({ code, value: value.trim(), line: index + 1 });
   }
   return pairs;

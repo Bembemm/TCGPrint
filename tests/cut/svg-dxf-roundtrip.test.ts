@@ -114,6 +114,28 @@ describe("bounded DXF cut parser and deterministic exporters", () => {
     expect(geometry.paths[0]).toMatchObject({ closed: true, boundsMm: { xMm: 10, yMm: 12, widthMm: 63.5, heightMm: 88.9 } });
   });
 
+  it("ignores supported entity XDATA without changing geometry and keeps DXF round-trip intact", async () => {
+    const bytes = await fixture("dxf-standard-sections.dxf");
+    const text = new TextDecoder().decode(bytes);
+    const xdata = "1001\nTCGPRINT_TEST\n1000\nsome-metadata\n1040\n0.125\n1070\n42\n1071\n123456\n";
+    expect(text).toContain(xdata);
+    const withoutXdata = new TextEncoder().encode(text.replace(xdata, ""));
+    const plainGeometry = parseDxfCutGeometry(withoutXdata, { source: identity, expectedPageSizeMm: pageSizeMm });
+    const metadataGeometry = parseDxfCutGeometry(bytes, { source: identity, expectedPageSizeMm: pageSizeMm });
+
+    expect(metadataGeometry.paths).toHaveLength(1);
+    expect(metadataGeometry.boundsMm).toEqual(plainGeometry.boundsMm);
+    expect(compareCutGeometryMm(metadataGeometry, plainGeometry, 0).equal).toBe(true);
+
+    const exported = exportCutGeometryToDxf(metadataGeometry);
+    expect(exported).not.toMatch(/1001|TCGPRINT_TEST|some-metadata/);
+    const roundTrip = parseDxfCutGeometry(new TextEncoder().encode(exported), { source: identity, expectedPageSizeMm: pageSizeMm });
+    expect(compareCutGeometryMm(metadataGeometry, roundTrip, 0.000001).equal).toBe(true);
+    expect(() => parseDxfCutGeometry(new TextEncoder().encode(text.replace("1071\n123456", "1072\n123456")), { source: identity, expectedPageSizeMm: pageSizeMm })).toThrow(/unsupported group code 1072/i);
+    expect(() => parseDxfCutGeometry(bytes, { source: identity, expectedPageSizeMm: pageSizeMm }, { ...DEFAULT_DXF_CUT_LIMITS, maxLineLength: 8 })).toThrow(/line-length limit/i);
+    expect(() => parseDxfCutGeometry(bytes, { source: identity, expectedPageSizeMm: pageSizeMm }, { ...DEFAULT_DXF_CUT_LIMITS, maxPairs: 12 })).toThrow(/pairs/i);
+  });
+
   it("keeps INSERT and unsupported entities blocked while respecting frozen layers", async () => {
     const standard = new TextDecoder().decode(await fixture("dxf-standard-sections.dxf"));
     const insert = standard.replace(/0\nLWPOLYLINE[\s\S]*?(?=0\nENDSEC)/, "0\nINSERT\n5\n20\n8\nCUT\n2\ncard-block\n10\n10\n20\n10\n");
