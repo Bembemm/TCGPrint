@@ -506,6 +506,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const projectRestoreLookupGate = useRef(createProjectRestoreLookupGate(-1));
   const [pdfUrl, setPdfUrl] = useState("");
   const [cutGeometryPreview, setCutGeometryPreview] = useState<CutPreviewDto | null>(null);
+  const [cutPageNumber, setCutPageNumber] = useState(1);
   const [bleedDiagnostics, setBleedDiagnostics] = useState<BleedDiagnosticsReport | null>(null);
   const interactionBusy = busy || projectOpenPending;
   function setProjectInteractionLocked(locked: boolean) {
@@ -950,6 +951,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         onProjectOpen={restoreProject}
         onCutSourceSelectionChange={setCutSourceSelection}
         onCutGeometryPreviewChange={setCutGeometryPreview}
+        selectedCutPageNumber={cutPageNumber}
+        onCutPageNumberChange={setCutPageNumber}
         onProjectSyncStateChange={setActiveProjectSync}
         onTemplateRegistrationStatusChange={(registrationStatus) => setTemplateRegistrationStatus(
           applyProjectRegistrationOverride(registrationStatus, projectSettings.registrationOverride),
@@ -1149,7 +1152,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             onLayoutRowsChange={(value) => updateProjectSetting(() => setLayoutRows(value))}
             onLayoutColumnsChange={(value) => updateProjectSetting(() => setLayoutColumns(value))}
           />
-          <RegistrationLayoutPreview settings={projectSettings} cardCount={physicalCardCount} cutPreview={cutGeometryPreview} onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))} />
+          <RegistrationLayoutPreview settings={projectSettings} cardCount={physicalCardCount} cutPreview={cutGeometryPreview} selectedPageNumber={cutPageNumber} onSelectPage={setCutPageNumber} onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))} />
           {templateRegistrationStatus === "legacy-custom-unconfigured" && <p className="error-message" role="alert">O template selecionado declara registration custom, mas a versão não contém geometria física. O PDF usará somente a configuração independente do Project após escolha explícita.</p>}
           {templateRegistrationStatus === "legacy-physical-format-unconfigured" && <p className="error-message" role="alert">A versão legada do template declara papel ou carta custom sem dimensões físicas. Os formatos atuais do Working Set não foram substituídos; exportação bloqueada até selecionar uma versão com geometria explícita.</p>}
           {templateRegistrationStatus === "unavailable" && <p className="error-message" role="alert">A versão exata do template não está disponível para validar registration. Revise ou desassocie o template.</p>}

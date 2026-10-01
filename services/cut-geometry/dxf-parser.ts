@@ -74,6 +74,18 @@ const INSUNITS_MM_FACTOR: Readonly<Record<number, number>> = Object.freeze({
 });
 
 const OVERRIDE_FACTOR: Readonly<Record<DxfUnits, number>> = Object.freeze({ mm: 1, cm: 10, m: 1_000, in: 25.4, ft: 304.8, yd: 914.4 });
+const STANDARD_IGNORABLE_SECTIONS = new Set(["CLASSES", "BLOCKS", "OBJECTS", "THUMBNAILIMAGE"]);
+const STANDARD_TABLE_RECORDS: Readonly<Record<string, string>> = Object.freeze({
+  APPID: "APPID",
+  BLOCK_RECORD: "BLOCK_RECORD",
+  DIMSTYLE: "DIMSTYLE",
+  LAYER: "LAYER",
+  LTYPE: "LTYPE",
+  STYLE: "STYLE",
+  UCS: "UCS",
+  VIEW: "VIEW",
+  VPORT: "VPORT",
+});
 
 function malformed(message: string): never {
   return sourceFailure("CUT_SOURCE_MALFORMED", `DXF cut source ${message}`);
@@ -135,7 +147,7 @@ function scalar(entity: DxfEntity, code: number, field: string, required = true,
   return numeric(selected[0], `${entity.type} ${field}`, required, defaultValue);
 }
 
-function parseSections(pairs: readonly DxfPair[]): { header: Map<string, readonly DxfPair[]>; entities: DxfEntity[]; layers?: Map<string, { hidden: boolean }> } {
+function parseSections(pairs: readonly DxfPair[], limits: DxfCutLimits): { header: Map<string, readonly DxfPair[]>; entities: DxfEntity[]; layers?: Map<string, { hidden: boolean }> } {
   const header = new Map<string, readonly DxfPair[]>();
   let layers: Map<string, { hidden: boolean }> | undefined;
   const entities: DxfEntity[] = [];
@@ -160,8 +172,9 @@ function parseSections(pairs: readonly DxfPair[]): { header: Map<string, readonl
     if (end >= pairs.length) malformed(`${section} section is missing ENDSEC.`);
     const content = pairs.slice(index, end);
     if (section === "HEADER") parseHeader(content, header);
-    else if (section === "ENTITIES") parseEntities(content, entities);
+    else if (section === "ENTITIES") parseEntities(content, entities, limits);
     else if (section === "TABLES") layers = parseTables(content);
+    else if (STANDARD_IGNORABLE_SECTIONS.has(section)) { /* Known non-geometric section, bounded by maxPairs/maxBytes. */ }
     else unsupported(`SECTION ${section}`);
     index = end + 1;
   }
@@ -187,32 +200,41 @@ function parseHeader(content: readonly DxfPair[], output: Map<string, readonly D
 
 function parseTables(content: readonly DxfPair[]): Map<string, { hidden: boolean }> {
   const layers = new Map<string, { hidden: boolean }>();
+  const seenTables = new Set<string>();
   let index = 0;
   while (index < content.length) {
     if (content[index]?.code !== 0 || content[index]?.value !== "TABLE" || content[index + 1]?.code !== 2) malformed("TABLES section contains a malformed table.");
     const tableName = content[index + 1]!.value.toUpperCase();
-    if (tableName !== "LAYER") unsupported(`TABLE ${tableName}`);
+    const expectedRecordType = STANDARD_TABLE_RECORDS[tableName];
+    if (!expectedRecordType) unsupported(`TABLE ${tableName}`);
+    if (seenTables.has(tableName)) malformed(`TABLES contains duplicate ${tableName} tables.`);
+    seenTables.add(tableName);
     index += 2;
+    let foundEndTable = false;
     while (index < content.length && !(content[index]?.code === 0 && content[index]?.value === "ENDTAB")) {
-      if (content[index]?.code === 70) { index += 1; continue; }
+      if (content[index]?.code !== 0) { index += 1; continue; }
       const start = index;
-      if (content[index]?.code !== 0 || content[index]?.value !== "LAYER") malformed("LAYER table contains an unsupported record.");
+      const recordType = content[index]!.value.toUpperCase();
+      if (recordType !== expectedRecordType) unsupported(`record ${recordType} in TABLE ${tableName}`);
       index += 1;
       while (index < content.length && content[index]?.code !== 0) index += 1;
-      const entity: DxfEntity = { type: "LAYER", pairs: content.slice(start + 1, index) };
-      const name = first(entity, 2)?.value;
-      if (!name || name.length > 255 || layers.has(name)) malformed("LAYER table has an invalid or duplicate layer name.");
-      const flags = scalar(entity, 70, "flags", false);
-      const color = scalar(entity, 62, "color", false, 7);
-      layers.set(name, { hidden: color < 0 || (flags & 1) !== 0 });
+      if (tableName === "LAYER") {
+        const entity: DxfEntity = { type: "LAYER", pairs: content.slice(start + 1, index) };
+        const name = first(entity, 2)?.value;
+        if (!name || name.length > 255 || layers.has(name)) malformed("LAYER table has an invalid or duplicate layer name.");
+        const flags = scalar(entity, 70, "flags", false);
+        const color = scalar(entity, 62, "color", false, 7);
+        layers.set(name, { hidden: color < 0 || (flags & 1) !== 0 });
+      }
     }
-    if (content[index]?.value !== "ENDTAB") malformed("LAYER table is missing ENDTAB.");
+    if (content[index]?.code === 0 && content[index]?.value === "ENDTAB") foundEndTable = true;
+    if (!foundEndTable) malformed(`${tableName} table is missing ENDTAB.`);
     index += 1;
   }
   return layers;
 }
 
-function parseEntities(content: readonly DxfPair[], output: DxfEntity[]): void {
+function parseEntities(content: readonly DxfPair[], output: DxfEntity[], limits: DxfCutLimits): void {
   let index = 0;
   while (index < content.length) {
     if (content[index]?.code !== 0) malformed(`ENTITIES record must begin with code 0 on line ${content[index]!.line}.`);
@@ -225,6 +247,7 @@ function parseEntities(content: readonly DxfPair[], output: DxfEntity[]): void {
       const header = content.slice(headerStart, index);
       const vertices: DxfEntity[] = [];
       while (index < content.length && content[index]?.code === 0 && content[index]?.value === "VERTEX") {
+        if (vertices.length >= limits.maxVertices) limit(`more than ${limits.maxVertices} vertices in one POLYLINE`);
         const vertexStart = index + 1;
         index += 1;
         while (index < content.length && content[index]?.code !== 0) index += 1;
@@ -233,9 +256,11 @@ function parseEntities(content: readonly DxfPair[], output: DxfEntity[]): void {
       if (content[index]?.code !== 0 || content[index]?.value !== "SEQEND") malformed("POLYLINE is missing its SEQEND record.");
       index += 1;
       while (index < content.length && content[index]?.code !== 0) index += 1;
+      if (output.length >= limits.maxEntities) limit(`more than ${limits.maxEntities} entities`);
       output.push({ type, pairs: header, vertices });
     } else {
       while (index < content.length && content[index]?.code !== 0) index += 1;
+      if (output.length >= limits.maxEntities) limit(`more than ${limits.maxEntities} entities`);
       output.push({ type, pairs: content.slice(start, index) });
     }
     if (output.length > MAX_DXF_ENTITIES) limit(`more than ${MAX_DXF_ENTITIES} entities`);
@@ -472,7 +497,7 @@ export function parseDxfCutGeometry(
 ): CutGeometryMm {
   const limits = { ...DEFAULT_DXF_CUT_LIMITS, ...overrides };
   const pairs = pairsFromBytes(bytes, limits);
-  const parsed = parseSections(pairs);
+  const parsed = parseSections(pairs, limits);
   const factor = unitFactor(parsed.header, options.unitsOverride);
   const page = options.expectedPageSizeMm;
   if (![page.widthMm, page.heightMm].every((value) => Number.isFinite(value) && value > 0 && value <= 2_000)) malformed("expected Project page dimensions are invalid.");

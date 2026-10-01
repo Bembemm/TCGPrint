@@ -108,6 +108,26 @@ describe("bounded DXF cut parser and deterministic exporters", () => {
     expect(geometry.paths[1]).toMatchObject({ closed: true, boundsMm: { xMm: 10, yMm: 12, widthMm: 63.5, heightMm: 88.9 } });
   });
 
+  it("parses common standard non-geometric DXF sections and tables around cut entities", async () => {
+    const geometry = parseDxfCutGeometry(await fixture("dxf-standard-sections.dxf"), { source: identity, expectedPageSizeMm: pageSizeMm });
+    expect(geometry.paths).toHaveLength(1);
+    expect(geometry.paths[0]).toMatchObject({ closed: true, boundsMm: { xMm: 10, yMm: 12, widthMm: 63.5, heightMm: 88.9 } });
+  });
+
+  it("keeps INSERT and unsupported entities blocked while respecting frozen layers", async () => {
+    const standard = new TextDecoder().decode(await fixture("dxf-standard-sections.dxf"));
+    const insert = standard.replace(/0\nLWPOLYLINE[\s\S]*?(?=0\nENDSEC)/, "0\nINSERT\n5\n20\n8\nCUT\n2\ncard-block\n10\n10\n20\n10\n");
+    expect(() => parseDxfCutGeometry(new TextEncoder().encode(insert), { source: identity, expectedPageSizeMm: pageSizeMm })).toThrow(/unsupported.*INSERT/i);
+    const unsupported = standard.replace("LWPOLYLINE", "HATCH");
+    expect(() => parseDxfCutGeometry(new TextEncoder().encode(unsupported), { source: identity, expectedPageSizeMm: pageSizeMm })).toThrow(/unsupported.*HATCH/i);
+    const frozen = standard.replace("0\nLAYER\n2\nCUT\n70\n0\n62\n7", "0\nLAYER\n2\nCUT\n70\n1\n62\n7");
+    expect(() => parseDxfCutGeometry(new TextEncoder().encode(frozen), { source: identity, expectedPageSizeMm: pageSizeMm })).toThrow(/hidden\/frozen layer CUT/i);
+    const hidden = standard.replace("0\nLAYER\n2\nCUT\n70\n0\n62\n7", "0\nLAYER\n2\nCUT\n70\n0\n62\n-7");
+    expect(() => parseDxfCutGeometry(new TextEncoder().encode(hidden), { source: identity, expectedPageSizeMm: pageSizeMm })).toThrow(/hidden\/frozen layer CUT/i);
+    const standardBytes = new TextEncoder().encode(standard);
+    expect(() => parseDxfCutGeometry(standardBytes, { source: identity, expectedPageSizeMm: pageSizeMm }, { ...DEFAULT_DXF_CUT_LIMITS, maxPairs: 12 })).toThrow(/pairs/i);
+  });
+
   it("preserves bulge, ARC, CIRCLE, and ELLIPSE source curves before export", async () => {
     const geometry = parseDxfCutGeometry(await fixture("dxf-polyline-curve.dxf"), { source: identity, expectedPageSizeMm: pageSizeMm });
     expect(geometry.paths.map(({ id }) => id)).toEqual(["dxf-20", "dxf-21", "dxf-22", "dxf-23"]);
@@ -149,9 +169,11 @@ describe("bounded DXF cut parser and deterministic exporters", () => {
     const widthBearing = await fixture("dxf-polyline-width.dxf");
     const classicWidthBearing = await fixture("dxf-polyline-header-width.dxf");
     const tooManyEntities = await fixture("dxf-mm-polyline.dxf");
+    const tooManyVertices = await fixture("dxf-polyline-curve.dxf");
     expect(() => parseDxfCutGeometry(widthBearing, { source: identity, expectedPageSizeMm: pageSizeMm })).toThrow(/unsupported.*width/i);
     expect(() => parseDxfCutGeometry(classicWidthBearing, { source: identity, expectedPageSizeMm: pageSizeMm })).toThrow(/unsupported.*width/i);
     expect(() => parseDxfCutGeometry(tooManyEntities, { source: identity, expectedPageSizeMm: pageSizeMm }, { ...DEFAULT_DXF_CUT_LIMITS, maxEntities: 1 })).toThrow(/safety limit|entities/i);
+    expect(() => parseDxfCutGeometry(tooManyVertices, { source: identity, expectedPageSizeMm: pageSizeMm }, { ...DEFAULT_DXF_CUT_LIMITS, maxVertices: 3 })).toThrow(/safety limit|vertices/i);
     expect(() => parseDxfCutGeometry(widthBearing, { source: identity, expectedPageSizeMm: pageSizeMm }, { ...DEFAULT_DXF_CUT_LIMITS, maxBytes: 12 })).toThrow(/limit/i);
   });
 

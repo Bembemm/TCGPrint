@@ -14,8 +14,25 @@ import { handleCardExport } from "../../services/card-api";
 import type { CardWorkbench } from "../../services/card-workbench";
 import { parseDxfCutGeometry } from "../../services/cut-geometry/dxf-parser";
 import { parseSvgCutGeometry } from "../../services/cut-geometry/svg-parser";
-import { compareCutGeometryMm } from "../../core/cut";
+import { compareCutGeometryMm, type CutSourceIdentity } from "../../core/cut";
 import type { WorkingCard } from "../../core/cards/types";
+
+function projectCard(id: string, quantity: number, order: number): WorkingCard {
+  return {
+    id,
+    quantity,
+    order,
+    importSource: { sourceId: "fixture-source", importKind: "text", entryKind: "card" },
+    identityHints: { name: "Pagination fixture" },
+    identity: null,
+    identityResolution: { status: "unresolved", candidates: [], confirmed: false },
+    faces: [{ id: "front", side: "front", name: "Pagination fixture" }],
+    selectedArtworkByFace: {},
+    localArtworkIds: [],
+    mpcReferences: [],
+    faceAssociations: [],
+  };
+}
 
 describe("cut preview and export API", () => {
   let directory: string | undefined;
@@ -51,6 +68,7 @@ describe("cut preview and export API", () => {
     };
     const svg = new Uint8Array(await readFile(join(process.cwd(), "tests/fixtures/cut/layout-sync.svg")));
     const divergentDxf = new Uint8Array(await readFile(join(process.cwd(), "tests/fixtures/cut/dxf-layout-sync-divergent.dxf")));
+    const equivalentDxf = new Uint8Array(await readFile(join(process.cwd(), "tests/fixtures/cut/dxf-alternate-equivalent.dxf")));
     const metadata = {
       name: "Cut fixture template",
       source: "TCGPrint test fixture",
@@ -64,6 +82,7 @@ describe("cut preview and export API", () => {
     const version5 = await library.importTemplate(metadata, [
       { fileName: "template.svg", bytes: svg },
       { fileName: "alternate.dxf", bytes: divergentDxf },
+      { fileName: "alternate-same-contour.dxf", bytes: equivalentDxf },
     ]);
     const svgFile = version5.version.files.find(({ fileName }) => fileName === "template.svg")!;
     const packageHash = version5.version.packageHash;
@@ -165,6 +184,7 @@ describe("cut preview and export API", () => {
     ]);
     expect(activeGeometry.paths.map(({ id }) => id)).toEqual(["card-a"]);
     expect(preview.alternateSources).toContainEqual(expect.objectContaining({ status: "divergent" }));
+    expect(preview.alternateSources).toContainEqual(expect.objectContaining({ fileName: "alternate-same-contour.dxf", status: "equivalent" }));
 
     const svgResponse = await handleCutSvgExport(request(), projects, library);
     const svgOutput = new Uint8Array(await svgResponse.arrayBuffer());
@@ -189,5 +209,69 @@ describe("cut preview and export API", () => {
     const corrupt = await handleCutPreview(request(), projects, library);
     expect(corrupt.status).toBe(409);
     expect(await corrupt.json()).toMatchObject({ code: "CUT_SOURCE_INTEGRITY_FAILURE" });
+  });
+
+  it("returns matching per-page cut layouts and requires explicit page selection for multi-page exports", async () => {
+    directory = await mkdtemp(join(tmpdir(), "tcgprint-cut-pages-"));
+    database = openProjectDatabase(join(directory, "projects.sqlite"));
+    const templates = new TemplateRepository(database);
+    const library = new TemplateLibraryService(templates, new TemplateFileStore(join(directory, "originals")));
+    const projects = new ProjectRepository(database, { idFactory: (() => { let id = 0; return () => `cut-page-project-${++id}`; })() });
+    const settings = { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 0 };
+    const cards = [projectCard("page-card", 10, 0)];
+    const project = projects.create(deserializeProjectSnapshot(serializeProjectSnapshot(cards, settings)));
+    const body = JSON.stringify({ projectId: project.id, expectedRevision: project.revision });
+    const makeRequest = (url: string) => new Request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+
+    const previewResponse = await handleCutPreview(makeRequest("http://localhost/api/cut/preview"), projects, library);
+    expect(previewResponse.status).toBe(200);
+    const preview = await previewResponse.json() as CutPreviewDto;
+    expect(preview.pageCount).toBe(2);
+    expect(preview.pages.map(({ pageNumber, firstCardNumber, lastCardNumber }) => [pageNumber, firstCardNumber, lastCardNumber])).toEqual([[1, 1, 9], [2, 10, 10]]);
+    expect(preview.pages.map(({ activeGeometry }) => activeGeometry?.paths.length)).toEqual([9, 1]);
+    for (const page of preview.pages) {
+      expect(page.activeGeometry?.paths.map(({ boundsMm }) => boundsMm)).toEqual(
+        page.geometry.paths.filter((path) => page.slotPaths.some(({ pathId, state }) => pathId === path.id && state === "active"))
+          .map(({ boundsMm }) => boundsMm),
+      );
+    }
+
+    const pageRequired = await handleCutSvgExport(makeRequest("http://localhost/api/cut/export/svg"), projects, library);
+    expect(pageRequired.status).toBe(400);
+    expect(await pageRequired.json()).toMatchObject({ code: "CUT_PAGE_REQUIRED" });
+
+    const svgResponse = await handleCutSvgExport(makeRequest("http://localhost/api/cut/export/svg?page=2"), projects, library);
+    expect(svgResponse.status).toBe(200);
+    expect(svgResponse.headers.get("content-disposition")).toContain("page-02.svg");
+    expect(svgResponse.headers.get("x-tcgprint-pdf-page")).toBe("2/2");
+    const page2 = preview.pages[1]!;
+    const roundTripSource: CutSourceIdentity = { kind: "template-file", templateId: "cut-export", version: "1", packageHash: "c".repeat(64), fileId: "round-trip", fileHash: "d".repeat(64) };
+    const svg = parseSvgCutGeometry(new Uint8Array(await svgResponse.arrayBuffer()), {
+      source: roundTripSource,
+      expectedPageSizeMm: page2.layout.pageSizeMm,
+    });
+    expect(compareCutGeometryMm(page2.activeGeometry!, svg, 0.000001).equal).toBe(true);
+
+    const dxfResponse = await handleCutDxfExport(makeRequest("http://localhost/api/cut/export/dxf?page=2"), projects, library);
+    expect(dxfResponse.status).toBe(200);
+    expect(dxfResponse.headers.get("content-disposition")).toContain("page-02.dxf");
+    const dxf = parseDxfCutGeometry(new Uint8Array(await dxfResponse.arrayBuffer()), {
+      source: roundTripSource,
+      expectedPageSizeMm: page2.layout.pageSizeMm,
+    });
+    expect(compareCutGeometryMm(page2.activeGeometry!, dxf, 0.000001).equal).toBe(true);
+
+    const hundred = projects.create(deserializeProjectSnapshot(serializeProjectSnapshot([projectCard("hundred-cards", 100, 0)], settings)));
+    const hundredPreviewResponse = await handleCutPreview(new Request("http://localhost/api/cut/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: hundred.id, expectedRevision: hundred.revision }),
+    }), projects, library);
+    const hundredPreview = await hundredPreviewResponse.json() as CutPreviewDto;
+    expect(hundredPreviewResponse.status).toBe(200);
+    expect(hundredPreview.pageCount).toBeGreaterThan(1);
+    expect(hundredPreview.pages[0]?.firstCardNumber).toBe(1);
+    expect(hundredPreview.pages.at(-1)?.lastCardNumber).toBe(100);
+    expect(hundredPreview.pages.every((page) => (page.activeGeometry?.paths.length ?? 0) <= page.layout.capacity)).toBe(true);
   });
 });

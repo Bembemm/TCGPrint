@@ -111,5 +111,7 @@ export type {
 } from "./cut-guides";
 export { calculateGridPlacement } from "./placement";
 export type { CardSlotMm, GridPlacementMm, GridPlacementRequest, LayoutReservedZoneMm } from "./placement";
+export { calculateGridPagePlacements } from "./page-placement";
+export type { GridPagePlacementRequest, GridPlacementPage } from "./page-placement";
 export { parseTemplateLayoutGeometry } from "./template-layout";
 export type { TemplateLayoutGeometryMm, TemplateLayoutSlotMm } from "./template-layout";

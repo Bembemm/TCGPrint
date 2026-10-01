@@ -1,15 +1,16 @@
 import { PAPER_FORMATS, type PageOrientation, type PaperFormat } from "../../core/geometry";
-import { compareCutGeometryMm, type CutGeometryMm, type CutSourceIdentity, type DxfUnitsOverride } from "../../core/cut";
+import type { CutGeometryMm, CutSourceIdentity, DxfUnitsOverride } from "../../core/cut";
 import type { ProjectRecord } from "../../persistence/projects/repository";
 import { ProjectRepositoryError, ProjectRepository } from "../../persistence/projects/repository";
 import type { TemplateFileRecord, TemplateVersionRecord } from "../../persistence/templates/repository";
 import type { TemplateSelectionInspection, TemplateLibraryService } from "../template-library";
 import { CutSourceError } from "./errors";
 import { parseDxfCutGeometry } from "./dxf-parser";
-import { resolveCutLayout, type CutLayoutResolution } from "./layout-sync";
+import { resolveCutLayoutPages, type CutLayoutResolution, type CutPageLayoutResolution } from "./layout-sync";
 import { parseSvgCutGeometry } from "./svg-parser";
+import { comparePhysicalCutGeometryMm } from "./physical-comparison";
 
-export const CUT_GEOMETRY_PARSER_VERSION = "11.1";
+export const CUT_GEOMETRY_PARSER_VERSION = "11.2";
 const MAX_ALTERNATE_SOURCES_TO_COMPARE = 8;
 
 export interface CutAlternativeSourceStatus {
@@ -22,6 +23,7 @@ export interface CutAlternativeSourceStatus {
 export interface CutProjectResolution {
   readonly project: ProjectRecord;
   readonly layout: CutLayoutResolution;
+  readonly pages: readonly CutPageLayoutResolution[];
   readonly alternateSources: readonly CutAlternativeSourceStatus[];
   readonly templateIdentity: ProjectRecord["templateSelection"];
 }
@@ -111,16 +113,6 @@ async function parseSourceFile(
   return parseDxfCutGeometry(bytes, { source, expectedPageSizeMm: pageSizeMm, ...(unitsOverride ? { unitsOverride } : {}) });
 }
 
-function geometryComparable(geometry: CutGeometryMm): CutGeometryMm {
-  return {
-    ...geometry,
-    paths: [...geometry.paths].sort((left, right) => left.boundsMm.yMm - right.boundsMm.yMm
-      || left.boundsMm.xMm - right.boundsMm.xMm
-      || left.boundsMm.widthMm - right.boundsMm.widthMm
-      || left.boundsMm.heightMm - right.boundsMm.heightMm),
-  };
-}
-
 async function compareAlternates(
   project: ProjectRecord,
   version: TemplateVersionRecord,
@@ -144,8 +136,8 @@ async function compareAlternates(
         library,
         pageSizeMm,
       );
-      const comparison = compareCutGeometryMm(geometryComparable(selectedGeometry), geometryComparable(geometry), 0.001, { compareIds: false });
-      result.push({ fileId: file.fileId, fileName: file.fileName, status: comparison.equal ? "equivalent" : "divergent", ...(!comparison.equal ? { message: comparison.differences[0] ?? "Vector paths differ." } : {}) });
+      const comparison = comparePhysicalCutGeometryMm(selectedGeometry, geometry, 0.001);
+      result.push({ fileId: file.fileId, fileName: file.fileName, status: comparison.status, ...(comparison.message ? { message: comparison.message } : {}) });
     } catch (error) {
       result.push({ fileId: file.fileId, fileName: file.fileName, status: "unreadable", message: error instanceof Error ? error.message : "Alternate geometry could not be interpreted." });
     }
@@ -181,12 +173,16 @@ export async function resolveProjectCutLayout(
       return record;
     }).filter((entry): entry is TemplateFileRecord => entry !== undefined), file, sourceGeometry, library, nativePage);
   }
-  let layout: CutLayoutResolution;
+  let pages: readonly CutPageLayoutResolution[];
   try {
-    layout = resolveCutLayout({ projectId, projectRevision: project.revision, settings, cardCount: project.snapshot.cards.reduce((total, card) => total + card.quantity, 0), ...(sourceGeometry ? { sourceGeometry, sourceOrientation } : {}) });
+    const orderedCards = [...project.snapshot.cards].sort((left, right) => left.order - right.order);
+    const cardCount = orderedCards.reduce((total, card) => total + card.quantity, 0);
+    pages = resolveCutLayoutPages({ projectId, projectRevision: project.revision, settings, cardCount, ...(sourceGeometry ? { sourceGeometry, sourceOrientation } : {}) });
   } catch (error) {
     if (error instanceof CutSourceError) throw error;
     throw new CutSourceError("CUT_LAYOUT_MISMATCH", error instanceof Error ? error.message : "Cut geometry does not match the PDF placement.", { cause: error });
   }
-  return { project, layout, alternateSources: Object.freeze(alternateSources), templateIdentity: project.templateSelection };
+  const layout = pages[0];
+  if (!layout) throw new CutSourceError("CUT_LAYOUT_MISMATCH", "Project cut layout did not resolve a physical page.");
+  return { project, layout, pages, alternateSources: Object.freeze(alternateSources), templateIdentity: project.templateSelection };
 }

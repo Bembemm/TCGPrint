@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, type KeyboardEvent } from "react";
-import { calculateGridPlacement, CutGuideEngine } from "../../core/geometry";
+import { calculateGridPagePlacements, CutGuideEngine } from "../../core/geometry";
 import { generateRegistrationGeometry, type RegistrationPrimitive } from "../../core/registration";
 import type { ProjectSettingsV2 } from "../../persistence/projects/serializer";
 import { cutPathToSvgD } from "../../core/cut";
@@ -11,6 +11,8 @@ interface RegistrationLayoutPreviewProps {
   readonly settings: ProjectSettingsV2;
   readonly cardCount: number;
   readonly cutPreview?: CutPreviewDto | null;
+  readonly selectedPageNumber: number;
+  readonly onSelectPage: (pageNumber: number) => void;
   readonly onToggleSkippedSlot: (index: number) => void;
 }
 
@@ -20,7 +22,7 @@ function primitiveElement(primitive: RegistrationPrimitive, key: string) {
   return <circle key={key} cx={primitive.cxMm} cy={primitive.cyMm} r={primitive.radiusMm} fill={primitive.fill ? "#111827" : "none"} stroke={primitive.strokeWidthMm ? "#111827" : "none"} strokeWidth={primitive.strokeWidthMm} />;
 }
 
-export default function RegistrationLayoutPreview({ settings, cardCount, cutPreview = null, onToggleSkippedSlot }: RegistrationLayoutPreviewProps) {
+export default function RegistrationLayoutPreview({ settings, cardCount, cutPreview = null, selectedPageNumber, onSelectPage, onToggleSkippedSlot }: RegistrationLayoutPreviewProps) {
   const paper = settings.paperFormat;
   const card = settings.cardFormat;
   const result = useMemo(() => {
@@ -32,40 +34,46 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cutPrev
         : { widthMm: paper.heightMm, heightMm: paper.widthMm };
       const geometry = generateRegistrationGeometry(settings.registration, pageSizeMm);
       const templateGeometry = settings.layout.templateGeometry ?? cutPreview?.derivedTemplateGeometry;
-      const placement = calculateGridPlacement({
-        paper,
-        pageOrientation: settings.pageOrientation,
-        card,
-        cardOrientation: settings.cardOrientation,
+      const pages = calculateGridPagePlacements({
+        placement: {
+          paper,
+          pageOrientation: settings.pageOrientation,
+          card,
+          cardOrientation: settings.cardOrientation,
+          bleedMm: settings.bleedMm,
+          marginsMm: settings.marginsMm,
+          horizontalGapMm: settings.horizontalGapMm,
+          verticalGapMm: settings.verticalGapMm,
+          ...(templateGeometry ? { templateGeometry } : {}),
+          reservedZonesMm: geometry.reservedZones,
+          skippedSlotIndices: settings.layout.skippedSlotIndices,
+          ...(settings.layout.rows !== undefined && settings.layout.columns !== undefined
+            ? { rows: settings.layout.rows, columns: settings.layout.columns }
+            : {}),
+        },
         count: cardCount,
-        bleedMm: settings.bleedMm,
-        marginsMm: settings.marginsMm,
-        horizontalGapMm: settings.horizontalGapMm,
-        verticalGapMm: settings.verticalGapMm,
-        ...(templateGeometry ? { templateGeometry } : {}),
-        reservedZonesMm: geometry.reservedZones,
-        skippedSlotIndices: settings.layout.skippedSlotIndices,
-        ...(settings.layout.rows !== undefined && settings.layout.columns !== undefined
-          ? { rows: settings.layout.rows, columns: settings.layout.columns }
-          : {}),
       });
-      const cutGeometry = new CutGuideEngine().generate({
-        cards: placement.slots.map((slot) => ({ trim: slot.trim, bleedMm: settings.bleedMm })),
-        pageSizeMm: placement.pageSizeMm,
-        config: settings.cutGuides,
-      });
-      return { placement, geometry, cutGeometry, error: null } as const;
+      return { pages, geometry, error: null } as const;
     } catch (error) {
-      return { placement: null, geometry: null, cutGeometry: null, error: error instanceof Error ? error.message : "Layout inválido." } as const;
+      return { pages: null, geometry: null, error: error instanceof Error ? error.message : "Layout inválido." } as const;
     }
   }, [settings, cardCount, paper, card, cutPreview?.derivedTemplateGeometry]);
 
-  if (!result.placement || !result.geometry || !result.cutGeometry) {
+  if (!result.pages || !result.geometry) {
     return <section className="registration-preview" aria-label="Preview da folha">
       <h4>Preview de folha</h4><p className="error-message" role="alert">Layout inválido: {result.error}</p>
     </section>;
   }
-  const { placement, geometry, cutGeometry } = result;
+  const { geometry } = result;
+  const activePageIndex = Math.min(selectedPageNumber, result.pages.length) - 1;
+  const pagePlacement = result.pages[activePageIndex]!;
+  const { placement } = pagePlacement;
+  const cutGeometry = new CutGuideEngine().generate({
+    cards: placement.slots.map((slot) => ({ trim: slot.trim, bleedMm: settings.bleedMm })),
+    pageSizeMm: placement.pageSizeMm,
+    config: settings.cutGuides,
+  });
+  const cutPreviewPage = cutPreview?.pages.find(({ pageNumber: sourcePage }) => sourcePage === activePageIndex + 1);
   const page = placement.pageSizeMm;
   const fontSize = Math.min(7, page.widthMm / 35);
   const skipped = new Set(settings.layout.skippedSlotIndices);
@@ -77,15 +85,20 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cutPrev
     || (settings.layout.rows !== undefined && settings.layout.columns !== undefined));
 
   return <section className="registration-preview" aria-label="Preview da folha">
-    <div className="registration-preview-heading"><div><h4>Preview da folha</h4><p>{settings.paperFormat.name} {settings.pageOrientation} · {settings.cardFormat.name} {card.widthMm} × {card.heightMm} mm / {settings.cardOrientation} · registration {settings.registration.type}/{settings.registration.orientation} · capacidade {placement.capacity}</p></div>
+    <div className="registration-preview-heading"><div><h4>Preview da folha</h4><p>{settings.paperFormat.name} {settings.pageOrientation} · {settings.cardFormat.name} {card.widthMm} × {card.heightMm} mm / {settings.cardOrientation} · registration {settings.registration.type}/{settings.registration.orientation} · capacidade {placement.capacity} · página PDF {activePageIndex + 1}/{result.pages.length} · cartas {pagePlacement.startCardIndex + 1}–{pagePlacement.endCardIndex}</p></div>
       <span>Bleed · trim · cut guides · reserved zones · skipped slots</span>
     </div>
-    <svg className="registration-sheet-preview" viewBox={`0 0 ${page.widthMm} ${page.heightMm}`} role="img" aria-label={`Folha ${settings.paperFormat.name} ${settings.pageOrientation} com ${cardCount} cartas e ${geometry.marks.length} registration marks`}>
+    {result.pages.length > 1 && <label className="registration-page-picker">Página PDF
+      <select aria-label="Página PDF do preview físico" value={activePageIndex + 1} onChange={(event) => onSelectPage(Number(event.currentTarget.value))}>
+        {result.pages.map((entry, index) => <option key={entry.pageIndex} value={entry.pageIndex + 1}>Página {index + 1} · cartas {entry.startCardIndex + 1}–{entry.endCardIndex}</option>)}
+      </select>
+    </label>}
+    <svg className="registration-sheet-preview" viewBox={`0 0 ${page.widthMm} ${page.heightMm}`} role="img" aria-label={`Folha ${settings.paperFormat.name} ${settings.pageOrientation}, página PDF ${activePageIndex + 1} com cartas ${pagePlacement.startCardIndex + 1}–${pagePlacement.endCardIndex} e ${geometry.marks.length} registration marks`}>
       <rect x="0" y="0" width={page.widthMm} height={page.heightMm} fill="#fff" stroke="#64748b" strokeWidth="0.5" />
       {placement.gridSlots.map((slot) => <g
         key={`slot-${slot.index}`}
         {...(slotsCanBeSkipped ? { role: "button", tabIndex: 0 } : {})}
-        aria-label={`Slot ${slot.index + 1}${skipped.has(slot.index) ? " desativado" : reserved.has(slot.index) ? " reservado" : assigned.has(slot.index) ? ` carta ${slot.cardIndex! + 1}` : " vazio"}`}
+        aria-label={`Slot ${slot.index + 1}${skipped.has(slot.index) ? " desativado" : reserved.has(slot.index) ? " reservado" : assigned.has(slot.index) ? ` carta ${pagePlacement.startCardIndex + slot.cardIndex! + 1}` : " vazio"}`}
         aria-pressed={skipped.has(slot.index)}
         {...(slotsCanBeSkipped ? {
           onClick: () => toggle(slot.index),
@@ -96,7 +109,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cutPrev
         <rect x={slot.slotXmm} y={slot.slotYmm} width={slot.slotWidthMm} height={slot.slotHeightMm} fill={skipped.has(slot.index) ? "#f3e8ff" : "#fff7ed"} stroke={skipped.has(slot.index) ? "#7e22ce" : "#f97316"} strokeWidth="0.35" />
         {assigned.has(slot.index) && <>
           <rect x={slot.trim.xMm} y={slot.trim.yMm} width={slot.trim.widthMm} height={slot.trim.heightMm} fill="#eff6ff" stroke="#1d4ed8" strokeWidth="0.5" />
-          <text x={slot.trim.xMm + slot.trim.widthMm / 2} y={slot.trim.yMm + slot.trim.heightMm / 2} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#1e3a8a">{String(slot.cardIndex! + 1).padStart(2, "0")}</text>
+          <text x={slot.trim.xMm + slot.trim.widthMm / 2} y={slot.trim.yMm + slot.trim.heightMm / 2} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#1e3a8a">{String(pagePlacement.startCardIndex + slot.cardIndex! + 1).padStart(2, "0")}</text>
         </>}
         {skipped.has(slot.index) && <>
           <line x1={slot.trim.xMm} y1={slot.trim.yMm} x2={slot.trim.xMm + slot.trim.widthMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
@@ -106,8 +119,8 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cutPrev
         {!assigned.has(slot.index) && !skipped.has(slot.index) && <text x={slot.trim.xMm + slot.trim.widthMm / 2} y={slot.trim.yMm + slot.trim.heightMm / 2} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#64748b">{slot.index + 1}</text>}
       </g>)}
       {geometry.reservedZones.map((zone, index) => <rect key={`reserved-${index}`} x={zone.xMm} y={zone.yMm} width={zone.widthMm} height={zone.heightMm} fill="#fecaca" fillOpacity="0.75" stroke="#dc2626" strokeWidth="0.7" strokeDasharray="2 1" />)}
-      {cutPreview?.geometry.paths.map((path) => {
-        const state = cutPreview.slotPaths.find(({ pathId }) => pathId === path.id)?.state ?? "empty";
+      {(cutPreviewPage?.geometry ?? cutPreview?.geometry)?.paths.map((path) => {
+        const state = (cutPreviewPage?.slotPaths ?? cutPreview?.slotPaths ?? []).find(({ pathId }) => pathId === path.id)?.state ?? "empty";
         const active = state === "active";
         const skippedPath = state === "skipped";
         return <path

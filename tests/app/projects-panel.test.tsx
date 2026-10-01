@@ -26,6 +26,8 @@ describe("Projects panel", () => {
       cards: [],
       settings: DEFAULT_PROJECT_SETTINGS,
       onProjectOpen: vi.fn(),
+      selectedCutPageNumber: 1,
+      onCutPageNumberChange: vi.fn(),
       disabled: false,
     }));
 

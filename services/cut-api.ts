@@ -17,6 +17,8 @@ export interface CutPreviewDto {
   readonly geometry: CutGeometryMm;
   readonly activeGeometry: CutGeometryMm | null;
   readonly slotPaths: readonly CutPathSlotState[];
+  readonly pageCount: number;
+  readonly pages: readonly CutPreviewPageDto[];
   readonly derivedTemplateGeometry?: TemplateLayoutGeometryMm;
   readonly alternateSources: readonly CutAlternativeSourceStatus[];
   readonly layout: {
@@ -26,6 +28,18 @@ export interface CutPreviewDto {
     readonly columns: number;
     readonly capacity: number;
   };
+}
+
+export interface CutPreviewPageDto {
+  readonly pageNumber: number;
+  /** One-based inclusive card ordinal range matching PDF document order. */
+  readonly firstCardNumber: number;
+  /** One-based inclusive card ordinal range matching PDF document order. */
+  readonly lastCardNumber: number;
+  readonly geometry: CutGeometryMm;
+  readonly activeGeometry: CutGeometryMm | null;
+  readonly slotPaths: readonly CutPathSlotState[];
+  readonly layout: CutPreviewDto["layout"];
 }
 
 const MAX_CUT_API_BODY_BYTES = 2_048;
@@ -111,6 +125,22 @@ export async function handleCutPreview(request: Request, projects: ProjectReposi
       geometry: result.layout.sourceGeometry,
       activeGeometry: result.layout.activeGeometry,
       slotPaths: result.layout.slotPaths,
+      pageCount: result.pages.length,
+      pages: result.pages.map((page) => ({
+        pageNumber: page.pageNumber,
+        firstCardNumber: page.startCardIndex + 1,
+        lastCardNumber: page.endCardIndex,
+        geometry: page.sourceGeometry,
+        activeGeometry: page.activeGeometry,
+        slotPaths: page.slotPaths,
+        layout: {
+          pageSizeMm: page.placement.pageSizeMm,
+          cardSizeMm: page.placement.cardSizeMm,
+          rows: page.placement.rows,
+          columns: page.placement.columns,
+          capacity: page.placement.capacity,
+        },
+      })),
       ...(result.layout.derivedTemplateGeometry ? { derivedTemplateGeometry: result.layout.derivedTemplateGeometry } : {}),
       alternateSources: result.alternateSources,
       layout: {
@@ -128,7 +158,20 @@ export async function handleCutPreview(request: Request, projects: ProjectReposi
 async function exportCut(request: Request, projects: ProjectRepository, library: TemplateLibraryService, format: "svg" | "dxf"): Promise<Response> {
   try {
     const result = await resolveRequest(request, projects, library);
-    const geometry = result.layout.activeGeometry;
+    const url = new URL(request.url);
+    const pageValues = url.searchParams.getAll("page");
+    if ([...url.searchParams.keys()].some((key) => key !== "page") || pageValues.length > 1) {
+      throw new CutApiRequestError(400, "INVALID_CUT_PAGE", "Cut export accepts only one optional 1-based page query parameter.");
+    }
+    if (pageValues.length === 0 && result.pages.length > 1) {
+      throw new CutApiRequestError(400, "CUT_PAGE_REQUIRED", `Project PDF has ${result.pages.length} pages; select the matching cut sheet with ?page=1 through ?page=${result.pages.length}.`);
+    }
+    const pageNumber = pageValues.length === 0 ? 1 : Number(pageValues[0]);
+    if (!Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > result.pages.length) {
+      throw new CutApiRequestError(400, "INVALID_CUT_PAGE", `Cut page must be a 1-based integer from 1 through ${result.pages.length}.`);
+    }
+    const page = result.pages[pageNumber - 1]!;
+    const geometry = page.activeGeometry;
     if (!geometry) throw new CutSourceError("CUT_LAYOUT_MISMATCH", "Project has no active card slots to export.");
     const text = format === "svg" ? exportCutGeometryToSvg(geometry) : exportCutGeometryToDxf(geometry);
     const contentType = format === "svg" ? "image/svg+xml; charset=utf-8" : "application/dxf; charset=utf-8";
@@ -138,11 +181,12 @@ async function exportCut(request: Request, projects: ProjectRepository, library:
     return new Response(text, {
       headers: {
         "Content-Type": contentType,
-        "Content-Disposition": `attachment; filename="tcgprint-cut.${format}"`,
+        "Content-Disposition": `attachment; filename="tcgprint-cut${result.pages.length > 1 ? `-page-${String(pageNumber).padStart(2, "0")}` : ""}.${format}"`,
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
         "X-TCGPrint-Template-Identity": identity,
         "X-TCGPrint-Cut-Bounds-Mm": JSON.stringify(geometry.boundsMm),
+        "X-TCGPrint-Pdf-Page": `${pageNumber}/${result.pages.length}`,
       },
     });
   } catch (error) { return errorResponse(error); }

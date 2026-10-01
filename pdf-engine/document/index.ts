@@ -27,7 +27,7 @@ import {
   GUIDE_COLOR_HEX,
   TRIM_GUIDE_STROKE_WIDTH_PT,
   PAPER_FORMATS,
-  calculateGridPlacement,
+  calculateGridPagePlacements,
   CutGuideEngine,
   parseCutGuideConfig,
   type CutGuideConfig,
@@ -859,60 +859,11 @@ export class LosslessPdfEngine {
       }
       return bleed.bleedMm;
     });
-    const zeroBleedGrid = calculateGridPlacement({ ...placementOptions, count: 0, bleedMm: 0 });
-    const pagePlacements: Array<{
-      readonly startCardIndex: number;
-      readonly endCardIndex: number;
-      readonly placement: ReturnType<typeof calculateGridPlacement>;
-    }> = [];
-    if (request.images.length === 0) {
-      pagePlacements.push({
-        startCardIndex: 0,
-        endCardIndex: 0,
-        placement: zeroBleedGrid,
-      });
-    } else {
-      let startCardIndex = 0;
-      while (startCardIndex < request.images.length) {
-        const remaining = request.images.length - startCardIndex;
-        const maximumCandidate = Math.min(remaining, zeroBleedGrid.capacity);
-        let selectedPlacement: ReturnType<typeof calculateGridPlacement> | undefined;
-        let selectedCount = 0;
-
-        for (let candidateCount = maximumCandidate; candidateCount > 0; candidateCount -= 1) {
-          try {
-            selectedPlacement = calculateGridPlacement({
-              ...placementOptions,
-              count: candidateCount,
-              bleedMm: 0,
-              bleedByCardMm: bleedByImageMm.slice(startCardIndex, startCardIndex + candidateCount),
-            });
-            selectedCount = candidateCount;
-            break;
-          } catch (error) {
-            if (!(error instanceof RangeError) || !/card slots do not fit|no physical card slot fits/i.test(error.message)) {
-              throw error;
-            }
-          }
-        }
-
-        if (!selectedPlacement) {
-          calculateGridPlacement({
-            ...placementOptions,
-            count: 1,
-            bleedMm: 0,
-            bleedByCardMm: [bleedByImageMm[startCardIndex]],
-          });
-          throw new PdfExportError("No physical card slot fits on the selected paper.");
-        }
-        pagePlacements.push({
-          startCardIndex,
-          endCardIndex: startCardIndex + selectedCount,
-          placement: selectedPlacement,
-        });
-        startCardIndex += selectedCount;
-      }
-    }
+    const pagePlacements = calculateGridPagePlacements({
+      placement: { ...placementOptions, bleedMm: 0 },
+      count: request.images.length,
+      bleedByCardMm: bleedByImageMm,
+    });
 
     const pdf = await PDFDocument.create();
     const sourceWidthPoints = mmToPoints(card.widthMm);

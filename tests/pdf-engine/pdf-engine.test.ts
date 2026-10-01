@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { PDFDict, PDFDocument, PDFName, PDFRawStream } from "@pdfme/pdf-lib";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { calculateGridPlacement, MAGIC_STANDARD_CARD, PAPER_FORMATS, type CardFormat } from "../../core/geometry";
+import { calculateGridPagePlacements, calculateGridPlacement, MAGIC_STANDARD_CARD, PAPER_FORMATS, type CardFormat } from "../../core/geometry";
 import { mmToPoints, pointsToMm } from "../../core/units";
 import { BleedEngine } from "../../image-engine/bleed";
 import type { CutGuideConfig, GuideColor } from "../../core/geometry/cut-guides";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 import { createDefaultRegistrationConfig, generateRegistrationGeometry } from "../../core/registration";
-import { resolveCutLayout } from "../../services/cut-geometry/layout-sync";
+import { resolveCutLayout, resolveCutLayoutPages } from "../../services/cut-geometry/layout-sync";
 import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 import { parseSvgCutGeometry } from "../../services/cut-geometry/svg-parser";
 
@@ -1567,6 +1567,37 @@ describe("LosslessPdfEngine", () => {
     expect(parsed.document.getPages()).toHaveLength(2);
     expect(parsed.images).toHaveLength(10);
     expect(parsed.content.match(/\s+Do\b/g)).toHaveLength(10);
+  });
+
+  it("shares each PDF page's exact trim placements with the corresponding cut page", async () => {
+    const cardPath = join(FIXTURES, "synthetic-gradient.jpg");
+    const image = new Uint8Array(await readFile(cardPath));
+    const pdf = await engine.generate({ images: Array.from({ length: 10 }, () => image) });
+    const parsed = await parsePdf(pdf);
+    const settings = { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 0 };
+    const cutPages = resolveCutLayoutPages({ projectId: "pdf-cut-pages", projectRevision: 1, settings, cardCount: 10 });
+    const sharedPlacements = calculateGridPagePlacements({
+      placement: { paper: settings.paperFormat, card: settings.cardFormat, pageOrientation: settings.pageOrientation, cardOrientation: settings.cardOrientation, bleedMm: 0, marginsMm: settings.marginsMm, horizontalGapMm: settings.horizontalGapMm, verticalGapMm: settings.verticalGapMm, reservedZonesMm: [] },
+      count: 10,
+      bleedByCardMm: Array.from({ length: 10 }, () => 0),
+    });
+
+    expect(parsed.document.getPages()).toHaveLength(2);
+    expect(cutPages).toHaveLength(2);
+    expect(cutPages.map(({ startCardIndex, endCardIndex }) => [startCardIndex, endCardIndex])).toEqual(sharedPlacements.map(({ startCardIndex, endCardIndex }) => [startCardIndex, endCardIndex]));
+    for (const [pageIndex, page] of cutPages.entries()) {
+      const pdfPage = sharedPlacements[pageIndex]!;
+      const expected = page.activeGeometry!.paths.map(({ boundsMm }) => boundsMm);
+      const actual = pdfPage.placement.slots.map(({ trim }) => trim);
+      expect(page.pageNumber).toBe(pageIndex + 1);
+      expect(actual).toHaveLength(expected.length);
+      for (const [slotIndex, trim] of expected.entries()) {
+        expect(actual[slotIndex]!.xMm).toBeCloseTo(trim.xMm, 8);
+        expect(actual[slotIndex]!.yMm).toBeCloseTo(trim.yMm, 8);
+        expect(actual[slotIndex]!.widthMm).toBeCloseTo(trim.widthMm, 8);
+        expect(actual[slotIndex]!.heightMm).toBeCloseTo(trim.heightMm, 8);
+      }
+    }
   });
 
   it("places the physical scale pattern at exactly 100 × 100 mm", async () => {

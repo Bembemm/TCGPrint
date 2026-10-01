@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 import { createCutGeometryMm, createRectangularCutPathMm, type CutSourceIdentity } from "../../core/cut";
-import { resolveCutLayout } from "../../services/cut-geometry/layout-sync";
+import { resolveCutLayout, resolveCutLayoutPages } from "../../services/cut-geometry/layout-sync";
 
 const source: CutSourceIdentity = {
   kind: "template-file",
@@ -135,5 +135,88 @@ describe("cut/layout synchronization", () => {
     expect(result.activeGeometry?.paths).toHaveLength(1);
     expect(result.activeGeometry?.paths[0]?.segments.every(({ type }) => type === "line")).toBe(true);
     expect(result.slotPaths.find(({ slotIndex }) => slotIndex === 1)?.state).toBe("skipped");
+  });
+
+  it("resolves 9, 10, and 100 cards as PDF-aligned physical cut pages", () => {
+    const projectSettings = { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 0 };
+    const nine = resolveCutLayoutPages({ projectId: "paged", projectRevision: 1, settings: projectSettings, cardCount: 9 });
+    const ten = resolveCutLayoutPages({ projectId: "paged", projectRevision: 1, settings: projectSettings, cardCount: 10 });
+    const hundred = resolveCutLayoutPages({ projectId: "paged", projectRevision: 1, settings: projectSettings, cardCount: 100 });
+
+    expect(nine).toHaveLength(1);
+    expect(ten.map(({ startCardIndex, endCardIndex }) => [startCardIndex, endCardIndex])).toEqual([[0, 9], [9, 10]]);
+    expect(ten[1]?.placement.slots.map(({ cardIndex }) => cardIndex)).toEqual([0]);
+    expect(hundred[0]?.startCardIndex).toBe(0);
+    expect(hundred.at(-1)?.endCardIndex).toBe(100);
+    expect(hundred.every((page) => page.placement.slots.length <= page.placement.capacity)).toBe(true);
+    for (const page of [...nine, ...ten, ...hundred]) {
+      const activePaths = page.activeGeometry?.paths ?? [];
+      expect(activePaths).toHaveLength(page.placement.slots.length);
+      for (const [slotIndex, path] of activePaths.entries()) {
+        const trim = page.placement.slots[slotIndex]!.trim;
+        expect(path.boundsMm.xMm).toBeCloseTo(trim.xMm, 8);
+        expect(path.boundsMm.yMm).toBeCloseTo(trim.yMm, 8);
+        expect(path.boundsMm.widthMm).toBeCloseTo(trim.widthMm, 8);
+        expect(path.boundsMm.heightMm).toBeCloseTo(trim.heightMm, 8);
+      }
+    }
+  });
+
+  it("does not silently project a multi-page Project into a single cut layout", () => {
+    expect(() => resolveCutLayout({ projectId: "paged", projectRevision: 1, settings: { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 0 }, cardCount: 10 })).toThrow(/use resolveCutLayoutPages/i);
+  });
+
+  it("repeats exact template positions across pages while preserving skips and registration reservations", () => {
+    const threeSlotTemplate = {
+      ...geometry,
+      pageSizeMm: { widthMm: 297, heightMm: 420 },
+      rows: 1,
+      columns: 3,
+      slots: [
+        { index: 0, row: 0, column: 0, xMm: 10, yMm: 12 },
+        { index: 1, row: 0, column: 1, xMm: 90, yMm: 12 },
+        { index: 2, row: 0, column: 2, xMm: 170, yMm: 12 },
+      ],
+    };
+    const registration = {
+      type: "custom" as const,
+      orientation: "portrait" as const,
+      marks: [[{ type: "line" as const, x1Mm: 4, y1Mm: 4, x2Mm: 8, y2Mm: 4, strokeWidthMm: 0.5 }]],
+      reservedZones: [{ xMm: 10, yMm: 12, widthMm: 63.5, heightMm: 88.9 }],
+    };
+    const pages = resolveCutLayoutPages({
+      projectId: "paged-template",
+      projectRevision: 1,
+      settings: {
+        ...DEFAULT_PROJECT_SETTINGS,
+        paperFormat: { name: "A3", widthMm: 297, heightMm: 420 },
+        bleedMm: 0,
+        registration,
+        layout: { rows: 1, columns: 3, skippedSlotIndices: [1], templateGeometry: threeSlotTemplate },
+      },
+      cardCount: 2,
+      sourceGeometry: createCutGeometryMm({
+        source,
+        pageSizeMm: { widthMm: 297, heightMm: 420 },
+        paths: [
+          createRectangularCutPathMm("slot-a", { xMm: 10, yMm: 12, widthMm: 63.5, heightMm: 88.9 }),
+          createRectangularCutPathMm("slot-b", { xMm: 90, yMm: 12, widthMm: 63.5, heightMm: 88.9 }),
+          createRectangularCutPathMm("slot-c", { xMm: 170, yMm: 12, widthMm: 63.5, heightMm: 88.9 }),
+        ],
+      }),
+      sourceOrientation: "portrait",
+    });
+
+    expect(pages).toHaveLength(2);
+    expect(pages.map(({ startCardIndex, endCardIndex }) => [startCardIndex, endCardIndex])).toEqual([[0, 1], [1, 2]]);
+    expect(pages.map(({ placement }) => placement.slots.map(({ index }) => index))).toEqual([[2], [2]]);
+    expect(pages.map(({ slotPaths }) => slotPaths.map(({ state }) => state))).toEqual([
+      ["reserved", "skipped", "active"],
+      ["reserved", "skipped", "active"],
+    ]);
+    expect(pages.map(({ activeGeometry }) => activeGeometry?.paths[0]?.boundsMm)).toEqual([
+      { xMm: 170, yMm: 12, widthMm: 63.5, heightMm: 88.9 },
+      { xMm: 170, yMm: 12, widthMm: 63.5, heightMm: 88.9 },
+    ]);
   });
 });

@@ -17,6 +17,8 @@ describe("registration layout preview", () => {
     const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
       settings,
       cardCount: 1,
+      selectedPageNumber: 1,
+      onSelectPage: vi.fn(),
       onToggleSkippedSlot: vi.fn(),
     }));
 
@@ -53,6 +55,8 @@ describe("registration layout preview", () => {
     const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
       settings,
       cardCount: 2,
+      selectedPageNumber: 1,
+      onSelectPage: vi.fn(),
       onToggleSkippedSlot: vi.fn(),
     }));
 
@@ -66,10 +70,27 @@ describe("registration layout preview", () => {
     const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
       settings: DEFAULT_PROJECT_SETTINGS,
       cardCount: 1,
+      selectedPageNumber: 1,
+      onSelectPage: vi.fn(),
       onToggleSkippedSlot: vi.fn(),
     }));
 
     expect(markup).toContain("Defina linhas e colunas antes de desativar slots");
     expect(markup).not.toContain("role=\"button\"");
+  });
+
+  it("previews the selected PDF page for a multi-page card list", () => {
+    const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
+      settings: { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 0 },
+      cardCount: 10,
+      selectedPageNumber: 2,
+      onSelectPage: vi.fn(),
+      onToggleSkippedSlot: vi.fn(),
+    }));
+
+    expect(markup).toContain("página PDF 2/2 · cartas 10–10");
+    expect(markup).toContain("aria-label=\"Página PDF do preview físico\"");
+    expect(markup).toContain('aria-label="Slot 1 carta 10"');
+    expect(markup).toContain(">10</text>");
   });
 });

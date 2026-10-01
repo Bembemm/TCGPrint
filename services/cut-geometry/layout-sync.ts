@@ -1,4 +1,4 @@
-import { calculateGridPlacement, parseTemplateLayoutGeometry, type GridPlacementMm, type PageOrientation, type TemplateLayoutGeometryMm } from "../../core/geometry";
+import { calculateGridPagePlacements, parseTemplateLayoutGeometry, type GridPlacementMm, type PageOrientation, type TemplateLayoutGeometryMm } from "../../core/geometry";
 import { createCutGeometryMm, createRectangularCutPathMm, type CutGeometryMm, type CutPathMm, type CutPointMm, type CutSegmentMm } from "../../core/cut";
 import { generateRegistrationGeometry } from "../../core/registration";
 import type { ProjectSettingsV2 } from "../../persistence/projects/serializer";
@@ -196,12 +196,20 @@ export interface CutLayoutRequest {
   readonly projectRevision: number;
   readonly settings: ProjectSettingsV2;
   readonly cardCount: number;
+  /** Effective bleed values in the same flattened order used by the PDF engine. */
+  readonly bleedByCardMm?: readonly number[];
   readonly sourceGeometry?: CutGeometryMm;
   readonly sourceOrientation?: PageOrientation;
 }
 
-/** Builds the exact placement shared by cut exports and PDF, then excludes skipped/reserved/unused paths. */
-export function resolveCutLayout(request: CutLayoutRequest): CutLayoutResolution {
+export interface CutPageLayoutResolution extends CutLayoutResolution {
+  readonly pageNumber: number;
+  readonly startCardIndex: number;
+  readonly endCardIndex: number;
+}
+
+/** Builds the exact per-page placements shared by cut exports and PDF. */
+export function resolveCutLayoutPages(request: CutLayoutRequest): readonly CutPageLayoutResolution[] {
   const settings = request.settings;
   const pageSizeMm = orientedDimensions(settings.paperFormat, settings.pageOrientation);
   const cardSizeMm = orientedDimensions(settings.cardFormat, settings.cardOrientation);
@@ -214,46 +222,63 @@ export function resolveCutLayout(request: CutLayoutRequest): CutLayoutResolution
     derivedTemplateGeometry = deriveTemplateLayoutFromCutGeometry(sourceGeometry, cardSizeMm, settings.pageOrientation, settings.cardOrientation);
   }
   const registration = generateRegistrationGeometry(settings.registration, pageSizeMm);
-  const placement = calculateGridPlacement({
-    paper: settings.paperFormat,
-    pageOrientation: settings.pageOrientation,
-    card: settings.cardFormat,
-    cardOrientation: settings.cardOrientation,
+  const placements = calculateGridPagePlacements({
+    placement: {
+      paper: settings.paperFormat,
+      pageOrientation: settings.pageOrientation,
+      card: settings.cardFormat,
+      cardOrientation: settings.cardOrientation,
+      bleedMm: 0,
+      marginsMm: settings.marginsMm,
+      horizontalGapMm: settings.horizontalGapMm,
+      verticalGapMm: settings.verticalGapMm,
+      ...(settings.layout.templateGeometry ? { templateGeometry: settings.layout.templateGeometry } : derivedTemplateGeometry ? { templateGeometry: derivedTemplateGeometry } : {}),
+      ...(settings.layout.rows !== undefined && settings.layout.columns !== undefined ? { rows: settings.layout.rows, columns: settings.layout.columns } : {}),
+      skippedSlotIndices: settings.layout.skippedSlotIndices,
+      reservedZonesMm: registration.reservedZones,
+    },
     count: request.cardCount,
-    bleedMm: settings.bleedMm,
-    marginsMm: settings.marginsMm,
-    horizontalGapMm: settings.horizontalGapMm,
-    verticalGapMm: settings.verticalGapMm,
-    ...(settings.layout.templateGeometry ? { templateGeometry: settings.layout.templateGeometry } : derivedTemplateGeometry ? { templateGeometry: derivedTemplateGeometry } : {}),
-    ...(settings.layout.rows !== undefined && settings.layout.columns !== undefined ? { rows: settings.layout.rows, columns: settings.layout.columns } : {}),
-    skippedSlotIndices: settings.layout.skippedSlotIndices,
-    reservedZonesMm: registration.reservedZones,
+    bleedByCardMm: request.bleedByCardMm ?? Array.from({ length: request.cardCount }, () => settings.bleedMm),
   });
-  if (sourceGeometry) {
-    const pathBySlot = matchSourcePaths(sourceGeometry, placement);
+  const manualSource = { kind: "project-layout" as const, projectId: request.projectId, projectRevision: request.projectRevision };
+  return Object.freeze(placements.map(({ pageIndex, startCardIndex, endCardIndex, placement }): CutPageLayoutResolution => {
+    if (sourceGeometry) {
+      const pathBySlot = matchSourcePaths(sourceGeometry, placement);
+      const slotPaths = placement.gridSlots.map((slot): CutPathSlotState => ({
+        slotIndex: slot.index,
+        pathId: pathBySlot.get(slot.index)!.id,
+        state: slot.skippedByUser ? "skipped" : slot.reserved ? "reserved" : slot.cardIndex === undefined ? "empty" : "active",
+      }));
+      const activePaths = placement.slots.map((slot) => pathBySlot.get(slot.index)!).filter(Boolean);
+      const activeGeometry = activePaths.length > 0
+        ? createCutGeometryMm({ source: sourceGeometry.source, pageSizeMm, paths: activePaths.map(({ id, start, closed, segments }) => ({ id, start, closed, segments })) })
+        : null;
+      return { pageNumber: pageIndex + 1, startCardIndex, endCardIndex, sourceGeometry, activeGeometry, placement, slotPaths: Object.freeze(slotPaths), ...(derivedTemplateGeometry ? { derivedTemplateGeometry } : {}) };
+    }
+    const generatedPaths = placement.gridSlots.map((slot) => createRectangularCutPathMm(`slot-${slot.index}`, slot.trim));
+    const generated = createCutGeometryMm({ source: manualSource, pageSizeMm, paths: generatedPaths });
     const slotPaths = placement.gridSlots.map((slot): CutPathSlotState => ({
       slotIndex: slot.index,
-      pathId: pathBySlot.get(slot.index)!.id,
+      pathId: `slot-${slot.index}`,
       state: slot.skippedByUser ? "skipped" : slot.reserved ? "reserved" : slot.cardIndex === undefined ? "empty" : "active",
     }));
-    const activePaths = placement.slots.map((slot) => pathBySlot.get(slot.index)!).filter(Boolean);
+    const activeIds = new Set(placement.slots.map(({ index }) => `slot-${index}`));
+    const activePaths = generated.paths.filter(({ id }) => activeIds.has(id));
     const activeGeometry = activePaths.length > 0
-      ? createCutGeometryMm({ source: sourceGeometry.source, pageSizeMm, paths: activePaths.map(({ id, start, closed, segments }) => ({ id, start, closed, segments })) })
+      ? createCutGeometryMm({ source: manualSource, pageSizeMm, paths: activePaths.map(({ id, start, closed, segments }) => ({ id, start, closed, segments })) })
       : null;
-    return { sourceGeometry, activeGeometry, placement, slotPaths: Object.freeze(slotPaths), ...(derivedTemplateGeometry ? { derivedTemplateGeometry } : {}) };
-  }
-  const manualSource = { kind: "project-layout" as const, projectId: request.projectId, projectRevision: request.projectRevision };
-  const generatedPaths = placement.gridSlots.map((slot) => createRectangularCutPathMm(`slot-${slot.index}`, slot.trim));
-  const generated = createCutGeometryMm({ source: manualSource, pageSizeMm, paths: generatedPaths });
-  const slotPaths = placement.gridSlots.map((slot): CutPathSlotState => ({
-    slotIndex: slot.index,
-    pathId: `slot-${slot.index}`,
-    state: slot.skippedByUser ? "skipped" : slot.reserved ? "reserved" : slot.cardIndex === undefined ? "empty" : "active",
+    return { pageNumber: pageIndex + 1, startCardIndex, endCardIndex, sourceGeometry: generated, activeGeometry, placement, slotPaths: Object.freeze(slotPaths) };
   }));
-  const activeIds = new Set(placement.slots.map(({ index }) => `slot-${index}`));
-  const activePaths = generated.paths.filter(({ id }) => activeIds.has(id));
-  const activeGeometry = activePaths.length > 0
-    ? createCutGeometryMm({ source: manualSource, pageSizeMm, paths: activePaths.map(({ id, start, closed, segments }) => ({ id, start, closed, segments })) })
-    : null;
-  return { sourceGeometry: generated, activeGeometry, placement, slotPaths: Object.freeze(slotPaths) };
+}
+
+/** Backwards-compatible single-page projection of the explicit page list. */
+export function resolveCutLayout(request: CutLayoutRequest): CutLayoutResolution {
+  const pages = resolveCutLayoutPages(request);
+  if (pages.length > 1) {
+    throw new CutSourceError("CUT_LAYOUT_MISMATCH", `Project resolves to ${pages.length} physical pages; use resolveCutLayoutPages to preserve the PDF page mapping.`);
+  }
+  const firstPage = pages[0];
+  if (!firstPage) throw new RangeError("Cut layout did not resolve any physical pages.");
+  const { pageNumber: _pageNumber, startCardIndex: _startCardIndex, endCardIndex: _endCardIndex, ...layout } = firstPage;
+  return layout;
 }

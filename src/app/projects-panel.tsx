@@ -37,6 +37,8 @@ export interface ProjectsPanelProps {
   readonly onTemplateDefaults?: (defaults: TemplateRegistrationDefaults | null) => void;
   readonly onCutSourceSelectionChange?: (selection: CutSourceSelection | null) => void;
   readonly onCutGeometryPreviewChange?: (preview: CutPreviewDto | null) => void;
+  readonly selectedCutPageNumber: number;
+  readonly onCutPageNumberChange: (pageNumber: number) => void;
   readonly onProjectSyncStateChange?: (state: { readonly projectId: string; readonly revision: number; readonly saved: boolean } | null) => void;
   readonly onTemplateRegistrationStatusChange?: (status: TemplateRegistrationStatus) => void;
   readonly onProjectInteractionLockChange?: (locked: boolean) => void;
@@ -55,6 +57,8 @@ export default function ProjectsPanel({
   onTemplateDefaults,
   onCutSourceSelectionChange,
   onCutGeometryPreviewChange,
+  selectedCutPageNumber,
+  onCutPageNumberChange,
   onProjectSyncStateChange,
   onTemplateRegistrationStatusChange,
   onProjectInteractionLockChange,
@@ -158,12 +162,14 @@ export default function ProjectsPanel({
     if (!project || session.status !== "Salvo") {
       setCutPreview(null);
       setCutPreviewError(null);
+      onCutPageNumberChange(1);
       onCutGeometryPreviewChange?.(null);
       setCutPreviewLoading(false);
       return () => { current = false; abort.abort(); };
     }
     setCutPreview(null);
     setCutPreviewError(null);
+    onCutPageNumberChange(1);
     setCutPreviewLoading(true);
     onCutGeometryPreviewChange?.(null);
     void fetch("/api/cut/preview", {
@@ -182,7 +188,6 @@ export default function ProjectsPanel({
     }).then((result) => {
       if (!current) return;
       setCutPreview(result);
-      onCutGeometryPreviewChange?.(result);
     }).catch((error: unknown) => {
       if (!current || (error instanceof DOMException && error.name === "AbortError")) return;
       setCutPreviewError(errorMessage(error));
@@ -190,7 +195,20 @@ export default function ProjectsPanel({
       if (current) setCutPreviewLoading(false);
     });
     return () => { current = false; abort.abort(); };
-  }, [session.activeProject?.id, session.activeProject?.revision, session.status, onCutGeometryPreviewChange]);
+  }, [session.activeProject?.id, session.activeProject?.revision, session.status, onCutGeometryPreviewChange, onCutPageNumberChange]);
+
+  useEffect(() => {
+    if (!cutPreview) return;
+    const page = cutPreview.pages.find(({ pageNumber }) => pageNumber === selectedCutPageNumber) ?? cutPreview.pages[0];
+    if (!page) return;
+    onCutGeometryPreviewChange?.({
+      ...cutPreview,
+      geometry: page.geometry,
+      activeGeometry: page.activeGeometry,
+      slotPaths: page.slotPaths,
+      layout: page.layout,
+    });
+  }, [cutPreview, selectedCutPageNumber, onCutGeometryPreviewChange]);
 
   useEffect(() => {
     const project = session.activeProject;
@@ -421,13 +439,14 @@ export default function ProjectsPanel({
     }
   }
 
-  async function exportCut(format: "svg" | "dxf") {
+  async function exportCut(format: "svg" | "dxf", pageNumber: number) {
     const project = session.activeProject;
     if (!project || session.status !== "Salvo" || cutExportBusy || projectActionsDisabled) return;
     setCutExportBusy(true);
     setCutPreviewError(null);
     try {
-      const response = await fetch(`/api/cut/export/${format}`, {
+      const pageQuery = (cutPreview?.pageCount ?? 1) > 1 ? `?page=${pageNumber}` : "";
+      const response = await fetch(`/api/cut/export/${format}${pageQuery}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId: project.id, expectedRevision: project.revision }),
@@ -441,7 +460,7 @@ export default function ProjectsPanel({
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement("a");
       link.href = url;
-      link.download = `tcgprint-cut.${format}`;
+      link.download = `tcgprint-cut${(cutPreview?.pageCount ?? 1) > 1 ? `-page-${String(pageNumber).padStart(2, "0")}` : ""}.${format}`;
       document.body.append(link);
       link.click();
       link.remove();
@@ -452,6 +471,8 @@ export default function ProjectsPanel({
       setCutExportBusy(false);
     }
   }
+
+  const selectedCutPage = cutPreview?.pages.find(({ pageNumber }) => pageNumber === selectedCutPageNumber) ?? cutPreview?.pages[0];
 
   return (
     <section className="panel projects-panel" aria-label="Projects">
@@ -507,7 +528,7 @@ export default function ProjectsPanel({
       <section className="cut-export-panel" aria-label="SVG e DXF Cut Export">
         <div>
           <h3>SVG/DXF Cut Export</h3>
-          <p>Preview e exports usam a mesma geometria em milímetros. O arquivo contém somente caminhos dos slots com cartas atribuídas; slots pulados, reservados ou vazios ficam de fora.</p>
+          <p>Preview e exports usam a mesma geometria em milímetros. Cada cut file corresponde à página PDF selecionada e contém somente caminhos dos slots com cartas atribuídas; slots pulados, reservados ou vazios ficam de fora.</p>
           {cutPreview?.geometry.source.kind === "project-layout" && <p className="muted">Sem SVG/DXF selecionado: os exports manuais geram somente retângulos de canto reto a partir dos trims ativos do layout PDF. Nenhum canto ou curva é inferido.</p>}
         </div>
         {session.activeProject === null
@@ -518,14 +539,19 @@ export default function ProjectsPanel({
               ? <p className="muted" aria-live="polite">Validando original, versão, hash e sincronização com o layout…</p>
               : cutPreview
                 ? <>
-                  <p>Project {cutPreview.projectId} · revisão {cutPreview.projectRevision} · parser {cutPreview.parserVersion} · página {cutPreview.layout.pageSizeMm.widthMm} × {cutPreview.layout.pageSizeMm.heightMm} mm · {cutPreview.slotPaths.filter(({ state }) => state === "active").length} paths ativos</p>
+                  <p>Project {cutPreview.projectId} · revisão {cutPreview.projectRevision} · parser {cutPreview.parserVersion} · folha {cutPreview.layout.pageSizeMm.widthMm} × {cutPreview.layout.pageSizeMm.heightMm} mm · {selectedCutPage?.slotPaths.filter(({ state }) => state === "active").length ?? 0} paths ativos</p>
+                  {cutPreview.pageCount > 1 && selectedCutPage && <label className="cut-page-picker">Página PDF
+                    <select aria-label="Página PDF correspondente ao cut file" value={selectedCutPage.pageNumber} onChange={(event) => onCutPageNumberChange(Number(event.currentTarget.value))}>
+                      {cutPreview.pages.map((page) => <option key={page.pageNumber} value={page.pageNumber}>Página {page.pageNumber} · cartas {page.firstCardNumber}–{page.lastCardNumber}</option>)}
+                    </select>
+                  </label>}
                   {cutPreview.alternateSources.map((source) => source.status === "divergent" || source.status === "unreadable"
                     ? <p key={source.fileId} className="error-message" role="alert">Fonte alternativa {source.fileName}: {source.status === "divergent" ? "geometria materialmente divergente" : "não pôde ser comparada"}{source.message ? ` · ${source.message}` : ""}. A seleção explícita do Project continua vinculada ao arquivo escolhido.</p>
                     : null)}
                   {cutPreview.alternateSources.filter(({ status }) => status === "equivalent" || status === "not-compared").map((source) => <p key={source.fileId} className="muted">Fonte alternativa {source.fileName}: {source.status === "equivalent" ? "geometria equivalente" : source.message}</p>)}
                   <div className="cut-export-actions">
-                    <button className="button secondary" type="button" disabled={projectActionsDisabled || cutExportBusy || !cutPreview.activeGeometry} onClick={() => void exportCut("svg")}>{cutExportBusy ? "Exportando…" : "Exportar SVG Cut"}</button>
-                    <button className="button secondary" type="button" disabled={projectActionsDisabled || cutExportBusy || !cutPreview.activeGeometry} onClick={() => void exportCut("dxf")}>{cutExportBusy ? "Exportando…" : "Exportar DXF Cut"}</button>
+                    <button className="button secondary" type="button" disabled={projectActionsDisabled || cutExportBusy || !selectedCutPage?.activeGeometry} onClick={() => void exportCut("svg", selectedCutPage?.pageNumber ?? 1)}>{cutExportBusy ? "Exportando…" : `Exportar SVG Cut · página ${selectedCutPage?.pageNumber ?? 1}`}</button>
+                    <button className="button secondary" type="button" disabled={projectActionsDisabled || cutExportBusy || !selectedCutPage?.activeGeometry} onClick={() => void exportCut("dxf", selectedCutPage?.pageNumber ?? 1)}>{cutExportBusy ? "Exportando…" : `Exportar DXF Cut · página ${selectedCutPage?.pageNumber ?? 1}`}</button>
                   </div>
                 </>
                 : <p className="muted">Cut preview indisponível.</p>}
