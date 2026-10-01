@@ -38,7 +38,7 @@ async function boundedMultipartRequest(request: Request): Promise<Request> {
 }
 
 export async function handleBackLibraryList(service: BackLibraryService): Promise<Response> {
-  try { return Response.json({ assets: service.listAll() }); }
+  try { return Response.json({ assets: service.listAll().map((asset) => ({ ...asset, selectable: !asset.retired })) }); }
   catch { return Response.json({ code: "BACK_LIBRARY_FAILED", message: "Back Library could not be read." }, { status: 500 }); }
 }
 

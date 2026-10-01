@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 import type { ProjectDto, ProjectOpenDto } from "../../services/project-api";
+import type { WorkingCard } from "../../core/cards/types";
 import { saveProjectWithRecovery } from "../../src/app/project-autosave-persistence";
 
 function project(revision: number, bleedMm: number): ProjectDto {
@@ -62,5 +63,36 @@ describe("saveProjectWithRecovery", () => {
     expect(saved).toMatchObject({ revision: 2, snapshot: state.snapshot });
     expect(api.promoteRecovery).not.toHaveBeenCalled();
     expect(api.open).toHaveBeenCalledWith("project-1");
+  });
+
+  it("stages and promotes the exact manual physical back selection in the autosaved snapshot", async () => {
+    const manualBackArtwork = {
+      candidateId: `upload:${"a".repeat(64)}`, source: "upload" as const, identityId: null,
+      faceId: "front", providerAssetId: "validated-original", selectionPolicy: "user-selected",
+    };
+    const card: WorkingCard = {
+      id: "simple-with-manual-back", quantity: 1, order: 0,
+      importSource: { sourceId: "source", importKind: "fixture", entryKind: "card" },
+      identityHints: { name: "Simple" }, identity: null,
+      identityResolution: { status: "unresolved", candidates: [], confirmed: false },
+      faces: [{ id: "front", side: "front" }], selectedArtworkByFace: {},
+      backMode: "manual", backModeSelectionPolicy: "explicit", manualBackArtwork,
+      localArtworkIds: [], mpcReferences: [], faceAssociations: [],
+    };
+    const state = {
+      snapshot: { ...project(1, 2).snapshot, cards: [card] },
+      templateSelection: null,
+    };
+    const api = {
+      stageRecovery: vi.fn(async () => ({ recovery: {} as never })),
+      promoteRecovery: vi.fn(async () => ({ ...project(2, 2), snapshot: state.snapshot })),
+      open: vi.fn(),
+    };
+
+    const saved = await saveProjectWithRecovery(api, "project-1", 1, state);
+
+    expect(api.stageRecovery).toHaveBeenCalledWith("project-1", 1, state.snapshot, null);
+    expect(saved.snapshot.cards[0]?.manualBackArtwork).toEqual(manualBackArtwork);
+    expect(saved.snapshot.cards[0]?.backModeSelectionPolicy).toBe("explicit");
   });
 });

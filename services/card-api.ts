@@ -162,21 +162,21 @@ function safeIdentity(value: unknown): CardIdentity | null {
   };
 }
 
-function safeSelection(value: unknown, side: CardFaceSide): SelectedArtwork | undefined {
+function safeSelection(value: unknown, side: CardFaceSide | undefined, fieldName = "selected artwork"): SelectedArtwork | undefined {
   if (value === undefined || value === null) return undefined;
   const input = record(value);
-  if (!input) throw new ApiRequestError(400, "INVALID_REQUEST", `selected artwork for ${side} must be an object.`);
+  if (!input) throw new ApiRequestError(400, "INVALID_REQUEST", `${fieldName} must be an object.`);
   const source = requiredString(input.source, "selected artwork source", 16);
   const faceId = requiredString(input.faceId, "selected artwork face", 8);
   const candidateId = requiredString(input.candidateId, "selected artwork candidate", 128);
-  if (!SOURCES.has(source) || faceId !== side || !isSafeArtworkCandidateId(candidateId)) {
+  if (!SOURCES.has(source) || (faceId !== "front" && faceId !== "back") || (side !== undefined && faceId !== side) || !isSafeArtworkCandidateId(candidateId)) {
     throw new ApiRequestError(400, "INVALID_REQUEST", "selected artwork reference is invalid.");
   }
   return {
     candidateId,
     source: source as SelectedArtwork["source"],
     identityId: typeof input.identityId === "string" ? input.identityId.slice(0, 180) : null,
-    faceId: side,
+    faceId,
     ...(optionalString(input.providerAssetId, "providerAssetId", 200) ? { providerAssetId: input.providerAssetId as string } : {}),
     ...(optionalString(input.selectedArtworkId, "selectedArtworkId", 200) ? { selectedArtworkId: input.selectedArtworkId as string } : {}),
     ...(optionalString(input.selectionPolicy, "selectionPolicy", 80) ? { selectionPolicy: input.selectionPolicy as string } : {}),
@@ -237,24 +237,29 @@ export function parseWorkingCards(value: unknown): WorkingCard[] {
       ...(safeSelection(selections.back, "back") ? { back: safeSelection(selections.back, "back") } : {}),
     };
     const manualBackAsset = parseBackLibraryReference(input.manualBackAsset);
+    const manualBackArtwork = safeSelection(input.manualBackArtwork, undefined, "manualBackArtwork");
+    if (manualBackArtwork && manualBackArtwork.selectionPolicy !== "user-selected") {
+      throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}].manualBackArtwork must preserve a user-selected override lock.`);
+    }
+    if (manualBackAsset && manualBackArtwork) throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}] cannot select both a Back Library asset and provider artwork as its manual back.`);
     const backModeValue = input.backMode;
     if (backModeValue !== undefined && (typeof backModeValue !== "string" || !BACK_MODES.has(backModeValue as WorkingCardBackMode))) {
       throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}].backMode is invalid.`);
     }
     const legacyManualSelection = backModeValue === undefined && selectedArtworkByFace.back?.selectionPolicy === "user-selected";
     const backMode: WorkingCardBackMode = backModeValue as WorkingCardBackMode | undefined
-      ?? (manualBackAsset || legacyManualSelection ? "manual" : isDoubleFacedIdentity(identity) ? "auto" : "project-default");
+      ?? (manualBackAsset || manualBackArtwork || legacyManualSelection ? "manual" : isDoubleFacedIdentity(identity) ? "auto" : "project-default");
     const selectionPolicyValue = input.backModeSelectionPolicy;
     if (selectionPolicyValue !== undefined && (typeof selectionPolicyValue !== "string" || !BACK_MODE_SELECTION_POLICIES.has(selectionPolicyValue as WorkingCardBackModeSelectionPolicy))) {
       throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}].backModeSelectionPolicy is invalid.`);
     }
     const backModeSelectionPolicy: WorkingCardBackModeSelectionPolicy = selectionPolicyValue as WorkingCardBackModeSelectionPolicy | undefined
-      ?? (manualBackAsset || legacyManualSelection ? "explicit" : "automatic");
-    if (backMode === "manual" && !manualBackAsset && !selectedArtworkByFace.back) {
-      throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}] manual back requires a selected back face or Back Library asset.`);
+      ?? (manualBackAsset || manualBackArtwork || legacyManualSelection ? "explicit" : "automatic");
+    if (backMode === "manual" && !manualBackAsset && !manualBackArtwork && !selectedArtworkByFace.back) {
+      throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}] manual back requires a selected back face, provider artwork, or Back Library asset.`);
     }
-    if (manualBackAsset && backMode !== "manual") {
-      throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}] manualBackAsset requires manual back mode.`);
+    if ((manualBackAsset || manualBackArtwork) && backMode !== "manual") {
+      throw new ApiRequestError(400, "INVALID_BACK_MODE", `cards[${index}] manual back references require manual back mode.`);
     }
     const localArtworkIds = Array.isArray(input.localArtworkIds) ? [...new Set(input.localArtworkIds.slice(0, 200).map((id) => requiredString(id, "localArtworkId", 80)))].filter((id) => /^upload:[a-f0-9]{64}$/.test(id)) : [];
     const mpcReferences: WorkingCardMpcReference[] = Array.isArray(input.mpcReferences) ? input.mpcReferences.slice(0, 200).flatMap((item): WorkingCardMpcReference[] => {
@@ -319,6 +324,7 @@ export function parseWorkingCards(value: unknown): WorkingCard[] {
       backMode,
       backModeSelectionPolicy,
       ...(manualBackAsset ? { manualBackAsset } : {}),
+      ...(manualBackArtwork ? { manualBackArtwork } : {}),
       localArtworkIds,
       mpcReferences,
       ...(sharedMpcCardback ? { sharedMpcCardback } : {}),
@@ -555,9 +561,21 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
       const updated = workbench.selectArtwork(card, faceId, candidate);
       return Response.json({ workingCards: [updated], providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
     }
+    if (action === "select-manual-back-artwork") {
+      const card = parseWorkingCards([body.card])[0];
+      const candidateId = requiredString(body.candidateId, "candidateId", 128);
+      const candidate = await workbench.getArtworkCandidate(candidateId, {
+        mpcReferences: card.mpcReferences,
+        ...(card.identity ? { identity: card.identity } : {}),
+        signal: request.signal,
+      });
+      if (!candidate) throw new ApiRequestError(404, "ARTWORK_CANDIDATE_NOT_FOUND", "Artwork candidate is not available in the local catalog.");
+      const updated = workbench.selectManualBackArtwork(card, candidate);
+      return Response.json({ workingCards: [updated], providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
+    }
     const cards = parseWorkingCards(body.cards);
     if (action === "custom") return Response.json({ workingCards: cards.map((card) => workbench.keepWorkingCardCustom(card)), providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
-    if (action !== "resolve") throw new ApiRequestError(400, "INVALID_ACTION", "Action must be resolve, reresolve, confirm, select, restore-default-artwork or custom.");
+    if (action !== "resolve") throw new ApiRequestError(400, "INVALID_ACTION", "Action must be resolve, reresolve, confirm, select, select-manual-back-artwork, restore-default-artwork or custom.");
     const result = await workbench.resolveWorkingCards(cards, { signal: request.signal });
     return Response.json({ ...result, providerHealth: safeProviderHealth(result.providerHealth) });
   } catch (error) { return respondError(error); }
@@ -579,13 +597,18 @@ export async function handleArtworkList(request: Request, identityId: string, wo
     if (!faceId) throw new ApiRequestError(400, "INVALID_FACE", "Face must be front or back.");
     const sourceValue = body.source === undefined ? "all" : body.source;
     if (typeof sourceValue !== "string" || !["all", ...SOURCES].includes(sourceValue)) throw new ApiRequestError(400, "INVALID_SOURCE", "Artwork source filter is invalid.");
+    if (body.physicalBackArtwork !== undefined && typeof body.physicalBackArtwork !== "boolean") throw new ApiRequestError(400, "INVALID_REQUEST", "physicalBackArtwork must be a boolean.");
     const references: WorkingCardMpcReference[] = Array.isArray(body.mpcReferences) ? body.mpcReferences.slice(0, 100).flatMap((value): WorkingCardMpcReference[] => {
       const ref = record(value);
       if (!ref || (ref.faceId !== "front" && ref.faceId !== "back")) return [];
       return [{ faceId: ref.faceId, importedAssetId: requiredString(ref.importedAssetId, "MPC importedAssetId", 180), ...(optionalString(ref.providerAssetId, "MPC providerAssetId", 200) ? { providerAssetId: ref.providerAssetId as string } : {}), ...(optionalString(ref.selectedArtworkId, "MPC selectedArtworkId", 200) ? { selectedArtworkId: ref.selectedArtworkId as string } : {}), slots: Array.isArray(ref.slots) ? ref.slots.filter((slot): slot is string => typeof slot === "string").slice(0, 100) : [], availableLocally: ref.availableLocally === true }];
     }) : [];
     const candidates = await workbench.listArtworkCandidates(identityId, faceId, sourceValue as ArtworkCatalogSource, { mpcReferences: references, signal: request.signal });
-    return Response.json({ candidates: candidates.map(candidateDto), providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
+    const manualMpcBackCandidates = body.physicalBackArtwork === true && (sourceValue === "all" || sourceValue === "mpc")
+      ? await workbench.listArtworkCandidates(identityId, "back", "mpc", { mpcReferences: references, signal: request.signal })
+      : [];
+    const uniqueCandidates = [...new Map([...candidates, ...manualMpcBackCandidates].map((candidate) => [candidate.id, candidate])).values()];
+    return Response.json({ candidates: uniqueCandidates.map(candidateDto), providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
   } catch (error) { return respondError(error); }
 }
 

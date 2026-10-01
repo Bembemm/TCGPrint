@@ -31,7 +31,7 @@ import {
   type EditorSnapshot,
 } from "../../core/cards/editor-history";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
-import { postArtworkSelection } from "./artwork-selection-request";
+import { postArtworkSelection, postManualBackArtworkSelection } from "./artwork-selection-request";
 import { clearRequestCache, createRequestCache, getOrCreateCachedRequest, updateResolvedRequestCache } from "./request-cache";
 import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
 import ProjectSettingsControls from "./project-settings-controls";
@@ -204,6 +204,18 @@ export function WorkingCardDetailsSummary({ card, identityLayout, artworkCandida
             {mismatch && <p className="artwork-identity-mismatch" role="note">Artwork escolhida manualmente para outra identidade.</p>}
           </article>;
         })}
+        {card.manualBackArtwork && <article className="card-artwork-detail" aria-label="Verso físico manual">
+          <h5>Verso físico manual</h5>
+          <DetailFields fields={[
+            ["Source", labelSource(card.manualBackArtwork.source)],
+            ["Candidate/referência", card.manualBackArtwork.candidateId],
+            ["Provider asset", card.manualBackArtwork.providerAssetId],
+            ["Artwork selecionada", card.manualBackArtwork.selectedArtworkId],
+            ["Face de origem da artwork", card.manualBackArtwork.faceId],
+            ["Selection policy", artworkPolicyLabel(card.manualBackArtwork)],
+          ]} />
+          <p className="muted">Esta arte foi atribuída ao verso físico; ela não cria uma face DFC na identidade.</p>
+        </article>}
       </section>
     </div>
   </section>;
@@ -236,6 +248,9 @@ export function WorkingCardList({ cards, selectedCardId, physicalCardCount, disa
         .filter((side) => card.faces.some((item) => item.side === side))
         .map((side) => `${side === "front" ? "Front" : "Back"}: ${card.selectedArtworkByFace[side] ? labelSource(card.selectedArtworkByFace[side]!.source) : "sem arte"}`)
         .join(" · ");
+      const physicalBackStatus = card.manualBackArtwork
+        ? `Verso físico manual: ${labelSource(card.manualBackArtwork.source)}`
+        : card.manualBackAsset ? "Verso físico manual: Back Library" : "";
 
       return <article
         key={card.id}
@@ -268,7 +283,7 @@ export function WorkingCardList({ cards, selectedCardId, physicalCardCount, disa
         <button type="button" className="working-card-select" aria-pressed={card.id === selectedCardId} disabled={disabled} onClick={() => onSelect(card.id)}>
           <span className="working-card-name">{index + 1}/{orderedCards.length} · {name}{isDoubleFacedIdentity(card.identity) && <span className="multiface-label" aria-label="Carta dupla-face"> · Carta dupla-face</span>}</span>
           <span className="working-card-meta">×{card.quantity} · {card.section ?? "sem seção"} · {statusLabel(card)}</span>
-          <span className="working-card-meta">{artworkStatus}</span>
+          <span className="working-card-meta">{[artworkStatus, physicalBackStatus].filter(Boolean).join(" · ")}</span>
         </button>
         <div className="working-card-controls">
           <div className="working-card-quantity" role="group" aria-label={`Quantidade de ${name}`}>
@@ -465,6 +480,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [artworkCandidates, setArtworkCandidates] = useState<CandidateDto[]>([]);
   const [artworkCatalogRevision, setArtworkCatalogRevision] = useState(0);
   const [artworkFilter, setArtworkFilter] = useState<ArtworkFilter>("all");
+  const [manualPhysicalBackPickerCardId, setManualPhysicalBackPickerCardId] = useState<string | null>(null);
   const [manualQuery, setManualQuery] = useState("");
   const [autocompleteEnabled, setAutocompleteEnabled] = useState(true);
   const [autocompleteResults, setAutocompleteResults] = useState<{ query: string; names: string[] } | null>(null);
@@ -577,15 +593,17 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const physicalCardCount = useMemo(() => workingCards.reduce((sum, card) => sum + card.quantity, 0), [workingCards]);
   const backValidation = useMemo(() => createBackValidationSummary(workingCards, projectDefaultBack, missingBackPolicy), [workingCards, projectDefaultBack, missingBackPolicy]);
   const filterCards = useMemo(() => artworkCandidates.filter((candidate) => artworkFilter === "all" || candidate.source === artworkFilter), [artworkCandidates, artworkFilter]);
-  const activeFaceExists = Boolean(activeCard?.faces.some((item) => item.side === face));
+  const manualPhysicalBackPicker = Boolean(activeCard && manualPhysicalBackPickerCardId === activeCard.id && !isDoubleFacedIdentity(activeCard.identity));
+  const artworkFace = manualPhysicalBackPicker ? "front" : face;
+  const activeFaceExists = Boolean(manualPhysicalBackPicker || activeCard?.faces.some((item) => item.side === face));
   const activeIdentityId = activeCard?.identity?.id ?? null;
   const artworkRequest = activeCard && activeFaceExists
     ? {
       identityId: activeIdentityId ?? "custom:artwork-picker",
-      faceId: face,
+      faceId: artworkFace,
       source: artworkFilter,
       mpcReferences: activeCard.mpcReferences,
-      cacheKey: JSON.stringify([activeIdentityId, face, artworkFilter, activeCard.mpcReferences, artworkCatalogRevision]),
+      cacheKey: JSON.stringify([activeIdentityId, artworkFace, manualPhysicalBackPicker, artworkFilter, activeCard.mpcReferences, artworkCatalogRevision]),
     }
     : null;
   const visibleProblem = problem && (problemCardId === null || problemCardId === selectedCardId) ? problem : "";
@@ -649,7 +667,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ faceId: artworkRequest.faceId, source: artworkRequest.source, mpcReferences: artworkRequest.mpcReferences }),
+            body: JSON.stringify({ faceId: artworkRequest.faceId, source: artworkRequest.source, physicalBackArtwork: manualPhysicalBackPicker, mpcReferences: artworkRequest.mpcReferences }),
           });
           return jsonResponse<ArtworkCatalogResult>(response);
         });
@@ -804,10 +822,14 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         }));
         setArtworkCandidates((current) => current.map((item) => item.id === candidate.id ? prepared.candidate : item));
       }
-      const response = await postArtworkSelection(activeCard, face, candidate.id);
+      const response = manualPhysicalBackPicker
+        ? await postManualBackArtworkSelection(activeCard, candidate.id)
+        : await postArtworkSelection(activeCard, face, candidate.id);
       const result = await jsonResponse<{ workingCards: WorkingCard[] }>(response);
       dispatchEditor({ type: "apply-artwork-selection", cardId: activeCard.id, card: result.workingCards[0] });
-      setStatus(candidate.originalAvailable ? "Artwork selecionado; original validado e armazenado no cache." : "Referência MPC selecionada; nenhum original local está disponível.");
+      setStatus(manualPhysicalBackPicker
+        ? candidate.originalAvailable ? "Artwork selecionado como verso físico manual; original validado e armazenado no cache." : "Referência MPC selecionada como verso físico manual; nenhum original local está disponível."
+        : candidate.originalAvailable ? "Artwork selecionado; original validado e armazenado no cache." : "Referência MPC selecionada; nenhum original local está disponível.");
     } catch (error) {
       setArtworkProblem({
         message: error instanceof Error ? error.message : "Não foi possível selecionar essa arte.",
@@ -941,6 +963,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     setCutSourceSelection(settings.cutSourceSelection);
 
     setArtworkCandidates([]);
+    setManualPhysicalBackPickerCardId(null);
     setArtworkProblem(null);
     setArtworkFilter("all");
     setManualQuery("");
@@ -957,7 +980,9 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     setStatus(`${project.name} aberto · revisão ${project.revision}.`);
   }
 
-  const selected = activeCard ? selectedFor(activeCard, face) : undefined;
+  const selected = activeCard
+    ? manualPhysicalBackPicker ? activeCard.manualBackArtwork : selectedFor(activeCard, face)
+    : undefined;
   const previewMatchesActiveProject = !activeProjectSync || Boolean(activeProjectSync.saved
     && cutGeometryPreview
     && cutGeometryPreview.projectId === activeProjectSync.projectId
@@ -1060,6 +1085,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           disabled={interactionBusy}
           onSelect={(cardId) => {
             if (problemCardId !== null && problemCardId !== cardId) clearProblem();
+            setManualPhysicalBackPickerCardId((current) => current === cardId ? current : null);
             setArtworkProblem(null);
             dispatchEditor({ type: "select-card", cardId });
           }}
@@ -1109,23 +1135,38 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
           {(identityDetails?.relatedCards.length || relatedCardNames(activeCard).length) > 0 && <div className="related-card-list"><strong>Related cards / tokens:</strong> {(identityDetails?.relatedCards ?? relatedCardNames(activeCard)).map((item) => `${item.name}${item.component === "token" ? " (token; não adicionado)" : ""}`).join(" · ")}</div>}
 
+          {!isDoubleFacedIdentity(activeCard.identity) && <div className="manual-physical-back-picker-control">
+            <button
+              className={`button ${manualPhysicalBackPicker ? "primary" : "secondary"}`}
+              type="button"
+              aria-pressed={manualPhysicalBackPicker}
+              disabled={interactionBusy}
+              onClick={() => {
+                setManualPhysicalBackPickerCardId((current) => current === activeCard.id ? null : activeCard.id);
+                setArtworkFilter("all");
+                setArtworkProblem(null);
+              }}
+            >{manualPhysicalBackPicker ? "Fechar escolha do verso manual" : activeCard.manualBackArtwork ? "Editar artwork do verso manual" : "Escolher artwork como verso manual"}</button>
+            {manualPhysicalBackPicker && <p className="muted">Escolha Scryfall, MPC ou artwork local para o verso físico. A identidade continua com suas faces originais.</p>}
+          </div>}
+
           {activeCard.faces.length > 1 && <div className="face-tabs" role="group" aria-label="Face da carta">
             {activeCard.faces.map((item) => <button key={item.side} type="button" disabled={interactionBusy} className={`button ${face === item.side ? "primary" : "secondary"}`} onClick={() => dispatchEditor({ type: "set-face", side: item.side })}>{item.side === "front" ? "Front" : "Back"}{item.name ? ` · ${item.name}` : ""}</button>)}
           </div>}
 
           <div className="artwork-section">
-            <div className="compact-heading"><div><strong>Artwork Picker · {face === "front" ? "Front" : "Back"}{isDoubleFacedIdentity(activeCard.identity) && <span className="multiface-label" aria-label="Carta dupla-face"> · Carta dupla-face</span>}</strong><span>Seleção atual é preservada durante a atualização do catálogo.</span></div></div>
+            <div className="compact-heading"><div><strong>{manualPhysicalBackPicker ? "Escolher artwork como verso manual" : `Artwork Picker · ${face === "front" ? "Front" : "Back"}`}{!manualPhysicalBackPicker && isDoubleFacedIdentity(activeCard.identity) && <span className="multiface-label" aria-label="Carta dupla-face"> · Carta dupla-face</span>}</strong><span>Seleção atual é preservada durante a atualização do catálogo.</span></div></div>
             <div className="artwork-filter-row" role="group" aria-label="Filtrar origem das artes">
               {([ ["all", "Todas"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"], ["upload", "Meus uploads"] ] as const).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => setArtworkFilter(value)}>{label}</button>)}
             </div>
             {selected && <p className="selected-artwork-line">Selecionada: {labelSource(selected.source)} · {selected.candidateId} · {artworkPolicyLabel(selected)}</p>}
-            <button
+            {!manualPhysicalBackPicker && <button
               className="button secondary restore-artwork-default"
               type="button"
               disabled={interactionBusy || !activeCard.identity || !activeFaceExists}
               title={!activeCard.identity ? "Não há identidade resolvida para determinar uma artwork padrão." : undefined}
               onClick={() => void restoreArtworkDefault(activeCard, face)}
-            >Restaurar artwork padrão desta face</button>
+            >Restaurar artwork padrão desta face</button>}
             {!activeCard.identity && <p className="muted">Não há identidade resolvida para determinar uma artwork padrão.</p>}
             {visibleArtworkProblem && <p className="error-message" role="alert">{visibleArtworkProblem}</p>}
             {filterCards.length === 0 && !visibleArtworkProblem && <p className="muted">Nenhuma arte disponível neste filtro. Referências MPC não possuem original se não foram importadas localmente.</p>}

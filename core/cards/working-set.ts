@@ -194,6 +194,6 @@ export function selectArtwork(card: WorkingCard, side: CardFaceSide, artwork: Se
     selectedArtworkByFace: { ...card.selectedArtworkByFace, [side]: artwork },
   };
   if (side === "front") return next;
-  const { manualBackAsset: _manualBackAsset, ...withoutGenericBack } = next;
+  const { manualBackAsset: _manualBackAsset, manualBackArtwork: _manualBackArtwork, ...withoutGenericBack } = next;
   return { ...withoutGenericBack, backMode: "manual", backModeSelectionPolicy: "explicit" };
 }

@@ -47,7 +47,9 @@ describe("Back Library API", () => {
     expect(uploaded.status).toBe(201);
     expect(body.asset).toMatchObject({ name: "Back.png", format: "png", metadata: { edition: "test" }, retired: false });
     expect(JSON.stringify(body)).not.toMatch(/bytes|blob|originalsDirectory|filesystemPath|localPath/i);
-    expect((await handleBackLibraryList(service)).status).toBe(200);
+    const listed = await handleBackLibraryList(service);
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toMatchObject({ assets: [{ assetId: body.asset.assetId, retired: false, selectable: true }] });
   });
 
   it("retirement exposes a tombstone and preserves the immutable Project reference", async () => {
@@ -62,7 +64,7 @@ describe("Back Library API", () => {
 
     expect(retired.status).toBe(200);
     expect((await retired.json()).asset.retired).toBe(true);
-    expect(await (await handleBackLibraryList(service).then((response) => response.json())).assets).toMatchObject([{ assetId: asset.assetId, sha256: asset.sha256, retired: true }]);
+    expect(await (await handleBackLibraryList(service).then((response) => response.json())).assets).toMatchObject([{ assetId: asset.assetId, sha256: asset.sha256, retired: true, selectable: false }]);
     await expect(service.resolveOriginal({ assetId: asset.assetId, sha256: asset.sha256, format: "png" })).resolves.toMatchObject({ bytes });
   });
 

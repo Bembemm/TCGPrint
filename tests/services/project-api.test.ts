@@ -205,6 +205,59 @@ describe("project API service", () => {
     }] });
   });
 
+  it("keeps existing retired Back Library references but rejects new ones through Project writes", async () => {
+    const projects = setup();
+    const reference = { assetId: `back:${"d".repeat(64)}`, sha256: "d".repeat(64), format: "png" } as const;
+    let retired = false;
+    const backLibrary = {
+      listAll: () => [{
+        assetId: reference.assetId, sha256: reference.sha256, format: reference.format,
+        name: "Retired back.png", widthPx: 64, heightPx: 96, metadata: {},
+        createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", retired,
+      }],
+    };
+    const source = snapshot();
+    const withReferences = deserializeProjectSnapshot(serializeProjectSnapshot(
+      source.cards.map((card, index) => index === 0
+        ? { ...card, backMode: "manual", backModeSelectionPolicy: "explicit", manualBackAsset: reference }
+        : card),
+      { ...source.settings, projectDefaultBack: reference },
+    ));
+
+    const createdResponse = await handleProjectCreate(request("POST", { snapshot: withReferences }), projects, backLibrary);
+    expect(createdResponse.status).toBe(201);
+    const created = await createdResponse.json() as { id: string; snapshot: typeof withReferences };
+    retired = true;
+
+    const preserved = await handleProjectSave(request("PUT", { expectedRevision: 1, snapshot: created.snapshot }), created.id, projects, backLibrary);
+    expect(preserved.status).toBe(200);
+    const preservedProject = await preserved.json() as { snapshot: typeof withReferences };
+    expect(preservedProject.snapshot.settings.projectDefaultBack).toEqual(reference);
+    expect(preservedProject.snapshot.cards[0]?.manualBackAsset).toEqual(reference);
+
+    const preservedRecovery = await handleProjectStageRecovery(request("POST", { expectedRevision: 2, snapshot: preservedProject.snapshot }), created.id, projects, backLibrary);
+    expect(preservedRecovery.status).toBe(200);
+
+    const newDefault = deserializeProjectSnapshot(serializeProjectSnapshot(source.cards, { ...source.settings, projectDefaultBack: reference }));
+    const createWithRetiredDefault = await handleProjectCreate(request("POST", { snapshot: newDefault }), projects, backLibrary);
+    expect(createWithRetiredDefault.status).toBe(409);
+    expect(await createWithRetiredDefault.json()).toMatchObject({ code: "BACK_ASSET_RETIRED" });
+
+    const addedManualReference = deserializeProjectSnapshot(serializeProjectSnapshot(
+      preservedProject.snapshot.cards.map((card, index) => index === 1
+        ? { ...card, backMode: "manual", backModeSelectionPolicy: "explicit", manualBackAsset: reference }
+        : card),
+      preservedProject.snapshot.settings,
+    ));
+    const addRetiredManual = await handleProjectSave(request("PUT", { expectedRevision: 2, snapshot: addedManualReference }), created.id, projects, backLibrary);
+    expect(addRetiredManual.status).toBe(409);
+    expect(await addRetiredManual.json()).toMatchObject({ code: "BACK_ASSET_RETIRED" });
+
+    const recoveryWithNewRetiredManual = await handleProjectStageRecovery(request("POST", { expectedRevision: 2, snapshot: addedManualReference }), created.id, projects, backLibrary);
+    expect(recoveryWithNewRetiredManual.status).toBe(409);
+    expect(await recoveryWithNewRetiredManual.json()).toMatchObject({ code: "BACK_ASSET_RETIRED" });
+  });
+
   it("creates a new revision-one Project from a validated local conflict snapshot", async () => {
     const projects = setup();
     const localSnapshot = snapshot();

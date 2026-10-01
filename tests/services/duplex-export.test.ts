@@ -6,6 +6,7 @@ import type { ArtworkCandidate, BackLibraryAssetReference, WorkingCard } from ".
 import { exportWorkingCardsByContentMode } from "../../services/card-export";
 import type { CardWorkbench } from "../../services/card-workbench";
 import { NO_CUT_GUIDES } from "../helpers/cut-guides";
+import { mpcArtworkCandidateId } from "../../core/cards/ids";
 
 async function png(color: string) {
   return new Uint8Array(await sharp({ create: { width: 42, height: 63, channels: 3, background: color } }).png().toBuffer());
@@ -60,6 +61,7 @@ describe("duplex export modes", () => {
     const manualBack: BackLibraryAssetReference = { assetId: `back:${manualHash}`, sha256: manualHash, format: "png" };
     const sources = new Map([
       ["upload:A-front", original("upload:A-front", await png("#d03030"))],
+      ["upload:A-manual-back", original("upload:A-manual-back", await png("#10b0d0"))],
       ["upload:B-front", original("upload:B-front", await png("#20b060"))],
       ["upload:B-back", original("upload:B-back", await png("#2050d0"))],
       [defaultBack.assetId, original("project-default", defaultBytes)],
@@ -67,6 +69,7 @@ describe("duplex export modes", () => {
     ]);
     const candidateMap = new Map<string, ArtworkCandidate>([
       ["upload:A-front", candidate("upload:A-front")],
+      ["upload:A-manual-back", candidate("upload:A-manual-back")],
       ["upload:B-front", candidate("upload:B-front", "scryfall:oracle:B")],
       ["upload:B-back", candidate("upload:B-back", "scryfall:oracle:B", "back")],
     ]);
@@ -214,6 +217,68 @@ describe("duplex export modes", () => {
 
     expect(backLibrary.resolveOriginal).toHaveBeenCalledWith(manualBack);
     expect(result.preflight?.backs.manual).toBe(1);
+  });
+
+  it.each(["back-only", "front-back-separated", "duplex"] as const)("exports a simple card's manual physical artwork back in %s mode", async (mode) => {
+    const { catalog, backLibrary, defaultBack, getArtworkCandidate, getArtworkOriginal } = await fixture();
+    const selected = {
+      candidateId: "upload:A-manual-back", source: "upload" as const, identityId: null, faceId: "front" as const,
+      providerAssetId: "validated-upload-id", selectionPolicy: "user-selected" as const,
+    };
+    const simpleWithManualBack = {
+      ...card("A", 0, 1, { mode: "manual" }),
+      manualBackArtwork: selected,
+      backModeSelectionPolicy: "explicit" as const,
+    };
+    const before = structuredClone(simpleWithManualBack);
+    const result = await exportWorkingCardsByContentMode(catalog, backLibrary, [simpleWithManualBack], options(mode, { projectDefaultBack: defaultBack }));
+
+    const backPdf = result.backPdfBytes ?? result.pdfBytes;
+    expect((await PDFDocument.load(backPdf!)).getPages()).toHaveLength(mode === "duplex" ? 2 : 1);
+    expect(result.preflight?.backs.manual).toBe(1);
+    expect(getArtworkCandidate.mock.calls.some(([id]) => id === "upload:A-manual-back")).toBe(true);
+    expect(getArtworkOriginal.mock.calls.some(([id]) => id === "upload:A-manual-back")).toBe(true);
+    expect(backLibrary.resolveOriginal).not.toHaveBeenCalled();
+    expect(simpleWithManualBack).toEqual(before);
+  });
+
+  it.each([
+    { source: "scryfall" as const, id: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", providerAssetId: "scryfall-printing" },
+    { source: "mpc" as const, id: mpcArtworkCandidateId("mpc-imported-back", "back"), providerAssetId: "mpc-imported-back" },
+    { source: "upload" as const, id: `upload:${"f".repeat(64)}`, providerAssetId: "local-validated-original" },
+  ])("resolves a simple card's $source manual back source during back-only export", async ({ source, id, providerAssetId }) => {
+    const frontBytes = await png("#d03030");
+    const backBytes = await png("#1090d0");
+    const selectedCandidate: ArtworkCandidate = {
+      id, source, identityId: null, faceId: source === "mpc" ? "back" : "front", providerAssetId,
+      ...(source === "mpc" ? { selectedArtworkId: "mpc-selected-back" } : {}),
+      originalAvailable: true,
+    };
+    const sources = new Map([
+      ["front", original("front", frontBytes)],
+      [id, original(id, backBytes)],
+    ]);
+    const catalog = {
+      getArtworkCandidate: vi.fn(async (candidateId: string) => candidateId === id ? selectedCandidate : candidate("front")),
+      getArtworkOriginal: vi.fn(async (candidateId: string) => sources.get(candidateId)!),
+    } as unknown as Pick<CardWorkbench, "getArtworkCandidate" | "getArtworkOriginal">;
+    const simpleManual = {
+      ...card("simple-manual", 0, 1, { mode: "manual" }),
+      selectedArtworkByFace: {},
+      manualBackArtwork: {
+        candidateId: id, source, identityId: null, faceId: selectedCandidate.faceId, providerAssetId,
+        ...(source === "mpc" ? { selectedArtworkId: "mpc-selected-back" } : {}),
+        selectionPolicy: "user-selected",
+      },
+      backModeSelectionPolicy: "explicit" as const,
+      ...(source === "mpc" ? { mpcReferences: [{ faceId: "back" as const, importedAssetId: providerAssetId, providerAssetId, selectedArtworkId: "mpc-selected-back", slots: [], availableLocally: true }] } : {}),
+    };
+    const result = await exportWorkingCardsByContentMode(catalog, undefined, [simpleManual], options("back-only"));
+
+    expect((await PDFDocument.load(result.pdfBytes!)).getPages()).toHaveLength(1);
+    expect(result.preflight?.backs.manual).toBe(1);
+    expect(catalog.getArtworkCandidate).toHaveBeenCalledWith(id, expect.objectContaining({ mpcReferences: simpleManual.mpcReferences }));
+    expect(simpleManual.faces).toHaveLength(1);
   });
 
   it("does not substitute a generic Project back for a known DFC with unresolved auto face", async () => {

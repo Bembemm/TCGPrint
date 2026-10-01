@@ -16,6 +16,7 @@ There are three distinct concepts:
 | Concept | Stored as | Meaning |
 | --- | --- | --- |
 | DFC back face | `WorkingCard.faces.back` and `selectedArtworkByFace.back` | The real back face of the same logical card identity. It may resolve from a different provider than the front. |
+| Provider physical manual back | `WorkingCard.manualBackArtwork` | A user-locked provider artwork assigned to the physical back. Its `faceId` identifies the source artwork face; it does not add or imply a `CardFace.back` or DFC identity. It can be Scryfall, MPC, or a validated local upload. For simple cards, the picker queries MPC source-face references on both sides while Scryfall follows the selected identity's front artwork. |
 | Generic Project back | immutable Back Library reference `{assetId, sha256, format}` | A reusable cardback inherited by cards in `project-default` mode or chosen as a manual generic override. |
 | MPC shared cardback | `sharedMpcCardback` | The imported order-level MPC cardback. It is never implicitly a DFC face or a Project default. |
 
@@ -25,12 +26,12 @@ Every `WorkingCard` has an explicit back mode:
 | --- | --- |
 | `auto` | The DFC's provider-backed back face when its semantic layout and face metadata prove two named faces. |
 | `project-default` | The current immutable Project Back Library reference. |
-| `manual` | A locked selected face artwork or an immutable Back Library reference. |
+| `manual` | A locked DFC back face, provider physical manual artwork, or immutable Back Library reference. Only one generic/manual source is active at a time. |
 | `none` | An intentionally blank physical slot. |
 
 DFC detection requires a supported provider layout (`transform`, `modal_dfc`, `double_faced_token`, or `reversible_card`) and exactly two named faces. Provider metadata stays attached to one `CardIdentity`; front and back selections resolve independently. Provider refresh, re-resolution, and other-face changes cannot replace a manual back lock. Restoring automatic selection is an explicit action and clears a user-selected back face before auto-resolution resumes.
 
-The Project default is stored as `assetId + SHA-256 + format`, never as a temporary URL. Back Library upload validates actual JPEG/PNG bytes, dimensions, and limits, then stores the original without recompression. The content-addressed original is the PDF source. Retiring a library item only hides it from active selection: the byte-free metadata tombstone and original stay resolvable by the immutable ID/hash so existing Projects remain reproducible. Re-uploading the same bytes cannot change that identity.
+The Project default is stored as `assetId + SHA-256 + format`, never as a temporary URL. Back Library upload validates actual JPEG/PNG bytes, dimensions, and limits, then stores the original without recompression. The content-addressed original is the PDF source. Retiring a library item only hides it from new choices: the list DTO marks it `selectable: false`, while a retired asset currently referenced by the Project or active card remains present as that select's current value. Project create/save/recovery APIs validate every Back Library reference against its immutable record and reject a retired reference unless the same Project already has that exact reference at the same setting/card location. The byte-free metadata tombstone and original stay resolvable by immutable ID/hash so existing Projects remain reproducible. Re-uploading the same bytes revives the same identity.
 
 ## Missing backs
 
@@ -81,7 +82,7 @@ Changing a content mode never changes card artwork selections. JPEG passthrough,
 
 ## Project and API state
 
-Project schema v4 stores per-card back mode and override lock, Project default back reference, missing-back policy, flip mode, and content mode. Deserialization accepts v1/v2/v3 and supplies safe defaults: front-only, long-edge, no Project default, and `use-project-default` missing policy. Artwork bytes, filesystem paths, and temporary URLs are never embedded in Project JSON.
+Project schema v4 stores per-card back mode and override lock, optional `manualBackArtwork` source/provider IDs, Project default back reference, missing-back policy, flip mode, and content mode. `manualBackArtwork` is an additive v4 field containing only the exact durable artwork candidate reference and source face/provider IDs; uploads remain resolvable through their SHA-addressed original. It survives autosave, reopen, duplicate, and recovery. Front artwork changes and identity/provider re-resolution preserve the explicit manual lock. Deserialization accepts v1/v2/v3 and supplies safe defaults: front-only, long-edge, no Project default, and `use-project-default` missing policy. Artwork bytes, filesystem paths, and temporary URLs are never embedded in Project JSON.
 
 For Project-based exports, the API reopens the supplied Project ID at `expectedProjectRevision`, compares the full normalized card list (identity, face selections, MPC refs, manual locks, order, and quantity) and every export-relevant saved setting, and uses the persisted snapshot for rendering. Stale or client-mutated state is rejected. Request bodies remain bounded; responses expose metadata and PDF bytes only through the relevant download, without leaking original storage paths.
 

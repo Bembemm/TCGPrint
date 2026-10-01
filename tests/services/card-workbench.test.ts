@@ -12,6 +12,8 @@ import type { ScryfallClient } from "../../providers/scryfall/client";
 import type { ScryfallCard } from "../../providers/scryfall/types";
 import { mapScryfallCard } from "../../providers/scryfall/mapper";
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
+import { mpcArtworkCandidateId } from "../../core/cards/ids";
+import { isDoubleFacedIdentity } from "../../core/cards/back-selection";
 import { NO_CUT_GUIDES } from "../helpers/cut-guides";
 
 const roots: string[] = [];
@@ -330,6 +332,42 @@ describe("card workbench services", () => {
     await expect(workbench.reresolveWorkingCard(previous)).rejects.toThrow("Scryfall network unavailable");
 
     expect(previous).toEqual(before);
+  });
+
+  it("selects provider artwork as a simple card's locked physical back and preserves source identities", async () => {
+    const identityCard = resolvedDeckPrintings[0]!;
+    const nextIdentity = resolvedDeckPrintings[1]!;
+    const fake = fakeScryfallClient([identityCard, nextIdentity]);
+    const { workbench } = await setup(undefined, undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
+    const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
+    const [scryfallFront] = await workbench.listArtworkCandidates(identified.identity!.id, "front", "scryfall");
+    if (!scryfallFront) throw new Error("Expected a Scryfall front artwork candidate.");
+    const scryfallBack = workbench.selectManualBackArtwork(identified, scryfallFront);
+    const frontChanged = workbench.selectArtwork(scryfallBack, "front", scryfallFront);
+    const identityChanged = await workbench.confirmWorkingCardIdentity(frontChanged, nextIdentity.id);
+    const mpcCandidate = {
+      id: mpcArtworkCandidateId("provider-manual-back", "back"), source: "mpc" as const, identityId: identified.identity!.id,
+      faceId: "back", providerAssetId: "provider-manual-back", selectedArtworkId: "selected-manual-back", originalAvailable: false,
+    };
+    const mpcBack = workbench.selectManualBackArtwork(identified, mpcCandidate);
+    const uploadBytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
+    const uploaded = await workbench.importForWorkingSet({ files: [{ filename: "manual-back.png", bytes: uploadBytes }] });
+    const uploadCandidate = await workbench.getArtworkCandidate(uploaded.workingCards[0]!.localArtworkIds[0]!);
+    if (!uploadCandidate) throw new Error("Expected a validated local artwork candidate.");
+    const uploadBack = workbench.selectManualBackArtwork(identified, uploadCandidate);
+
+    expect(isDoubleFacedIdentity(identityChanged.identity)).toBe(false);
+    expect(identityChanged.faces).toMatchObject([{ id: "front", side: "front" }]);
+    expect(identityChanged.faces).toHaveLength(1);
+    expect(identityChanged.manualBackArtwork).toEqual(scryfallBack.manualBackArtwork);
+    expect(identityChanged.backModeSelectionPolicy).toBe("explicit");
+    expect(mpcBack.manualBackArtwork).toMatchObject({ source: "mpc", faceId: "back", providerAssetId: "provider-manual-back", selectedArtworkId: "selected-manual-back", selectionPolicy: "user-selected" });
+    expect(mpcBack.faces).toHaveLength(1);
+    expect(mpcBack.mpcReferences).toContainEqual(expect.objectContaining({ faceId: "back", importedAssetId: "provider-manual-back", providerAssetId: "provider-manual-back", selectedArtworkId: "selected-manual-back", referenceOrigin: "gallery-selection" }));
+    expect(uploadBack.manualBackArtwork).toMatchObject({ source: "upload", candidateId: uploadCandidate.id, identityId: identified.identity!.id, selectionPolicy: "user-selected" });
+    expect(uploadBack.localArtworkIds).toContain(uploadCandidate.id);
+    expect(frontChanged.manualBackArtwork).toEqual(scryfallBack.manualBackArtwork);
   });
 
   it("restores default artwork independently on each DFC face without replacing the opposite face", async () => {

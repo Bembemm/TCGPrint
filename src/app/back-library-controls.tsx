@@ -8,6 +8,7 @@ export interface BackLibraryAssetDto extends BackLibraryAssetReference {
   readonly widthPx: number;
   readonly heightPx: number;
   readonly retired: boolean;
+  readonly selectable?: boolean;
 }
 
 export function backLibraryAssetReference(asset: BackLibraryAssetDto): BackLibraryAssetReference {
@@ -38,7 +39,14 @@ export default function BackLibraryControls({ assets, selectedDefault, selectedC
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
   const selectedCardBack = selectedCard?.manualBackAsset ?? null;
+  const activeAssets = assets.filter((asset) => asset.selectable !== false && !asset.retired);
   const assetForValue = (value: string) => assets.find(({ assetId }) => assetId === value);
+  const choicesFor = (selected: BackLibraryAssetReference | null) => {
+    const referencedRetired = selected && assets.find((asset) => asset.retired && asset.assetId === selected.assetId && asset.sha256 === selected.sha256);
+    return referencedRetired ? [...activeAssets, referencedRetired] : activeAssets;
+  };
+  const defaultChoices = choicesFor(selectedDefault);
+  const manualChoices = choicesFor(selectedCardBack);
 
   async function reload() {
     const result = await responseJson(await fetch("/api/back-library", { cache: "no-store" }));
@@ -75,10 +83,10 @@ export default function BackLibraryControls({ assets, selectedDefault, selectedC
     <label>Verso padrão do Project
       <select aria-label="Verso padrão do Project" value={selectedDefault?.assetId ?? ""} disabled={disabled || busy} onChange={(event) => {
         const asset = assetForValue(event.currentTarget.value);
-        onDefaultChange(asset ? backLibraryAssetReference(asset) : null);
+        if (!asset || (asset.selectable !== false && !asset.retired) || asset.assetId === selectedDefault?.assetId) onDefaultChange(asset ? backLibraryAssetReference(asset) : null);
       }}>
         <option value="">Nenhum verso padrão</option>
-        {assets.map((asset) => <option key={asset.assetId} value={asset.assetId}>{asset.name} · {asset.format.toUpperCase()} · {asset.sha256.slice(0, 12)}{asset.retired ? " · arquivado (imutável)" : ""}</option>)}
+        {defaultChoices.map((asset) => <option key={asset.assetId} value={asset.assetId}>{asset.name} · {asset.format.toUpperCase()} · {asset.sha256.slice(0, 12)}{asset.retired ? " · arquivado (imutável)" : ""}</option>)}
       </select>
     </label>
     <label>Adicionar verso (JPEG ou PNG)
@@ -97,17 +105,17 @@ export default function BackLibraryControls({ assets, selectedDefault, selectedC
         <select aria-label="Modo de verso da carta" value={selectedCard.backMode} disabled={disabled || busy} onChange={(event) => onCardModeChange(event.currentTarget.value as WorkingCardBackMode)}>
           <option value="auto">Auto · face traseira DFC</option>
           <option value="project-default">Verso padrão do Project</option>
-          <option value="manual" disabled={!selectedCard.manualBackAsset && !selectedCard.selectedArtworkByFace.back}>Manual · face/artwork selecionada</option>
+          <option value="manual" disabled={!selectedCard.manualBackAsset && !selectedCard.manualBackArtwork && !selectedCard.selectedArtworkByFace.back}>Manual · verso escolhido</option>
           <option value="none">Sem verso · slot traseiro em branco</option>
         </select>
       </label>
       <label>Verso manual da Back Library
         <select aria-label="Verso manual da Back Library" value={selectedCardBack?.assetId ?? ""} disabled={disabled || busy} onChange={(event) => {
           const asset = assetForValue(event.currentTarget.value);
-          if (asset) onManualBackChange(backLibraryAssetReference(asset));
+          if (asset && ((asset.selectable !== false && !asset.retired) || asset.assetId === selectedCardBack?.assetId)) onManualBackChange(backLibraryAssetReference(asset));
         }}>
           <option value="">Usar face traseira / nenhum asset manual</option>
-          {assets.map((asset) => <option key={asset.assetId} value={asset.assetId}>{asset.name} · {asset.sha256.slice(0, 12)}{asset.retired ? " · arquivado" : ""}</option>)}
+          {manualChoices.map((asset) => <option key={asset.assetId} value={asset.assetId}>{asset.name} · {asset.sha256.slice(0, 12)}{asset.retired ? " · arquivado" : ""}</option>)}
         </select>
       </label>
       {selectedCard.backMode === "manual" && <p className="muted">Override manual bloqueado contra re-resolução automática; restaurar Auto é uma ação explícita.</p>}

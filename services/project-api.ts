@@ -12,6 +12,9 @@ import {
   type ProjectSnapshotV1,
 } from "../persistence/projects/serializer";
 import type { TemplateSelection } from "../templates/types";
+import type { BackLibraryService } from "./back-library";
+
+type BackLibraryReferenceCatalog = Pick<BackLibraryService, "listAll">;
 
 export interface ProjectSummaryDto {
   readonly id: string;
@@ -180,6 +183,39 @@ function invalidRequest(message = "The project request is invalid."): Response {
   return Response.json({ code: "INVALID_PROJECT_REQUEST", message }, { status: 400 });
 }
 
+function backLibraryReferences(snapshot: ProjectSnapshotV1): ReadonlyMap<string, string> {
+  const references = new Map<string, string>();
+  const identify = (reference: NonNullable<ProjectSnapshotV1["settings"]["projectDefaultBack"]>) =>
+    `${reference.assetId}\0${reference.sha256}\0${reference.format}`;
+  if (snapshot.settings.projectDefaultBack) references.set("settings.projectDefaultBack", identify(snapshot.settings.projectDefaultBack));
+  for (const card of snapshot.cards) {
+    if (card.manualBackAsset) references.set(`cards.${card.id}.manualBackAsset`, identify(card.manualBackAsset));
+  }
+  return references;
+}
+
+function validateBackLibraryReferences(
+  snapshot: ProjectSnapshotV1,
+  existingSnapshot: ProjectSnapshotV1 | undefined,
+  backLibrary: BackLibraryReferenceCatalog | undefined,
+): void {
+  const references = backLibraryReferences(snapshot);
+  if (references.size === 0) return;
+  if (!backLibrary) throw new ProjectApiRequestError(503, "BACK_LIBRARY_UNAVAILABLE", "Back Library must be available to validate Project back references.");
+  const records = new Map(backLibrary.listAll().map((record) => [record.assetId, record]));
+  const existingReferences = existingSnapshot ? backLibraryReferences(existingSnapshot) : new Map<string, string>();
+  for (const [location, reference] of references) {
+    const [assetId, sha256, format] = reference.split("\0");
+    const record = records.get(assetId!);
+    if (!record || record.sha256 !== sha256 || record.format !== format) {
+      throw new ProjectApiRequestError(400, "BACK_ASSET_NOT_FOUND", "Project references an unavailable or mismatched Back Library asset.");
+    }
+    if (record.retired && existingReferences.get(location) !== reference) {
+      throw new ProjectApiRequestError(409, "BACK_ASSET_RETIRED", "A retired Back Library asset cannot be added as a new Project reference.");
+    }
+  }
+}
+
 function parseTemplateSelectionField(fields: Record<string, unknown>): TemplateSelection | null | undefined {
   if (!Object.prototype.hasOwnProperty.call(fields, "templateSelection")) return undefined;
   const selection = fields.templateSelection;
@@ -228,7 +264,7 @@ export async function handleProjectList(_request: Request, projects: ProjectRepo
   }
 }
 
-export async function handleProjectCreate(request: Request, projects: ProjectRepository): Promise<Response> {
+export async function handleProjectCreate(request: Request, projects: ProjectRepository, backLibrary?: BackLibraryReferenceCatalog): Promise<Response> {
   try {
     if (!request.body) return Response.json(projectDto(projects.create()), { status: 201 });
     const body = await parseProjectSaveBody(request, true);
@@ -241,6 +277,7 @@ export async function handleProjectCreate(request: Request, projects: ProjectRep
     const snapshot = Object.prototype.hasOwnProperty.call(fields, "snapshot")
       ? deserializeProjectSnapshot(fields.snapshot)
       : undefined;
+    if (snapshot) validateBackLibraryReferences(snapshot, undefined, backLibrary);
     return Response.json(projectDto(projects.create(snapshot, parseTemplateSelectionField(fields) ?? null)), { status: 201 });
   } catch (error) {
     return errorResponse(error);
@@ -262,7 +299,7 @@ export async function handleProjectOpen(_request: Request, projectId: string, pr
   }
 }
 
-export async function handleProjectSave(request: Request, projectId: string, projects: ProjectRepository): Promise<Response> {
+export async function handleProjectSave(request: Request, projectId: string, projects: ProjectRepository, backLibrary?: BackLibraryReferenceCatalog): Promise<Response> {
   if (!validProjectId(projectId)) return invalidRequest("Project ID is invalid.");
   let body: unknown;
   try {
@@ -273,13 +310,15 @@ export async function handleProjectSave(request: Request, projectId: string, pro
   try {
     const fields = expectedRevisionSnapshotFields(body);
     const snapshot = deserializeProjectSnapshot(fields.snapshot);
+    const existing = projects.open(projectId);
+    validateBackLibraryReferences(snapshot, existing.snapshot, backLibrary);
     return Response.json(projectDto(projects.save(projectId, fields.expectedRevision, snapshot, fields.templateSelection)));
   } catch (error) {
     return errorResponse(error);
   }
 }
 
-export async function handleProjectStageRecovery(request: Request, projectId: string, projects: ProjectRepository): Promise<Response> {
+export async function handleProjectStageRecovery(request: Request, projectId: string, projects: ProjectRepository, backLibrary?: BackLibraryReferenceCatalog): Promise<Response> {
   if (!validProjectId(projectId)) return invalidRequest("Project ID is invalid.");
   let body: unknown;
   try {
@@ -290,6 +329,8 @@ export async function handleProjectStageRecovery(request: Request, projectId: st
   try {
     const fields = expectedRevisionSnapshotFields(body);
     const snapshot = deserializeProjectSnapshot(fields.snapshot);
+    const existing = projects.open(projectId);
+    validateBackLibraryReferences(snapshot, existing.snapshot, backLibrary);
     const recovery = projects.stageRecovery(projectId, fields.expectedRevision, snapshot, fields.templateSelection);
     return Response.json({ recovery: projectRecoveryDto(recovery) });
   } catch (error) {

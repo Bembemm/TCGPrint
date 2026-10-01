@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { fallbackToProjectDefaultBack, resolveEffectiveCardBack, restoreAutomaticBackSelection, setWorkingCardBackMode } from "../../../core/cards/back-selection";
+import { fallbackToProjectDefaultBack, isDoubleFacedIdentity, resolveEffectiveCardBack, restoreAutomaticBackSelection, selectManualBackArtwork, setWorkingCardBackMode } from "../../../core/cards/back-selection";
 import type { BackLibraryAssetReference, WorkingCard } from "../../../core/cards/types";
+import { selectArtwork as selectWorkingArtwork } from "../../../core/cards/working-set";
 
 const dfc: WorkingCard = {
   id: "dfc", quantity: 1, order: 0,
@@ -42,5 +43,20 @@ describe("card back selection", () => {
 
     expect(restored).toMatchObject({ backMode: "project-default", backModeSelectionPolicy: "automatic" });
     expect("manualBackAsset" in restored).toBe(false);
+  });
+
+  it("resolves an explicit physical manual artwork back on a simple card without making it a DFC", () => {
+    const simple: WorkingCard = { ...dfc, identity: null, faces: [dfc.faces[0]!], selectedArtworkByFace: {}, backMode: "project-default", backModeSelectionPolicy: "automatic" };
+    const artwork = { candidateId: "scryfall:printing:front", source: "scryfall" as const, identityId: "scryfall:oracle:simple", faceId: "front" as const, providerAssetId: "printing", selectionPolicy: "user-selected" as const };
+    const selected = selectManualBackArtwork(simple, artwork);
+
+    expect(selected.faces).toHaveLength(1);
+    expect(isDoubleFacedIdentity(selected.identity)).toBe(false);
+    expect(resolveEffectiveCardBack(selected)).toMatchObject({ mode: "manual", status: "available", source: "manual-artwork", artwork });
+    const newFront = { candidateId: "scryfall:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb:front", source: "scryfall" as const, identityId: "scryfall:oracle:new-front", faceId: "front" as const, selectionPolicy: "user-selected" };
+    const frontChanged = selectWorkingArtwork({ ...selected, identity: { id: "scryfall:oracle:new-front", provider: "scryfall", name: "New front", resolutionMethod: "manual", confidence: 1 } }, "front", newFront);
+    expect(frontChanged.manualBackArtwork).toEqual(artwork);
+    expect(resolveEffectiveCardBack(frontChanged, { assetId: `back:${"b".repeat(64)}`, sha256: "b".repeat(64), format: "png" })).toMatchObject({ source: "manual-artwork", artwork });
+    expect(restoreAutomaticBackSelection(selected)).not.toHaveProperty("manualBackArtwork");
   });
 });

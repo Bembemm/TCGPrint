@@ -93,6 +93,18 @@ describe("Back Library", () => {
     await expect(reopened.resolveOriginal(reference)).resolves.toMatchObject({ bytes, contentHash: added.sha256 });
   });
 
+  it("revives the same immutable Back Library identity when its original bytes are uploaded again", async () => {
+    const { service } = await makeService();
+    const bytes = await png();
+    const first = await service.add({ bytes, filename: "Original.png" });
+    await service.retire(first.assetId);
+
+    const revived = await service.add({ bytes, filename: "Reuploaded.png" });
+
+    expect(revived).toMatchObject({ assetId: first.assetId, sha256: first.sha256, retired: false, name: "Original.png" });
+    expect(await service.list()).toEqual([revived]);
+  });
+
   it("rejects unsupported bytes, oversized uploads, and excessive image dimensions", async () => {
     const { service } = await makeService({ maximumBytes: 1024, maximumDimensionPixels: 80, maximumPixels: 5_000 });
     await expect(service.add({ bytes: new Uint8Array(Buffer.from("<svg><script>alert(1)</script></svg>")), filename: "bad.svg" }))

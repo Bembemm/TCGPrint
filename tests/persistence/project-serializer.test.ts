@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WorkingCard } from "../../core/cards/types";
+import { mpcArtworkCandidateId } from "../../core/cards/ids";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
 import {
   DEFAULT_PROJECT_SETTINGS,
@@ -217,6 +218,31 @@ describe("project snapshot serializer", () => {
     });
   });
 
+  it("round-trips a simple card's manual physical back artwork without adding a DFC face", () => {
+    const card: WorkingCard = {
+      ...singleFaceCard(),
+      identity: { id: "scryfall:oracle:simple", provider: "scryfall", name: "Sol Ring", resolutionMethod: "manual", confidence: 1 },
+      manualBackArtwork: {
+        candidateId: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front",
+        source: "scryfall",
+        identityId: "scryfall:oracle:simple",
+        faceId: "front",
+        providerAssetId: "printing-123",
+        selectedArtworkId: "artwork-123",
+        selectionPolicy: "user-selected",
+      },
+      backMode: "manual",
+      backModeSelectionPolicy: "explicit",
+    };
+
+    expect(deserializeProjectSnapshot(serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS)).cards[0]).toMatchObject({
+      faces: [{ side: "front" }],
+      manualBackArtwork: { source: "scryfall", candidateId: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", faceId: "front", providerAssetId: "printing-123", selectedArtworkId: "artwork-123", selectionPolicy: "user-selected" },
+      backMode: "manual",
+      backModeSelectionPolicy: "explicit",
+    });
+  });
+
   it("migrates a genuine schema-3 snapshot to safe front-only duplex defaults", () => {
     const current = JSON.parse(serializeProjectSnapshot([singleFaceCard()], DEFAULT_PROJECT_SETTINGS)) as {
       projectSchemaVersion: number;
@@ -390,6 +416,24 @@ describe("project snapshot serializer", () => {
 
     expect(() => serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS))
       .toThrowError(expect.objectContaining({ code: "INVALID_PROJECT_SNAPSHOT" }));
+  });
+
+  it("preserves a source-side MPC back reference for a manual physical back without creating a logical back face", () => {
+    const importedAssetId = "physical-source-back";
+    const candidateId = mpcArtworkCandidateId(importedAssetId, "back");
+    const card: WorkingCard = {
+      ...singleFaceCard(),
+      backMode: "manual",
+      backModeSelectionPolicy: "explicit",
+      manualBackArtwork: { candidateId, source: "mpc", identityId: null, faceId: "back", providerAssetId: importedAssetId, selectedArtworkId: importedAssetId, selectionPolicy: "user-selected" },
+      mpcReferences: [{ faceId: "back", importedAssetId, providerAssetId: importedAssetId, selectedArtworkId: importedAssetId, slots: [], availableLocally: true }],
+    };
+
+    expect(deserializeProjectSnapshot(serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS)).cards[0]).toMatchObject({
+      faces: [{ side: "front" }],
+      manualBackArtwork: { candidateId, faceId: "back", source: "mpc" },
+      mpcReferences: [{ faceId: "back", importedAssetId }],
+    });
   });
 
   it("rejects artwork candidate IDs that the current API boundary cannot accept", () => {

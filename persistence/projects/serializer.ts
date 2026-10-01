@@ -13,6 +13,7 @@ import type {
 } from "../../core/cards/types";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
 import { isSafeArtworkCandidateId } from "../../core/cards/artwork-candidate-id";
+import { mpcArtworkCandidateId } from "../../core/cards/ids";
 import { validateCardIdentityMetadata } from "../../core/cards/safe-identity-metadata";
 import { DEFAULT_CUT_GUIDE_CONFIG, GUIDE_COLOR_OPTIONS, MAGIC_STANDARD_CARD, PAPER_FORMATS, parseTemplateLayoutGeometry, type CardFormat, type CutGuideConfig, type GuideColor, type PageOrientation, type PaperFormat, type TemplateLayoutGeometryMm } from "../../core/geometry";
 import { parseRegistrationConfig, type RegistrationConfig } from "../../core/registration";
@@ -254,7 +255,7 @@ function identity(value: unknown, path: string): CardIdentity | null {
   };
 }
 
-function selectedArtwork(value: unknown, side: CardFaceSide, path: string): SelectedArtwork {
+function selectedArtwork(value: unknown, side: CardFaceSide | undefined, path: string): SelectedArtwork {
   const source = object(value, path,
     ["candidateId", "source", "identityId", "faceId", "providerAssetId", "selectedArtworkId", "selectionPolicy"],
     ["candidateId", "source", "identityId", "faceId"]);
@@ -262,7 +263,8 @@ function selectedArtwork(value: unknown, side: CardFaceSide, path: string): Sele
   if (!ARTWORK_SOURCES.has(artworkSource)) invalid(`${path}.source`, "is not supported.");
   if (source.identityId !== null && typeof source.identityId !== "string") invalid(`${path}.identityId`, "must be a string or null.");
   const faceId = string(source.faceId, `${path}.faceId`, 8);
-  if (faceId !== side) invalid(`${path}.faceId`, `must match the ${side} selection key.`);
+  if (faceId !== "front" && faceId !== "back") invalid(`${path}.faceId`, "must be front or back.");
+  if (side && faceId !== side) invalid(`${path}.faceId`, `must match the ${side} selection key.`);
   const candidateId = string(source.candidateId, `${path}.candidateId`, 128);
   if (!isSafeArtworkCandidateId(candidateId)) invalid(`${path}.candidateId`, "is not a supported artwork candidate ID.");
   const providerAssetId = optionalString(source, "providerAssetId", `${path}.providerAssetId`, 200);
@@ -406,7 +408,7 @@ function faceAssociation(value: unknown, path: string): WorkingCard["faceAssocia
 function persistedCard(value: unknown, index: number, schemaVersion = CURRENT_PROJECT_SCHEMA_VERSION): PersistedWorkingCard {
   const path = `snapshot.cards[${index}]`;
   const legacyCardKeys = ["id", "quantity", "order", "section", "importSource", "identityHints", "identity", "identityResolution", "faces", "selectedArtworkByFace", "localArtworkIds", "mpcReferences", "sharedMpcCardback", "faceAssociations"];
-  const backKeys = ["backMode", "backModeSelectionPolicy", "manualBackAsset"];
+  const backKeys = ["backMode", "backModeSelectionPolicy", "manualBackAsset", "manualBackArtwork"];
   const source = object(value, path,
     schemaVersion >= 4 ? [...legacyCardKeys, ...backKeys] : legacyCardKeys,
     ["id", "quantity", "order", "importSource", "identityHints", "identity", "identityResolution", "faces", "selectedArtworkByFace", "localArtworkIds", "mpcReferences", "faceAssociations"]);
@@ -436,6 +438,9 @@ function persistedCard(value: unknown, index: number, schemaVersion = CURRENT_PR
     if (!faceSides.includes(side)) invalid(`${path}.selectedArtworkByFace.${side}`, "cannot select artwork for a missing face.");
     selectedArtworkByFace[side] = selectedArtwork(selectionsSource[side], side, `${path}.selectedArtworkByFace.${side}`);
   }
+  const manualBackArtwork = source.manualBackArtwork === undefined
+    ? undefined
+    : selectedArtwork(source.manualBackArtwork, undefined, `${path}.manualBackArtwork`);
   const localArtworkIds = stringArray(source.localArtworkIds, `${path}.localArtworkIds`, 200, 80);
   localArtworkIds.forEach((artworkId, index) => {
     if (!isSafeArtworkCandidateId(artworkId) || !artworkId.startsWith("upload:")) {
@@ -446,7 +451,10 @@ function persistedCard(value: unknown, index: number, schemaVersion = CURRENT_PR
     .map((reference, referenceIndex) => {
       const referencePath = `${path}.mpcReferences[${referenceIndex}]`;
       const parsedReference = mpcReference(reference, referencePath);
-      if (!faceSides.includes(parsedReference.faceId as CardFaceSide)) invalid(`${referencePath}.faceId`, "must reference a face on this card.");
+      const backsThisManualArtwork = manualBackArtwork?.source === "mpc"
+        && manualBackArtwork.faceId === parsedReference.faceId
+        && mpcArtworkCandidateId(parsedReference.importedAssetId, parsedReference.faceId as CardFaceSide) === manualBackArtwork.candidateId;
+      if (!faceSides.includes(parsedReference.faceId as CardFaceSide) && !backsThisManualArtwork) invalid(`${referencePath}.faceId`, "must reference a face on this card or the selected physical manual MPC artwork.");
       return parsedReference;
     });
   let backMode: WorkingCardBackMode;
@@ -454,7 +462,7 @@ function persistedCard(value: unknown, index: number, schemaVersion = CURRENT_PR
     // Legacy user-selected face artwork already carried an explicit policy; all
     // other old cards safely inherit the Project default unless provider layout
     // metadata identifies an automatic DFC face pair.
-    backMode = selectedArtworkByFace.back?.selectionPolicy === "user-selected"
+    backMode = source.manualBackAsset !== undefined || source.manualBackArtwork !== undefined || selectedArtworkByFace.back?.selectionPolicy === "user-selected"
       ? "manual"
       : isDoubleFacedIdentity(currentIdentity) ? "auto" : "project-default";
   } else {
@@ -474,6 +482,12 @@ function persistedCard(value: unknown, index: number, schemaVersion = CURRENT_PR
   const manualBackAsset = source.manualBackAsset === undefined
     ? undefined
     : backLibraryAssetReference(source.manualBackAsset, `${path}.manualBackAsset`);
+  if (manualBackArtwork && manualBackArtwork.selectionPolicy !== "user-selected") invalid(`${path}.manualBackArtwork.selectionPolicy`, "must preserve the explicit user-selected override lock.");
+  if (manualBackAsset && manualBackArtwork) invalid(path, "cannot contain both a manual Back Library asset and manual physical artwork.");
+  if ((manualBackAsset || manualBackArtwork) && backMode !== "manual") invalid(path, "manual back references require manual back mode.");
+  if (backMode === "manual" && !manualBackAsset && !manualBackArtwork && !selectedArtworkByFace.back) {
+    invalid(`${path}.backMode`, "manual mode requires a manual asset, manual physical artwork, or a selected DFC back face.");
+  }
   const cardback = source.sharedMpcCardback === undefined ? undefined : sharedMpcCardback(source.sharedMpcCardback, `${path}.sharedMpcCardback`);
   const associations = array(source.faceAssociations, `${path}.faceAssociations`, 200)
     .map((association, associationIndex) => faceAssociation(association, `${path}.faceAssociations[${associationIndex}]`));
@@ -496,6 +510,7 @@ function persistedCard(value: unknown, index: number, schemaVersion = CURRENT_PR
     backMode,
     backModeSelectionPolicy,
     ...(manualBackAsset !== undefined ? { manualBackAsset } : {}),
+    ...(manualBackArtwork !== undefined ? { manualBackArtwork } : {}),
     localArtworkIds,
     mpcReferences,
     ...(cardback !== undefined ? { sharedMpcCardback: cardback } : {}),

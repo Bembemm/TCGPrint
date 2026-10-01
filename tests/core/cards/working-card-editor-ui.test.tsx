@@ -108,6 +108,35 @@ describe("working card editor list UI", () => {
     expect(unverifiedMarkup).not.toContain("Original validado no cache local");
   });
 
+  it("labels a provider artwork assigned as physical back without announcing a simple card as DFC", () => {
+    const Details = (workbenchModule as unknown as Record<string, unknown>).WorkingCardDetailsSummary as ComponentType<{ card: WorkingCard }> | undefined;
+    const simpleWithPhysicalBack: WorkingCard = {
+      ...card,
+      manualBackArtwork: {
+        candidateId: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front",
+        source: "scryfall",
+        identityId: "scryfall:oracle:sol-ring",
+        faceId: "front",
+        providerAssetId: "provider-printing",
+        selectionPolicy: "user-selected",
+      },
+      backMode: "manual",
+      backModeSelectionPolicy: "explicit",
+    };
+    const details = renderToStaticMarkup(createElement(Details!, { card: simpleWithPhysicalBack }));
+    const list = renderToStaticMarkup(createElement(WorkingCardList, {
+      cards: [simpleWithPhysicalBack], selectedCardId: simpleWithPhysicalBack.id, physicalCardCount: simpleWithPhysicalBack.quantity, disabled: false,
+      onSelect: vi.fn(), onQuantityCommit: vi.fn(), onQuantityAdjust: vi.fn(), onMove: vi.fn(), onDuplicate: vi.fn(), onDelete: vi.fn(),
+    }));
+
+    expect(details).toContain("Verso físico manual");
+    expect(details).toContain("provider-printing");
+    expect(details).toContain("não cria uma face DFC");
+    expect(details).not.toContain('aria-label="Carta dupla-face"');
+    expect(list).toContain("Verso físico manual: Scryfall");
+    expect(list).not.toContain('aria-label="Carta dupla-face"');
+  });
+
   it("shows only the existing back face for a back-only WorkingCard", () => {
     const backOnly: WorkingCard = {
       ...card,

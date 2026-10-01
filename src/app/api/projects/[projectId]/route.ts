@@ -1,5 +1,6 @@
 import { handleProjectDelete, handleProjectOpen, handleProjectSave } from "../../../../../services/project-api";
 import { getProjectRepository } from "../../../../../services/project-repository";
+import { getBackLibraryService } from "../../../../../services/back-library-repository";
 
 export const runtime = "nodejs";
 
@@ -10,7 +11,7 @@ export async function GET(request: Request, context: { params: Promise<{ project
 
 export async function PUT(request: Request, context: { params: Promise<{ projectId: string }> }): Promise<Response> {
   const { projectId } = await context.params;
-  return handleProjectSave(request, projectId, getProjectRepository());
+  return handleProjectSave(request, projectId, getProjectRepository(), getBackLibraryService());
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ projectId: string }> }): Promise<Response> {

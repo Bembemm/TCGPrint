@@ -17,6 +17,8 @@ import { ArtworkThumbnailStore } from "../artwork/storage/thumbnail-store";
 import type { ArtworkCatalogSource, ArtworkPreview, ProviderHealth } from "../artwork/types";
 import { confirmIdentity, IdentityResolver, isDoubleFacedIdentity, keepCustom, reconcileArtworkAfterIdentityChange, restoreAutomaticBackSelection, selectDefaultArtworkForFace, selectResolvedPrintingArtwork } from "../core/cards/identity-resolver";
 import { selectArtwork as updateSelectedArtwork, createWorkingSet } from "../core/cards/working-set";
+import { selectManualBackArtwork as selectManualBackArtworkCore } from "../core/cards/back-selection";
+import { mpcArtworkCandidateId } from "../core/cards/ids";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
 import { ScryfallClient } from "../providers/scryfall/client";
 import { ScryfallError } from "../providers/scryfall/errors";
@@ -97,6 +99,7 @@ export interface CardWorkbench {
   getArtworkPreview(candidateId: string, signal?: AbortSignal): Promise<ArtworkPreview | undefined>;
   getArtworkOriginal(candidateId: string, signal?: AbortSignal): ReturnType<ArtworkCatalog["getOriginal"]>;
   selectArtwork(card: WorkingCard, faceId: CardFaceSide, candidate: ArtworkCandidate): WorkingCard;
+  selectManualBackArtwork(card: WorkingCard, candidate: ArtworkCandidate): WorkingCard;
   getProviderHealth(): Readonly<Record<string, ProviderHealth>>;
   close(): Promise<void>;
 }
@@ -254,11 +257,15 @@ function remapImportedIds(card: WorkingCard, uploadByImportId: ReadonlyMap<strin
       return [side, mapped ? { ...selection, candidateId: mapped.id, providerAssetId: mapped.providerAssetId } : selection];
     }),
   );
+  const manualBackArtwork = card.manualBackArtwork && uploadByImportId.has(card.manualBackArtwork.candidateId)
+    ? { ...card.manualBackArtwork, candidateId: remapId(card.manualBackArtwork.candidateId)!, providerAssetId: uploadByImportId.get(card.manualBackArtwork.candidateId)!.providerAssetId }
+    : card.manualBackArtwork;
   return {
     ...card,
     importSource: { ...card.importSource, ...(fileBaseName(card.importSource.filename) ? { filename: fileBaseName(card.importSource.filename) } : {}) },
     faces: card.faces.map((face) => ({ ...face, ...(remapId(face.importedAssetId) ? { importedAssetId: remapId(face.importedAssetId) } : {}) })),
     selectedArtworkByFace,
+    ...(manualBackArtwork ? { manualBackArtwork } : {}),
     localArtworkIds: [...new Set(card.localArtworkIds.map((id) => uploadByImportId.get(id)?.id ?? id))],
     faceAssociations: card.faceAssociations.map((association) => ({
       ...association,
@@ -568,6 +575,44 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
       };
       if (candidate.source === "upload" && card.identity) local.linkUpload(card.identity.id, candidate.id, faceId);
       return updateSelectedArtwork(card, faceId, selection);
+    },
+    selectManualBackArtwork(card, candidate) {
+      if (candidate.faceId !== "front" && candidate.faceId !== "back") throw new Error("Manual physical back artwork has an invalid provider source face.");
+      const faceId: CardFaceSide = candidate.faceId;
+      const selection: SelectedArtwork = {
+        candidateId: candidate.id,
+        source: candidate.source,
+        identityId: candidate.identityId ?? card.identity?.id ?? null,
+        faceId,
+        ...(candidate.providerAssetId ? { providerAssetId: candidate.providerAssetId } : {}),
+        ...(candidate.selectedArtworkId ? { selectedArtworkId: candidate.selectedArtworkId } : {}),
+        selectionPolicy: "user-selected",
+      };
+      if (candidate.source === "upload" && card.identity) local.linkUpload(card.identity.id, candidate.id, faceId);
+      const next = selectManualBackArtworkCore(card, selection);
+      if (candidate.source === "upload") return { ...next, localArtworkIds: [...new Set([...next.localArtworkIds, candidate.id])] };
+      if (candidate.source !== "mpc") return next;
+      const alreadyReferenced = next.mpcReferences.some((reference) =>
+        reference.faceId === faceId && mpcArtworkCandidateId(reference.importedAssetId, faceId) === candidate.id,
+      );
+      if (alreadyReferenced) return next;
+      const metadataImportedAssetId = candidate.metadata?.importedAssetId;
+      const importedAssetId = typeof metadataImportedAssetId === "string"
+        ? metadataImportedAssetId
+        : candidate.providerAssetId ?? candidate.selectedArtworkId;
+      if (!importedAssetId || mpcArtworkCandidateId(importedAssetId, faceId) !== candidate.id) return next;
+      return {
+        ...next,
+        mpcReferences: [...next.mpcReferences, {
+          faceId,
+          importedAssetId,
+          ...(candidate.providerAssetId ? { providerAssetId: candidate.providerAssetId } : {}),
+          ...(candidate.selectedArtworkId ? { selectedArtworkId: candidate.selectedArtworkId } : {}),
+          referenceOrigin: "gallery-selection",
+          slots: [],
+          availableLocally: candidate.originalCached === true,
+        }],
+      };
     },
     getProviderHealth() { return catalog.getProviderHealth(); },
     close() {

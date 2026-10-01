@@ -140,6 +140,8 @@ export interface WorkingCard {
   readonly backModeSelectionPolicy: WorkingCardBackModeSelectionPolicy;
   /** Only used when backMode is manual and the cardback is a generic library asset. */
   readonly manualBackAsset?: BackLibraryAssetReference;
+  /** Provider artwork assigned to the physical back. Its faceId records the artwork's source face; it does not add an identity face. */
+  readonly manualBackArtwork?: SelectedArtwork;
   readonly localArtworkIds: readonly string[];
   readonly mpcReferences: readonly WorkingCardMpcReference[];
   readonly sharedMpcCardback?: WorkingCardSharedMpcCardback;
