@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const ARTWORK_SCHEMA_VERSION = 1;
+export const ARTWORK_SCHEMA_VERSION = 2;
 
 function migrateToV1(database: Database.Database): void {
   database.exec(`
@@ -66,6 +66,25 @@ function migrateToV1(database: Database.Database): void {
   `);
 }
 
+function migrateToV2(database: Database.Database): void {
+  database.exec(`
+    CREATE TABLE back_library_assets (
+      asset_id TEXT PRIMARY KEY NOT NULL CHECK(length(asset_id) = 69 AND substr(asset_id, 1, 5) = 'back:'),
+      sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+      format TEXT NOT NULL CHECK(format IN ('jpeg','png')),
+      name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 120),
+      width_px INTEGER NOT NULL CHECK(width_px > 0),
+      height_px INTEGER NOT NULL CHECK(height_px > 0),
+      metadata_json TEXT NOT NULL CHECK(length(metadata_json) <= 8192),
+      retired INTEGER NOT NULL DEFAULT 0 CHECK(retired IN (0,1)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (sha256) REFERENCES artwork_originals(content_hash) ON DELETE RESTRICT
+    );
+    CREATE INDEX back_library_assets_active_idx ON back_library_assets(retired, name, asset_id);
+  `);
+}
+
 /** Applies all cache schema migrations in a deterministic transaction. */
 export function migrateArtworkDatabase(database: Database.Database): number {
   let version = Number(database.pragma("user_version", { simple: true }));
@@ -76,6 +95,11 @@ export function migrateArtworkDatabase(database: Database.Database): number {
       migrateToV1(database);
       database.pragma("user_version = 1");
       version = 1;
+    }
+    if (version < 2) {
+      migrateToV2(database);
+      database.pragma("user_version = 2");
+      version = 2;
     }
   });
   migrate.immediate();

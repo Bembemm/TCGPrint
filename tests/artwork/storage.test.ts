@@ -37,10 +37,10 @@ async function dbAt(path: string) {
 describe("artwork storage", () => {
   it("migrates schema zero transactionally and idempotently without project tables", async () => {
     const database = new Database(":memory:");
-    expect(migrateArtworkDatabase(database)).toBe(1);
-    expect(migrateArtworkDatabase(database)).toBe(1);
+    expect(migrateArtworkDatabase(database)).toBe(2);
+    expect(migrateArtworkDatabase(database)).toBe(2);
     const tables = database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((row) => (row as { name: string }).name);
-    expect(tables).toEqual(expect.arrayContaining(["artwork_metadata_cache", "artwork_originals", "artwork_provenance", "artwork_thumbnails", "artwork_identity_links"]));
+    expect(tables).toEqual(expect.arrayContaining(["artwork_metadata_cache", "artwork_originals", "artwork_provenance", "artwork_thumbnails", "artwork_identity_links", "back_library_assets"]));
     expect(tables.some((name) => /project|autosave/i.test(name))).toBe(false);
     database.close();
   });
