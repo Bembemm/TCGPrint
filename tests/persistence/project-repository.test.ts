@@ -402,6 +402,61 @@ describe("project repository", () => {
     expect(projects.open(original.id)).toEqual(original);
   });
 
+  it("preserves manual back locks and Project back settings through save, reopen, duplicate, recovery promotion, and recovery copy", async () => {
+    const projects = await setup();
+    const ref = (letter: string) => {
+      const sha256 = letter.repeat(64);
+      return { assetId: `back:${sha256}`, sha256, format: "png" as const };
+    };
+    const manualBack = ref("a");
+    const defaultBack = ref("b");
+    const changedDefaultBack = ref("c");
+    const recoveryDefaultBack = ref("d");
+    const card: WorkingCard = {
+      id: "card-with-manual-back",
+      quantity: 2,
+      order: 0,
+      importSource: { sourceId: "source-manual-back", importKind: "text", entryKind: "card" },
+      identityHints: { name: "Custom card" },
+      identity: null,
+      identityResolution: { status: "unresolved", candidates: [], confirmed: false },
+      faces: [{ id: "front", side: "front", name: "Custom card" }],
+      selectedArtworkByFace: {},
+      backMode: "manual",
+      backModeSelectionPolicy: "explicit",
+      manualBackAsset: manualBack,
+      localArtworkIds: [],
+      mpcReferences: [],
+      faceAssociations: [],
+    };
+    const settings = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      exportContentMode: "duplex" as const,
+      missingBackPolicy: "block" as const,
+      duplexFlipMode: "short-edge" as const,
+      projectDefaultBack: defaultBack,
+    };
+    const snapshot = deserializeProjectSnapshot(serializeProjectSnapshot([card], settings));
+    const created = projects.create(snapshot);
+    const saved = projects.save(created.id, created.revision, snapshot);
+
+    expect(projects.open(saved.id).snapshot).toEqual(snapshot);
+    expect(projects.duplicate(saved.id).snapshot).toEqual(snapshot);
+
+    const recoverySnapshot = deserializeProjectSnapshot(serializeProjectSnapshot([card], { ...settings, projectDefaultBack: changedDefaultBack }));
+    projects.stageRecovery(saved.id, saved.revision, recoverySnapshot);
+    const promoted = projects.promoteRecovery(saved.id);
+    expect(promoted.snapshot.settings.projectDefaultBack).toEqual(changedDefaultBack);
+    expect(promoted.snapshot.cards[0]).toMatchObject({ backMode: "manual", backModeSelectionPolicy: "explicit", manualBackAsset: manualBack });
+
+    const staleRecovery = deserializeProjectSnapshot(serializeProjectSnapshot([card], { ...settings, projectDefaultBack: recoveryDefaultBack }));
+    projects.stageRecovery(promoted.id, promoted.revision, staleRecovery);
+    projects.save(promoted.id, promoted.revision, promoted.snapshot);
+    const recoveryCopy = projects.copyRecovery(promoted.id);
+    expect(recoveryCopy.snapshot.settings.projectDefaultBack).toEqual(recoveryDefaultBack);
+    expect(recoveryCopy.snapshot.cards[0]).toMatchObject({ backMode: "manual", backModeSelectionPolicy: "explicit", manualBackAsset: manualBack });
+  });
+
   it("duplicates under one write transaction so another connection cannot delete the source between read and insert", async () => {
     const projects = await setup();
     const original = projects.create();
