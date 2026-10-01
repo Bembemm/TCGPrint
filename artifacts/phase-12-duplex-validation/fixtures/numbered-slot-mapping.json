@@ -1,0 +1,110 @@
+{
+  "fixture": "3x3-asymmetric-orientation-check",
+  "front": [
+    [
+      "TOP ↑ 1F",
+      "TOP ↑ 2F",
+      "TOP ↑ 3F"
+    ],
+    [
+      "TOP ↑ 4F",
+      "TOP ↑ 5F",
+      "TOP ↑ 6F"
+    ],
+    [
+      "TOP ↑ 7F",
+      "TOP ↑ 8F",
+      "TOP ↑ 9F"
+    ]
+  ],
+  "portrait-long-edge": [
+    [
+      "TOP ↑ 3B",
+      "TOP ↑ 2B",
+      "TOP ↑ 1B"
+    ],
+    [
+      "TOP ↑ 6B",
+      "TOP ↑ 5B",
+      "TOP ↑ 4B"
+    ],
+    [
+      "TOP ↑ 9B",
+      "TOP ↑ 8B",
+      "TOP ↑ 7B"
+    ]
+  ],
+  "portrait-short-edge": [
+    [
+      "TOP ↑ 7B",
+      "TOP ↑ 8B",
+      "TOP ↑ 9B"
+    ],
+    [
+      "TOP ↑ 4B",
+      "TOP ↑ 5B",
+      "TOP ↑ 6B"
+    ],
+    [
+      "TOP ↑ 1B",
+      "TOP ↑ 2B",
+      "TOP ↑ 3B"
+    ]
+  ],
+  "landscape-long-edge": [
+    [
+      "TOP ↑ 7B",
+      "TOP ↑ 8B",
+      "TOP ↑ 9B"
+    ],
+    [
+      "TOP ↑ 4B",
+      "TOP ↑ 5B",
+      "TOP ↑ 6B"
+    ],
+    [
+      "TOP ↑ 1B",
+      "TOP ↑ 2B",
+      "TOP ↑ 3B"
+    ]
+  ],
+  "landscape-short-edge": [
+    [
+      "TOP ↑ 3B",
+      "TOP ↑ 2B",
+      "TOP ↑ 1B"
+    ],
+    [
+      "TOP ↑ 6B",
+      "TOP ↑ 5B",
+      "TOP ↑ 4B"
+    ],
+    [
+      "TOP ↑ 9B",
+      "TOP ↑ 8B",
+      "TOP ↑ 7B"
+    ]
+  ],
+  "backArtworkOrientation": {
+    "portrait-long-edge": {
+      "rotationDegrees": 0,
+      "mirrorX": false,
+      "mirrorY": false
+    },
+    "portrait-short-edge": {
+      "rotationDegrees": 180,
+      "mirrorX": false,
+      "mirrorY": false
+    },
+    "landscape-long-edge": {
+      "rotationDegrees": 180,
+      "mirrorX": false,
+      "mirrorY": false
+    },
+    "landscape-short-edge": {
+      "rotationDegrees": 0,
+      "mirrorX": false,
+      "mirrorY": false
+    }
+  }
+}

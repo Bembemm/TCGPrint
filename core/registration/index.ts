@@ -9,6 +9,7 @@ export {
   MAX_REGISTRATION_PAGE_DIMENSION_MM,
 } from "./config";
 export { generateRegistrationGeometry } from "./geometry";
+export { transformRegistrationGeometry } from "./transform";
 export type {
   BuiltinRegistrationConfig,
   CustomRegistrationConfig,
@@ -24,4 +25,5 @@ export type {
   RegistrationRectanglePrimitive,
   RegistrationType,
 } from "./types";
+export type { RegistrationReflectionAxis } from "./transform";
 export type { BuiltinRegistrationOverrides } from "./config";

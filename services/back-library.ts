@@ -124,6 +124,11 @@ export class BackLibraryService {
     return this.repository.listActive();
   }
 
+  /** Includes immutable retired records so Project references remain visible in the UI. */
+  listAll(): readonly BackLibraryAssetRecord[] {
+    return this.repository.listAll();
+  }
+
   retire(assetId: string): BackLibraryAssetRecord {
     const hash = assetId.startsWith("back:") ? assetId.slice(5) : "";
     if (!/^[a-f0-9]{64}$/.test(hash)) throw new BackLibraryError("BACK_ASSET_NOT_FOUND", "Back Library asset ID is invalid.");

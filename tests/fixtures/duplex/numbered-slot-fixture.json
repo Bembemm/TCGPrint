@@ -24,5 +24,11 @@
     ["TOP ↑ 3B", "TOP ↑ 2B", "TOP ↑ 1B"],
     ["TOP ↑ 6B", "TOP ↑ 5B", "TOP ↑ 4B"],
     ["TOP ↑ 9B", "TOP ↑ 8B", "TOP ↑ 7B"]
-  ]
+  ],
+  "backArtworkOrientation": {
+    "portrait-long-edge": { "rotationDegrees": 0, "mirrorX": false, "mirrorY": false },
+    "portrait-short-edge": { "rotationDegrees": 180, "mirrorX": false, "mirrorY": false },
+    "landscape-long-edge": { "rotationDegrees": 180, "mirrorX": false, "mirrorY": false },
+    "landscape-short-edge": { "rotationDegrees": 0, "mirrorX": false, "mirrorY": false }
+  }
 }

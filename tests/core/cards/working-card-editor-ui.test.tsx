@@ -47,13 +47,33 @@ describe("working card editor list UI", () => {
     expect([...markup.matchAll(/aria-label="(?:Diminuir quantidade|Aumentar quantidade|Quantidade|Mover|Duplicar|Excluir)[^"]*"[^>]*disabled=""/g)]).toHaveLength(14);
   });
 
+  it("announces semantic DFC identity in the main card list", () => {
+    const dfc: WorkingCard = {
+      ...card,
+      identity: {
+        id: "scryfall:oracle:dfc", provider: "scryfall", name: "Front // Back", resolutionMethod: "manual", confidence: 1,
+        metadata: { layout: "transform", faces: [{ name: "Front" }, { name: "Back" }] },
+      },
+      faces: [{ id: "front", side: "front", name: "Front" }, { id: "back", side: "back", name: "Back" }],
+      backMode: "auto",
+    };
+    const markup = renderToStaticMarkup(createElement(WorkingCardList, {
+      cards: [dfc], selectedCardId: dfc.id, physicalCardCount: dfc.quantity, disabled: false,
+      onSelect: vi.fn(), onQuantityCommit: vi.fn(), onQuantityAdjust: vi.fn(), onMove: vi.fn(), onDuplicate: vi.fn(), onDelete: vi.fn(),
+    }));
+
+    expect(markup).toContain('aria-label="Carta dupla-face"');
+    expect(markup).toContain("Front // Back");
+  });
+
   it("renders Card Details origin, imported hints, current identity, both artwork faces and manual mismatch text", () => {
     const detailed: WorkingCard = {
       ...card,
       section: "Mainboard",
       importSource: { sourceId: "decklist.txt", filename: "decklist.txt", importKind: "text", entryKind: "deck-card" },
       identityHints: { name: "Imported Island", setCode: "m21", collectorNumber: "265", language: "en", scryfallId: "hint-id" },
-      identity: { id: "scryfall:oracle:island", provider: "scryfall", name: "Island", setCode: "khm", collectorNumber: "145", lang: "ja", resolutionMethod: "manual", confidence: 0.94 },
+      identity: { id: "scryfall:oracle:island", provider: "scryfall", name: "Island // Island", setCode: "khm", collectorNumber: "145", lang: "ja", resolutionMethod: "manual", confidence: 0.94,
+        metadata: { layout: "transform", faces: [{ name: "Island" }, { name: "Island Back" }] } },
       identityResolution: { status: "resolved", method: "manual", query: "Island", confidence: 0.94, confirmed: true, candidates: [] },
       faces: [{ id: "front", side: "front", name: "Island" }, { id: "back", side: "back", name: "Island Back" }],
       selectedArtworkByFace: {
@@ -74,7 +94,7 @@ describe("working card editor list UI", () => {
       artworkCandidates: [{ id: "mpc:back-choice", source: "mpc", identityId: "scryfall:oracle:island", faceId: "back", originalAvailable: true, originalCached: true, effectiveDpi: 300 }],
     }));
 
-    for (const text of ["Origem", "decklist.txt", "Tipo de import", "text", "Mainboard", "Hints importados", "Imported Island", "Set", "Collector", "Idioma", "EN", "M21", "Scryfall ID", "hint-id", "Identidade atual", "Island", "KHM", "145", "JA", "Provider", "scryfall", "Método de resolução", "manual", "Query", "Confiança", "94%", "Confirmada", "sim", "transform", "Artwork", "Front", "Back", "user-selected", "newest-en-highres-nondigital-v1", "Artwork escolhida manualmente para outra identidade.", "300 DPI", "Original validado no cache local"]) {
+    for (const text of ["Origem", "decklist.txt", "Tipo de import", "text", "Mainboard", "Hints importados", "Imported Island", "Set", "Collector", "Idioma", "EN", "M21", "Scryfall ID", "hint-id", "Identidade atual", "Island", "KHM", "145", "JA", "Provider", "scryfall", "Método de resolução", "manual", "Query", "Confiança", "94%", "Confirmada", "sim", "transform", "Carta dupla-face", "Artwork", "Front", "Back", "user-selected", "newest-en-highres-nondigital-v1", "Artwork escolhida manualmente para outra identidade.", "300 DPI", "Original validado no cache local"]) {
       expect(markup).toContain(text);
     }
     expect(markup).toContain("scryfall:front-choice");

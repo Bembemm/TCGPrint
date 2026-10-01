@@ -6,10 +6,17 @@ export type DuplexFlipMode = "long-edge" | "short-edge";
 export type DuplexReflectionAxis = "x" | "y";
 
 export interface DuplexArtworkOrientation {
-  /** Back artwork is printed as supplied so its text reads normally from the back side. */
-  readonly rotationDegrees: 0;
+  /** Rotation applied with PDF/vector placement so text reads upright after the sheet flip. */
+  readonly rotationDegrees: 0 | 180;
   readonly mirrorX: false;
   readonly mirrorY: false;
+}
+
+/** The page-space registration transform and the independent artwork orientation for a back page. */
+export interface DuplexBackPageTransform {
+  readonly physicalSlotReflectionAxis: DuplexReflectionAxis;
+  readonly registrationReflectionAxis: DuplexReflectionAxis;
+  readonly artworkOrientation: DuplexArtworkOrientation;
 }
 
 export interface DuplexSlotTransform {
@@ -44,6 +51,7 @@ export interface DuplexPagePair {
   readonly reflectionAxis: DuplexReflectionAxis;
   readonly slotTransform: DuplexSlotTransform;
   readonly backArtworkOrientation: DuplexArtworkOrientation;
+  readonly backPageTransform: DuplexBackPageTransform;
   readonly slots: readonly DuplexSlotPair[];
   readonly frontPlacement: GridPlacementPage;
   readonly backPlacement: GridPlacementPage;

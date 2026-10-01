@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import CutGuideControls from "./cut-guide-controls";
 import type { GuideColor, PageMarginsMm, PageOrientation } from "../../core/geometry";
 import { createDefaultRegistrationConfig, parseRegistrationConfig, type RegistrationConfig } from "../../core/registration";
+import type { ExportContentMode, MissingBackPolicy } from "../../persistence/projects/serializer";
+import type { DuplexFlipMode } from "../../core/duplex";
 
 export interface ProjectSettingsControlsProps {
   readonly bleedMm: string;
@@ -24,6 +26,9 @@ export interface ProjectSettingsControlsProps {
   readonly layoutColumns: string;
   readonly templateGeometryActive: boolean;
   readonly skippedSlotIndices: readonly number[];
+  readonly exportContentMode: ExportContentMode;
+  readonly missingBackPolicy: MissingBackPolicy;
+  readonly duplexFlipMode: DuplexFlipMode;
   readonly disabled: boolean;
   readonly onBleedMmChange: (value: string) => void;
   readonly onRoundedCornersChange: (value: boolean) => void;
@@ -41,6 +46,9 @@ export interface ProjectSettingsControlsProps {
   readonly onRegistrationChange: (value: RegistrationConfig) => void;
   readonly onLayoutRowsChange: (value: string) => void;
   readonly onLayoutColumnsChange: (value: string) => void;
+  readonly onExportContentModeChange: (value: ExportContentMode) => void;
+  readonly onMissingBackPolicyChange: (value: MissingBackPolicy) => void;
+  readonly onDuplexFlipModeChange: (value: DuplexFlipMode) => void;
 }
 
 export default function ProjectSettingsControls({
@@ -62,6 +70,9 @@ export default function ProjectSettingsControls({
   layoutColumns,
   templateGeometryActive,
   skippedSlotIndices,
+  exportContentMode,
+  missingBackPolicy,
+  duplexFlipMode,
   disabled,
   onBleedMmChange,
   onRoundedCornersChange,
@@ -79,6 +90,9 @@ export default function ProjectSettingsControls({
   onRegistrationChange,
   onLayoutRowsChange,
   onLayoutColumnsChange,
+  onExportContentModeChange,
+  onMissingBackPolicyChange,
+  onDuplexFlipModeChange,
 }: ProjectSettingsControlsProps) {
   const [customGeometryJson, setCustomGeometryJson] = useState("");
   const [customGeometryError, setCustomGeometryError] = useState("");
@@ -123,6 +137,18 @@ export default function ProjectSettingsControls({
   };
   return <>
     <div className="registration-layout-controls">
+      <label>Conteúdo do PDF<select aria-label="Modo de exportação" value={exportContentMode} disabled={disabled} onChange={(event) => onExportContentModeChange(event.currentTarget.value as ExportContentMode)}>
+        <option value="front-only">Somente frente</option><option value="back-only">Somente verso</option><option value="front-back-separated">Frente e verso separados (2 PDFs)</option><option value="duplex">Duplex intercalado</option>
+      </select></label>
+      {exportContentMode !== "front-only" && <>
+        <label>Virada da folha<select aria-label="Modo de virada duplex" value={duplexFlipMode} disabled={disabled} onChange={(event) => onDuplexFlipModeChange(event.currentTarget.value as DuplexFlipMode)}>
+          <option value="long-edge">Long edge</option><option value="short-edge">Short edge</option>
+        </select></label>
+        <label>Cartas sem verso<select aria-label="Política para cartas sem verso" value={missingBackPolicy} disabled={disabled} onChange={(event) => onMissingBackPolicyChange(event.currentTarget.value as MissingBackPolicy)}>
+          <option value="use-project-default">Usar verso padrão do Project</option><option value="blank">Slot em branco</option><option value="warn-and-continue">Avisar e continuar</option><option value="block">Bloquear export</option>
+        </select></label>
+        <p className="muted">Separated gera `front.pdf` e `back.pdf` independentes dentro de um ZIP com manifest pareado. Back-only e front-only continuam disponíveis em separado.</p>
+      </>}
       <label>Orientação da página<select value={pageOrientation} disabled={disabled} onChange={(event) => onPageOrientationChange(event.currentTarget.value as PageOrientation)}>
         <option value="portrait">Portrait</option><option value="landscape">Landscape</option>
       </select></label>

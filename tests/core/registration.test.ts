@@ -3,6 +3,7 @@ import {
   createDefaultRegistrationConfig,
   generateRegistrationGeometry,
   parseRegistrationConfig,
+  transformRegistrationGeometry,
   type RegistrationConfig,
   type RegistrationPrimitive,
 } from "../../core/registration";
@@ -86,6 +87,35 @@ describe("registration geometry", () => {
 
     expect(generateRegistrationGeometry(config, landscapePage))
       .toEqual(generateRegistrationGeometry(config, landscapePage));
+  });
+
+  it.each(["x", "y"] as const)("reflects asymmetric registration marks and reserved zones around the physical page on %s", (axis) => {
+    const geometry = generateRegistrationGeometry({
+      type: "custom",
+      orientation: "portrait",
+      marks: [[
+        { type: "rect", xMm: 10, yMm: 12, widthMm: 4, heightMm: 6, fill: true, strokeWidthMm: 0 },
+        { type: "line", x1Mm: 10, y1Mm: 20, x2Mm: 18, y2Mm: 20, strokeWidthMm: 0.4 },
+        { type: "circle", cxMm: 13, cyMm: 24, radiusMm: 2, fill: false, strokeWidthMm: 0.4 },
+      ]],
+      reservedZones: [{ xMm: 8, yMm: 10, widthMm: 16, heightMm: 18 }],
+    }, portraitPage);
+    const reflected = transformRegistrationGeometry(geometry, portraitPage, axis);
+
+    expect(reflected.marks[0]?.primitives).toEqual(axis === "x"
+      ? [
+          { type: "rect", xMm: 196, yMm: 12, widthMm: 4, heightMm: 6, fill: true, strokeWidthMm: 0 },
+          { type: "line", x1Mm: 200, y1Mm: 20, x2Mm: 192, y2Mm: 20, strokeWidthMm: 0.4 },
+          { type: "circle", cxMm: 197, cyMm: 24, radiusMm: 2, fill: false, strokeWidthMm: 0.4 },
+        ]
+      : [
+          { type: "rect", xMm: 10, yMm: 279, widthMm: 4, heightMm: 6, fill: true, strokeWidthMm: 0 },
+          { type: "line", x1Mm: 10, y1Mm: 277, x2Mm: 18, y2Mm: 277, strokeWidthMm: 0.4 },
+          { type: "circle", cxMm: 13, cyMm: 273, radiusMm: 2, fill: false, strokeWidthMm: 0.4 },
+        ]);
+    expect(reflected.reservedZones).toContainEqual(axis === "x"
+      ? { xMm: 186, yMm: 10, widthMm: 16, heightMm: 18 }
+      : { xMm: 8, yMm: 269, widthMm: 16, heightMm: 18 });
   });
 
   it.each([

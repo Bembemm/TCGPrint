@@ -1,5 +1,5 @@
 import { artworkQualityFromCandidate, type CardWorkbench } from "./card-workbench";
-import { CardExportServiceError, exportWorkingCardsWithDiagnostics, type CardExportBleedDiagnostic } from "./card-export";
+import { CardExportServiceError, exportWorkingCardsByContentMode, exportWorkingCardsWithDiagnostics, type BackExportPreflight, type CardExportBleedDiagnostic } from "./card-export";
 import type { ArtworkCatalogSource } from "../artwork/types";
 import type { ArtworkCandidate, BackLibraryAssetReference, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardBackMode, WorkingCardBackModeSelectionPolicy, WorkingCardMpcReference } from "../core/cards/types";
 import { isSafeArtworkCandidateId } from "../core/cards/ids";
@@ -18,6 +18,10 @@ import { ProjectRepository, ProjectRepositoryError } from "../persistence/projec
 import type { TemplateLibraryService } from "./template-library";
 import { CutSourceError } from "./cut-geometry/errors";
 import { resolveProjectCutLayout } from "./cut-geometry/service";
+import type { ExportContentMode, MissingBackPolicy } from "../persistence/projects/serializer";
+import type { DuplexFlipMode } from "../core/duplex";
+import type { BackLibraryOriginalSource } from "./card-export";
+import { createSeparatePdfArchive } from "./separate-pdf-archive";
 
 const FORBIDDEN_PROPERTIES = new Set(["originalBytes", "bytes", "sourcePath", "localOriginalPath", "originalUri", "previewUri", "filePaths", "absolutePath", "filesystemPath"]);
 const SOURCES = new Set(["scryfall", "upload", "mpc", "url", "custom"]);
@@ -25,6 +29,15 @@ const RESOLUTION_STATUSES = new Set(["resolved", "suggested", "ambiguous", "unre
 const RESOLUTION_METHODS = new Set(["scryfall-id", "set-collector", "name", "filename", "ocr", "fuzzy", "manual", "custom"]);
 const BACK_MODES = new Set<WorkingCardBackMode>(["auto", "project-default", "manual", "none"]);
 const BACK_MODE_SELECTION_POLICIES = new Set<WorkingCardBackModeSelectionPolicy>(["automatic", "explicit"]);
+const EXPORT_CONTENT_MODES = new Set<ExportContentMode>(["front-only", "back-only", "front-back-separated", "duplex"]);
+const MISSING_BACK_POLICIES = new Set<MissingBackPolicy>(["use-project-default", "blank", "warn-and-continue", "block"]);
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const input = record(value);
+  if (input) return `{${Object.keys(input).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(input[key])}`).join(",")}}`;
+  return JSON.stringify(value) ?? "null";
+}
 
 class ApiRequestError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); this.name = "ApiRequestError"; }
@@ -55,13 +68,13 @@ function optionalString(value: unknown, key: string, maximum = 256): string | un
   return requiredString(value, key, maximum);
 }
 
-function parseBackLibraryReference(value: unknown): BackLibraryAssetReference | undefined {
+function parseBackLibraryReference(value: unknown, fieldName = "manualBackAsset"): BackLibraryAssetReference | undefined {
   if (value === undefined || value === null) return undefined;
   const input = record(value);
-  if (!input) throw new ApiRequestError(400, "INVALID_REQUEST", "manualBackAsset must be an immutable Back Library reference.");
-  const sha256 = requiredString(input.sha256, "manualBackAsset.sha256", 64);
+  if (!input) throw new ApiRequestError(400, "INVALID_REQUEST", `${fieldName} must be an immutable Back Library reference.`);
+  const sha256 = requiredString(input.sha256, `${fieldName}.sha256`, 64);
   if (!/^[a-f0-9]{64}$/.test(sha256) || input.assetId !== `back:${sha256}` || (input.format !== "jpeg" && input.format !== "png")) {
-    throw new ApiRequestError(400, "INVALID_REQUEST", "manualBackAsset must include a content-addressed asset ID, SHA-256, and supported format.");
+    throw new ApiRequestError(400, "INVALID_REQUEST", `${fieldName} must include a content-addressed asset ID, SHA-256, and supported format.`);
   }
   return { assetId: input.assetId, sha256, format: input.format };
 }
@@ -312,6 +325,11 @@ export function parseWorkingCards(value: unknown): WorkingCard[] {
       faceAssociations: associations,
     };
   });
+  const ids = new Set<string>();
+  for (const card of cards) {
+    if (ids.has(card.id)) throw new ApiRequestError(400, "INVALID_REQUEST", `Card ID ${card.id} is duplicated in this export request.`);
+    ids.add(card.id);
+  }
   return cards;
 }
 
@@ -332,8 +350,11 @@ function respondError(error: unknown): Response {
   if (error instanceof ApiRequestError) return Response.json({ code: error.code, message: error.message }, { status: error.status });
   if (error instanceof ImportFailureError && error.code === "INVALID_SOURCE_PATH") return Response.json({ code: error.code, message: error.message }, { status: 400 });
   if (error instanceof CardExportServiceError) {
-    const status = error.code === "INVALID_BLEED" || error.code === "INVALID_ROUNDED_CORNERS" ? 400 : error.code === "ARTWORK_REQUIRED" ? 422 : error.code === "UNSUPPORTED_FORMAT" ? 415 : error.code === "ARTWORK_ORIGINAL_UNAVAILABLE" ? 422 : error.code === "EXPORT_TOO_LARGE" ? 413 : 500;
-    return Response.json({ code: error.code, message: error.message }, { status });
+    const status = error.code === "INVALID_BLEED" || error.code === "INVALID_ROUNDED_CORNERS" || error.code === "INVALID_BACK_MODE" || error.code === "INVALID_DUPLEX_FLIP" || error.code === "INVALID_CARD_ID" ? 400
+      : error.code === "ARTWORK_REQUIRED" || error.code === "BACK_REQUIRED" || error.code === "BACK_ORIGINAL_UNAVAILABLE" || error.code === "ARTWORK_ORIGINAL_UNAVAILABLE" ? 422
+        : error.code === "UNSUPPORTED_FORMAT" ? 415 : error.code === "EXPORT_TOO_LARGE" ? 413 : 500;
+    const preflight = error.cause && typeof error.cause === "object" && "backs" in error.cause ? error.cause as BackExportPreflight : undefined;
+    return Response.json({ code: error.code, message: error.message, ...(preflight ? { preflight } : {}) }, { status });
   }
   if (error instanceof CutSourceError) {
     const status = error.code === "CUT_SOURCE_TOO_LARGE" ? 413
@@ -647,11 +668,19 @@ export async function handleCardExport(
   workbench: CardWorkbench,
   projects?: ProjectRepository,
   templateLibrary?: TemplateLibraryService,
+  backLibrary?: BackLibraryOriginalSource,
 ): Promise<Response> {
   try {
     const body = await parseJsonRequest(request, 4_000_000);
     const cards = parseWorkingCards(body.cards);
     const options = record(body.options) ?? {};
+    const exportContentMode = options.exportContentMode === undefined ? "front-only" : options.exportContentMode as ExportContentMode;
+    if (!EXPORT_CONTENT_MODES.has(exportContentMode)) throw new ApiRequestError(400, "INVALID_EXPORT_CONTENT_MODE", "exportContentMode must be front-only, back-only, front-back-separated, or duplex.");
+    const missingBackPolicy = options.missingBackPolicy === undefined ? "use-project-default" : options.missingBackPolicy as MissingBackPolicy;
+    if (!MISSING_BACK_POLICIES.has(missingBackPolicy)) throw new ApiRequestError(400, "INVALID_BACK_MODE", "missingBackPolicy must be use-project-default, blank, warn-and-continue, or block.");
+    const duplexFlipMode = options.duplexFlipMode === undefined ? "long-edge" : options.duplexFlipMode as DuplexFlipMode;
+    if (duplexFlipMode !== "long-edge" && duplexFlipMode !== "short-edge") throw new ApiRequestError(400, "INVALID_DUPLEX_FLIP", "duplexFlipMode must be long-edge or short-edge.");
+    const projectDefaultBack = parseBackLibraryReference(options.projectDefaultBack, "projectDefaultBack") ?? null;
     const bleedMm = options.bleedMm === undefined ? 0.625 : Number(options.bleedMm);
     let cutGuides: CutGuideConfig;
     try {
@@ -698,18 +727,19 @@ export async function handleCardExport(
       throw new ApiRequestError(400, "INVALID_LAYOUT", "Skipped slots require a fixed grid or versioned template geometry.");
     }
     let derivedTemplateGeometry: TemplateLayoutGeometryMm | undefined;
+    let exportCards = cards;
+    let projectRevision: number | null = null;
     if (options.projectId !== undefined || options.expectedProjectRevision !== undefined) {
       if (typeof options.projectId !== "string" || !options.projectId.trim() || options.projectId.length > 180 || /[\u0000-\u001f]/.test(options.projectId)
         || !Number.isSafeInteger(options.expectedProjectRevision) || (options.expectedProjectRevision as number) < 1) {
-        throw new ApiRequestError(400, "INVALID_PROJECT_CUT_SYNC", "Project cut synchronization requires an opaque Project ID and positive expected revision.");
+        throw new ApiRequestError(400, "INVALID_PROJECT_EXPORT_SYNC", "Project export synchronization requires an opaque Project ID and positive expected revision.");
       }
-      if (!projects || !templateLibrary) throw new ApiRequestError(503, "CUT_SYNC_UNAVAILABLE", "Project cut synchronization is unavailable.");
+      if (!projects || !templateLibrary) throw new ApiRequestError(503, "PROJECT_EXPORT_SYNC_UNAVAILABLE", "Project export synchronization is unavailable.");
       const project = projects.open(options.projectId);
       if (project.revision !== options.expectedProjectRevision) {
         throw new ProjectRepositoryError("PROJECT_REVISION_CONFLICT", `Project revision ${project.revision} does not match requested revision ${options.expectedProjectRevision}.`, options.expectedProjectRevision as number, project.revision);
       }
       const saved = project.snapshot.settings;
-      const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
       const expectedLayoutOptions = {
         bleedMm: saved.bleedMm,
         roundedCorners: saved.roundedCorners,
@@ -733,7 +763,7 @@ export async function handleCardExport(
         cutGuides,
         pageOrientation: pageOrientation ?? "portrait",
         cardOrientation: cardOrientation ?? "portrait",
-        paperFormat: paperFormat ?? PAPER_FORMATS.A4,
+        paperFormat: paperFormat ?? { name: PAPER_FORMATS.A4.name, widthMm: PAPER_FORMATS.A4.widthMm, heightMm: PAPER_FORMATS.A4.heightMm },
         cardFormat: cardFormat ?? MAGIC_STANDARD_CARD,
         marginsMm: marginsMm ?? { top: 0, right: 0, bottom: 0, left: 0 },
         horizontalGapMm: horizontalGapMm ?? 0,
@@ -744,15 +774,26 @@ export async function handleCardExport(
         layoutColumns,
         skippedSlotIndices: skippedSlotIndices ?? [],
       };
-      const persistedCardOrder = project.snapshot.cards.map(({ id, quantity, order }) => ({ id, quantity, order }));
-      const submittedCardOrder = cards.map(({ id, quantity, order }) => ({ id, quantity, order }));
-      if (!same(expectedLayoutOptions, requestLayoutOptions) || !same(persistedCardOrder, submittedCardOrder)) {
-        throw new ApiRequestError(409, "PROJECT_CUT_SYNC_STALE", "PDF request does not match the autosaved Project settings and card order used by cut geometry. Save the Project and retry.");
+      const expectedBackOptions = {
+        exportContentMode: saved.exportContentMode,
+        missingBackPolicy: saved.missingBackPolicy,
+        duplexFlipMode: saved.duplexFlipMode,
+        projectDefaultBack: saved.projectDefaultBack,
+      };
+      const requestBackOptions = { exportContentMode, missingBackPolicy, duplexFlipMode, projectDefaultBack };
+      const savedCards = parseWorkingCards(project.snapshot.cards);
+      if (canonicalJson(expectedLayoutOptions) !== canonicalJson(requestLayoutOptions)) {
+        throw new ApiRequestError(409, "PROJECT_CUT_SYNC_STALE", "PDF request does not match the autosaved Project settings used by cut geometry. Save the Project and retry.");
+      }
+      if (canonicalJson(expectedBackOptions) !== canonicalJson(requestBackOptions) || canonicalJson(savedCards) !== canonicalJson(cards)) {
+        throw new ApiRequestError(409, "STALE_PROJECT", "PDF request does not match the autosaved Project revision, card order, artwork selections, or duplex settings. Save the Project and retry.");
       }
       const resolved = await resolveProjectCutLayout(project.id, project.revision, projects, templateLibrary);
       derivedTemplateGeometry = resolved.layout.derivedTemplateGeometry;
+      exportCards = savedCards;
+      projectRevision = project.revision;
     }
-    const result = await exportWorkingCardsWithDiagnostics(workbench, cards, {
+    const exportOptions = {
       bleedMm,
       cutGuides,
       roundedCorners: options.roundedCorners ?? false,
@@ -767,15 +808,58 @@ export async function handleCardExport(
       ...((derivedTemplateGeometry ?? templateGeometry) ? { templateGeometry: derivedTemplateGeometry ?? templateGeometry } : {}),
       ...(layoutRows !== undefined ? { layoutRows, layoutColumns } : {}),
       ...(skippedSlotIndices ? { skippedSlotIndices } : {}),
-    }, request.signal);
+      exportContentMode,
+      duplexFlipMode,
+      missingBackPolicy,
+      projectDefaultBack,
+      projectRevision,
+    } as const;
+    const result = await exportWorkingCardsByContentMode(workbench, backLibrary, exportCards, exportOptions, request.signal);
     const bleedReport = encodeBleedDiagnostics(result.bleedDiagnostics);
-    return new Response(new Uint8Array(result.pdfBytes), {
+    const backPreflight = Buffer.from(JSON.stringify({
+      projectRevision: result.preflight.projectRevision,
+      totalPhysicalCards: result.preflight.totalPhysicalCards,
+      dfcPhysicalCards: result.preflight.dfcPhysicalCards,
+      simplePhysicalCards: result.preflight.simplePhysicalCards,
+      backs: result.preflight.backs,
+      missingCount: result.preflight.missing.length,
+      warningCount: result.preflight.warnings.length,
+    })).toString("base64url");
+    const sharedHeaders = {
+      "Cache-Control": "no-store",
+      "X-TCGPrint-Bleed-Diagnostics": bleedReport.value,
+      "X-TCGPrint-Bleed-Diagnostics-Mode": bleedReport.mode,
+      "X-TCGPrint-Back-Preflight": backPreflight,
+      "X-TCGPrint-Export-Content-Mode": result.contentMode,
+      ...(result.pagePairingPlan ? {
+        "X-TCGPrint-Duplex-Flip-Mode": result.pagePairingPlan.flipMode,
+        "X-TCGPrint-Duplex-Page-Orientation": result.pagePairingPlan.pageOrientation,
+      } : {}),
+    };
+    if (result.contentMode === "front-back-separated") {
+      const front = result.frontPdfBytes!;
+      const back = result.backPdfBytes!;
+      const manifest = new TextEncoder().encode(JSON.stringify(result.manifest));
+      const archive = createSeparatePdfArchive([
+        { filename: "front.pdf", bytes: front },
+        { filename: "back.pdf", bytes: back },
+        { filename: "manifest.json", bytes: manifest },
+      ]);
+      return new Response(Uint8Array.from(archive), {
+        headers: {
+          ...sharedHeaders,
+          "Content-Type": "application/zip",
+          "Content-Disposition": 'attachment; filename="tcgprint-front-back.zip"',
+        },
+      });
+    }
+    const filename = result.contentMode === "front-only" ? "tcgprint-cards.pdf"
+      : result.contentMode === "back-only" ? "tcgprint-back.pdf" : "tcgprint-duplex.pdf";
+    return new Response(Uint8Array.from(result.pdfBytes!), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": 'attachment; filename="tcgprint-cards.pdf"',
-        "Cache-Control": "no-store",
-        "X-TCGPrint-Bleed-Diagnostics": bleedReport.value,
-        "X-TCGPrint-Bleed-Diagnostics-Mode": bleedReport.mode,
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        ...sharedHeaders,
       },
     });
   } catch (error) { return respondError(error); }

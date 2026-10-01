@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { PDFDocument } from "@pdfme/pdf-lib";
 import {
   BLEED_ALGORITHM_VERSION,
   BleedEngine,
@@ -11,13 +12,22 @@ import {
   type BleedResult,
 } from "../image-engine/bleed";
 import { MAGIC_STANDARD_CARD, PAPER_FORMATS, type CardFormat, type CutGuideConfig, type PaperFormat, type TemplateLayoutGeometryMm } from "../core/geometry";
+import { createDuplexPagePairing, DuplexPairingError, type DuplexPagePairingPlan, type DuplexFlipMode } from "../core/duplex";
 import type { PageMarginsMm, PageOrientation } from "../core/geometry";
 import type { RegistrationConfig } from "../core/registration";
+import type { GridPlacementPage } from "../core/geometry/page-placement";
 import { LosslessPdfEngine, PdfExportError } from "../pdf-engine/document";
 import { mpcArtworkCandidateId } from "../core/cards/ids";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../core/cards/limits";
 import type { ArtworkCandidate, CardFaceSide, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
+import { fallbackToProjectDefaultBack, resolveEffectiveCardBack, isDoubleFacedIdentity } from "../core/cards/back-selection";
+import type { BackLibraryAssetReference, CardIdentity } from "../core/cards/types";
 import type { CardWorkbench } from "./card-workbench";
+import type { ArtworkOriginal } from "../artwork/storage/types";
+import { BackLibraryError } from "./back-library";
+import type { ExportContentMode, MissingBackPolicy } from "../persistence/projects/serializer";
+import { calculateSharedPagePlacements } from "../core/duplex/shared-placement";
+import type { DuplexBackPageTransform } from "../core/duplex";
 
 export interface CardExportOptions {
   readonly bleedMm: number;
@@ -35,6 +45,17 @@ export interface CardExportOptions {
   readonly layoutRows?: number;
   readonly layoutColumns?: number;
   readonly skippedSlotIndices?: readonly number[];
+  /** Internal shared front/back placement plan; absent for the legacy front-only path. */
+  readonly pagePlacements?: readonly GridPlacementPage[];
+  /** Internal vector/page transform required by every back-side render. */
+  readonly duplexBackPageTransform?: DuplexBackPageTransform;
+  /** Missing back indexes remain in pagePlacements while no image is painted. */
+  readonly skipImageIndexes?: ReadonlySet<number>;
+  readonly exportContentMode?: ExportContentMode;
+  readonly duplexFlipMode?: DuplexFlipMode;
+  readonly missingBackPolicy?: MissingBackPolicy;
+  readonly projectDefaultBack?: BackLibraryAssetReference | null;
+  readonly projectRevision?: number | null;
 }
 
 export interface CardExportBleedDiagnostic {
@@ -60,8 +81,68 @@ export interface CardExportResult {
   readonly bleedDiagnostics: readonly CardExportBleedDiagnostic[];
 }
 
+export interface BackExportPreflightItem {
+  readonly cardId: string;
+  readonly cardName: string;
+  readonly physicalCardIndex: number;
+  readonly copyNumber: number;
+  readonly backMode: WorkingCard["backMode"];
+  readonly reason: string;
+}
+
+export interface BackExportPreflight {
+  readonly projectRevision: number | null;
+  readonly totalPhysicalCards: number;
+  readonly dfcPhysicalCards: number;
+  readonly simplePhysicalCards: number;
+  readonly backs: {
+    readonly auto: number;
+    readonly projectDefault: number;
+    readonly manual: number;
+    readonly noneOrMissing: number;
+  };
+  readonly missing: readonly BackExportPreflightItem[];
+  readonly warnings: readonly BackExportPreflightItem[];
+}
+
+export interface SeparatePdfManifest {
+  readonly schemaVersion: 1;
+  readonly projectRevision: number | null;
+  readonly pageOrientation: PageOrientation;
+  readonly cardOrientation: PageOrientation;
+  readonly flipMode: DuplexFlipMode;
+  readonly frontPdf: { readonly filename: "front.pdf"; readonly sha256: string; readonly pageCount: number };
+  readonly backPdf: { readonly filename: "back.pdf"; readonly sha256: string; readonly pageCount: number };
+  readonly pagePairs: readonly {
+    readonly frontPageNumber: number;
+    readonly backPageNumber: number;
+    readonly physicalSlotReflectionAxis: "x" | "y";
+    readonly registrationReflectionAxis: "x" | "y";
+    readonly backArtworkRotationDegrees: 0 | 180;
+    readonly slots: readonly {
+      readonly physicalCardIndex: number | null;
+      readonly frontSlotIndex: number;
+      readonly backSlotIndex: number;
+      readonly skipped: boolean;
+      readonly reserved: boolean;
+    }[];
+  }[];
+}
+
+export interface CardExportModeResult {
+  readonly contentMode: ExportContentMode;
+  readonly pdfBytes?: Uint8Array;
+  readonly bleedDiagnostics: readonly CardExportBleedDiagnostic[];
+  readonly frontPdfBytes?: Uint8Array;
+  readonly backPdfBytes?: Uint8Array;
+  readonly manifest?: SeparatePdfManifest;
+  readonly pagePairingPlan?: DuplexPagePairingPlan;
+  readonly pageOrder?: readonly string[];
+  readonly preflight: BackExportPreflight;
+}
+
 export class CardExportServiceError extends Error {
-  constructor(readonly code: "ARTWORK_REQUIRED" | "ARTWORK_ORIGINAL_UNAVAILABLE" | "UNSUPPORTED_FORMAT" | "INVALID_BLEED" | "INVALID_ROUNDED_CORNERS" | "EXPORT_FAILED" | "EXPORT_TOO_LARGE", message: string, options?: ErrorOptions) {
+  constructor(readonly code: "ARTWORK_REQUIRED" | "ARTWORK_ORIGINAL_UNAVAILABLE" | "BACK_REQUIRED" | "BACK_ORIGINAL_UNAVAILABLE" | "INVALID_BACK_MODE" | "INVALID_DUPLEX_FLIP" | "DUPLEX_PAIRING_FAILED" | "INVALID_CARD_ID" | "UNSUPPORTED_FORMAT" | "INVALID_BLEED" | "INVALID_ROUNDED_CORNERS" | "EXPORT_FAILED" | "EXPORT_TOO_LARGE", message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "CardExportServiceError";
   }
@@ -141,8 +222,18 @@ export async function exportWorkingCardsWithDiagnostics(
     throw new CardExportServiceError("INVALID_ROUNDED_CORNERS", "Rounded-corner bleed needs a card format with an explicit physical corner radius.");
   }
 
+  let nextPhysicalCardIndex = 0;
   for (const card of [...cards].sort((a, b) => a.order - b.order)) {
     if (signal?.aborted) throw new CardExportServiceError("EXPORT_FAILED", "PDF export was cancelled.");
+    const physicalCardIndexes = Array.from({ length: card.quantity }, () => nextPhysicalCardIndex++);
+    const drawableCopies = physicalCardIndexes.filter((index) => !options.skipImageIndexes?.has(index));
+    if (drawableCopies.length === 0) {
+      for (const _physicalCardIndex of physicalCardIndexes) {
+        composedImages.push(new Uint8Array());
+        composedBleeds.push(undefined);
+      }
+      continue;
+    }
     const selection = card.selectedArtworkByFace.front;
     if (!selection) throw new CardExportServiceError("ARTWORK_REQUIRED", `${card.identity?.name ?? card.identityHints.name ?? "Custom card"} needs a selected front artwork.`);
     let candidate: ArtworkCandidate | undefined;
@@ -230,9 +321,14 @@ export async function exportWorkingCardsWithDiagnostics(
         previewSha256: digest(bleed.preview.bytes),
       });
     }
-    for (let copy = 0; copy < card.quantity; copy += 1) {
-      composedImages.push(image);
-      composedBleeds.push(bleed);
+    for (const physicalCardIndex of physicalCardIndexes) {
+      if (options.skipImageIndexes?.has(physicalCardIndex)) {
+        composedImages.push(new Uint8Array());
+        composedBleeds.push(undefined);
+      } else {
+        composedImages.push(image);
+        composedBleeds.push(bleed);
+      }
     }
   }
 
@@ -253,6 +349,9 @@ export async function exportWorkingCardsWithDiagnostics(
       layoutRows: options.layoutRows,
       layoutColumns: options.layoutColumns,
       skippedSlotIndices: options.skippedSlotIndices,
+      ...(options.pagePlacements ? { pagePlacements: options.pagePlacements } : {}),
+      ...(options.duplexBackPageTransform ? { duplexBackPageTransform: options.duplexBackPageTransform } : {}),
+      ...(options.skipImageIndexes ? { skipImageIndexes: options.skipImageIndexes } : {}),
     });
     return { pdfBytes, bleedDiagnostics };
   } catch (error) {
@@ -268,4 +367,339 @@ export async function exportWorkingCards(
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
   return (await exportWorkingCardsWithDiagnostics(catalog, cards, options, signal)).pdfBytes;
+}
+
+export interface CardExportContentOptions extends CardExportOptions {
+  readonly exportContentMode?: ExportContentMode;
+  readonly duplexFlipMode?: DuplexFlipMode;
+  readonly missingBackPolicy?: MissingBackPolicy;
+  readonly projectDefaultBack?: BackLibraryAssetReference | null;
+  readonly projectRevision?: number | null;
+}
+
+export interface BackLibraryOriginalSource {
+  resolveOriginal(reference: BackLibraryAssetReference): Promise<ArtworkOriginal>;
+}
+
+interface PhysicalCopy {
+  readonly card: WorkingCard;
+  readonly physicalCardIndex: number;
+  readonly copyNumber: number;
+}
+
+interface ResolvedBack {
+  readonly mode: WorkingCard["backMode"];
+  readonly selection?: SelectedArtwork;
+  readonly libraryReference?: BackLibraryAssetReference;
+  readonly missingReason?: string;
+}
+
+function orderedPhysicalCopies(cards: readonly WorkingCard[]): readonly PhysicalCopy[] {
+  const physical: PhysicalCopy[] = [];
+  const ids = new Set<string>();
+  for (const card of cards) {
+    if (!card.id || ids.has(card.id)) throw new CardExportServiceError("INVALID_CARD_ID", "Every logical card in an export must have a unique card ID.");
+    ids.add(card.id);
+  }
+  const orderedCards = cards.map((card, index) => ({ card, index })).sort((left, right) => left.card.order - right.card.order || left.index - right.index);
+  for (const { card } of orderedCards) {
+    for (let copy = 0; copy < card.quantity; copy += 1) {
+      physical.push({ card, physicalCardIndex: physical.length, copyNumber: copy + 1 });
+    }
+  }
+  return physical;
+}
+
+function backName(card: WorkingCard): string {
+  return card.identity?.name ?? card.identityHints.name ?? "Custom card";
+}
+
+function sharedPagePlacements(count: number, options: CardExportOptions): { readonly pages: readonly GridPlacementPage[]; readonly pageOrientation: PageOrientation } {
+  return calculateSharedPagePlacements(count, options);
+}
+
+function memoizedArtworkCatalog(
+  catalog: Pick<CardWorkbench, "getArtworkCandidate" | "getArtworkOriginal">,
+  directCandidates: ReadonlyMap<string, ArtworkCandidate>,
+  directOriginals: ReadonlyMap<string, ArtworkOriginal>,
+): Pick<CardWorkbench, "getArtworkCandidate" | "getArtworkOriginal"> {
+  const candidates = new Map<string, ReturnType<CardWorkbench["getArtworkCandidate"]>>();
+  const originals = new Map<string, ReturnType<CardWorkbench["getArtworkOriginal"]>>();
+  return {
+    getArtworkCandidate(candidateId, options) {
+      const direct = directCandidates.get(candidateId);
+      if (direct) return Promise.resolve(direct);
+      const key = JSON.stringify([candidateId, options?.identity?.id ?? null, options?.mpcReferences ?? []]);
+      let pending = candidates.get(key);
+      if (!pending) {
+        pending = catalog.getArtworkCandidate(candidateId, options);
+        candidates.set(key, pending);
+      }
+      return pending;
+    },
+    getArtworkOriginal(candidateId, signal) {
+      const direct = directOriginals.get(candidateId);
+      if (direct) return Promise.resolve(direct);
+      let pending = originals.get(candidateId);
+      if (!pending) {
+        pending = catalog.getArtworkOriginal(candidateId, signal);
+        originals.set(candidateId, pending);
+      }
+      return pending;
+    },
+  };
+}
+
+function separateManifest(
+  plan: DuplexPagePairingPlan,
+  frontPdfBytes: Uint8Array,
+  backPdfBytes: Uint8Array,
+  projectRevision: number | null,
+  cardOrientation: PageOrientation,
+): SeparatePdfManifest {
+  return {
+    schemaVersion: 1,
+    projectRevision,
+    pageOrientation: plan.pageOrientation,
+    cardOrientation,
+    flipMode: plan.flipMode,
+    frontPdf: { filename: "front.pdf", sha256: digest(frontPdfBytes), pageCount: plan.pagePairs.length },
+    backPdf: { filename: "back.pdf", sha256: digest(backPdfBytes), pageCount: plan.pagePairs.length },
+    pagePairs: plan.pagePairs.map((pair) => ({
+      frontPageNumber: pair.frontPageNumber,
+      backPageNumber: pair.backPageNumber,
+      physicalSlotReflectionAxis: pair.backPageTransform.physicalSlotReflectionAxis,
+      registrationReflectionAxis: pair.backPageTransform.registrationReflectionAxis,
+      backArtworkRotationDegrees: pair.backPageTransform.artworkOrientation.rotationDegrees,
+      slots: pair.slots.map((slot) => ({
+        physicalCardIndex: slot.physicalCardIndex ?? null,
+        frontSlotIndex: slot.frontSlotIndex,
+        backSlotIndex: slot.backSlotIndex,
+        skipped: slot.skippedByUser,
+        reserved: slot.reserved,
+      })),
+    })),
+  };
+}
+
+async function interleavePdfPages(
+  frontPdfBytes: Uint8Array,
+  backPdfBytes: Uint8Array,
+  plan: DuplexPagePairingPlan,
+): Promise<Uint8Array> {
+  try {
+    const front = await PDFDocument.load(frontPdfBytes);
+    const back = await PDFDocument.load(backPdfBytes);
+    if (front.getPageCount() !== plan.pagePairs.length || back.getPageCount() !== plan.pagePairs.length) {
+      throw new CardExportServiceError("DUPLEX_PAIRING_FAILED", "Front and back page counts do not match the shared physical pairing plan.");
+    }
+    const interleaved = await PDFDocument.create();
+    for (const pair of plan.pagePairs) {
+      const [frontPage] = await interleaved.copyPages(front, [pair.frontPageIndex]);
+      const [backPage] = await interleaved.copyPages(back, [pair.backPageIndex]);
+      interleaved.addPage(frontPage!);
+      interleaved.addPage(backPage!);
+    }
+    return new Uint8Array(await interleaved.save());
+  } catch (error) {
+    if (error instanceof CardExportServiceError) throw error;
+    throw new CardExportServiceError("DUPLEX_PAIRING_FAILED", "Duplex front/back pages could not be interleaved by their explicit page pairing.", { cause: error });
+  }
+}
+
+/** Resolves backs once per logical card and renders every mode from one shared physical placement plan. */
+export async function exportWorkingCardsByContentMode(
+  catalog: Pick<CardWorkbench, "getArtworkCandidate" | "getArtworkOriginal">,
+  backLibrary: BackLibraryOriginalSource | undefined,
+  cards: readonly WorkingCard[],
+  options: CardExportContentOptions,
+  signal?: AbortSignal,
+): Promise<CardExportModeResult> {
+  const contentMode = options.exportContentMode ?? "front-only";
+  if (contentMode !== "front-only" && contentMode !== "back-only" && contentMode !== "front-back-separated" && contentMode !== "duplex") {
+    throw new CardExportServiceError("INVALID_BACK_MODE", "Export content mode is invalid.");
+  }
+  const physical = orderedPhysicalCopies(cards);
+  const totalPhysicalCards = physical.length;
+  if (totalPhysicalCards < 1) throw new CardExportServiceError("ARTWORK_REQUIRED", "Add at least one card to export.");
+  if (totalPhysicalCards > MAX_PHYSICAL_CARDS_PER_EXPORT) throw new CardExportServiceError("EXPORT_TOO_LARGE", `The first export is limited to ${MAX_PHYSICAL_CARDS_PER_EXPORT} physical cards per PDF.`);
+  const dfcPhysicalCards = physical.filter(({ card }) => isDoubleFacedIdentity(card.identity)).length;
+  const commonPreflight = {
+    projectRevision: options.projectRevision ?? null,
+    totalPhysicalCards,
+    dfcPhysicalCards,
+    simplePhysicalCards: totalPhysicalCards - dfcPhysicalCards,
+  };
+  const emptyBackCounts = { auto: 0, projectDefault: 0, manual: 0, noneOrMissing: 0 };
+  if (contentMode === "front-only") {
+    const front = await exportWorkingCardsWithDiagnostics(catalog, cards, options, signal);
+    return {
+      contentMode,
+      pdfBytes: front.pdfBytes,
+      bleedDiagnostics: front.bleedDiagnostics,
+      preflight: { ...commonPreflight, backs: emptyBackCounts, missing: [], warnings: [] },
+    };
+  }
+  if (options.duplexFlipMode !== undefined && options.duplexFlipMode !== "long-edge" && options.duplexFlipMode !== "short-edge") {
+    throw new CardExportServiceError("INVALID_DUPLEX_FLIP", "Duplex flip mode must be long-edge or short-edge.");
+  }
+  const flipMode = options.duplexFlipMode ?? "long-edge";
+  const missingBackPolicy = options.missingBackPolicy ?? "use-project-default";
+  if (!(["use-project-default", "blank", "warn-and-continue", "block"] as const).includes(missingBackPolicy)) {
+    throw new CardExportServiceError("INVALID_BACK_MODE", "Missing-back policy is invalid.");
+  }
+  const { pages, pageOrientation } = sharedPagePlacements(totalPhysicalCards, options);
+  let pairingPlan: DuplexPagePairingPlan;
+  try { pairingPlan = createDuplexPagePairing(pages, { pageOrientation, flipMode }); }
+  catch (error) {
+    if (error instanceof DuplexPairingError) throw new CardExportServiceError(error.code, error.message, { cause: error });
+    throw error;
+  }
+
+  const missing: BackExportPreflightItem[] = [];
+  const warnings: BackExportPreflightItem[] = [];
+  const backCounts = { auto: 0, projectDefault: 0, manual: 0, noneOrMissing: 0 };
+  const resolvedByCard = new Map<string, ResolvedBack>();
+  const directCandidates = new Map<string, ArtworkCandidate>();
+  const directOriginals = new Map<string, ArtworkOriginal>();
+  const originalByBackHash = new Map<string, ArtworkOriginal>();
+  const physicalBackSelections = new Map<number, SelectedArtwork>();
+
+  for (const copy of physical) {
+    if (signal?.aborted) throw new CardExportServiceError("EXPORT_FAILED", "PDF export was cancelled.");
+    let resolved = resolvedByCard.get(copy.card.id);
+    if (!resolved) {
+      const effective = resolveEffectiveCardBack(copy.card, options.projectDefaultBack);
+      const resolvedBack = missingBackPolicy === "use-project-default"
+        ? fallbackToProjectDefaultBack(copy.card, effective, options.projectDefaultBack)
+        : effective;
+      if (resolvedBack.status === "available") {
+        resolved = {
+          mode: resolvedBack.mode,
+          ...(resolvedBack.artwork ? { selection: resolvedBack.artwork } : {}),
+          ...(resolvedBack.asset ? { libraryReference: resolvedBack.asset } : {}),
+        };
+      } else {
+        resolved = {
+          mode: resolvedBack.mode,
+          missingReason: resolvedBack.status === "intentional-none"
+            ? "This card is explicitly configured without a back."
+            : isDoubleFacedIdentity(copy.card.identity) && resolvedBack.mode === "auto"
+              ? "This double-faced card's provider-backed back face is unresolved; a generic Project back cannot replace it."
+              : "No reproducible back artwork is available.",
+        };
+      }
+      resolvedByCard.set(copy.card.id, resolved);
+      if (resolved.libraryReference) {
+        if (!backLibrary) throw new CardExportServiceError("BACK_ORIGINAL_UNAVAILABLE", "Back Library is unavailable for a referenced Project back.");
+        const key = `${resolved.libraryReference.assetId}\0${resolved.libraryReference.sha256}`;
+        let original = originalByBackHash.get(key);
+        if (!original) {
+          try { original = await backLibrary.resolveOriginal(resolved.libraryReference); }
+          catch (error) {
+            throw new CardExportServiceError("BACK_ORIGINAL_UNAVAILABLE", "The referenced Back Library original is missing or failed SHA-256 validation.", { cause: error });
+          }
+          if (!(original.bytes instanceof Uint8Array) || digest(original.bytes) !== resolved.libraryReference.sha256 || original.contentHash !== resolved.libraryReference.sha256) {
+            throw new CardExportServiceError("BACK_ORIGINAL_UNAVAILABLE", "The referenced Back Library bytes do not match the Project SHA-256.");
+          }
+          if (original.format !== "jpeg" && original.format !== "png") {
+            throw new CardExportServiceError("UNSUPPORTED_FORMAT", `Back Library ${original.format.toUpperCase()} is not supported by the PDF engine.`);
+          }
+          originalByBackHash.set(key, original);
+        }
+        const candidateId = `back:${resolved.libraryReference.sha256}`;
+        directCandidates.set(candidateId, {
+          id: candidateId,
+          source: "custom",
+          identityId: copy.card.identity?.id ?? null,
+          faceId: "back",
+          originalAvailable: true,
+          widthPx: original.widthPx,
+          heightPx: original.heightPx,
+          metadata: { contentHash: resolved.libraryReference.sha256, backLibrary: true },
+        });
+        directOriginals.set(candidateId, original);
+        resolvedByCard.set(copy.card.id, { ...resolved, selection: {
+          candidateId,
+          source: "custom",
+          identityId: copy.card.identity?.id ?? null,
+          faceId: "back",
+        } });
+        resolved = resolvedByCard.get(copy.card.id)!;
+      }
+    }
+    if (resolved.selection) physicalBackSelections.set(copy.physicalCardIndex, resolved.selection);
+    if (resolved.missingReason) {
+      const item = {
+        cardId: copy.card.id,
+        cardName: backName(copy.card),
+        physicalCardIndex: copy.physicalCardIndex,
+        copyNumber: copy.copyNumber,
+        backMode: resolved.mode,
+        reason: resolved.missingReason,
+      } satisfies BackExportPreflightItem;
+      missing.push(item);
+      if (missingBackPolicy === "warn-and-continue" || missingBackPolicy === "use-project-default") warnings.push(item);
+    }
+    if (resolved.mode === "auto") backCounts.auto += 1;
+    else if (resolved.mode === "project-default") backCounts.projectDefault += 1;
+    else if (resolved.mode === "manual") backCounts.manual += 1;
+    else backCounts.noneOrMissing += 1;
+  }
+  const preflight: BackExportPreflight = { ...commonPreflight, backs: backCounts, missing, warnings };
+  if (missingBackPolicy === "block" && missing.length) {
+    const identities = missing.map(({ cardName, copyNumber }) => `${cardName} copy ${copyNumber}`).join(", ");
+    throw new CardExportServiceError("BACK_REQUIRED", `Backs are required for: ${identities}.`, { cause: preflight });
+  }
+
+  const memoCatalog = memoizedArtworkCatalog(catalog, directCandidates, directOriginals);
+  const backCards: WorkingCard[] = physical.map((copy) => {
+    const selection = physicalBackSelections.get(copy.physicalCardIndex);
+    return {
+      ...copy.card,
+      quantity: 1,
+      order: copy.physicalCardIndex,
+      selectedArtworkByFace: selection ? { front: selection } : {},
+    };
+  });
+  const blankIndexes = new Set(missing.map(({ physicalCardIndex }) => physicalCardIndex));
+  const backPlacements = pairingPlan.pagePairs.map(({ backPlacement }) => backPlacement);
+  const duplexBackPageTransform = pairingPlan.pagePairs[0]!.backPageTransform;
+  const renderOptions: CardExportOptions = {
+    ...options,
+    pagePlacements: backPlacements,
+    duplexBackPageTransform,
+    skipImageIndexes: blankIndexes,
+  };
+
+  try {
+    if (contentMode === "back-only") {
+      const back = await exportWorkingCardsWithDiagnostics(memoCatalog, backCards, renderOptions, signal);
+      return { contentMode, pdfBytes: back.pdfBytes, bleedDiagnostics: back.bleedDiagnostics, pagePairingPlan: pairingPlan, preflight };
+    }
+    const front = await exportWorkingCardsWithDiagnostics(memoCatalog, cards, { ...options, pagePlacements: pages }, signal);
+    const back = await exportWorkingCardsWithDiagnostics(memoCatalog, backCards, renderOptions, signal);
+    if (contentMode === "front-back-separated") {
+      const effectiveCardOrientation = options.cardOrientation
+        ?? ((options.cardFormat ?? MAGIC_STANDARD_CARD).widthMm > (options.cardFormat ?? MAGIC_STANDARD_CARD).heightMm ? "landscape" : "portrait");
+      const manifest = separateManifest(pairingPlan, front.pdfBytes, back.pdfBytes, options.projectRevision ?? null, effectiveCardOrientation);
+      return { contentMode, frontPdfBytes: front.pdfBytes, backPdfBytes: back.pdfBytes, bleedDiagnostics: [...front.bleedDiagnostics, ...back.bleedDiagnostics], manifest, pagePairingPlan: pairingPlan, preflight };
+    }
+    const pdfBytes = await interleavePdfPages(front.pdfBytes, back.pdfBytes, pairingPlan);
+    return {
+      contentMode,
+      pdfBytes,
+      bleedDiagnostics: [...front.bleedDiagnostics, ...back.bleedDiagnostics],
+      pagePairingPlan: pairingPlan,
+      pageOrder: pairingPlan.pagePairs.flatMap(({ frontPageNumber, backPageNumber }) => [`front:${frontPageNumber}`, `back:${backPageNumber}`]),
+      preflight,
+    };
+  } catch (error) {
+    if (error instanceof CardExportServiceError) throw error;
+    if (error instanceof BackLibraryError) throw new CardExportServiceError("BACK_ORIGINAL_UNAVAILABLE", error.message, { cause: error });
+    if (error instanceof Error && /original|artwork candidate/i.test(error.message)) {
+      throw new CardExportServiceError("BACK_ORIGINAL_UNAVAILABLE", "A back artwork original could not be loaded for PDF export.", { cause: error });
+    }
+    throw error;
+  }
 }

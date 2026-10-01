@@ -71,8 +71,20 @@ export function resolveEffectiveCardBack(
   return { mode: "auto", status: "missing", source: "dfc-face" };
 }
 
+/** Applies the explicit missing-back fallback without replacing DFC faces, manual locks, or intentional blanks. */
+export function fallbackToProjectDefaultBack(
+  card: WorkingCard,
+  effective: EffectiveCardBack,
+  projectDefault?: BackLibraryAssetReference | null,
+): EffectiveCardBack {
+  if (!projectDefault || effective.status !== "missing" || effective.mode === "manual"
+    || isDoubleFacedIdentity(card.identity)) return effective;
+  return { mode: "project-default", status: "available", source: "project-default", asset: projectDefault };
+}
+
 /** Marks an explicit mode choice; selecting a print mode never changes artwork. */
 export function setWorkingCardBackMode(card: WorkingCard, mode: WorkingCardBackMode): WorkingCard {
+  if (mode === "auto") return restoreAutomaticBackSelection(card);
   if (mode === "manual") {
     return { ...card, backMode: mode, backModeSelectionPolicy: "explicit" };
   }
@@ -95,7 +107,7 @@ export function selectManualBackLibraryAsset(
 /** Explicitly clears a manual lock and returns to the face or Project default policy. */
 export function restoreAutomaticBackSelection(card: WorkingCard): WorkingCard {
   const selectedArtworkByFace = { ...card.selectedArtworkByFace };
-  if (card.backMode === "manual") delete selectedArtworkByFace.back;
+  if (card.backMode === "manual" || selectedArtworkByFace.back?.selectionPolicy === "user-selected") delete selectedArtworkByFace.back;
   const { manualBackAsset: _manualBackAsset, ...rest } = card;
   const isDfc = isDoubleFacedIdentity(card.identity);
   return {

@@ -1,0 +1,673 @@
+{
+  "schemaVersion": 1,
+  "validation": "duplex pairing/geometry validated in software",
+  "physicalAlignmentValidated": false,
+  "calibration": "not included; Phase 13 owns measured printer correction",
+  "physicalCardsPerRun": 9,
+  "doubleFacedCardsPerRun": 9,
+  "simpleCardsPerRun": 0,
+  "sourceArtwork": "18 independent lossless PNG originals rendered from the included asymmetric SVG fixture art; each face has its own SHA-256, TOP arrow and numbered front/back ID",
+  "fixtureArtworkFiles": [
+    {
+      "filename": "fixtures/numbered-01-back.png",
+      "sha256": "978721c9869e3ed182b33f1726f52ea601e9b2a7a00b04f71e8af0c984e3f34b",
+      "bytes": 12595
+    },
+    {
+      "filename": "fixtures/numbered-01-back.svg",
+      "sha256": "5a8d7dc9721c5553ea322cef2d1372ac03f1ba4401bf5d1af93d37176645230b",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-01-front.png",
+      "sha256": "d71083b81d20a68447afc7be992ef0d7d22a0c4fab8472f92f540e3d56b90efc",
+      "bytes": 12229
+    },
+    {
+      "filename": "fixtures/numbered-01-front.svg",
+      "sha256": "d4908f2bd32b3ab69a6f0cf7de56cfb63f2acbe0bb0a04590ceccd48636f2295",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-02-back.png",
+      "sha256": "3a374cc4635005b0e74a848f808d69737b19bed98d2d386c581cc63ec3968a6d",
+      "bytes": 12907
+    },
+    {
+      "filename": "fixtures/numbered-02-back.svg",
+      "sha256": "1ecb80522a925690b3077469add4a459bbdc1b2d6da21e30cf6a25c578aa38e0",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-02-front.png",
+      "sha256": "abcef91c8398e7e6453661f269821f692a96f0cc0312701865cb1a0f3a12cccd",
+      "bytes": 12584
+    },
+    {
+      "filename": "fixtures/numbered-02-front.svg",
+      "sha256": "aba561adce0b746d370192b2170eb01e143c69fb896cedb46e8f8cd7f2f481cb",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-03-back.png",
+      "sha256": "2c45d1b7985064467dbeb755b3ecb6243df050143063643dc97db7f4939ffa32",
+      "bytes": 13021
+    },
+    {
+      "filename": "fixtures/numbered-03-back.svg",
+      "sha256": "b3d545f0fc049e656e203f2a79d4e68e7aca69cb5cec9d94db1934cec402efd2",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-03-front.png",
+      "sha256": "8595ace8268ae25ce632c127fb383495735a5d51a6969bc95060c70dc0dc9d0f",
+      "bytes": 12720
+    },
+    {
+      "filename": "fixtures/numbered-03-front.svg",
+      "sha256": "f3a0791c01553c4837a20d7805a81ba6d788e1c709934cc97c571c6fd2dad21e",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-04-back.png",
+      "sha256": "6d1a5c4638bbe6fb057b625df8741f44fe3bcff63555fff0d9b1b0092f0752fb",
+      "bytes": 12740
+    },
+    {
+      "filename": "fixtures/numbered-04-back.svg",
+      "sha256": "7f90efb228a89681632115043e5ec43bbfa77c3d18adfd962fb8232420821a2c",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-04-front.png",
+      "sha256": "f9a0d4ecc5b90aa75efd61fa5c1dc938f142b1ae7928b9c08bb9d0d8c7af884c",
+      "bytes": 12398
+    },
+    {
+      "filename": "fixtures/numbered-04-front.svg",
+      "sha256": "22d37db458d8fd1249196ee2bc68d103128d2b8f04b03487ab335b416494e9a9",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-05-back.png",
+      "sha256": "fc675d7d5463c3880c35617304ea8d2d7862dc302645929d26ad8031a825148e",
+      "bytes": 12892
+    },
+    {
+      "filename": "fixtures/numbered-05-back.svg",
+      "sha256": "30e90087e0c08a1edefd4c71199c43b82342df4d69f89163c6cff0404a910811",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-05-front.png",
+      "sha256": "968827b5a91d8a8fdc472e1a864a695c32f80c5c09465bee3f5f38dbd76e41c1",
+      "bytes": 12604
+    },
+    {
+      "filename": "fixtures/numbered-05-front.svg",
+      "sha256": "37b9dc5e015e4217d985e9147732f12aeb5f28d64df3c0b40f26a3028a8b36f5",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-06-back.png",
+      "sha256": "9b0944c5795e980a57b4fe25e9aaff22815d917af325e008e8730cb496e29a8f",
+      "bytes": 13145
+    },
+    {
+      "filename": "fixtures/numbered-06-back.svg",
+      "sha256": "5de6b3077e7ac2f49277827da8889ca4564bce385a40bff26fb659cb464f615e",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-06-front.png",
+      "sha256": "807918b16ffe02264f4479f9e2a785a7b3d5727a88f066341ad5175b6f6eb620",
+      "bytes": 12833
+    },
+    {
+      "filename": "fixtures/numbered-06-front.svg",
+      "sha256": "46b7e6eb9c65940ebbdb9ec39dc388b0f89a9331d2b3bc373d04db8e98666682",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-07-back.png",
+      "sha256": "968edffb983c8ce9c0df930f231698336368a41d41928e3b4041065e108f7bd0",
+      "bytes": 12825
+    },
+    {
+      "filename": "fixtures/numbered-07-back.svg",
+      "sha256": "2f940bf9aa6075bfb281de9769d81397495c63b193f837a122a3161be3e5e3b1",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-07-front.png",
+      "sha256": "e9e32be8e6f24b419200af3903b520c5e117d4c5098d0361b35994a98c3166fb",
+      "bytes": 12490
+    },
+    {
+      "filename": "fixtures/numbered-07-front.svg",
+      "sha256": "1213ef48de228be3c581e41761739d1410798132c35b1edf893c3981e1c8b310",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-08-back.png",
+      "sha256": "fcc487cb077de8ca656c81adb8354551997ab5689649672931cb50f692bf15a7",
+      "bytes": 13185
+    },
+    {
+      "filename": "fixtures/numbered-08-back.svg",
+      "sha256": "cce618878bd0cbc037ac561f328a8586389d8bf46b4457f2893bca3c9a082a99",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-08-front.png",
+      "sha256": "5f2bda8d1cf5b867c8964b6ce8b46bac5308dd023fc3082ed0f361f0c8b0e9d9",
+      "bytes": 12883
+    },
+    {
+      "filename": "fixtures/numbered-08-front.svg",
+      "sha256": "646c5a1314255f55d217f8006f7726f059a7d9fcceb4e553664e44ef8149aa4b",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-09-back.png",
+      "sha256": "bd71ed67bd52c3d119fb73b86a2b5be298e88f4265c2a1322e8fc69212920200",
+      "bytes": 13132
+    },
+    {
+      "filename": "fixtures/numbered-09-back.svg",
+      "sha256": "7d400ccf41b5f2c57ebf52bbfe1a2d3c0e952c2500d80e263d78e352bd337849",
+      "bytes": 670
+    },
+    {
+      "filename": "fixtures/numbered-09-front.png",
+      "sha256": "d97333c237234ce94411fd65544d15c634b0ccffeb5dbb90fa0e11252c125d16",
+      "bytes": 12837
+    },
+    {
+      "filename": "fixtures/numbered-09-front.svg",
+      "sha256": "205723e9806a42319e0eaaa0046d89493e581efb3b3d5a16f7116803c8dfdeeb",
+      "bytes": 670
+    }
+  ],
+  "runs": [
+    {
+      "orientation": "portrait",
+      "flipMode": "long-edge",
+      "pageCount": 1,
+      "duplexPageCount": 2,
+      "expectedNumberedFixture": [
+        [
+          "TOP ↑ 3B",
+          "TOP ↑ 2B",
+          "TOP ↑ 1B"
+        ],
+        [
+          "TOP ↑ 6B",
+          "TOP ↑ 5B",
+          "TOP ↑ 4B"
+        ],
+        [
+          "TOP ↑ 9B",
+          "TOP ↑ 8B",
+          "TOP ↑ 7B"
+        ]
+      ],
+      "pagePairs": [
+        {
+          "frontPageNumber": 1,
+          "backPageNumber": 1,
+          "reflectionAxis": "x",
+          "backArtworkOrientation": {
+            "rotationDegrees": 0,
+            "mirrorX": false,
+            "mirrorY": false
+          },
+          "registrationReflectionAxis": "x",
+          "slots": [
+            {
+              "physicalCardNumber": 1,
+              "frontSlotNumber": 1,
+              "backSlotNumber": 3,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 2,
+              "frontSlotNumber": 2,
+              "backSlotNumber": 2,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 3,
+              "frontSlotNumber": 3,
+              "backSlotNumber": 1,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 4,
+              "frontSlotNumber": 4,
+              "backSlotNumber": 6,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 5,
+              "frontSlotNumber": 5,
+              "backSlotNumber": 5,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 6,
+              "frontSlotNumber": 6,
+              "backSlotNumber": 4,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 7,
+              "frontSlotNumber": 7,
+              "backSlotNumber": 9,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 8,
+              "frontSlotNumber": 8,
+              "backSlotNumber": 8,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 9,
+              "frontSlotNumber": 9,
+              "backSlotNumber": 7,
+              "skipped": false,
+              "reserved": false
+            }
+          ]
+        }
+      ],
+      "separateManifest": {
+        "schemaVersion": 1,
+        "projectRevision": null,
+        "pageOrientation": "portrait",
+        "cardOrientation": "portrait",
+        "flipMode": "long-edge",
+        "frontPdf": {
+          "filename": "front.pdf",
+          "sha256": "58ef18befb64d1b4639f3fbb488e7b84d4e4784ec8e058bf7001e60449c73e24",
+          "pageCount": 1
+        },
+        "backPdf": {
+          "filename": "back.pdf",
+          "sha256": "68651ab88575a1499ae907c36d0b3ffd404c2d176cc7da9ef7847568eed2377d",
+          "pageCount": 1
+        },
+        "pagePairs": [
+          {
+            "frontPageNumber": 1,
+            "backPageNumber": 1,
+            "physicalSlotReflectionAxis": "x",
+            "registrationReflectionAxis": "x",
+            "backArtworkRotationDegrees": 0,
+            "slots": [
+              {
+                "physicalCardIndex": 0,
+                "frontSlotIndex": 0,
+                "backSlotIndex": 2,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 1,
+                "frontSlotIndex": 1,
+                "backSlotIndex": 1,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 2,
+                "frontSlotIndex": 2,
+                "backSlotIndex": 0,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 3,
+                "frontSlotIndex": 3,
+                "backSlotIndex": 5,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 4,
+                "frontSlotIndex": 4,
+                "backSlotIndex": 4,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 5,
+                "frontSlotIndex": 5,
+                "backSlotIndex": 3,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 6,
+                "frontSlotIndex": 6,
+                "backSlotIndex": 8,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 7,
+                "frontSlotIndex": 7,
+                "backSlotIndex": 7,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 8,
+                "frontSlotIndex": 8,
+                "backSlotIndex": 6,
+                "skipped": false,
+                "reserved": false
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "orientation": "landscape",
+      "flipMode": "long-edge",
+      "pageCount": 1,
+      "duplexPageCount": 2,
+      "expectedNumberedFixture": [
+        [
+          "TOP ↑ 7B",
+          "TOP ↑ 8B",
+          "TOP ↑ 9B"
+        ],
+        [
+          "TOP ↑ 4B",
+          "TOP ↑ 5B",
+          "TOP ↑ 6B"
+        ],
+        [
+          "TOP ↑ 1B",
+          "TOP ↑ 2B",
+          "TOP ↑ 3B"
+        ]
+      ],
+      "pagePairs": [
+        {
+          "frontPageNumber": 1,
+          "backPageNumber": 1,
+          "reflectionAxis": "y",
+          "backArtworkOrientation": {
+            "rotationDegrees": 180,
+            "mirrorX": false,
+            "mirrorY": false
+          },
+          "registrationReflectionAxis": "y",
+          "slots": [
+            {
+              "physicalCardNumber": 1,
+              "frontSlotNumber": 1,
+              "backSlotNumber": 7,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 2,
+              "frontSlotNumber": 2,
+              "backSlotNumber": 8,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 3,
+              "frontSlotNumber": 3,
+              "backSlotNumber": 9,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 4,
+              "frontSlotNumber": 4,
+              "backSlotNumber": 4,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 5,
+              "frontSlotNumber": 5,
+              "backSlotNumber": 5,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 6,
+              "frontSlotNumber": 6,
+              "backSlotNumber": 6,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 7,
+              "frontSlotNumber": 7,
+              "backSlotNumber": 1,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 8,
+              "frontSlotNumber": 8,
+              "backSlotNumber": 2,
+              "skipped": false,
+              "reserved": false
+            },
+            {
+              "physicalCardNumber": 9,
+              "frontSlotNumber": 9,
+              "backSlotNumber": 3,
+              "skipped": false,
+              "reserved": false
+            }
+          ]
+        }
+      ],
+      "separateManifest": {
+        "schemaVersion": 1,
+        "projectRevision": null,
+        "pageOrientation": "landscape",
+        "cardOrientation": "portrait",
+        "flipMode": "long-edge",
+        "frontPdf": {
+          "filename": "front.pdf",
+          "sha256": "8f0dbab04ec34786a478225402a1fea1a5cdcc68fa56381b22cd8be0e18fba0e",
+          "pageCount": 1
+        },
+        "backPdf": {
+          "filename": "back.pdf",
+          "sha256": "a37e204c3689ad839ff5057c3c9f208a2663c0fc65d06c2a39bcbe4c0c16f993",
+          "pageCount": 1
+        },
+        "pagePairs": [
+          {
+            "frontPageNumber": 1,
+            "backPageNumber": 1,
+            "physicalSlotReflectionAxis": "y",
+            "registrationReflectionAxis": "y",
+            "backArtworkRotationDegrees": 180,
+            "slots": [
+              {
+                "physicalCardIndex": 0,
+                "frontSlotIndex": 0,
+                "backSlotIndex": 6,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 1,
+                "frontSlotIndex": 1,
+                "backSlotIndex": 7,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 2,
+                "frontSlotIndex": 2,
+                "backSlotIndex": 8,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 3,
+                "frontSlotIndex": 3,
+                "backSlotIndex": 3,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 4,
+                "frontSlotIndex": 4,
+                "backSlotIndex": 4,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 5,
+                "frontSlotIndex": 5,
+                "backSlotIndex": 5,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 6,
+                "frontSlotIndex": 6,
+                "backSlotIndex": 0,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 7,
+                "frontSlotIndex": 7,
+                "backSlotIndex": 1,
+                "skipped": false,
+                "reserved": false
+              },
+              {
+                "physicalCardIndex": 8,
+                "frontSlotIndex": 8,
+                "backSlotIndex": 2,
+                "skipped": false,
+                "reserved": false
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "productionSmoke": {
+    "date": "2026-10-01",
+    "build": "Next.js production build",
+    "browserPageStatus": 200,
+    "provider": "Scryfall",
+    "dfc": "Delver of Secrets // Insectile Aberration resolved with independent front/back artwork; manual back survived Project reopen and explicit re-resolve",
+    "projectDefault": "Back Library original uploaded and saved by assetId + SHA-256; Sol Ring inherited it while DFC manual override stayed selected",
+    "exportApiStatuses": {
+      "front-only": 200,
+      "back-only": 200,
+      "front-back-separated": 200,
+      "duplex": 200
+    },
+    "finalRebuiltUiApiSmoke": {
+      "rootPageStatus": 200,
+      "backLibraryReadStatus": 200,
+      "projectsReadStatus": 200,
+      "browserPageErrors": [],
+      "backOnlyGateAndPreviewOverlayCoveredBy": "focused tests and full npm test"
+    },
+    "physicalAlignmentValidated": false,
+    "details": "production-smoke.md"
+  },
+  "files": [
+    {
+      "filename": "landscape-long-edge-back-only.pdf",
+      "sha256": "4b121ca4b0e7c062a63447839f8a232e595293a9d1dbc12c435798a496f23c21",
+      "bytes": 80726
+    },
+    {
+      "filename": "landscape-long-edge-duplex-interleaved.pdf",
+      "sha256": "284fbe56c4f2288ad266217f1bfdb46b2c10551e1b01aa2d859fe4ce59a2bcda",
+      "bytes": 157637
+    },
+    {
+      "filename": "landscape-long-edge-front-back-separate-back.pdf",
+      "sha256": "a37e204c3689ad839ff5057c3c9f208a2663c0fc65d06c2a39bcbe4c0c16f993",
+      "bytes": 80726
+    },
+    {
+      "filename": "landscape-long-edge-front-back-separate-front.pdf",
+      "sha256": "8f0dbab04ec34786a478225402a1fea1a5cdcc68fa56381b22cd8be0e18fba0e",
+      "bytes": 77596
+    },
+    {
+      "filename": "landscape-long-edge-front-back-separate-manifest.json",
+      "sha256": "659ee9eb0d01048436d1a472a6a19b957065837722704b5fcd096f6d73ecd641",
+      "bytes": 2230
+    },
+    {
+      "filename": "landscape-long-edge-front-back-separate.zip",
+      "sha256": "d8a9ceec84984f7793c8e5af9474afc3acdb663c7050d693c28ae4a9534f1f3e",
+      "bytes": 160862
+    },
+    {
+      "filename": "landscape-long-edge-front-only.pdf",
+      "sha256": "8f0dbab04ec34786a478225402a1fea1a5cdcc68fa56381b22cd8be0e18fba0e",
+      "bytes": 77596
+    },
+    {
+      "filename": "portrait-long-edge-back-only.pdf",
+      "sha256": "b3e062526911f93b0c000345565c2dc55f356e8edc334bfe4deb7cb1994894ac",
+      "bytes": 80720
+    },
+    {
+      "filename": "portrait-long-edge-duplex-interleaved.pdf",
+      "sha256": "5f9eea77844965331c729051f875910e4740e9e15ae3afe146ab0b95a82f2f76",
+      "bytes": 157633
+    },
+    {
+      "filename": "portrait-long-edge-front-back-separate-back.pdf",
+      "sha256": "68651ab88575a1499ae907c36d0b3ffd404c2d176cc7da9ef7847568eed2377d",
+      "bytes": 80720
+    },
+    {
+      "filename": "portrait-long-edge-front-back-separate-front.pdf",
+      "sha256": "58ef18befb64d1b4639f3fbb488e7b84d4e4784ec8e058bf7001e60449c73e24",
+      "bytes": 77598
+    },
+    {
+      "filename": "portrait-long-edge-front-back-separate-manifest.json",
+      "sha256": "75c8cba221ae0e78b6a4b094737248ae8f70cd78bd2ca97b0231ce60ff061113",
+      "bytes": 2227
+    },
+    {
+      "filename": "portrait-long-edge-front-back-separate.zip",
+      "sha256": "6fa49e98bab91a58e600306831c0f40a9f6ff6756ba43dc8923acce63c6cf0eb",
+      "bytes": 160855
+    },
+    {
+      "filename": "portrait-long-edge-front-only.pdf",
+      "sha256": "58ef18befb64d1b4639f3fbb488e7b84d4e4784ec8e058bf7001e60449c73e24",
+      "bytes": 77598
+    }
+  ]
+}

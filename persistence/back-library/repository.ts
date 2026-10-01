@@ -70,6 +70,11 @@ export class BackLibraryRepository {
     return rows.map(mapRow);
   }
 
+  listAll(): readonly BackLibraryAssetRecord[] {
+    const rows = this.database.prepare("SELECT * FROM back_library_assets ORDER BY retired, name COLLATE NOCASE, asset_id").all() as BackLibraryAssetRow[];
+    return rows.map(mapRow);
+  }
+
   /** Inserts immutable ID/hash metadata, or explicitly revives the same bytes after a re-upload. */
   add(record: Omit<BackLibraryAssetRecord, "retired" | "createdAt" | "updatedAt">, now = new Date().toISOString()): BackLibraryAssetRecord {
     this.database.prepare(`

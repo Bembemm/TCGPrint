@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
 import type { CardWorkbench } from "../../services/card-workbench";
@@ -22,6 +23,9 @@ import { BleedEngine } from "../../image-engine/bleed";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 import { ScryfallError } from "../../providers/scryfall/errors";
 import { FULL_TRIM_GUIDES, NO_CUT_GUIDES } from "../helpers/cut-guides";
+import { openProjectDatabase } from "../../persistence/projects/database";
+import { ProjectRepository } from "../../persistence/projects/repository";
+import { DEFAULT_PROJECT_SETTINGS, deserializeProjectSnapshot, serializeProjectSnapshot } from "../../persistence/projects/serializer";
 
 const candidateId = `upload:${"a".repeat(64)}`;
 const identity: CardIdentity = { id: "scryfall:oracle:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", provider: "scryfall", name: "Sol Ring", oracleId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", resolutionMethod: "manual", confidence: 1 };
@@ -90,6 +94,58 @@ function jsonRequest(url: string, value: unknown): Request {
 }
 
 describe("card APIs", () => {
+  it("returns a ZIP containing independently printable front/back PDFs and pairing metadata", async () => {
+    const frontBytes = new Uint8Array(await sharp({ create: { width: 127, height: 178, channels: 3, background: "#bb3344" } }).png().toBuffer());
+    const backBytes = new Uint8Array(await sharp({ create: { width: 127, height: 178, channels: 3, background: "#2255aa" } }).png().toBuffer());
+    const backHash = createHash("sha256").update(backBytes).digest("hex");
+    const projectDefaultBack = { assetId: `back:${backHash}`, sha256: backHash, format: "png" };
+    const workbench = testWorkbench({ getArtworkOriginal: vi.fn(async () => ({
+      artworkId: "front-original", contentHash: "front-original", extension: "png", format: "png", byteLength: frontBytes.byteLength,
+      widthPx: 127, heightPx: 178, createdAt: new Date(0).toISOString(), bytes: frontBytes, provenance: [],
+    })) });
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES, exportContentMode: "front-back-separated", projectDefaultBack, pageOrientation: "portrait", layoutRows: 1, layoutColumns: 1 },
+    }), workbench, undefined, undefined, {
+      resolveOriginal: vi.fn(async () => ({
+        artworkId: backHash, contentHash: backHash, extension: "png", format: "png", byteLength: backBytes.byteLength,
+        widthPx: 127, heightPx: 178, createdAt: new Date(0).toISOString(), bytes: backBytes, provenance: [],
+      })),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/zip");
+    expect(response.headers.get("content-disposition")).toContain("tcgprint-front-back.zip");
+    expect(Buffer.from(await response.arrayBuffer()).readUInt32LE(0)).toBe(0x04034b50);
+    expect(JSON.parse(Buffer.from(response.headers.get("x-tcgprint-back-preflight")!, "base64url").toString("utf8"))).toMatchObject({
+      totalPhysicalCards: 1,
+      backs: { projectDefault: 1 },
+    });
+  });
+
+  it("rejects Project exports when submitted artwork differs from the exact autosaved revision", async () => {
+    const database = openProjectDatabase(":memory:");
+    try {
+      const projects = new ProjectRepository(database);
+      const saved = projects.create(deserializeProjectSnapshot(serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS)));
+      const submitted: WorkingCard = {
+        ...structuredClone(card),
+        selectedArtworkByFace: {
+          front: { ...card.selectedArtworkByFace.front!, candidateId: `upload:${"c".repeat(64)}` },
+        },
+      };
+      const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+        cards: [submitted],
+        options: { projectId: saved.id, expectedProjectRevision: saved.revision, bleedMm: saved.snapshot.settings.bleedMm, cutGuides: saved.snapshot.settings.cutGuides },
+      }), testWorkbench(), projects, {} as never);
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: "STALE_PROJECT" });
+    } finally {
+      database.close();
+    }
+  });
+
   it("validates registration input and forwards independent orientations and slot skips to PDF export", async () => {
     const malformed = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
       cards: [card],
@@ -316,6 +372,7 @@ describe("card APIs", () => {
 
   it("accepts only DTO working cards and rejects byte/path fields from the client", () => {
     expect(parseWorkingCards([card])).toMatchObject([{ id: card.id, identity: { id: identity.id }, quantity: 1 }]);
+    expect(() => parseWorkingCards([card, { ...card, order: 1 }])).toThrow(/Card ID .* duplicated/i);
     expect(() => parseWorkingCards([{ ...card, localOriginalPath: "/tmp/card.png" }])).toThrow(/localOriginalPath/);
     expect(() => parseWorkingCards([{ ...card, identityHints: { ...card.identityHints, imageUrl: "https://evil.test/card.png" } }])).toThrow(/imageUrl/);
     expect(() => parseWorkingCards([{ ...card, selectedArtworkByFace: { front: { ...card.selectedArtworkByFace.front, candidateId: "https://evil.test/a.jpg" } } }])).toThrow(/selected artwork reference/);

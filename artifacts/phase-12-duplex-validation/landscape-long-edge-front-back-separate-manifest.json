@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "projectRevision": null,
+  "pageOrientation": "landscape",
+  "cardOrientation": "portrait",
+  "flipMode": "long-edge",
+  "frontPdf": {
+    "filename": "front.pdf",
+    "sha256": "8f0dbab04ec34786a478225402a1fea1a5cdcc68fa56381b22cd8be0e18fba0e",
+    "pageCount": 1
+  },
+  "backPdf": {
+    "filename": "back.pdf",
+    "sha256": "a37e204c3689ad839ff5057c3c9f208a2663c0fc65d06c2a39bcbe4c0c16f993",
+    "pageCount": 1
+  },
+  "pagePairs": [
+    {
+      "frontPageNumber": 1,
+      "backPageNumber": 1,
+      "physicalSlotReflectionAxis": "y",
+      "registrationReflectionAxis": "y",
+      "backArtworkRotationDegrees": 180,
+      "slots": [
+        {
+          "physicalCardIndex": 0,
+          "frontSlotIndex": 0,
+          "backSlotIndex": 6,
+          "skipped": false,
+          "reserved": false
+        },
+        {
+          "physicalCardIndex": 1,
+          "frontSlotIndex": 1,
+          "backSlotIndex": 7,
+          "skipped": false,
+          "reserved": false
+        },
+        {
+          "physicalCardIndex": 2,
+          "frontSlotIndex": 2,
+          "backSlotIndex": 8,
+          "skipped": false,
+          "reserved": false
+        },
+        {
+          "physicalCardIndex": 3,
+          "frontSlotIndex": 3,
+          "backSlotIndex": 3,
+          "skipped": false,
+          "reserved": false
+        },
+        {
+          "physicalCardIndex": 4,
+          "frontSlotIndex": 4,
+          "backSlotIndex": 4,
+          "skipped": false,
+          "reserved": false
+        },
+        {
+          "physicalCardIndex": 5,
+          "frontSlotIndex": 5,
+          "backSlotIndex": 5,
+          "skipped": false,
+          "reserved": false
+        },
+        {
+          "physicalCardIndex": 6,
+          "frontSlotIndex": 6,
+          "backSlotIndex": 0,
+          "skipped": false,
+          "reserved": false
+        },
+        {
+          "physicalCardIndex": 7,
+          "frontSlotIndex": 7,
+          "backSlotIndex": 1,
+          "skipped": false,
+          "reserved": false
+        },
+        {
+          "physicalCardIndex": 8,
+          "frontSlotIndex": 8,
+          "backSlotIndex": 2,
+          "skipped": false,
+          "reserved": false
+        }
+      ]
+    }
+  ]
+}

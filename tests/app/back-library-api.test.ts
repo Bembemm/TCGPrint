@@ -50,7 +50,7 @@ describe("Back Library API", () => {
     expect((await handleBackLibraryList(service)).status).toBe(200);
   });
 
-  it("retirement hides selection metadata while preserving the immutable Project reference", async () => {
+  it("retirement exposes a tombstone and preserves the immutable Project reference", async () => {
     const service = await setup();
     const bytes = new Uint8Array(await sharp({ create: { width: 20, height: 30, channels: 3, background: "#aa7330" } }).png().toBuffer());
     const form = new FormData();
@@ -62,7 +62,7 @@ describe("Back Library API", () => {
 
     expect(retired.status).toBe(200);
     expect((await retired.json()).asset.retired).toBe(true);
-    expect(await (await handleBackLibraryList(service).then((response) => response.json())).assets).toEqual([]);
+    expect(await (await handleBackLibraryList(service).then((response) => response.json())).assets).toMatchObject([{ assetId: asset.assetId, sha256: asset.sha256, retired: true }]);
     await expect(service.resolveOriginal({ assetId: asset.assetId, sha256: asset.sha256, format: "png" })).resolves.toMatchObject({ bytes });
   });
 

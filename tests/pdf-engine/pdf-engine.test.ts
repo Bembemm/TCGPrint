@@ -6,6 +6,7 @@ import { PDFDict, PDFDocument, PDFName, PDFRawStream } from "@pdfme/pdf-lib";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { calculateGridPagePlacements, calculateGridPlacement, MAGIC_STANDARD_CARD, PAPER_FORMATS, type CardFormat } from "../../core/geometry";
+import { createDuplexPagePairing } from "../../core/duplex";
 import { mmToPoints, pointsToMm } from "../../core/units";
 import { BleedEngine } from "../../image-engine/bleed";
 import type { CutGuideConfig, GuideColor } from "../../core/geometry/cut-guides";
@@ -263,6 +264,156 @@ describe("LosslessPdfEngine", () => {
     expect(mediaBox.height).toBeCloseTo(A4_HEIGHT_POINTS, 10);
     expect(pointsToMm(mediaBox.width)).toBeCloseTo(210, 10);
     expect(pointsToMm(mediaBox.height)).toBeCloseTo(297, 10);
+  });
+
+  it.each([
+    ["portrait", "long-edge"],
+    ["portrait", "short-edge"],
+    ["landscape", "long-edge"],
+    ["landscape", "short-edge"],
+  ] as const)("places asymmetric TOP artwork upright on a shared duplex placement for %s + %s", async (orientation, flipMode) => {
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="180"><rect width="120" height="180" fill="white"/><path d="M60 12 L35 55 L50 55 L50 90 L70 90 L70 55 L85 55 Z" fill="black"/><text x="8" y="150" font-size="20">TOP ↑ 1B</text></svg>');
+    const jpeg = new Uint8Array(await sharp(svg).jpeg({ quality: 96 }).toBuffer());
+    const paper = orientation === "portrait"
+      ? { name: "Portrait fixture", widthMm: 100, heightMm: 140 }
+      : { name: "Landscape fixture", widthMm: 140, heightMm: 100 };
+    const card = { id: "duplex-fixture", name: "20x30", widthMm: 20, heightMm: 30 };
+    const pages = calculateGridPagePlacements({
+      placement: { paper, pageOrientation: orientation, card, cardOrientation: "portrait", bleedMm: 0, rows: 1, columns: 2 },
+      count: 2,
+    });
+    const pair = createDuplexPagePairing(pages, { pageOrientation: orientation, flipMode }).pagePairs[0]!;
+    const expected = pair.slots.find(({ physicalCardIndex }) => physicalCardIndex === 0)!.back.trim;
+
+    const pdf = await engine.generate({
+      images: [jpeg, jpeg],
+      paperFormat: paper,
+      cardFormat: card,
+      pageOrientation: orientation,
+      cardOrientation: "portrait",
+      pagePlacements: [pair.backPlacement],
+      skipImageIndexes: new Set([1]),
+      duplexBackPageTransform: pair.backPageTransform,
+    });
+    const parsed = await parsePdf(pdf);
+    const image = parsed.images.find(({ dictionary }) => dictionary.includes("/DCTDecode"));
+    const matrices = getDrawMatrices(parsed.content);
+    const scaleMatrix = matrices.find(([a, b, c, d]) =>
+      Math.abs(a - (20 * 72) / 25.4) < 1e-7 && Math.abs(d - (30 * 72) / 25.4) < 1e-7 && Math.abs(b) < 1e-8 && Math.abs(c) < 1e-8,
+    );
+    const translationMatrix = matrices.find(([a, b, c, d, e, f]) => a === 1 && b === 0 && c === 0 && d === 1 && (e !== 0 || f !== 0));
+
+    expect(parsed.document.getPages()).toHaveLength(1);
+    expect(parsed.images).toHaveLength(1);
+    expect(Buffer.from(image!.raw.contents)).toEqual(Buffer.from(jpeg));
+    expect(scaleMatrix).toBeDefined();
+    expect(scaleMatrix![0]).toBeGreaterThan(0);
+    expect(scaleMatrix![3]).toBeGreaterThan(0);
+    expect(scaleMatrix![1]).toBe(0);
+    expect(scaleMatrix![2]).toBe(0);
+    const physicalArtworkTransform = getDrawMatrices(parsed.content).find(([a, b, c, d]) =>
+      a === -1 && b === 0 && c === 0 && d === -1,
+    );
+    if (pair.backArtworkOrientation.rotationDegrees === 180) {
+      expect(physicalArtworkTransform).toBeDefined();
+      expect(physicalArtworkTransform?.slice(0, 4)).toEqual([-1, 0, 0, -1]);
+      const pdfBottomMm = pair.backPlacement.placement.pageSizeMm.heightMm - expected.yMm - expected.heightMm;
+      expect(physicalArtworkTransform?.[4]).toBeCloseTo(((expected.xMm + expected.widthMm) * 72) / 25.4, 7);
+      expect(physicalArtworkTransform?.[5]).toBeCloseTo(((pdfBottomMm + expected.heightMm) * 72) / 25.4, 7);
+      // Local TOP points downward in this back-page PDF; the physical Y flip turns it upright again.
+      const artworkTopVector = { x: physicalArtworkTransform![2]!, y: physicalArtworkTransform![3]! };
+      expect(artworkTopVector).toEqual({ x: 0, y: -1 });
+      expect(pair.reflectionAxis === "y" ? -artworkTopVector.y : artworkTopVector.y).toBe(1);
+    } else {
+      expect(physicalArtworkTransform).toBeUndefined();
+      expect(translationMatrix).toBeDefined();
+      expect(translationMatrix![4]).toBeCloseTo((expected.xMm * 72) / 25.4, 7);
+      expect(translationMatrix![5]).toBeCloseTo(((pair.backPlacement.placement.pageSizeMm.heightMm - expected.yMm - expected.heightMm) * 72) / 25.4, 7);
+      expect(pair.backArtworkOrientation).toEqual({ rotationDegrees: 0, mirrorX: false, mirrorY: false });
+    }
+  });
+
+  it.each([
+    ["portrait", "long-edge", "x"],
+    ["portrait", "short-edge", "y"],
+    ["landscape", "long-edge", "y"],
+    ["landscape", "short-edge", "x"],
+  ] as const)("reflects registration vectors into the paired PDF page for %s + %s", async (orientation, flipMode, axis) => {
+    const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const paper = orientation === "portrait"
+      ? { name: "Portrait fixture", widthMm: 100, heightMm: 140 }
+      : { name: "Landscape fixture", widthMm: 140, heightMm: 100 };
+    const card = { id: "duplex-registration-fixture", name: "20x30", widthMm: 20, heightMm: 30 };
+    const registration = {
+      type: "custom" as const,
+      orientation,
+      marks: [[{ type: "rect" as const, xMm: 10, yMm: 12, widthMm: 4, heightMm: 6, fill: true, strokeWidthMm: 0 }]],
+      reservedZones: [{ xMm: 8, yMm: 10, widthMm: 8, heightMm: 10 }],
+    };
+    const pages = calculateGridPagePlacements({
+      placement: { paper, pageOrientation: orientation, card, cardOrientation: "portrait", bleedMm: 0, rows: 1, columns: 1 },
+      count: 1,
+    });
+    const pair = createDuplexPagePairing(pages, { pageOrientation: orientation, flipMode }).pagePairs[0]!;
+    const pdf = await engine.generate({
+      images: [jpeg],
+      paperFormat: paper,
+      cardFormat: card,
+      pageOrientation: orientation,
+      cardOrientation: "portrait",
+      registration,
+      pagePlacements: [pair.backPlacement],
+      duplexBackPageTransform: pair.backPageTransform,
+    });
+    const parsed = await parsePdf(pdf);
+    const widthMm = paper.widthMm;
+    const heightMm = paper.heightMm;
+    const expectedX = axis === "x" ? widthMm - 10 - 4 : 10;
+    const expectedTopMm = axis === "y" ? heightMm - 12 - 6 : 12;
+    const expectedXPoints = (expectedX * 72) / 25.4;
+    const expectedYPoints = ((heightMm - expectedTopMm - 6) * 72) / 25.4;
+    const registrationTranslation = getDrawMatrices(parsed.content).find(([a, b, c, d, e, f]) =>
+      a === 1 && b === 0 && c === 0 && d === 1
+        && Math.abs(e - expectedXPoints) < 1e-7
+        && Math.abs(f - expectedYPoints) < 1e-7,
+    );
+
+    expect(registrationTranslation).toBeDefined();
+    expect(pair.backPageTransform.registrationReflectionAxis).toBe(axis);
+  });
+
+  it("composes duplex back correction with the independent card orientation rotation", async () => {
+    const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const paper = { name: "Portrait fixture", widthMm: 100, heightMm: 140 };
+    const card = { id: "oriented-duplex-fixture", name: "20x30", widthMm: 20, heightMm: 30 };
+    const pages = calculateGridPagePlacements({
+      placement: { paper, pageOrientation: "portrait", card, cardOrientation: "landscape", bleedMm: 0, rows: 1, columns: 1 },
+      count: 1,
+    });
+    const pair = createDuplexPagePairing(pages, { pageOrientation: "portrait", flipMode: "short-edge" }).pagePairs[0]!;
+    const trim = pair.backPlacement.placement.slots[0]!.trim;
+    const pdf = await engine.generate({
+      images: [jpeg],
+      paperFormat: paper,
+      cardFormat: card,
+      pageOrientation: "portrait",
+      cardOrientation: "landscape",
+      pagePlacements: [pair.backPlacement],
+      duplexBackPageTransform: pair.backPageTransform,
+    });
+    const parsed = await parsePdf(pdf);
+    const xPoints = (trim.xMm * 72) / 25.4;
+    const yPoints = ((140 - trim.yMm - trim.heightMm) * 72) / 25.4;
+    const targetWidthPoints = (trim.widthMm * 72) / 25.4;
+    const composed = getDrawMatrices(parsed.content).find(([a, b, c, d, e, f]) =>
+      a === 0 && b === 1 && c === -1 && d === 0
+        && Math.abs(e - xPoints - targetWidthPoints) < 1e-7
+        && Math.abs(f - yPoints) < 1e-7,
+    );
+
+    expect(pair.backArtworkOrientation.rotationDegrees).toBe(180);
+    expect(composed).toBeDefined();
+    expect(Buffer.from(parsed.images.find(({ dictionary }) => dictionary.includes("/DCTDecode"))!.raw.contents)).toEqual(Buffer.from(jpeg));
   });
 
   it("adds independent landscape registration vectors to a landscape sheet without changing portrait card trim", async () => {

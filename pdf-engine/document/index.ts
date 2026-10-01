@@ -29,6 +29,7 @@ import {
   PAPER_FORMATS,
   calculateGridPagePlacements,
   CutGuideEngine,
+  type GridPlacementPage,
   parseCutGuideConfig,
   type CutGuideConfig,
   type CutGuideCardMm,
@@ -41,6 +42,8 @@ import {
 } from "../../core/geometry";
 import { mmToPoints } from "../../core/units";
 import { generateRegistrationGeometry, type RegistrationConfig, type RegistrationPrimitive } from "../../core/registration";
+import { transformRegistrationGeometry } from "../../core/registration";
+import type { DuplexBackPageTransform } from "../../core/duplex";
 
 export interface LosslessPdfRequest {
   /** Image bytes read from local files. Repeated entries produce repeated cards. */
@@ -61,6 +64,12 @@ export interface LosslessPdfRequest {
   readonly layoutRows?: number;
   readonly layoutColumns?: number;
   readonly skippedSlotIndices?: readonly number[];
+  /** The canonical placements shared by front/back preview and export. */
+  readonly pagePlacements?: readonly GridPlacementPage[];
+  /** Physical slot, registration, and vector artwork transforms for a paired back PDF. */
+  readonly duplexBackPageTransform?: DuplexBackPageTransform;
+  /** Physical image indexes intentionally left blank while their slots remain in the page plan. */
+  readonly skipImageIndexes?: ReadonlySet<number>;
 }
 
 export interface LosslessPdfFileRequest {
@@ -96,6 +105,8 @@ interface PdfClipRectangle {
   readonly width: number;
   readonly height: number;
 }
+
+type PdfAffineMatrix = readonly [number, number, number, number, number, number];
 
 interface SvgTag {
   readonly name: string;
@@ -775,12 +786,8 @@ function drawCutGuides(
 function drawRegistrationMarks(
   page: ReturnType<PDFDocument["addPage"]>,
   pageSizeMm: { readonly widthMm: number; readonly heightMm: number },
-  registration: RegistrationConfig | undefined,
+  geometry: ReturnType<typeof generateRegistrationGeometry>,
 ): void {
-  const geometry = generateRegistrationGeometry(
-    registration ?? { type: "none", orientation: "portrait" },
-    pageSizeMm,
-  );
   const black = rgb(0, 0, 0);
   const drawPrimitive = (primitive: RegistrationPrimitive) => {
     if (primitive.type === "line") {
@@ -859,11 +866,26 @@ export class LosslessPdfEngine {
       }
       return bleed.bleedMm;
     });
-    const pagePlacements = calculateGridPagePlacements({
+    const pagePlacements = request.pagePlacements ?? calculateGridPagePlacements({
       placement: { ...placementOptions, bleedMm: 0 },
       count: request.images.length,
       bleedByCardMm: bleedByImageMm,
     });
+    let nextPageStart = 0;
+    for (const [index, pagePlacement] of pagePlacements.entries()) {
+      if (pagePlacement.pageIndex !== index || pagePlacement.startCardIndex !== nextPageStart
+        || pagePlacement.endCardIndex < pagePlacement.startCardIndex || pagePlacement.endCardIndex > request.images.length
+        || pagePlacement.placement.slots.length !== pagePlacement.endCardIndex - pagePlacement.startCardIndex) {
+        throw new PdfExportError("Provided PDF page placements do not cover the ordered physical image list contiguously.");
+      }
+      nextPageStart = pagePlacement.endCardIndex;
+    }
+    if (nextPageStart !== request.images.length && request.images.length > 0) {
+      throw new PdfExportError("Provided PDF page placements do not include every physical image slot.");
+    }
+    if (request.skipImageIndexes && [...request.skipImageIndexes].some((index) => !Number.isSafeInteger(index) || index < 0 || index >= request.images.length)) {
+      throw new PdfExportError("Skipped PDF image indexes must refer to a physical slot in the supplied page plan.");
+    }
 
     const pdf = await PDFDocument.create();
     const sourceWidthPoints = mmToPoints(card.widthMm);
@@ -874,6 +896,7 @@ export class LosslessPdfEngine {
       const page = pdf.addPage([mmToPoints(pageSizeMm.widthMm), mmToPoints(pageSizeMm.heightMm)]);
 
       for (let imageIndex = startCardIndex; imageIndex < endCardIndex; imageIndex += 1) {
+        if (request.skipImageIndexes?.has(imageIndex)) continue;
         const imageBytes = request.images[imageIndex];
         if (!(imageBytes instanceof Uint8Array) || imageBytes.byteLength === 0) {
           throw new PdfExportError(`Image ${imageIndex + 1} is empty or is not a byte array.`);
@@ -881,22 +904,41 @@ export class LosslessPdfEngine {
 
         const format = detectFormat(imageBytes);
         const localCardIndex = imageIndex - startCardIndex;
-        const trim = pagePlacement.slots[localCardIndex].trim;
+        const slot = pagePlacement.slots.find((item) => item.cardIndex === localCardIndex);
+        if (!slot) throw new PdfExportError(`PDF page placement has no physical slot for image ${imageIndex + 1}.`);
+        const trim = slot.trim;
         const xMm = trim.xMm;
         const topMm = trim.yMm;
         const xPoints = mmToPoints(xMm);
         const yPoints = mmToPoints(pagePlacement.pageSizeMm.heightMm - topMm - pagePlacement.cardSizeMm.heightMm);
-        const artworkXPoints = rotateCardArtwork ? 0 : xPoints;
-        const artworkYPoints = rotateCardArtwork ? 0 : yPoints;
+        const artworkRotationDegrees = request.duplexBackPageTransform?.artworkOrientation.rotationDegrees ?? 0;
         const artworkTransform = rotateCardArtwork
           ? sourceCardIsLandscape
             ? [0, 1, -1, 0, xPoints + sourceHeightPoints, yPoints] as const
             : [0, -1, 1, 0, xPoints, yPoints + sourceWidthPoints] as const
-          : undefined;
+          : artworkRotationDegrees === 180
+            ? [1, 0, 0, 1, xPoints, yPoints] as const
+            : undefined;
+        let finalArtworkTransform: PdfAffineMatrix | undefined = artworkTransform;
+        if (artworkRotationDegrees === 180) {
+          const base = artworkTransform ?? [1, 0, 0, 1, xPoints, yPoints] as const;
+          const targetWidthPoints = mmToPoints(pagePlacement.cardSizeMm.widthMm);
+          const targetHeightPoints = mmToPoints(pagePlacement.cardSizeMm.heightMm);
+          finalArtworkTransform = [
+            -base[0],
+            -base[1],
+            -base[2],
+            -base[3],
+            2 * xPoints + targetWidthPoints - base[4],
+            2 * yPoints + targetHeightPoints - base[5],
+          ];
+        }
+        const artworkXPoints = finalArtworkTransform ? 0 : xPoints;
+        const artworkYPoints = finalArtworkTransform ? 0 : yPoints;
         const exactBytes = copyBytes(imageBytes);
 
-        if (artworkTransform) {
-          const [a, b, c, d, e, f] = artworkTransform;
+        if (finalArtworkTransform) {
+          const [a, b, c, d, e, f] = finalArtworkTransform;
           page.pushOperators(pushGraphicsState(), concatTransformationMatrix(a, b, c, d, e, f));
         }
 
@@ -1042,7 +1084,7 @@ export class LosslessPdfEngine {
           throw new PdfExportError(`SVG contains unsupported content: ${warnings.join("; ")}`);
         }
         } finally {
-          if (artworkTransform) page.pushOperators(popGraphicsState());
+          if (finalArtworkTransform) page.pushOperators(popGraphicsState());
         }
       }
 
@@ -1057,7 +1099,10 @@ export class LosslessPdfEngine {
           })),
         );
       }
-      drawRegistrationMarks(page, pageSizeMm, request.registration);
+      const pageRegistrationGeometry = request.duplexBackPageTransform
+        ? transformRegistrationGeometry(registrationGeometry, pageSizeMm, request.duplexBackPageTransform.registrationReflectionAxis)
+        : registrationGeometry;
+      drawRegistrationMarks(page, pageSizeMm, pageRegistrationGeometry);
     }
 
     return pdf.save();

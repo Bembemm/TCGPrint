@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { MAGIC_STANDARD_CARD, PAPER_FORMATS } from "../../core/geometry";
 import { calculateGridPagePlacements } from "../../core/geometry/page-placement";
-import { createDuplexPagePairing } from "../../core/duplex";
+import { calculateSharedPagePlacements, createDuplexPagePairing, getDuplexPageReflectionMatrix, getDuplexPreviewOverlayMatrix, transformPointByDuplexMatrix } from "../../core/duplex";
+import { generateRegistrationGeometry, transformRegistrationGeometry } from "../../core/registration";
 import type { DuplexFlipMode } from "../../core/duplex";
 
 const numberedFixture = JSON.parse(readFileSync(new URL("../fixtures/duplex/numbered-slot-fixture.json", import.meta.url), "utf8")) as Record<string, unknown>;
@@ -33,6 +34,23 @@ function backRows(page: ReturnType<typeof pair>["pagePairs"][number], columns: n
 
 describe("physical duplex page pairing", () => {
   it.each([
+    ["x", { a: -1, b: 0, c: 0, d: 1, e: 100, f: 0 }, { xMm: 13, yMm: 27 }, { xMm: 87, yMm: 27 }],
+    ["y", { a: 1, b: 0, c: 0, d: -1, e: 0, f: 140 }, { xMm: 13, yMm: 27 }, { xMm: 13, yMm: 113 }],
+  ] as const)("reflects asymmetric page-coordinate overlays across the %s axis", (axis, matrix, point, expected) => {
+    const actualMatrix = getDuplexPageReflectionMatrix(axis, { widthMm: 100, heightMm: 140 });
+    expect(actualMatrix).toEqual(matrix);
+    expect(transformPointByDuplexMatrix(point, actualMatrix)).toEqual(expected);
+    expect(transformPointByDuplexMatrix(expected, actualMatrix)).toEqual(point);
+  });
+
+  it("uses identity overlays on front preview and the paired reflection matrix on back preview", () => {
+    expect(getDuplexPreviewOverlayMatrix("front", "y", { widthMm: 100, heightMm: 140 }))
+      .toEqual({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
+    expect(getDuplexPreviewOverlayMatrix("back", "y", { widthMm: 100, heightMm: 140 }))
+      .toEqual({ a: 1, b: 0, c: 0, d: -1, e: 0, f: 140 });
+  });
+
+  it.each([
     ["portrait", "long-edge", "portrait-long-edge", "x"],
     ["portrait", "short-edge", "portrait-short-edge", "y"],
     ["landscape", "long-edge", "landscape-long-edge", "y"],
@@ -41,7 +59,10 @@ describe("physical duplex page pairing", () => {
     const page = pair(3, 3, 9, orientation, flipMode).pagePairs[0]!;
     expect(page.reflectionAxis).toBe(axis);
     expect(backRows(page, 3, 3)).toEqual(numberedFixture[fixtureKey]);
-    expect(page.backArtworkOrientation).toEqual({ rotationDegrees: 0, mirrorX: false, mirrorY: false });
+    expect(page.backArtworkOrientation).toEqual((numberedFixture.backArtworkOrientation as Record<string, unknown>)[fixtureKey]);
+    const artworkUpVector = page.backArtworkOrientation.rotationDegrees === 180 ? { x: 0, y: -1 } : { x: 0, y: 1 };
+    const physicalFlipUpVector = axis === "y" ? { x: artworkUpVector.x, y: -artworkUpVector.y } : artworkUpVector;
+    expect(physicalFlipUpVector).toEqual({ x: 0, y: 1 });
     expect(page.frontPageNumber).toBe(1);
     expect(page.backPageNumber).toBe(1);
   });
@@ -86,6 +107,8 @@ describe("physical duplex page pairing", () => {
     const transformed = result.pagePairs[0]!.slots.find(({ frontSlotIndex }) => frontSlotIndex === 0)!;
     expect(transformed.back.trim.xMm).toBe(68);
     expect(transformed.back.trim.yMm).toBe(8);
+    expect(transformPointByDuplexMatrix({ xMm: 32, yMm: 8 }, getDuplexPageReflectionMatrix("x", custom.pageSizeMm)))
+      .toEqual({ xMm: transformed.back.trim.xMm, yMm: transformed.back.trim.yMm });
   });
 
   it("keeps skipped and reserved physical slots blank through the coordinate transform", () => {
@@ -114,6 +137,47 @@ describe("physical duplex page pairing", () => {
     const reserved = reservedPage.slots.find(({ frontSlotIndex }) => frontSlotIndex === 0)!;
     expect(reserved.reserved).toBe(true);
     expect(reserved.cardIndex).toBeUndefined();
+  });
+
+  it("maps asymmetric registration marks and reserved zones with the back sheet coordinate frame", () => {
+    const registration = {
+      type: "custom" as const,
+      orientation: "portrait" as const,
+      marks: [[{ type: "rect" as const, xMm: 10, yMm: 10, widthMm: 4, heightMm: 4, fill: true, strokeWidthMm: 0 }]],
+      reservedZones: [{ xMm: 8, yMm: 8, widthMm: 8, heightMm: 8 }],
+    };
+    const result = calculateSharedPagePlacements(1, {
+      bleedMm: 0,
+      paperFormat: { name: "Custom 100", widthMm: 100, heightMm: 100 },
+      cardFormat: { ...smallCard, name: "20x30" },
+      pageOrientation: "portrait",
+      cardOrientation: "portrait",
+      registration,
+      templateGeometry: {
+        orientation: "portrait",
+        cardOrientation: "portrait",
+        pageSizeMm: { widthMm: 100, heightMm: 100 },
+        cardSizeMm: { widthMm: 20, heightMm: 30 },
+        rows: 1,
+        columns: 2,
+        slots: [
+          { index: 0, row: 0, column: 0, xMm: 10, yMm: 10 },
+          { index: 1, row: 0, column: 1, xMm: 70, yMm: 10 },
+        ],
+      },
+    });
+    const back = createDuplexPagePairing(result.pages, { pageOrientation: "portrait", flipMode: "long-edge" }).pagePairs[0]!;
+    const frontCard = result.pages[0]!.placement.slots[0]!;
+    const pairedBack = back.slots.find(({ physicalCardIndex }) => physicalCardIndex === 0)!.back;
+    const marks = generateRegistrationGeometry(registration, { widthMm: 100, heightMm: 100 });
+    const backMarks = transformRegistrationGeometry(marks, { widthMm: 100, heightMm: 100 }, back.reflectionAxis);
+
+    expect(frontCard.trim.xMm).toBe(70);
+    expect(pairedBack.trim.xMm).toBe(10);
+    expect(back.reflectionAxis).toBe("x");
+    expect(backMarks.marks[0]?.bounds.xMm).toBe(86);
+    expect(backMarks.reservedZones).toContainEqual({ xMm: 84, yMm: 8, widthMm: 8, heightMm: 8 });
+    expect(pairedBack.trim.xMm + pairedBack.trim.widthMm).toBeLessThan(backMarks.reservedZones[0]!.xMm);
   });
 
   it("keeps a partial last page paired to its own logical front page", () => {

@@ -4,6 +4,26 @@ import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 import { createDefaultRegistrationConfig } from "../../core/registration";
 import RegistrationLayoutPreview from "../../src/app/registration-layout-preview";
+import type { WorkingCard } from "../../core/cards/types";
+
+function cards(quantity: number, name = "Fixture card"): WorkingCard[] {
+  return [{
+    id: name,
+    quantity,
+    order: 0,
+    importSource: { sourceId: `source:${name}`, importKind: "fixture", entryKind: "card" },
+    identityHints: { name },
+    identity: null,
+    identityResolution: { status: "unresolved", candidates: [], confirmed: false },
+    faces: [{ id: "front", side: "front" }],
+    selectedArtworkByFace: {},
+    backMode: "project-default",
+    backModeSelectionPolicy: "automatic",
+    localArtworkIds: [],
+    mpcReferences: [],
+    faceAssociations: [],
+  }];
+}
 
 describe("registration layout preview", () => {
   it("shows registration marks and reserved zones with independent page, card, and registration orientation", () => {
@@ -17,6 +37,7 @@ describe("registration layout preview", () => {
     const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
       settings,
       cardCount: 1,
+      cards: cards(1),
       selectedPageNumber: 1,
       onSelectPage: vi.fn(),
       onToggleSkippedSlot: vi.fn(),
@@ -27,6 +48,33 @@ describe("registration layout preview", () => {
     expect(markup).toContain("stroke=\"#111827\"");
     expect(markup).toContain("fill=\"#fecaca\"");
     expect(markup).toContain("legend-reserved");
+    expect(markup).toContain('aria-label="Face do preview"');
+    expect(markup).toContain('data-duplex-cut-overlay="front" transform="matrix(1 0 0 1 0 0)"');
+  });
+
+  it("shows semantic DFC labeling and the upright back preview control", () => {
+    const dfc = cards(1, "Preview DFC").map((entry) => ({
+      ...entry,
+      identity: {
+        id: "scryfall:oracle:preview-dfc", provider: "scryfall", name: "Front // Back", resolutionMethod: "manual" as const, confidence: 1,
+        metadata: { layout: "transform", faces: [{ name: "Front" }, { name: "Back" }] },
+      },
+      faces: [{ id: "front" as const, side: "front" as const, name: "Front" }, { id: "back" as const, side: "back" as const, name: "Back" }],
+      backMode: "auto" as const,
+    }));
+    const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
+      settings: { ...DEFAULT_PROJECT_SETTINGS, layout: { rows: 1, columns: 1, skippedSlotIndices: [] } },
+      cardCount: 1,
+      cards: dfc,
+      selectedPageNumber: 1,
+      onSelectPage: vi.fn(),
+      onToggleSkippedSlot: vi.fn(),
+    }));
+
+    expect(markup).toContain("Front ↔ Back · carta dupla-face");
+    expect(markup).toContain("carta dupla-face");
+    expect(markup).toContain("TOP ↑");
+    expect(markup).toContain("01F · Front // Back · DFC");
   });
 
   it("renders exact template positions and skipped identities while registration none draws no marks", () => {
@@ -55,6 +103,7 @@ describe("registration layout preview", () => {
     const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
       settings,
       cardCount: 2,
+      cards: cards(2),
       selectedPageNumber: 1,
       onSelectPage: vi.fn(),
       onToggleSkippedSlot: vi.fn(),
@@ -70,6 +119,7 @@ describe("registration layout preview", () => {
     const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
       settings: DEFAULT_PROJECT_SETTINGS,
       cardCount: 1,
+      cards: cards(1),
       selectedPageNumber: 1,
       onSelectPage: vi.fn(),
       onToggleSkippedSlot: vi.fn(),
@@ -83,6 +133,7 @@ describe("registration layout preview", () => {
     const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
       settings: { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 0 },
       cardCount: 10,
+      cards: cards(10, "Page card"),
       selectedPageNumber: 2,
       onSelectPage: vi.fn(),
       onToggleSkippedSlot: vi.fn(),
@@ -90,7 +141,8 @@ describe("registration layout preview", () => {
 
     expect(markup).toContain("página PDF 2/2 · cartas 10–10");
     expect(markup).toContain("aria-label=\"Página PDF do preview físico\"");
-    expect(markup).toContain('aria-label="Slot 1 carta 10"');
-    expect(markup).toContain(">10</text>");
+    expect(markup).toContain('aria-label="Slot 1 carta física 10"');
+    expect(markup).toContain("10F");
+    expect(markup).toContain("TOP ↑");
   });
 });

@@ -110,6 +110,9 @@ describe("cut preview and export API", () => {
       ...DEFAULT_PROJECT_SETTINGS,
       cutSourceSelection: { fileId: svgFile.fileId, fileHash: svgFile.contentHash },
       layout: { rows: 1, columns: 2, skippedSlotIndices: [1], templateGeometry },
+      exportContentMode: "duplex" as const,
+      duplexFlipMode: "short-edge" as const,
+      projectDefaultBack: { assetId: `back:${"a".repeat(64)}`, sha256: "a".repeat(64), format: "png" as const },
     };
     const snapshot = deserializeProjectSnapshot(serializeProjectSnapshot([card], settings));
     const project = projects.create(snapshot, { templateId: version5.templateId, version: "v5", packageHash });
@@ -187,6 +190,28 @@ describe("cut preview and export API", () => {
       { slotIndex: 1, pathId: "card-b", state: "skipped" },
     ]);
     expect(activeGeometry.paths.map(({ id }) => id)).toEqual(["card-a"]);
+
+    const manualBackCard: WorkingCard = {
+      ...card,
+      backMode: "manual",
+      backModeSelectionPolicy: "explicit",
+      manualBackAsset: { assetId: `back:${"b".repeat(64)}`, sha256: "b".repeat(64), format: "png" },
+    };
+    const manualBackProject = projects.create(deserializeProjectSnapshot(serializeProjectSnapshot([manualBackCard], settings)), {
+      templateId: version5.templateId,
+      version: "v5",
+      packageHash,
+    });
+    const manualBackPreviewResponse = await handleCutPreview(new Request("http://localhost/api/cut/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: manualBackProject.id, expectedRevision: manualBackProject.revision }),
+    }), projects, library);
+    const manualBackPreview = await manualBackPreviewResponse.json() as CutPreviewDto;
+    expect(manualBackPreviewResponse.status).toBe(200);
+    expect(manualBackPreview.templateIdentity).toEqual(preview.templateIdentity);
+    expect(manualBackPreview.geometry).toEqual(preview.geometry);
+    expect(manualBackPreview.activeGeometry).toEqual(activeGeometry);
     expect(preview.alternateSources).toContainEqual(expect.objectContaining({ status: "divergent" }));
     expect(preview.alternateSources).toContainEqual(expect.objectContaining({ fileName: "alternate-same-contour.dxf", status: "equivalent" }));
 

@@ -26,6 +26,9 @@ describe("ProjectSettingsControls", () => {
       layoutColumns: "",
       templateGeometryActive: false,
       skippedSlotIndices: [],
+      exportContentMode: "duplex",
+      missingBackPolicy: "block",
+      duplexFlipMode: "short-edge",
       disabled: true,
       onBleedMmChange: inert,
       onRoundedCornersChange: inert,
@@ -43,6 +46,9 @@ describe("ProjectSettingsControls", () => {
       onRegistrationChange: inert,
       onLayoutRowsChange: inert,
       onLayoutColumnsChange: inert,
+      onExportContentModeChange: inert,
+      onMissingBackPolicyChange: inert,
+      onDuplexFlipModeChange: inert,
     }));
 
     const controls = [...markup.matchAll(/<(?:input|select)\b([^>]*)>/g)];
@@ -54,6 +60,9 @@ describe("ProjectSettingsControls", () => {
     expect(markup).toContain("Guia externa de corte");
     expect(markup).toContain("Orientação da página");
     expect(markup).toContain("Orientação do registration");
+    expect(markup).toContain("Modo de exportação");
+    expect(markup).toContain("Política para cartas sem verso");
+    expect(markup).toContain("Short edge");
   });
 
   it("locks manual grid dimensions when an immutable template geometry is active", () => {
@@ -77,6 +86,9 @@ describe("ProjectSettingsControls", () => {
       layoutColumns: "3",
       templateGeometryActive: true,
       skippedSlotIndices: [],
+      exportContentMode: "front-only",
+      missingBackPolicy: "use-project-default",
+      duplexFlipMode: "long-edge",
       disabled: false,
       onBleedMmChange: inert,
       onRoundedCornersChange: inert,
@@ -94,6 +106,9 @@ describe("ProjectSettingsControls", () => {
       onRegistrationChange: inert,
       onLayoutRowsChange: inert,
       onLayoutColumnsChange: inert,
+      onExportContentModeChange: inert,
+      onMissingBackPolicyChange: inert,
+      onDuplexFlipModeChange: inert,
     }));
 
     expect(markup).toContain("Grade bloqueada pela geometria do template");

@@ -10,11 +10,13 @@ import {
   type DuplexSlotPair,
 } from "./types";
 
-const ARTWORK_STAYS_UPRIGHT: DuplexArtworkOrientation = Object.freeze({
-  rotationDegrees: 0,
-  mirrorX: false,
-  mirrorY: false,
-});
+function artworkOrientation(axis: DuplexReflectionAxis): DuplexArtworkOrientation {
+  return Object.freeze({
+    rotationDegrees: axis === "y" ? 180 : 0,
+    mirrorX: false,
+    mirrorY: false,
+  });
+}
 
 function reflectionAxis(options: DuplexPagePairingOptions): DuplexReflectionAxis {
   if (options.pageOrientation !== "portrait" && options.pageOrientation !== "landscape") {
@@ -122,8 +124,8 @@ function slotPairs(page: GridPlacementPage, backPage: GridPlacementPage, axis: D
 
 /**
  * Creates the deterministic physical back-sheet plan from the shared page
- * placements. The sheet-space reflection remaps slots and coordinates only;
- * artwork content is never reflected, rotated, or resampled.
+ * placements. Sheet-space reflection remaps slot coordinates and registration
+ * geometry; artwork orientation is carried separately for vector PDF placement.
  */
 export function createDuplexPagePairing(
   pages: readonly GridPlacementPage[],
@@ -137,6 +139,7 @@ export function createDuplexPagePairing(
       throw new DuplexPairingError("DUPLEX_PAIRING_FAILED", "Shared page placements must have contiguous zero-based page indexes.");
     }
     const backPage = transformPlacement(frontPage, axis);
+    const backArtworkOrientation = artworkOrientation(axis);
     pagePairs.push(Object.freeze({
       frontPageIndex: frontPage.pageIndex,
       backPageIndex: backPage.pageIndex,
@@ -150,7 +153,12 @@ export function createDuplexPagePairing(
         pageWidthMm: frontPage.placement.pageSizeMm.widthMm,
         pageHeightMm: frontPage.placement.pageSizeMm.heightMm,
       }),
-      backArtworkOrientation: ARTWORK_STAYS_UPRIGHT,
+      backArtworkOrientation,
+      backPageTransform: Object.freeze({
+        physicalSlotReflectionAxis: axis,
+        registrationReflectionAxis: axis,
+        artworkOrientation: backArtworkOrientation,
+      }),
       slots: slotPairs(frontPage, backPage, axis),
       frontPlacement: frontPage,
       backPlacement: backPage,

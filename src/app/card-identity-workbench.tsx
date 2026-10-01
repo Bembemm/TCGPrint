@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import Image from "next/image";
 import type { ImportKind } from "../../import-engine/types";
-import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard } from "../../core/cards/types";
+import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard, WorkingCardBackMode } from "../../core/cards/types";
+import { isDoubleFacedIdentity, restoreAutomaticBackSelection, selectManualBackLibraryAsset, setWorkingCardBackMode } from "../../core/cards/back-selection";
 
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
 import {
@@ -52,6 +53,8 @@ import {
   type TemplateRegistrationStatus,
 } from "./template-registration-compat";
 import RegistrationLayoutPreview from "./registration-layout-preview";
+import BackLibraryControls, { type BackLibraryAssetDto } from "./back-library-controls";
+import { createBackValidationSummary, exportModeRequiresFrontArtwork } from "./back-validation";
 import { applyTemplateLayoutDefaults } from "./template-layout-defaults";
 import { createProjectRestoreLookupGate, runProjectRestoreProviderLookup } from "./project-restore-provider-gate";
 
@@ -163,6 +166,7 @@ export function WorkingCardDetailsSummary({ card, identityLayout, artworkCandida
       </section>
       <section className="card-details-section" aria-label="Identidade atual">
         <h4>Identidade atual</h4>
+        {isDoubleFacedIdentity(identity) && <span className="multiface-label" aria-label="Carta dupla-face">Carta dupla-face</span>}
         {!identity && <p className="muted">Nenhuma identidade aplicada.</p>}
         <DetailFields fields={[
           ["Nome", identity?.name],
@@ -262,7 +266,7 @@ export function WorkingCardList({ cards, selectedCardId, physicalCardCount, disa
           }}
         >⠿</span>
         <button type="button" className="working-card-select" aria-pressed={card.id === selectedCardId} disabled={disabled} onClick={() => onSelect(card.id)}>
-          <span className="working-card-name">{index + 1}/{orderedCards.length} · {name}</span>
+          <span className="working-card-name">{index + 1}/{orderedCards.length} · {name}{isDoubleFacedIdentity(card.identity) && <span className="multiface-label" aria-label="Carta dupla-face"> · Carta dupla-face</span>}</span>
           <span className="working-card-meta">×{card.quantity} · {card.section ?? "sem seção"} · {statusLabel(card)}</span>
           <span className="working-card-meta">{artworkStatus}</span>
         </button>
@@ -511,9 +515,11 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const identityDetailsRequests = useRef(createRequestCache<IdentityDetails>());
   const projectRestoreLookupGate = useRef(createProjectRestoreLookupGate(-1));
   const [pdfUrl, setPdfUrl] = useState("");
+  const [exportDownloadName, setExportDownloadName] = useState("tcgprint-cards.pdf");
   const [cutGeometryPreview, setCutGeometryPreview] = useState<CutPreviewDto | null>(null);
   const [cutPageNumber, setCutPageNumber] = useState(1);
   const [bleedDiagnostics, setBleedDiagnostics] = useState<BleedDiagnosticsReport | null>(null);
+  const [backLibraryAssets, setBackLibraryAssets] = useState<readonly BackLibraryAssetDto[]>([]);
   const interactionBusy = busy || projectOpenPending;
   function setProjectInteractionLocked(locked: boolean) {
     projectOpenPendingRef.current = locked;
@@ -569,6 +575,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
   const activeCard = useMemo(() => workingCards.find((card) => card.id === selectedCardId), [workingCards, selectedCardId]);
   const physicalCardCount = useMemo(() => workingCards.reduce((sum, card) => sum + card.quantity, 0), [workingCards]);
+  const backValidation = useMemo(() => createBackValidationSummary(workingCards, projectDefaultBack, missingBackPolicy), [workingCards, projectDefaultBack, missingBackPolicy]);
   const filterCards = useMemo(() => artworkCandidates.filter((candidate) => artworkFilter === "all" || candidate.source === artworkFilter), [artworkCandidates, artworkFilter]);
   const activeFaceExists = Boolean(activeCard?.faces.some((item) => item.side === face));
   const activeIdentityId = activeCard?.identity?.id ?? null;
@@ -589,6 +596,15 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     : "";
 
   useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+
+  useEffect(() => {
+    let current = true;
+    void fetch("/api/back-library", { cache: "no-store" })
+      .then((response) => jsonResponse<{ assets: BackLibraryAssetDto[] }>(response))
+      .then(({ assets }) => { if (current) setBackLibraryAssets(assets); })
+      .catch(() => { if (current) setBackLibraryAssets([]); });
+    return () => { current = false; };
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -826,6 +842,11 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     finally { setBusy(false); }
   }
 
+  function updateCardBackMode(card: WorkingCard, mode: WorkingCardBackMode) {
+    const next = mode === "auto" ? restoreAutomaticBackSelection(card) : setWorkingCardBackMode(card, mode);
+    dispatchEditor({ type: "replace-card", cardId: card.id, card: next });
+  }
+
   async function exportPdf() {
     if (!workingCards.length) return;
     if (!projectCutSyncReady) {
@@ -841,7 +862,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       return;
     }
     setBleedDiagnostics(null);
-    setBusy(true); clearProblem(); setStatus(`Compondo quantidade física e gerando PDF ${paperFormat.name}…`);
+    setBusy(true); clearProblem(); setStatus(`Validando ${physicalCardCount} cartas físicas e compondo ${exportContentMode} ${paperFormat.name}…`);
     try {
       const response = await fetch("/api/cards/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -859,10 +880,14 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           horizontalGapMm,
           verticalGapMm,
           registration,
+          exportContentMode,
+          missingBackPolicy,
+          duplexFlipMode,
+          projectDefaultBack,
           ...(templateGeometry ? { templateGeometry } : {}),
           ...(projectSettings.layout.rows !== undefined ? { layoutRows: projectSettings.layout.rows, layoutColumns: projectSettings.layout.columns } : {}),
           skippedSlotIndices,
-          ...(activeProjectSync && cutGeometryPreview ? { projectId: activeProjectSync.projectId, expectedProjectRevision: activeProjectSync.revision } : {}),
+          ...(activeProjectSync?.saved ? { projectId: activeProjectSync.projectId, expectedProjectRevision: activeProjectSync.revision } : {}),
         } }),
       });
       if (!response.ok) {
@@ -870,8 +895,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         throw new Error(body.message ?? "Não foi possível gerar o PDF.");
       }
       setBleedDiagnostics(decodeBleedDiagnostics(response.headers.get("x-tcgprint-bleed-diagnostics")));
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const downloadName = disposition.match(/filename="([^"]+)"/i)?.[1] ?? (exportContentMode === "front-back-separated" ? "tcgprint-front-back.zip" : "tcgprint-cards.pdf");
       const nextUrl = URL.createObjectURL(await response.blob());
-      setPdfUrl(nextUrl); setStatus("PDF pronto · A4 · trim 63,5 × 88,9 mm · bleed externo · guias vetoriais.");
+      setPdfUrl(nextUrl); setExportDownloadName(downloadName); setStatus(`${downloadName} pronto · ${physicalCardCount} slots físicos pareados · ${paperFormat.name} · ${pageOrientation}.`);
     } catch (error) { setBleedDiagnostics(null); setProblem(error instanceof Error ? error.message : "Export falhou."); setStatus(""); }
     finally { setBusy(false); }
   }
@@ -1046,7 +1073,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         {activeCard && <div className="working-card-detail">
           <div className="compact-heading detail-title">
             <div><strong>{displayCard(activeCard)}</strong><span>{activeCard.quantity} cópia(s) físicas · entrada {activeCard.order + 1}</span></div>
-            {activeCard.faces.length > 1 && <span className="multiface-label">DFC / multiface · carta dupla-face</span>}
+            {isDoubleFacedIdentity(activeCard.identity) && <span className="multiface-label" aria-label="Carta dupla-face">Carta dupla-face · Front ↔ Back</span>}
           </div>
 
           <WorkingCardDetailsSummary card={activeCard} identityLayout={identityDetails?.layout} artworkCandidates={artworkCandidates} />
@@ -1087,7 +1114,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           </div>}
 
           <div className="artwork-section">
-            <div className="compact-heading"><div><strong>Artwork Picker · {face === "front" ? "Front" : "Back"}</strong><span>Seleção atual é preservada durante a atualização do catálogo.</span></div></div>
+            <div className="compact-heading"><div><strong>Artwork Picker · {face === "front" ? "Front" : "Back"}{isDoubleFacedIdentity(activeCard.identity) && <span className="multiface-label" aria-label="Carta dupla-face"> · Carta dupla-face</span>}</strong><span>Seleção atual é preservada durante a atualização do catálogo.</span></div></div>
             <div className="artwork-filter-row" role="group" aria-label="Filtrar origem das artes">
               {([ ["all", "Todas"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"], ["upload", "Meus uploads"] ] as const).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => setArtworkFilter(value)}>{label}</button>)}
             </div>
@@ -1144,6 +1171,9 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             layoutColumns={layoutColumns}
             templateGeometryActive={Boolean(templateGeometry)}
             skippedSlotIndices={skippedSlotIndices}
+            exportContentMode={exportContentMode}
+            missingBackPolicy={missingBackPolicy}
+            duplexFlipMode={duplexFlipMode}
             disabled={interactionBusy}
             onBleedMmChange={(value) => updateProjectSetting(() => setBleedMm(value))}
             onRoundedCornersChange={(value) => updateProjectSetting(() => setRoundedCorners(value))}
@@ -1165,13 +1195,39 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             })}
             onLayoutRowsChange={(value) => updateProjectSetting(() => setLayoutRows(value))}
             onLayoutColumnsChange={(value) => updateProjectSetting(() => setLayoutColumns(value))}
+            onExportContentModeChange={(value) => updateProjectSetting(() => setExportContentMode(value))}
+            onMissingBackPolicyChange={(value) => updateProjectSetting(() => setMissingBackPolicy(value))}
+            onDuplexFlipModeChange={(value) => updateProjectSetting(() => setDuplexFlipMode(value))}
           />
-          <RegistrationLayoutPreview settings={projectSettings} cardCount={physicalCardCount} cutPreview={cutGeometryPreview} selectedPageNumber={cutPageNumber} onSelectPage={setCutPageNumber} onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))} />
+          <BackLibraryControls
+            assets={backLibraryAssets}
+            selectedDefault={projectDefaultBack}
+            selectedCard={activeCard ?? null}
+            disabled={interactionBusy}
+            onAssetsChange={setBackLibraryAssets}
+            onDefaultChange={(asset) => updateProjectSetting(() => setProjectDefaultBack(asset))}
+            onCardModeChange={(mode) => { if (activeCard) updateCardBackMode(activeCard, mode); }}
+            onManualBackChange={(asset) => { if (activeCard) dispatchEditor({ type: "replace-card", cardId: activeCard.id, card: selectManualBackLibraryAsset(activeCard, asset) }); }}
+          />
+          {exportContentMode !== "front-only" && <section className="back-preflight" aria-label="Validação de versos antes do export">
+            <h4>Validação de versos</h4>
+            <p>{physicalCardCount} cartas físicas · {backValidation.dfcPhysicalCards} DFC · {backValidation.simplePhysicalCards} simples</p>
+            <p>Versos: {backValidation.backs.auto} auto · {backValidation.backs.projectDefault} Project default · {backValidation.backs.manual} manual · {backValidation.backs.noneOrMissing} none/missing</p>
+            {backValidation.missing.length > 0 && <div>
+              <p className={backValidation.blockers.length ? "error-message" : backValidation.warnings.length ? "warning-message" : "muted"} role={backValidation.blockers.length ? "alert" : "status"}>
+                {backValidation.blockers.length ? `${backValidation.blockers.length} slot(s) sem verso bloqueiam o export.` : backValidation.warnings.length ? `${backValidation.warnings.length} slot(s) sem verso; política permite continuar.` : `${backValidation.missing.length} slot(s) ficarão sem arte traseira.`}
+              </p>
+              <ul>{backValidation.missing.map((item, index) => <li key={`${item.cardId}-${item.copy}-${index}`}>
+                <button type="button" className="link-button" onClick={() => dispatchEditor({ type: "select-card", cardId: item.cardId })}>{item.name} · cópia {item.copy}: {item.reason}</button>
+              </li>)}</ul>
+            </div>}
+          </section>}
+          <RegistrationLayoutPreview settings={projectSettings} cardCount={physicalCardCount} cards={workingCards} cutPreview={cutGeometryPreview} selectedPageNumber={cutPageNumber} onSelectPage={setCutPageNumber} onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))} />
           {templateRegistrationStatus === "legacy-custom-unconfigured" && <p className="error-message" role="alert">O template selecionado declara registration custom, mas a versão não contém geometria física. O PDF usará somente a configuração independente do Project após escolha explícita.</p>}
           {templateRegistrationStatus === "legacy-physical-format-unconfigured" && <p className="error-message" role="alert">A versão legada do template declara papel ou carta custom sem dimensões físicas. Os formatos atuais do Working Set não foram substituídos; exportação bloqueada até selecionar uma versão com geometria explícita.</p>}
           {templateRegistrationStatus === "unavailable" && <p className="error-message" role="alert">A versão exata do template não está disponível para validar registration. Revise ou desassocie o template.</p>}
-          <button className="button primary" type="button" disabled={interactionBusy || templateRegistrationRequiresUserChoice(templateRegistrationStatus) || !projectCutSyncReady || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
-          {pdfUrl && <a className="download-link" href={pdfUrl} download="tcgprint-cards.pdf">Baixar PDF</a>}
+          <button className="button primary" type="button" disabled={interactionBusy || templateRegistrationRequiresUserChoice(templateRegistrationStatus) || !projectCutSyncReady || (exportModeRequiresFrontArtwork(exportContentMode) && !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))) || (exportContentMode !== "front-only" && backValidation.blockers.length > 0)} onClick={() => void exportPdf()}>Validar e gerar {exportContentMode === "front-back-separated" ? "front.pdf + back.pdf" : exportContentMode}</button>
+          {pdfUrl && <a className="download-link" href={pdfUrl} download={exportDownloadName}>Baixar {exportDownloadName}</a>}
         </div>
         <p className="muted">Bleed estende somente os pixels da borda imediata de cada lado. Moldura preta continua preta; full-art continua a própria arte. O trim da carta permanece intacto. Cantos arredondados são uma opção separada.</p>
         {bleedDiagnostics && <details className="bleed-diagnostics">
