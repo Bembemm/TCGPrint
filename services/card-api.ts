@@ -10,9 +10,13 @@ import { ImportFailureError } from "../import-engine/errors";
 import { ScryfallError } from "../providers/scryfall/errors";
 import { ArtworkStorageError } from "../artwork/storage/types";
 import { MpcArtworkProviderError } from "../artwork/mpc-provider";
-import { parseCutGuideConfig, parseTemplateLayoutGeometry, type CardFormat, type CutGuideConfig, type PageOrientation, type PaperFormat, type TemplateLayoutGeometryMm } from "../core/geometry";
+import { MAGIC_STANDARD_CARD, PAPER_FORMATS, parseCutGuideConfig, parseTemplateLayoutGeometry, type CardFormat, type CutGuideConfig, type PageOrientation, type PaperFormat, type TemplateLayoutGeometryMm } from "../core/geometry";
 import type { PageMarginsMm } from "../core/geometry";
 import { parseRegistrationConfig } from "../core/registration";
+import { ProjectRepository, ProjectRepositoryError } from "../persistence/projects/repository";
+import type { TemplateLibraryService } from "./template-library";
+import { CutSourceError } from "./cut-geometry/errors";
+import { resolveProjectCutLayout } from "./cut-geometry/service";
 
 const FORBIDDEN_PROPERTIES = new Set(["originalBytes", "bytes", "sourcePath", "localOriginalPath", "originalUri", "previewUri", "filePaths", "absolutePath", "filesystemPath"]);
 const SOURCES = new Set(["scryfall", "upload", "mpc", "url", "custom"]);
@@ -293,6 +297,16 @@ function respondError(error: unknown): Response {
   if (error instanceof CardExportServiceError) {
     const status = error.code === "INVALID_BLEED" || error.code === "INVALID_ROUNDED_CORNERS" ? 400 : error.code === "ARTWORK_REQUIRED" ? 422 : error.code === "UNSUPPORTED_FORMAT" ? 415 : error.code === "ARTWORK_ORIGINAL_UNAVAILABLE" ? 422 : error.code === "EXPORT_TOO_LARGE" ? 413 : 500;
     return Response.json({ code: error.code, message: error.message }, { status });
+  }
+  if (error instanceof CutSourceError) {
+    const status = error.code === "CUT_SOURCE_TOO_LARGE" ? 413
+      : error.code === "CUT_SOURCE_INTEGRITY_FAILURE" || error.code === "CUT_SOURCE_DIMENSIONS_MISMATCH" || error.code === "CUT_LAYOUT_MISMATCH" ? 409
+        : error.code === "CUT_SOURCE_UNSUPPORTED" ? 422 : 400;
+    return Response.json({ code: error.code, message: error.message }, { status });
+  }
+  if (error instanceof ProjectRepositoryError) {
+    const status = error.code === "PROJECT_NOT_FOUND" ? 404 : error.code === "PROJECT_REVISION_CONFLICT" ? 409 : 400;
+    return Response.json({ code: error.code, message: error.message, expectedRevision: error.expectedRevision, actualRevision: error.actualRevision }, { status });
   }
   if (error instanceof ScryfallError) {
     const status = error.kind === "not-found" ? 404 : error.kind === "rate-limited" ? 429 : error.kind === "aborted" ? 499 : error.kind === "timeout" || error.kind === "server" || error.kind === "network" ? 503 : 502;
@@ -591,7 +605,12 @@ export function encodeBleedDiagnostics(diagnostics: readonly CardExportBleedDiag
   };
 }
 
-export async function handleCardExport(request: Request, workbench: CardWorkbench): Promise<Response> {
+export async function handleCardExport(
+  request: Request,
+  workbench: CardWorkbench,
+  projects?: ProjectRepository,
+  templateLibrary?: TemplateLibraryService,
+): Promise<Response> {
   try {
     const body = await parseJsonRequest(request, 4_000_000);
     const cards = parseWorkingCards(body.cards);
@@ -641,6 +660,61 @@ export async function handleCardExport(request: Request, workbench: CardWorkbenc
     if (skippedSlotIndices?.length && layoutRows === undefined && templateGeometry === undefined) {
       throw new ApiRequestError(400, "INVALID_LAYOUT", "Skipped slots require a fixed grid or versioned template geometry.");
     }
+    let derivedTemplateGeometry: TemplateLayoutGeometryMm | undefined;
+    if (options.projectId !== undefined || options.expectedProjectRevision !== undefined) {
+      if (typeof options.projectId !== "string" || !options.projectId.trim() || options.projectId.length > 180 || /[\u0000-\u001f]/.test(options.projectId)
+        || !Number.isSafeInteger(options.expectedProjectRevision) || (options.expectedProjectRevision as number) < 1) {
+        throw new ApiRequestError(400, "INVALID_PROJECT_CUT_SYNC", "Project cut synchronization requires an opaque Project ID and positive expected revision.");
+      }
+      if (!projects || !templateLibrary) throw new ApiRequestError(503, "CUT_SYNC_UNAVAILABLE", "Project cut synchronization is unavailable.");
+      const project = projects.open(options.projectId);
+      if (project.revision !== options.expectedProjectRevision) {
+        throw new ProjectRepositoryError("PROJECT_REVISION_CONFLICT", `Project revision ${project.revision} does not match requested revision ${options.expectedProjectRevision}.`, options.expectedProjectRevision as number, project.revision);
+      }
+      const saved = project.snapshot.settings;
+      const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+      const expectedLayoutOptions = {
+        bleedMm: saved.bleedMm,
+        roundedCorners: saved.roundedCorners,
+        cutGuides: saved.cutGuides,
+        pageOrientation: saved.pageOrientation,
+        cardOrientation: saved.cardOrientation,
+        paperFormat: saved.paperFormat,
+        cardFormat: saved.cardFormat,
+        marginsMm: saved.marginsMm,
+        horizontalGapMm: saved.horizontalGapMm,
+        verticalGapMm: saved.verticalGapMm,
+        registration: saved.registration,
+        templateGeometry: saved.layout.templateGeometry,
+        layoutRows: saved.layout.rows,
+        layoutColumns: saved.layout.columns,
+        skippedSlotIndices: saved.layout.skippedSlotIndices,
+      };
+      const requestLayoutOptions = {
+        bleedMm,
+        roundedCorners: options.roundedCorners ?? false,
+        cutGuides,
+        pageOrientation: pageOrientation ?? "portrait",
+        cardOrientation: cardOrientation ?? "portrait",
+        paperFormat: paperFormat ?? PAPER_FORMATS.A4,
+        cardFormat: cardFormat ?? MAGIC_STANDARD_CARD,
+        marginsMm: marginsMm ?? { top: 0, right: 0, bottom: 0, left: 0 },
+        horizontalGapMm: horizontalGapMm ?? 0,
+        verticalGapMm: verticalGapMm ?? 0,
+        registration,
+        templateGeometry,
+        layoutRows,
+        layoutColumns,
+        skippedSlotIndices: skippedSlotIndices ?? [],
+      };
+      const persistedCardOrder = project.snapshot.cards.map(({ id, quantity, order }) => ({ id, quantity, order }));
+      const submittedCardOrder = cards.map(({ id, quantity, order }) => ({ id, quantity, order }));
+      if (!same(expectedLayoutOptions, requestLayoutOptions) || !same(persistedCardOrder, submittedCardOrder)) {
+        throw new ApiRequestError(409, "PROJECT_CUT_SYNC_STALE", "PDF request does not match the autosaved Project settings and card order used by cut geometry. Save the Project and retry.");
+      }
+      const resolved = await resolveProjectCutLayout(project.id, project.revision, projects, templateLibrary);
+      derivedTemplateGeometry = resolved.layout.derivedTemplateGeometry;
+    }
     const result = await exportWorkingCardsWithDiagnostics(workbench, cards, {
       bleedMm,
       cutGuides,
@@ -653,7 +727,7 @@ export async function handleCardExport(request: Request, workbench: CardWorkbenc
       ...(horizontalGapMm !== undefined ? { horizontalGapMm } : {}),
       ...(verticalGapMm !== undefined ? { verticalGapMm } : {}),
       registration,
-      ...(templateGeometry ? { templateGeometry } : {}),
+      ...((derivedTemplateGeometry ?? templateGeometry) ? { templateGeometry: derivedTemplateGeometry ?? templateGeometry } : {}),
       ...(layoutRows !== undefined ? { layoutRows, layoutColumns } : {}),
       ...(skippedSlotIndices ? { skippedSlotIndices } : {}),
     }, request.signal);

@@ -4,10 +4,13 @@ import { useMemo, type KeyboardEvent } from "react";
 import { calculateGridPlacement, CutGuideEngine } from "../../core/geometry";
 import { generateRegistrationGeometry, type RegistrationPrimitive } from "../../core/registration";
 import type { ProjectSettingsV2 } from "../../persistence/projects/serializer";
+import { cutPathToSvgD } from "../../core/cut";
+import type { CutPreviewDto } from "../../services/cut-api";
 
 interface RegistrationLayoutPreviewProps {
   readonly settings: ProjectSettingsV2;
   readonly cardCount: number;
+  readonly cutPreview?: CutPreviewDto | null;
   readonly onToggleSkippedSlot: (index: number) => void;
 }
 
@@ -17,7 +20,7 @@ function primitiveElement(primitive: RegistrationPrimitive, key: string) {
   return <circle key={key} cx={primitive.cxMm} cy={primitive.cyMm} r={primitive.radiusMm} fill={primitive.fill ? "#111827" : "none"} stroke={primitive.strokeWidthMm ? "#111827" : "none"} strokeWidth={primitive.strokeWidthMm} />;
 }
 
-export default function RegistrationLayoutPreview({ settings, cardCount, onToggleSkippedSlot }: RegistrationLayoutPreviewProps) {
+export default function RegistrationLayoutPreview({ settings, cardCount, cutPreview = null, onToggleSkippedSlot }: RegistrationLayoutPreviewProps) {
   const paper = settings.paperFormat;
   const card = settings.cardFormat;
   const result = useMemo(() => {
@@ -28,6 +31,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, onToggl
         ? { widthMm: paper.widthMm, heightMm: paper.heightMm }
         : { widthMm: paper.heightMm, heightMm: paper.widthMm };
       const geometry = generateRegistrationGeometry(settings.registration, pageSizeMm);
+      const templateGeometry = settings.layout.templateGeometry ?? cutPreview?.derivedTemplateGeometry;
       const placement = calculateGridPlacement({
         paper,
         pageOrientation: settings.pageOrientation,
@@ -38,7 +42,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, onToggl
         marginsMm: settings.marginsMm,
         horizontalGapMm: settings.horizontalGapMm,
         verticalGapMm: settings.verticalGapMm,
-        ...(settings.layout.templateGeometry ? { templateGeometry: settings.layout.templateGeometry } : {}),
+        ...(templateGeometry ? { templateGeometry } : {}),
         reservedZonesMm: geometry.reservedZones,
         skippedSlotIndices: settings.layout.skippedSlotIndices,
         ...(settings.layout.rows !== undefined && settings.layout.columns !== undefined
@@ -54,7 +58,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, onToggl
     } catch (error) {
       return { placement: null, geometry: null, cutGeometry: null, error: error instanceof Error ? error.message : "Layout inválido." } as const;
     }
-  }, [settings, cardCount, paper, card]);
+  }, [settings, cardCount, paper, card, cutPreview?.derivedTemplateGeometry]);
 
   if (!result.placement || !result.geometry || !result.cutGeometry) {
     return <section className="registration-preview" aria-label="Preview da folha">
@@ -69,6 +73,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, onToggl
   const reserved = new Set(placement.gridSlots.filter(({ reserved }) => reserved).map(({ index }) => index));
   const toggle = (index: number) => onToggleSkippedSlot(index);
   const slotsCanBeSkipped = Boolean(settings.layout.templateGeometry
+    || cutPreview?.derivedTemplateGeometry
     || (settings.layout.rows !== undefined && settings.layout.columns !== undefined));
 
   return <section className="registration-preview" aria-label="Preview da folha">
@@ -101,11 +106,27 @@ export default function RegistrationLayoutPreview({ settings, cardCount, onToggl
         {!assigned.has(slot.index) && !skipped.has(slot.index) && <text x={slot.trim.xMm + slot.trim.widthMm / 2} y={slot.trim.yMm + slot.trim.heightMm / 2} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#64748b">{slot.index + 1}</text>}
       </g>)}
       {geometry.reservedZones.map((zone, index) => <rect key={`reserved-${index}`} x={zone.xMm} y={zone.yMm} width={zone.widthMm} height={zone.heightMm} fill="#fecaca" fillOpacity="0.75" stroke="#dc2626" strokeWidth="0.7" strokeDasharray="2 1" />)}
+      {cutPreview?.geometry.paths.map((path) => {
+        const state = cutPreview.slotPaths.find(({ pathId }) => pathId === path.id)?.state ?? "empty";
+        const active = state === "active";
+        const skippedPath = state === "skipped";
+        return <path
+          key={`source-cut-${path.id}`}
+          d={cutPathToSvgD(path)}
+          fill="none"
+          stroke={active ? "#dc2626" : skippedPath ? "#7e22ce" : state === "reserved" ? "#ea580c" : "#64748b"}
+          strokeWidth={active ? "0.65" : "0.4"}
+          strokeDasharray={active ? undefined : "1.5 1"}
+          opacity={active ? "0.95" : "0.75"}
+          data-cut-slot-state={state}
+          aria-label={`Cut path ${path.id}: ${state}`}
+        />;
+      })}
       {cutGeometry.trimSegments.map((segment, index) => <line key={`cut-${index}`} x1={segment.x1Mm} y1={segment.y1Mm} x2={segment.x2Mm} y2={segment.y2Mm} stroke="#2563eb" strokeWidth="0.2" />)}
       {cutGeometry.externalSegments.map((segment, index) => <line key={`external-cut-${index}`} x1={segment.x1Mm} y1={segment.y1Mm} x2={segment.x2Mm} y2={segment.y2Mm} stroke="#111827" strokeWidth="0.2" />)}
       {geometry.marks.flatMap((mark) => mark.primitives.map((primitive, index) => primitiveElement(primitive, `${mark.id}-${index}`)))}
     </svg>
     {!slotsCanBeSkipped && <p>Defina linhas e colunas antes de desativar slots.</p>}
-    <div className="registration-preview-legend"><span><i className="legend-bleed" /> Bleed</span><span><i className="legend-trim" /> Trim/card</span><span><i className="legend-reserved" /> Reserved zone</span><span><i className="legend-skipped" /> Skipped slot</span><span><i className="legend-mark" /> Registration mark</span></div>
+    <div className="registration-preview-legend"><span><i className="legend-bleed" /> Bleed</span><span><i className="legend-trim" /> Trim/card</span><span><i className="legend-cut-source" /> Cut path ativo</span><span><i className="legend-skipped" /> Skipped slot/path</span><span><i className="legend-reserved" /> Reserved zone</span><span><i className="legend-mark" /> Registration mark</span></div>
   </section>;
 }

@@ -5,6 +5,8 @@ import type { WorkingCard } from "../../core/cards/types";
 import type { ProjectSettingsV1 } from "../../persistence/projects/serializer";
 import type { ProjectDto, ProjectOpenDto, ProjectSaveState } from "../../services/project-api";
 import type { TemplateSelection } from "../../templates/types";
+import type { CutSourceSelection } from "../../core/cut";
+import type { CutPreviewDto } from "../../services/cut-api";
 import { createProjectApiClient, ProjectApiClientError } from "./project-api-client";
 import { createProjectListRequestGuard } from "./project-list-request-guard";
 import { ProjectAutosaveQueue } from "./project-autosave";
@@ -33,6 +35,9 @@ export interface ProjectsPanelProps {
   readonly settings: ProjectSettingsV1;
   readonly onProjectOpen: (project: ProjectDto) => void;
   readonly onTemplateDefaults?: (defaults: TemplateRegistrationDefaults | null) => void;
+  readonly onCutSourceSelectionChange?: (selection: CutSourceSelection | null) => void;
+  readonly onCutGeometryPreviewChange?: (preview: CutPreviewDto | null) => void;
+  readonly onProjectSyncStateChange?: (state: { readonly projectId: string; readonly revision: number; readonly saved: boolean } | null) => void;
   readonly onTemplateRegistrationStatusChange?: (status: TemplateRegistrationStatus) => void;
   readonly onProjectInteractionLockChange?: (locked: boolean) => void;
   readonly disabled?: boolean;
@@ -48,6 +53,9 @@ export default function ProjectsPanel({
   settings,
   onProjectOpen,
   onTemplateDefaults,
+  onCutSourceSelectionChange,
+  onCutGeometryPreviewChange,
+  onProjectSyncStateChange,
   onTemplateRegistrationStatusChange,
   onProjectInteractionLockChange,
   disabled = false,
@@ -80,6 +88,10 @@ export default function ProjectsPanel({
   );
   const [operation, setOperation] = useState<"creating" | "opening" | "duplicating" | "deleting" | null>(null);
   const [recoveryDecision, setRecoveryDecision] = useState<ProjectOpenDto | null>(null);
+  const [cutPreview, setCutPreview] = useState<CutPreviewDto | null>(null);
+  const [cutPreviewError, setCutPreviewError] = useState<string | null>(null);
+  const [cutPreviewLoading, setCutPreviewLoading] = useState(false);
+  const [cutExportBusy, setCutExportBusy] = useState(false);
   const recoveryChoiceInProgress = useRef(false);
   const interactionLockCallbackRef = useRef(onProjectInteractionLockChange);
   interactionLockCallbackRef.current = onProjectInteractionLockChange;
@@ -138,6 +150,54 @@ export default function ProjectsPanel({
   }), [api, dispatchSession, refreshProjects]);
 
   useEffect(() => () => autosave.dispose(), [autosave]);
+
+  useEffect(() => {
+    const project = session.activeProject;
+    let current = true;
+    const abort = new AbortController();
+    if (!project || session.status !== "Salvo") {
+      setCutPreview(null);
+      setCutPreviewError(null);
+      onCutGeometryPreviewChange?.(null);
+      setCutPreviewLoading(false);
+      return () => { current = false; abort.abort(); };
+    }
+    setCutPreview(null);
+    setCutPreviewError(null);
+    setCutPreviewLoading(true);
+    onCutGeometryPreviewChange?.(null);
+    void fetch("/api/cut/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, expectedRevision: project.revision }),
+      cache: "no-store",
+      signal: abort.signal,
+    }).then(async (response) => {
+      const body = await response.json() as unknown;
+      if (!response.ok) {
+        const details = body && typeof body === "object" ? body as { message?: string } : {};
+        throw new Error(details.message ?? "Cut preview validation failed.");
+      }
+      return body as CutPreviewDto;
+    }).then((result) => {
+      if (!current) return;
+      setCutPreview(result);
+      onCutGeometryPreviewChange?.(result);
+    }).catch((error: unknown) => {
+      if (!current || (error instanceof DOMException && error.name === "AbortError")) return;
+      setCutPreviewError(errorMessage(error));
+    }).finally(() => {
+      if (current) setCutPreviewLoading(false);
+    });
+    return () => { current = false; abort.abort(); };
+  }, [session.activeProject?.id, session.activeProject?.revision, session.status, onCutGeometryPreviewChange]);
+
+  useEffect(() => {
+    const project = session.activeProject;
+    onProjectSyncStateChange?.(project
+      ? { projectId: project.id, revision: project.revision, saved: session.status === "Salvo" }
+      : null);
+  }, [session.activeProject?.id, session.activeProject?.revision, session.status, onProjectSyncStateChange]);
 
   useEffect(() => {
     if (session.activeProject && currentSnapshot.key !== null && currentSnapshot.document !== null) {
@@ -361,6 +421,38 @@ export default function ProjectsPanel({
     }
   }
 
+  async function exportCut(format: "svg" | "dxf") {
+    const project = session.activeProject;
+    if (!project || session.status !== "Salvo" || cutExportBusy || projectActionsDisabled) return;
+    setCutExportBusy(true);
+    setCutPreviewError(null);
+    try {
+      const response = await fetch(`/api/cut/export/${format}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, expectedRevision: project.revision }),
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        const body = await response.json() as unknown;
+        const details = body && typeof body === "object" ? body as { message?: string } : {};
+        throw new Error(details.message ?? `Cut ${format.toUpperCase()} export failed.`);
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `tcgprint-cut.${format}`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
+      setCutPreviewError(errorMessage(error));
+    } finally {
+      setCutExportBusy(false);
+    }
+  }
+
   return (
     <section className="panel projects-panel" aria-label="Projects">
       <div className="panel-heading">
@@ -402,11 +494,43 @@ export default function ProjectsPanel({
         </li>)}
       </ul> : <p className="muted">Nenhum Project salvo.</p>}
 
-      <TemplateLibraryPanel selection={templateSelection} onRegistrationStatusChange={onTemplateRegistrationStatusChange} onSelect={(selection, defaults) => {
+      <TemplateLibraryPanel selection={templateSelection} cutSourceSelection={settings.cutSourceSelection} onCutSourceSelect={onCutSourceSelectionChange} onRegistrationStatusChange={onTemplateRegistrationStatusChange} onSelect={(selection, defaults) => {
+        const sameTemplateSelection = templateSelection?.templateId === selection?.templateId
+          && templateSelection?.version === selection?.version
+          && templateSelection?.packageHash === selection?.packageHash;
         setTemplateSelection(selection);
+        if (!sameTemplateSelection) onCutSourceSelectionChange?.(null);
         if (defaults) onTemplateDefaults?.(defaults);
         else if (selection === null) onTemplateDefaults?.(null);
       }} disabled={projectActionsDisabled} />
+
+      <section className="cut-export-panel" aria-label="SVG e DXF Cut Export">
+        <div>
+          <h3>SVG/DXF Cut Export</h3>
+          <p>Preview e exports usam a mesma geometria em milímetros. O arquivo contém somente caminhos dos slots com cartas atribuídas; slots pulados, reservados ou vazios ficam de fora.</p>
+          {cutPreview?.geometry.source.kind === "project-layout" && <p className="muted">Sem SVG/DXF selecionado: os exports manuais geram somente retângulos de canto reto a partir dos trims ativos do layout PDF. Nenhum canto ou curva é inferido.</p>}
+        </div>
+        {session.activeProject === null
+          ? <p className="muted">Abra ou crie um Project para validar e exportar os paths de corte.</p>
+          : session.status !== "Salvo"
+            ? <p className="muted" aria-live="polite">Aguardando autosave para validar a revisão atual do Project.</p>
+            : cutPreviewLoading
+              ? <p className="muted" aria-live="polite">Validando original, versão, hash e sincronização com o layout…</p>
+              : cutPreview
+                ? <>
+                  <p>Project {cutPreview.projectId} · revisão {cutPreview.projectRevision} · parser {cutPreview.parserVersion} · página {cutPreview.layout.pageSizeMm.widthMm} × {cutPreview.layout.pageSizeMm.heightMm} mm · {cutPreview.slotPaths.filter(({ state }) => state === "active").length} paths ativos</p>
+                  {cutPreview.alternateSources.map((source) => source.status === "divergent" || source.status === "unreadable"
+                    ? <p key={source.fileId} className="error-message" role="alert">Fonte alternativa {source.fileName}: {source.status === "divergent" ? "geometria materialmente divergente" : "não pôde ser comparada"}{source.message ? ` · ${source.message}` : ""}. A seleção explícita do Project continua vinculada ao arquivo escolhido.</p>
+                    : null)}
+                  {cutPreview.alternateSources.filter(({ status }) => status === "equivalent" || status === "not-compared").map((source) => <p key={source.fileId} className="muted">Fonte alternativa {source.fileName}: {source.status === "equivalent" ? "geometria equivalente" : source.message}</p>)}
+                  <div className="cut-export-actions">
+                    <button className="button secondary" type="button" disabled={projectActionsDisabled || cutExportBusy || !cutPreview.activeGeometry} onClick={() => void exportCut("svg")}>{cutExportBusy ? "Exportando…" : "Exportar SVG Cut"}</button>
+                    <button className="button secondary" type="button" disabled={projectActionsDisabled || cutExportBusy || !cutPreview.activeGeometry} onClick={() => void exportCut("dxf")}>{cutExportBusy ? "Exportando…" : "Exportar DXF Cut"}</button>
+                  </div>
+                </>
+                : <p className="muted">Cut preview indisponível.</p>}
+        {cutPreviewError && <p className="error-message" role="alert">{cutPreviewError}</p>}
+      </section>
 
       {(session.status === "Conflito" || session.status === "Erro") && session.activeProject && <section className="project-conflict" aria-label={session.status === "Conflito" ? "Conflito de revisão" : "Falha no autosave"}>
         <p role="alert">{session.status === "Conflito"

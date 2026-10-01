@@ -48,10 +48,10 @@ describe("project repository", () => {
     expect(created).toEqual({
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 2,
+      projectSchemaVersion: 3,
       revision: 1,
       snapshot: {
-        projectSchemaVersion: 2,
+        projectSchemaVersion: 3,
         cards: [],
         settings: {
           bleedMm: 0.625,
@@ -69,6 +69,7 @@ describe("project repository", () => {
         verticalGapMm: 0,
         registration: { type: "none", orientation: "portrait" },
         registrationOverride: false,
+        cutSourceSelection: null,
         layout: { skippedSlotIndices: [] },
         },
       },
@@ -80,7 +81,7 @@ describe("project repository", () => {
     expect(projects.list()).toEqual([{
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 2,
+      projectSchemaVersion: 3,
       revision: 1,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -88,6 +89,65 @@ describe("project repository", () => {
     }]);
     expect(projects.open("project-1")).toEqual(created);
     expect(projects.get("missing-project")).toBeUndefined();
+  });
+
+  it("persists the exact DXF source and unit choice through autosave, reopen, duplicate, and recovery", async () => {
+    const projects = await setup();
+    const templates = new TemplateRepository(database!);
+    const metadata = parseTemplateMetadata({
+      name: "Cut source persistence",
+      source: "fixture",
+      version: "5",
+      paper: "a4",
+      cardFormat: "standard",
+      orientation: "portrait",
+      registrationType: "none",
+    });
+    const fileHash = "b".repeat(64);
+    const fileBytes = 321;
+    const packageHash = calculateTemplatePackageHash(metadata, [{ relativePath: "cut/template.dxf", contentHash: fileHash, byteLength: fileBytes }]);
+    const added = templates.addVersion({
+      metadata,
+      packageHash,
+      files: [{ relativePath: "cut/template.dxf", fileName: "template.dxf", extension: "dxf", mediaType: "application/dxf", contentHash: fileHash, byteLength: fileBytes }],
+    });
+    const templateSelection = { templateId: added.templateId, version: "5", packageHash };
+    const file = added.version.files[0]!;
+    const settings = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      cutSourceSelection: { fileId: file.fileId, fileHash: file.contentHash, dxfUnitsOverride: "mm" as const },
+    };
+    const snapshot = deserializeProjectSnapshot(serializeProjectSnapshot([], settings));
+    const created = projects.create(snapshot, templateSelection);
+
+    const saved = projects.save(created.id, created.revision, snapshot);
+    expect(projects.open(saved.id).snapshot.settings.cutSourceSelection).toEqual(settings.cutSourceSelection);
+    expect(projects.open(saved.id).templateSelection).toEqual(templateSelection);
+
+    const duplicate = projects.duplicate(saved.id);
+    expect(duplicate.snapshot.settings.cutSourceSelection).toEqual(settings.cutSourceSelection);
+    expect(duplicate.templateSelection).toEqual(templateSelection);
+
+    const recoverySnapshot = deserializeProjectSnapshot(serializeProjectSnapshot([], { ...settings, bleedMm: 1 }));
+    const recovery = projects.stageRecovery(saved.id, saved.revision, recoverySnapshot);
+    expect(projects.readRecovery(saved.id)?.snapshot.settings.cutSourceSelection).toEqual(settings.cutSourceSelection);
+    expect(projects.readRecovery(saved.id)?.templateSelection).toEqual(templateSelection);
+    const promoted = projects.promoteRecovery(saved.id);
+    expect(promoted.snapshot.settings.cutSourceSelection).toEqual(settings.cutSourceSelection);
+    expect(promoted.templateSelection).toEqual(templateSelection);
+    expect(promoted.snapshot.settings.bleedMm).toBe(1);
+    expect(recovery.snapshot.settings.cutSourceSelection).toEqual(settings.cutSourceSelection);
+
+    const copyCandidate = deserializeProjectSnapshot(serializeProjectSnapshot([], { ...settings, bleedMm: 2 }));
+    projects.stageRecovery(promoted.id, promoted.revision, copyCandidate);
+    const recoveryCopy = projects.copyRecovery(promoted.id);
+    expect(recoveryCopy.snapshot.settings.cutSourceSelection).toEqual(settings.cutSourceSelection);
+    expect(recoveryCopy.templateSelection).toEqual(templateSelection);
+
+    expect(() => projects.save(duplicate.id, duplicate.revision, deserializeProjectSnapshot(serializeProjectSnapshot([], {
+      ...settings,
+      cutSourceSelection: { fileId: file.fileId, fileHash: "c".repeat(64) },
+    })))).toThrowError(expect.objectContaining({ code: "PROJECT_CUT_SOURCE_NOT_FOUND" }));
   });
 
   it("persists registration and skipped-slot settings through save, reopen, duplicate, and recovery promotion", async () => {
@@ -199,7 +259,7 @@ describe("project repository", () => {
       .toThrowError(expect.objectContaining({ code: "PROJECT_TEMPLATE_GEOMETRY_MISMATCH" }));
   });
 
-  it("opens legacy v1 snapshots with explicit v2 defaults without rewriting the stored bytes", async () => {
+  it("opens legacy v1 snapshots with explicit current defaults without rewriting the stored bytes", async () => {
     const projects = await setup();
     const created = projects.create();
     const legacy = JSON.stringify({
@@ -215,9 +275,9 @@ describe("project repository", () => {
 
     const opened = projects.open(created.id);
 
-    expect(opened.projectSchemaVersion).toBe(2);
+    expect(opened.projectSchemaVersion).toBe(3);
     expect(opened.snapshot).toMatchObject({
-      projectSchemaVersion: 2,
+      projectSchemaVersion: 3,
       settings: { bleedMm: 1.25, roundedCorners: true, registration: { type: "none", orientation: "portrait" } },
     });
     expect(database!.prepare("SELECT snapshot_json FROM projects WHERE id = ?").get(created.id)).toEqual({ snapshot_json: legacy });
@@ -240,7 +300,7 @@ describe("project repository", () => {
       faceAssociations: [],
     };
     const initialSnapshot = {
-      projectSchemaVersion: 2 as const,
+      projectSchemaVersion: 3 as const,
       cards: [customCard],
       settings: DEFAULT_PROJECT_SETTINGS,
     };
@@ -288,9 +348,9 @@ describe("project repository", () => {
     const projects = await setup();
     const future = projects.create();
     const corrupt = projects.create();
-    const futureJson = JSON.stringify({ projectSchemaVersion: 3, cards: [], settings: {} });
+    const futureJson = JSON.stringify({ projectSchemaVersion: 4, cards: [], settings: {} });
     const corruptJson = "{";
-    database!.prepare("UPDATE projects SET project_schema_version = 3, snapshot_json = ? WHERE id = ?").run(futureJson, future.id);
+    database!.prepare("UPDATE projects SET project_schema_version = 4, snapshot_json = ? WHERE id = ?").run(futureJson, future.id);
     database!.prepare("UPDATE projects SET snapshot_json = ? WHERE id = ?").run(corruptJson, corrupt.id);
     const readRaw = (projectId: string) => database!.prepare("SELECT project_schema_version, revision, snapshot_json FROM projects WHERE id = ?").get(projectId);
     const futureBefore = readRaw(future.id);
@@ -411,7 +471,7 @@ describe("project repository", () => {
     expect(staged).toEqual({
       projectId: canonical.id,
       baseRevision: 1,
-      projectSchemaVersion: 2,
+      projectSchemaVersion: 3,
       snapshot: candidate,
       templateSelection: null,
       createdAt: "2026-01-01T00:00:01.000Z",

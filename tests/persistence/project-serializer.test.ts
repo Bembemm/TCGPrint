@@ -45,7 +45,7 @@ describe("project snapshot serializer", () => {
     const snapshot = deserializeProjectSnapshot(encoded);
 
     expect(snapshot).toEqual({
-      projectSchemaVersion: 2,
+      projectSchemaVersion: 3,
       cards: [{
         id: "working-card-1",
         quantity: 1,
@@ -76,12 +76,13 @@ describe("project snapshot serializer", () => {
         verticalGapMm: 0,
         registration: { type: "none", orientation: "portrait" },
         registrationOverride: false,
+        cutSourceSelection: null,
         layout: { skippedSlotIndices: [] },
       },
     });
   });
 
-  it("migrates a legacy v1 project deterministically to v2 defaults", () => {
+  it("migrates a legacy v1 project deterministically to v3 defaults", () => {
     const legacy = {
       projectSchemaVersion: 1,
       cards: [],
@@ -93,14 +94,23 @@ describe("project snapshot serializer", () => {
     };
 
     expect(deserializeProjectSnapshot(legacy)).toMatchObject({
-      projectSchemaVersion: 2,
+      projectSchemaVersion: 3,
       settings: {
         pageOrientation: "portrait",
         cardOrientation: "portrait",
         registration: { type: "none", orientation: "portrait" },
         registrationOverride: false,
+        cutSourceSelection: null,
         layout: { skippedSlotIndices: [] },
       },
+    });
+  });
+
+  it("migrates Phase 10 schema-2 snapshots without requiring a cut-source selection", () => {
+    const { cutSourceSelection: _cutSourceSelection, ...phase10Settings } = DEFAULT_PROJECT_SETTINGS;
+    expect(deserializeProjectSnapshot({ projectSchemaVersion: 2, cards: [], settings: phase10Settings })).toMatchObject({
+      projectSchemaVersion: 3,
+      settings: { cutSourceSelection: null, registrationOverride: false },
     });
   });
 
@@ -153,7 +163,7 @@ describe("project snapshot serializer", () => {
   });
 
   it("rejects a future logical snapshot version with an explicit version error", () => {
-    expect(() => deserializeProjectSnapshot({ projectSchemaVersion: 3, cards: [], settings: {} }))
+    expect(() => deserializeProjectSnapshot({ projectSchemaVersion: 4, cards: [], settings: {} }))
       .toThrowError(expect.objectContaining({ code: "FUTURE_PROJECT_SCHEMA_VERSION" }));
   });
 

@@ -47,6 +47,7 @@ export class ProjectRepositoryError extends Error {
       | "PROJECT_RECOVERY_EXISTS"
       | "PROJECT_TEMPLATE_NOT_FOUND"
       | "PROJECT_TEMPLATE_GEOMETRY_MISMATCH"
+      | "PROJECT_CUT_SOURCE_NOT_FOUND"
       | "INVALID_PROJECT_TIMESTAMP",
     message: string,
     readonly expectedRevision?: number,
@@ -397,7 +398,7 @@ export class ProjectRepository {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.id} snapshot must be stored as JSON text.`);
     }
     let snapshot = deserializeProjectSnapshot(row.snapshot_json);
-    if (row.project_schema_version !== snapshot.projectSchemaVersion && row.project_schema_version !== 1) {
+    if (row.project_schema_version !== snapshot.projectSchemaVersion && row.project_schema_version !== 1 && row.project_schema_version !== 2) {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.id} database and snapshot schema versions do not match.`);
     }
     const templateSelection = this.readProjectTemplateSelection(row.id);
@@ -413,7 +414,7 @@ export class ProjectRepository {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", "Project recovery metadata is invalid.");
     }
     let snapshot = deserializeProjectSnapshot(row.snapshot_json);
-    if (row.project_schema_version !== snapshot.projectSchemaVersion && row.project_schema_version !== 1) {
+    if (row.project_schema_version !== snapshot.projectSchemaVersion && row.project_schema_version !== 1 && row.project_schema_version !== 2) {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.project_id} recovery schema versions do not match.`);
     }
     const templateSelection = this.readRecoveryTemplateSelection(row.project_id);
@@ -443,7 +444,11 @@ export class ProjectRepository {
   }
 
   private validateTemplateSelection(selection: TemplateSelection | null, snapshot: ProjectSnapshotV1): void {
-    if (selection === null) return;
+    const cutSource = snapshot.settings.cutSourceSelection;
+    if (selection === null) {
+      if (cutSource !== null) throw new ProjectRepositoryError("PROJECT_CUT_SOURCE_NOT_FOUND", "A cut source must belong to the Project's exact selected template version.");
+      return;
+    }
     if (!selection || typeof selection.templateId !== "string" || !selection.templateId
       || typeof selection.version !== "string" || !selection.version
       || !/^[a-f0-9]{64}$/.test(selection.packageHash)) {
@@ -454,6 +459,18 @@ export class ProjectRepository {
     `).get(selection.templateId, selection.version, selection.packageHash);
     if (!version) {
       throw new ProjectRepositoryError("PROJECT_TEMPLATE_NOT_FOUND", "The selected template ID, version, and hash are not present in the library.");
+    }
+    if (cutSource !== null) {
+      const file = this.database.prepare(`
+        SELECT f.extension, f.content_hash
+        FROM template_files f
+        INNER JOIN template_versions v ON v.template_id = f.template_id AND v.version = f.version
+        WHERE f.file_id = ? AND f.template_id = ? AND f.version = ? AND v.package_hash = ?
+      `).get(cutSource.fileId, selection.templateId, selection.version, selection.packageHash) as { extension: string; content_hash: string } | undefined;
+      if (!file || (file.extension !== "svg" && file.extension !== "dxf") || file.content_hash !== cutSource.fileHash
+        || (cutSource.dxfUnitsOverride !== undefined && file.extension !== "dxf")) {
+        throw new ProjectRepositoryError("PROJECT_CUT_SOURCE_NOT_FOUND", "The selected SVG/DXF file and SHA-256 do not belong to the exact Project template version.");
+      }
     }
     const geometry = this.templateGeometryFromVersion((version as { template_geometry_json: string | null }).template_geometry_json);
     const projectGeometry = snapshot.settings.layout.templateGeometry;
@@ -531,7 +548,7 @@ export class ProjectRepository {
     return {
       id: row.id,
       name: row.name,
-      projectSchemaVersion: row.project_schema_version === 1 ? CURRENT_PROJECT_SCHEMA_VERSION : row.project_schema_version,
+      projectSchemaVersion: row.project_schema_version <= 2 ? CURRENT_PROJECT_SCHEMA_VERSION : row.project_schema_version,
       revision: row.revision,
       createdAt: this.readTimestamp(row.created_at),
       updatedAt: this.readTimestamp(row.updated_at),

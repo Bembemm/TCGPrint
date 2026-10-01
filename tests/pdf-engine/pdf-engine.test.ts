@@ -11,8 +11,12 @@ import { BleedEngine } from "../../image-engine/bleed";
 import type { CutGuideConfig, GuideColor } from "../../core/geometry/cut-guides";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 import { createDefaultRegistrationConfig, generateRegistrationGeometry } from "../../core/registration";
+import { resolveCutLayout } from "../../services/cut-geometry/layout-sync";
+import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
+import { parseSvgCutGeometry } from "../../services/cut-geometry/svg-parser";
 
 const FIXTURES = join(process.cwd(), "tests", "fixtures", "pdf");
+const CUT_FIXTURES = join(process.cwd(), "tests", "fixtures", "cut");
 const A4_WIDTH_POINTS = 595.2755905511812;
 const A4_HEIGHT_POINTS = 841.8897637795276;
 const MAGIC_CARD_WIDTH_POINTS = 180;
@@ -434,6 +438,73 @@ describe("LosslessPdfEngine", () => {
     expect(positionMatrices).toHaveLength(2);
     expect(actualX).toEqual(expectedX);
     expect(actualX).not.toContain(layout.gridSlots[1]!.trim.xMm);
+  });
+
+  it("keeps PDF trim coordinates numerically identical to canonical cut paths with registration and a skipped slot", async () => {
+    const jpeg = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const fixture = JSON.parse(await readFile(join(CUT_FIXTURES, "layout-sync.json"), "utf8")) as {
+      expectedActiveTrimMm: { xMm: number; yMm: number; widthMm: number; heightMm: number };
+      expectedPdfImageMatrixPoints: { a: number; d: number; e: number; f: number };
+    };
+    const templateGeometry = {
+      orientation: "portrait" as const,
+      cardOrientation: "portrait" as const,
+      pageSizeMm: { widthMm: 210, heightMm: 297 },
+      cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+      rows: 1,
+      columns: 2,
+      slots: [
+        { index: 0, row: 0, column: 0, xMm: 50, yMm: 100 },
+        { index: 1, row: 0, column: 1, xMm: 130, yMm: 100 },
+      ],
+    };
+    const registration = createDefaultRegistrationConfig("three-point", "portrait");
+    const settings = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      bleedMm: 0,
+      registration,
+      layout: { rows: 1, columns: 2, skippedSlotIndices: [1], templateGeometry },
+    };
+    const sourceGeometry = parseSvgCutGeometry(new Uint8Array(await readFile(join(CUT_FIXTURES, "layout-sync.svg"))), {
+      source: { kind: "template-file", templateId: "cut-sync-fixture", version: "1", packageHash: "a".repeat(64), fileId: "layout-sync-svg", fileHash: "b".repeat(64) },
+      expectedPageSizeMm: { widthMm: 210, heightMm: 297 },
+    });
+    const layout = resolveCutLayout({ projectId: "pdf-cut-sync-fixture", projectRevision: 1, settings, cardCount: 1, sourceGeometry, sourceOrientation: "portrait" });
+    const pdf = await engine.generate({
+      images: [jpeg],
+      pageOrientation: "portrait",
+      cardOrientation: "portrait",
+      paperFormat: PAPER_FORMATS.A4,
+      cardFormat: MAGIC_STANDARD_CARD,
+      templateGeometry,
+      layoutRows: 1,
+      layoutColumns: 2,
+      skippedSlotIndices: [1],
+      registration,
+    });
+    const parsed = await parsePdf(pdf);
+    const activeCut = layout.activeGeometry!.paths[0]!;
+    const trimMatrix = getDrawMatrices(parsed.content).find(([a, b, c, d]) =>
+      Math.abs(a - MAGIC_CARD_WIDTH_POINTS) < 1e-8 && Math.abs(b) < 1e-8 && Math.abs(c) < 1e-8 && Math.abs(d - MAGIC_CARD_HEIGHT_POINTS) < 1e-8);
+    const positionMatrix = getDrawMatrices(parsed.content).find(([a, b, c, d]) =>
+      Math.abs(a - 1) < 1e-10 && Math.abs(b) < 1e-10 && Math.abs(c) < 1e-10 && Math.abs(d - 1) < 1e-10);
+
+    expect(layout.slotPaths.map(({ state }) => state)).toEqual(["active", "skipped"]);
+    expect(activeCut.id).toBe("card-a");
+    expect(activeCut.boundsMm).toEqual(layout.placement.slots[0]!.trim);
+    expect(activeCut.boundsMm).toEqual(fixture.expectedActiveTrimMm);
+    expect(trimMatrix).toBeDefined();
+    expect(positionMatrix).toBeDefined();
+    expect(pointsToMm(positionMatrix![4]!)).toBeCloseTo(activeCut.boundsMm.xMm, 9);
+    expect(297 - pointsToMm(positionMatrix![5]!) - pointsToMm(trimMatrix![3]!)).toBeCloseTo(activeCut.boundsMm.yMm, 9);
+    expect(pointsToMm(trimMatrix![0]!)).toBeCloseTo(activeCut.boundsMm.widthMm, 9);
+    expect(pointsToMm(trimMatrix![3]!)).toBeCloseTo(activeCut.boundsMm.heightMm, 9);
+    expect(trimMatrix![0]).toBeCloseTo(fixture.expectedPdfImageMatrixPoints.a, 9);
+    expect(trimMatrix![3]).toBeCloseTo(fixture.expectedPdfImageMatrixPoints.d, 9);
+    expect(positionMatrix![4]).toBeCloseTo(fixture.expectedPdfImageMatrixPoints.e, 9);
+    expect(positionMatrix![5]).toBeCloseTo(fixture.expectedPdfImageMatrixPoints.f, 9);
+    expect(getVectorSegments(parsed.content).length).toBeGreaterThan(0);
+    expect(parsed.document.getPages()[0]!.getMediaBox().width).toBeCloseTo(mmToPoints(210), 10);
   });
 
   it("exports images at exact template slot coordinates while omitting the template's skipped slot", async () => {

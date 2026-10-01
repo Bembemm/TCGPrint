@@ -1,0 +1,13 @@
+{
+  "pageSizeMm": { "widthMm": 210, "heightMm": 297 },
+  "cardSizeMm": { "widthMm": 63.5, "heightMm": 88.9 },
+  "registration": { "type": "three-point", "orientation": "portrait" },
+  "slots": [
+    { "index": 0, "xMm": 50, "yMm": 100 },
+    { "index": 1, "xMm": 130, "yMm": 100 }
+  ],
+  "skippedSlotIndices": [1],
+  "physicalCardCount": 1,
+  "expectedActiveTrimMm": { "xMm": 50, "yMm": 100, "widthMm": 63.5, "heightMm": 88.9 },
+  "expectedPdfImageMatrixPoints": { "a": 180, "d": 252, "e": 141.73228346456693, "f": 306.4251968503937 }
+}

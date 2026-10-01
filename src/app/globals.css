@@ -167,6 +167,13 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .template-import-actions { align-items: center; margin-top: 8px; }
 .template-import-actions .button, .template-title-row .button, .template-version-row > .button { flex: none; min-height: 29px; padding: 5px 8px; font-size: 10px; }
 .template-selection-status { display: grid; gap: 3px; margin: 10px 0; padding: 8px; border: 1px solid #b7c7d5; border-radius: 4px; overflow-wrap: anywhere; background: #f4f8fb; color: #354452; font-size: 10px; }
+.template-cut-source { display: grid; gap: 6px; margin: 10px 0; padding: 9px; border: 1px solid #b7c7d5; border-radius: 4px; background: #f4f8fb; }
+.template-cut-source h4, .cut-export-panel h3 { margin: 0; color: #263544; font-size: 12px; }
+.template-cut-source p, .template-cut-source span, .cut-export-panel p { margin: 0; color: #586675; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.template-cut-source label { display: grid; gap: 4px; color: #354452; font-size: 10px; font-weight: 650; }
+.template-cut-source select { min-width: 0; min-height: 30px; border: 1px solid #aeb9c4; border-radius: 3px; padding: 5px 7px; background: #fff; color: #18212a; font-size: 10px; }
+.cut-export-panel { display: grid; gap: 8px; margin-top: 14px; border-top: 1px solid #d8dee4; padding-top: 12px; }
+.cut-export-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .template-integrity-available { border-color: #83b69a; background: #f1faf4; }
 .template-integrity-missing, .template-integrity-corrupt, .template-integrity-hash-mismatch { border-color: #d7867d; background: #fff4f2; }
 .template-list { display: grid; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
@@ -278,6 +285,7 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .registration-preview-legend i { display: inline-block; width: 12px; height: 8px; border: 1px solid; }
 .legend-bleed { border-color: #f97316 !important; background: #fff7ed; }
 .legend-trim { border-color: #1d4ed8 !important; background: #eff6ff; }
+.legend-cut-source { border-color: #dc2626 !important; background: #fee2e2; }
 .legend-reserved { border-color: #dc2626 !important; background: #fecaca; }
 .legend-skipped { border-color: #7e22ce !important; background: #f3e8ff; }
 .legend-mark { border-color: #111827 !important; background: #111827; }

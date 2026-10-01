@@ -37,6 +37,8 @@ import ProjectSettingsControls from "./project-settings-controls";
 import { runIfProjectInteractionUnlocked } from "./project-interaction-lock";
 import type { GuideColor, PageMarginsMm, PageOrientation } from "../../core/geometry";
 import type { CardFormat, PaperFormat, TemplateLayoutGeometryMm } from "../../core/geometry";
+import type { CutSourceSelection } from "../../core/cut";
+import type { CutPreviewDto } from "../../services/cut-api";
 import { createDefaultRegistrationConfig, type RegistrationConfig } from "../../core/registration";
 import type { ProjectDto } from "../../services/project-api";
 import { DEFAULT_PROJECT_SETTINGS, type ProjectSettingsV2 } from "../../persistence/projects/serializer";
@@ -488,9 +490,11 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [layoutColumns, setLayoutColumns] = useState("");
   const [skippedSlotIndices, setSkippedSlotIndices] = useState<readonly number[]>([]);
   const [templateGeometry, setTemplateGeometry] = useState<TemplateLayoutGeometryMm | undefined>();
+  const [cutSourceSelection, setCutSourceSelection] = useState<CutSourceSelection | null>(null);
   const [busy, setBusy] = useState(false);
   const [projectOpenPending, setProjectOpenPending] = useState(false);
   const [projectRestoreVersion, setProjectRestoreVersion] = useState(0);
+  const [activeProjectSync, setActiveProjectSync] = useState<{ readonly projectId: string; readonly revision: number; readonly saved: boolean } | null>(null);
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
   const [problemCardId, setProblemCardId] = useState<string | null>(null);
@@ -501,6 +505,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const identityDetailsRequests = useRef(createRequestCache<IdentityDetails>());
   const projectRestoreLookupGate = useRef(createProjectRestoreLookupGate(-1));
   const [pdfUrl, setPdfUrl] = useState("");
+  const [cutGeometryPreview, setCutGeometryPreview] = useState<CutPreviewDto | null>(null);
   const [bleedDiagnostics, setBleedDiagnostics] = useState<BleedDiagnosticsReport | null>(null);
   const interactionBusy = busy || projectOpenPending;
   function setProjectInteractionLocked(locked: boolean) {
@@ -536,13 +541,14 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       verticalGapMm,
       registration,
       registrationOverride,
+      cutSourceSelection,
       layout: {
         ...(fixedGrid ? { rows: rowCount, columns: columnCount } : {}),
         skippedSlotIndices,
         ...(templateGeometry ? { templateGeometry } : {}),
       },
     };
-  }, [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor, pageOrientation, cardOrientation, paperFormat, cardFormat, marginsMm, horizontalGapMm, verticalGapMm, registration, registrationOverride, layoutRows, layoutColumns, skippedSlotIndices, templateGeometry]);
+  }, [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor, pageOrientation, cardOrientation, paperFormat, cardFormat, marginsMm, horizontalGapMm, verticalGapMm, registration, registrationOverride, cutSourceSelection, layoutRows, layoutColumns, skippedSlotIndices, templateGeometry]);
 
   function clearProblem(cardId: string | null = null) {
     setProblem("");
@@ -811,6 +817,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
   async function exportPdf() {
     if (!workingCards.length) return;
+    if (!projectCutSyncReady) {
+      setProblem("Aguarde o autosave e a validação da geometria de corte do Project antes de gerar o PDF.");
+      return;
+    }
     if (templateRegistrationRequiresUserChoice(templateRegistrationStatus)) {
       setProblem(templateRegistrationStatus === "legacy-custom-unconfigured"
         ? "O template custom legado não tem geometria de registration. Escolha uma configuração física no Project antes de exportar."
@@ -841,6 +851,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           ...(templateGeometry ? { templateGeometry } : {}),
           ...(projectSettings.layout.rows !== undefined ? { layoutRows: projectSettings.layout.rows, layoutColumns: projectSettings.layout.columns } : {}),
           skippedSlotIndices,
+          ...(activeProjectSync && cutGeometryPreview ? { projectId: activeProjectSync.projectId, expectedProjectRevision: activeProjectSync.revision } : {}),
         } }),
       });
       if (!response.ok) {
@@ -885,6 +896,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     setLayoutColumns(settings.layout.columns === undefined ? "" : String(settings.layout.columns));
     setSkippedSlotIndices(settings.layout.skippedSlotIndices);
     setTemplateGeometry(settings.layout.templateGeometry);
+    setCutSourceSelection(settings.cutSourceSelection);
 
     setArtworkCandidates([]);
     setArtworkProblem(null);
@@ -904,6 +916,17 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   }
 
   const selected = activeCard ? selectedFor(activeCard, face) : undefined;
+  const previewMatchesActiveProject = !activeProjectSync || Boolean(activeProjectSync.saved
+    && cutGeometryPreview
+    && cutGeometryPreview.projectId === activeProjectSync.projectId
+    && cutGeometryPreview.projectRevision === activeProjectSync.revision
+    && cutGeometryPreview.activeGeometry);
+  const selectedCutSourceReady = !cutSourceSelection || Boolean(cutGeometryPreview
+    && cutGeometryPreview.geometry.source.kind === "template-file"
+    && cutGeometryPreview.geometry.source.fileId === cutSourceSelection.fileId
+    && cutGeometryPreview.geometry.source.fileHash === cutSourceSelection.fileHash
+    && cutGeometryPreview.activeGeometry);
+  const projectCutSyncReady = previewMatchesActiveProject && selectedCutSourceReady;
 
   return (
     <section className="panel card-identity-workbench" aria-labelledby="identity-workbench-heading">
@@ -925,6 +948,9 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         cards={workingCards}
         settings={projectSettings}
         onProjectOpen={restoreProject}
+        onCutSourceSelectionChange={setCutSourceSelection}
+        onCutGeometryPreviewChange={setCutGeometryPreview}
+        onProjectSyncStateChange={setActiveProjectSync}
         onTemplateRegistrationStatusChange={(registrationStatus) => setTemplateRegistrationStatus(
           applyProjectRegistrationOverride(registrationStatus, projectSettings.registrationOverride),
         )}
@@ -1123,11 +1149,11 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             onLayoutRowsChange={(value) => updateProjectSetting(() => setLayoutRows(value))}
             onLayoutColumnsChange={(value) => updateProjectSetting(() => setLayoutColumns(value))}
           />
-          <RegistrationLayoutPreview settings={projectSettings} cardCount={physicalCardCount} onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))} />
+          <RegistrationLayoutPreview settings={projectSettings} cardCount={physicalCardCount} cutPreview={cutGeometryPreview} onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))} />
           {templateRegistrationStatus === "legacy-custom-unconfigured" && <p className="error-message" role="alert">O template selecionado declara registration custom, mas a versão não contém geometria física. O PDF usará somente a configuração independente do Project após escolha explícita.</p>}
           {templateRegistrationStatus === "legacy-physical-format-unconfigured" && <p className="error-message" role="alert">A versão legada do template declara papel ou carta custom sem dimensões físicas. Os formatos atuais do Working Set não foram substituídos; exportação bloqueada até selecionar uma versão com geometria explícita.</p>}
           {templateRegistrationStatus === "unavailable" && <p className="error-message" role="alert">A versão exata do template não está disponível para validar registration. Revise ou desassocie o template.</p>}
-          <button className="button primary" type="button" disabled={interactionBusy || templateRegistrationRequiresUserChoice(templateRegistrationStatus) || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
+          <button className="button primary" type="button" disabled={interactionBusy || templateRegistrationRequiresUserChoice(templateRegistrationStatus) || !projectCutSyncReady || !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))} onClick={() => void exportPdf()}>Gerar PDF real</button>
           {pdfUrl && <a className="download-link" href={pdfUrl} download="tcgprint-cards.pdf">Baixar PDF</a>}
         </div>
         <p className="muted">Bleed estende somente os pixels da borda imediata de cada lado. Moldura preta continua preta; full-art continua a própria arte. O trim da carta permanece intacto. Cantos arredondados são uma opção separada.</p>

@@ -1,0 +1,62 @@
+{
+  "purpose": "software geometry review fixture; not a real Silhouette template or a physical cut validation",
+  "templateSelection": {
+    "templateId": "phase11-a4-cut-fixture",
+    "version": "1",
+    "packageHash": "6153c44c7faca945660edf5be5780b5abdaac878a73f53fac5d8f0168dbf6c93"
+  },
+  "selectedCutFile": {
+    "fileId": "phase11-layout-svg-v1",
+    "fileName": "layout-sync.svg",
+    "extension": "svg",
+    "fileHash": "458a5e3814260eca6ee5b09dbcf880c8cc99368458cf49a3b28bad9caebd1c4b",
+    "byteLength": 230
+  },
+  "reviewArtifacts": {
+    "source-layout.svg": {
+      "sha256": "458a5e3814260eca6ee5b09dbcf880c8cc99368458cf49a3b28bad9caebd1c4b",
+      "byteLength": 230
+    },
+    "layout-reference.pdf": {
+      "sha256": "52c3b40a474b1be05d6e2f5d38c226f64b14cff75c9fcfbb24f098386a6fe525",
+      "byteLength": 1607
+    },
+    "tcgprint-cut.svg": {
+      "sha256": "f874885188113b5d84b4529a6ee05758ffe0edfc4e089ea3606b023a63dfe931",
+      "byteLength": 222
+    },
+    "tcgprint-cut.dxf": {
+      "sha256": "f9db6f510ea2a138baa2f654d439a8d54ed658c0c6cf633f3c4330fb64b515a2",
+      "byteLength": 371
+    }
+  },
+  "project": {
+    "projectId": "phase11-review-project",
+    "revision": 1
+  },
+  "parserVersion": "11.1",
+  "pageSizeMm": {
+    "widthMm": 210,
+    "heightMm": 297
+  },
+  "cardSizeMm": {
+    "widthMm": 63.5,
+    "heightMm": 88.9
+  },
+  "registration": "three-point, portrait; emitted in PDF only",
+  "skippedSlotIndices": [
+    1
+  ],
+  "exportedActiveSlots": [
+    0
+  ],
+  "expectedActiveCutBoundsMm": {
+    "xMm": 50,
+    "yMm": 100,
+    "widthMm": 63.5,
+    "heightMm": 88.9
+  },
+  "internalNumericToleranceMm": 0.000001,
+  "dxfCurveFlatnessToleranceMm": 0.005,
+  "physicalCutValidation": "pending"
+}

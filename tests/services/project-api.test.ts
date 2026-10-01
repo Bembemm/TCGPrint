@@ -180,10 +180,10 @@ describe("project API service", () => {
     expect(created).toMatchObject({
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 2,
+      projectSchemaVersion: 3,
       revision: 1,
       snapshot: {
-        projectSchemaVersion: 2,
+        projectSchemaVersion: 3,
         cards: [],
         settings: DEFAULT_PROJECT_SETTINGS,
       },
@@ -194,7 +194,7 @@ describe("project API service", () => {
     expect(await listResponse.json()).toEqual({ projects: [{
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 2,
+      projectSchemaVersion: 3,
       revision: 1,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -270,7 +270,7 @@ describe("project API service", () => {
     expect(opened.snapshot).toEqual(canonical.snapshot);
     expect(opened.recovery).toMatchObject({
       baseRevision: 1,
-      projectSchemaVersion: 2,
+      projectSchemaVersion: 3,
       snapshot: candidate,
     });
   });
@@ -378,7 +378,7 @@ describe("project API service", () => {
     const projects = setup();
     projects.create();
 
-    const response = await handleProjectSave(request("PUT", { expectedRevision: 1, snapshot: { projectSchemaVersion: 3 } }), "project-1", projects);
+    const response = await handleProjectSave(request("PUT", { expectedRevision: 1, snapshot: { projectSchemaVersion: 4 } }), "project-1", projects);
     const opened = projects.open("project-1");
 
     expect(response.status).toBe(400);

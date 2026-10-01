@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297">
+  <g transform="translate(10 12)">
+    <rect id="rect" x="0" y="0" width="63.5" height="88.9" />
+    <line id="line" x1="65" y1="0" x2="70" y2="5" />
+    <polyline id="polyline" points="75,0 80,0 80,5" />
+    <polygon id="polygon" points="85,0 90,0 90,5" />
+    <rect id="matrix-rotate" transform="matrix(0 1 -1 0 110 0) rotate(0 0 0)" x="0" y="0" width="10" height="20" />
+  </g>
+</svg>

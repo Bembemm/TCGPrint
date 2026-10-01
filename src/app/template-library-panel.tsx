@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { TemplateRecord, TemplateVersionRecord } from "../../persistence/templates/repository";
 import type { TemplateSelection } from "../../templates/types";
+import type { CutSourceSelection, DxfUnitsOverride } from "../../core/cut";
 import type { TemplateSelectionInspection } from "../../services/template-library";
 import {
   registrationDefaultsForTemplate,
@@ -16,6 +17,8 @@ export type { TemplateRegistrationDefaults } from "./template-registration-compa
 
 interface TemplateLibraryPanelProps {
   readonly selection: TemplateSelection | null;
+  readonly cutSourceSelection: CutSourceSelection | null;
+  readonly onCutSourceSelect?: (selection: CutSourceSelection | null) => void;
   readonly onSelect: (selection: TemplateSelection | null, defaults?: TemplateRegistrationDefaults) => void;
   readonly onRegistrationStatusChange?: (status: TemplateRegistrationStatus) => void;
   readonly disabled?: boolean;
@@ -55,7 +58,7 @@ function integrityLabel(status: TemplateSelectionInspection["status"]): string {
   }
 }
 
-export default function TemplateLibraryPanel({ selection, onSelect, onRegistrationStatusChange, disabled = false }: TemplateLibraryPanelProps) {
+export default function TemplateLibraryPanel({ selection, cutSourceSelection, onCutSourceSelect, onSelect, onRegistrationStatusChange, disabled = false }: TemplateLibraryPanelProps) {
   const [templates, setTemplates] = useState<readonly TemplateRecord[]>([]);
   const [metadata, setMetadata] = useState(DEFAULT_METADATA);
   const [files, setFiles] = useState<readonly File[]>([]);
@@ -94,6 +97,8 @@ export default function TemplateLibraryPanel({ selection, onSelect, onRegistrati
 
   const selectedId = useMemo(() => selection ? `${selection.templateId}:${selection.version}` : "", [selection]);
   const registrationStatus = resolveTemplateRegistrationStatus(selection, inspection);
+  const cutFiles = inspection?.files.filter((file) => file.extension === "svg" || file.extension === "dxf") ?? [];
+  const selectedCutFile = cutFiles.find((file) => file.fileId === cutSourceSelection?.fileId);
 
   useEffect(() => {
     onRegistrationStatusChange?.(registrationStatus);
@@ -209,6 +214,46 @@ export default function TemplateLibraryPanel({ selection, onSelect, onRegistrati
         {registrationStatus === "unavailable" && <span role="alert">A versão selecionada não pôde ser verificada exatamente. Revise ou desassocie o template antes de exportar.</span>}
         {inspection?.files.filter((file) => file.status !== "available").map((file) => <span key={file.fileId} role="alert">{file.relativePath}: {file.status === "missing" ? "ausente" : "corrompido"}</span>)}
       </div>}
+
+      {selection && <section className="template-cut-source" aria-label="Geometria de corte">
+        <h4>Fonte de geometria de corte</h4>
+        <p>Selecione explicitamente um SVG ou DXF desta versão. Se houver vários, nenhum será escolhido automaticamente. Sem arquivo selecionado, exports de corte usam somente retângulos de trim do layout.</p>
+        <label>Arquivo SVG/DXF
+          <select
+            value={selectedCutFile?.fileId ?? ""}
+            disabled={disabled || busy || !inspection || inspection.status !== "available"}
+            onChange={(event) => {
+              const file = cutFiles.find((candidate) => candidate.fileId === event.currentTarget.value);
+              onCutSourceSelect?.(file ? { fileId: file.fileId, fileHash: file.contentHash } : null);
+            }}
+          >
+            <option value="">Sem arquivo de corte</option>
+            {cutFiles.map((file) => <option key={file.fileId} value={file.fileId}>{file.relativePath} · {file.extension.toUpperCase()} · {file.status}</option>)}
+          </select>
+        </label>
+        {selectedCutFile && selectedCutFile.extension === "dxf" && cutSourceSelection && <label>Unidades DXF
+          <select
+            value={cutSourceSelection.dxfUnitsOverride ?? "auto"}
+            disabled={disabled || busy}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              const units = value === "auto" ? undefined : value as DxfUnitsOverride;
+              onCutSourceSelect?.({
+                fileId: selectedCutFile.fileId,
+                fileHash: selectedCutFile.contentHash,
+                ...(units ? { dxfUnitsOverride: units } : {}),
+              });
+            }}
+          >
+            <option value="auto">Automática por $INSUNITS</option>
+            <option value="mm">Milímetros (mm)</option><option value="cm">Centímetros (cm)</option>
+            <option value="m">Metros (m)</option><option value="in">Polegadas (in)</option>
+            <option value="ft">Pés (ft)</option><option value="yd">Jardas (yd)</option>
+          </select>
+        </label>}
+        {selectedCutFile && selectedCutFile.status !== "available" && <span role="alert">O original selecionado não está íntegro; preview e export ficam bloqueados.</span>}
+        {cutFiles.length > 1 && <span>Esta versão contém {cutFiles.length} fontes vetoriais; a geometria exportada fica vinculada somente ao arquivo escolhido.</span>}
+      </section>}
 
       {templates.length === 0 ? <p className="muted">Biblioteca vazia.</p> : <ul className="template-list">
         {templates.map((template) => <li key={template.id} className="template-list-item">

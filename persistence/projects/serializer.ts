@@ -13,8 +13,9 @@ import { isSafeArtworkCandidateId } from "../../core/cards/artwork-candidate-id"
 import { validateCardIdentityMetadata } from "../../core/cards/safe-identity-metadata";
 import { DEFAULT_CUT_GUIDE_CONFIG, GUIDE_COLOR_OPTIONS, MAGIC_STANDARD_CARD, PAPER_FORMATS, parseTemplateLayoutGeometry, type CardFormat, type CutGuideConfig, type GuideColor, type PageOrientation, type PaperFormat, type TemplateLayoutGeometryMm } from "../../core/geometry";
 import { parseRegistrationConfig, type RegistrationConfig } from "../../core/registration";
+import type { CutSourceSelection, DxfUnitsOverride } from "../../core/cut";
 
-export const CURRENT_PROJECT_SCHEMA_VERSION = 2;
+export const CURRENT_PROJECT_SCHEMA_VERSION = 3;
 
 /** 16 MiB bounds a 500-entry resolved Working Set without ever embedding artwork bytes. */
 export const MAX_PROJECT_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -22,7 +23,7 @@ const MAX_PROJECT_CARDS = 500;
 
 export type PersistedWorkingCard = Omit<WorkingCard, "metadata">;
 
-export interface ProjectSettingsV2 {
+export interface ProjectSettingsV3 {
   readonly bleedMm: number;
   readonly roundedCorners: boolean;
   readonly cutGuides: CutGuideConfig;
@@ -36,6 +37,8 @@ export interface ProjectSettingsV2 {
   readonly registration: RegistrationConfig;
   /** Explicit Project-level registration choice overriding a version's registration default. */
   readonly registrationOverride: boolean;
+  /** Exact SVG/DXF file selected within the associated immutable TemplateSelection. */
+  readonly cutSourceSelection: CutSourceSelection | null;
   readonly layout: {
     readonly rows?: number;
     readonly columns?: number;
@@ -50,12 +53,14 @@ export interface LegacyProjectSettingsV1 {
   readonly cutGuides: CutGuideConfig;
 }
 
-/** @deprecated Kept as a source-compatible name; current settings use the v2 shape. */
-export type ProjectSettingsV1 = ProjectSettingsV2;
-export type ProjectSettingsInput = ProjectSettingsV2 | LegacyProjectSettingsV1;
+/** @deprecated Source-compatible name retained for existing UI modules. */
+export type ProjectSettingsV2 = ProjectSettingsV3;
+/** @deprecated Source-compatible name retained for existing UI modules. */
+export type ProjectSettingsV1 = ProjectSettingsV3;
+export type ProjectSettingsInput = ProjectSettingsV3 | LegacyProjectSettingsV1;
 
 export interface ProjectSnapshotV1 {
-  /** Legacy version-1 snapshots are accepted and promoted to version 2 on read. */
+  /** Legacy v1/v2 snapshots are accepted and promoted to the current v3 shape on read. */
   readonly projectSchemaVersion: number;
   readonly cards: readonly PersistedWorkingCard[];
   readonly settings: ProjectSettingsV2;
@@ -89,6 +94,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettingsV1 = Object.freeze({
   verticalGapMm: 0,
   registration: Object.freeze({ type: "none", orientation: "portrait" }),
   registrationOverride: false,
+  cutSourceSelection: null,
   layout: Object.freeze({ skippedSlotIndices: Object.freeze([]) }),
 });
 
@@ -437,13 +443,34 @@ function persistedCard(value: unknown, index: number): PersistedWorkingCard {
   };
 }
 
-function projectSettings(value: unknown, legacy = false): ProjectSettingsV2 {
+function dxfUnitsOverride(value: unknown, path: string): DxfUnitsOverride {
+  if (value !== "mm" && value !== "cm" && value !== "m" && value !== "in" && value !== "ft" && value !== "yd") {
+    invalid(path, "must be one of mm, cm, m, in, ft, or yd.");
+  }
+  return value;
+}
+
+function cutSourceSelection(value: unknown): CutSourceSelection | null {
+  if (value === undefined || value === null) return null;
+  const source = object(value, "snapshot.settings.cutSourceSelection", ["fileId", "fileHash", "dxfUnitsOverride"], ["fileId", "fileHash"]);
+  const fileId = string(source.fileId, "snapshot.settings.cutSourceSelection.fileId", 180);
+  const fileHash = string(source.fileHash, "snapshot.settings.cutSourceSelection.fileHash", 64);
+  if (!/^[a-f0-9]{64}$/.test(fileHash)) invalid("snapshot.settings.cutSourceSelection.fileHash", "must be a SHA-256 hex digest.");
+  const units = source.dxfUnitsOverride === undefined
+    ? undefined
+    : dxfUnitsOverride(source.dxfUnitsOverride, "snapshot.settings.cutSourceSelection.dxfUnitsOverride");
+  return Object.freeze({ fileId, fileHash, ...(units ? { dxfUnitsOverride: units } : {}) });
+}
+
+function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_VERSION): ProjectSettingsV3 {
+  const legacy = schemaVersion === 1;
   const baseKeys = ["bleedMm", "roundedCorners", "cutGuides"];
-  const currentKeys = [...baseKeys, "pageOrientation", "cardOrientation", "paperFormat", "cardFormat", "marginsMm", "horizontalGapMm", "verticalGapMm", "registration", "registrationOverride", "layout"];
+  const v2Keys = [...baseKeys, "pageOrientation", "cardOrientation", "paperFormat", "cardFormat", "marginsMm", "horizontalGapMm", "verticalGapMm", "registration", "registrationOverride", "layout"];
+  const currentKeys = [...v2Keys, "cutSourceSelection"];
   const source = object(value, "snapshot.settings", legacy
     ? baseKeys
-    : currentKeys,
-  legacy ? undefined : currentKeys.filter((key) => key !== "registrationOverride"));
+    : schemaVersion === 2 ? v2Keys : currentKeys,
+  legacy ? undefined : (schemaVersion === 2 ? v2Keys : currentKeys).filter((key) => key !== "registrationOverride" && key !== "cutSourceSelection"));
   const guides = object(source.cutGuides, "snapshot.settings.cutGuides", ["trim", "external"]);
   const trim = object(guides.trim, "snapshot.settings.cutGuides.trim", ["enabled", "extentMm", "color"]);
   const external = object(guides.external, "snapshot.settings.cutGuides.external", ["enabled", "strokeWidthPt", "color"]);
@@ -550,6 +577,7 @@ function projectSettings(value: unknown, legacy = false): ProjectSettingsV2 {
     verticalGapMm,
     registration,
     registrationOverride,
+    cutSourceSelection: schemaVersion >= 3 ? cutSourceSelection(source.cutSourceSelection) : null,
     layout: {
       ...(rows !== undefined ? { rows, columns } : {}),
       skippedSlotIndices,
@@ -558,7 +586,7 @@ function projectSettings(value: unknown, legacy = false): ProjectSettingsV2 {
   };
 }
 
-function validateSnapshot(value: unknown, legacy = false): ProjectSnapshotV1 {
+function validateSnapshot(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_VERSION): ProjectSnapshotV1 {
   const source = object(value, "snapshot", ["projectSchemaVersion", "cards", "settings"]);
   const cards = array(source.cards, "snapshot.cards", MAX_PROJECT_CARDS).map((card, index) => persistedCard(card, index));
   if (new Set(cards.map(({ id }) => id)).size !== cards.length) invalid("snapshot.cards", "must not contain duplicate WorkingCard IDs.");
@@ -568,7 +596,7 @@ function validateSnapshot(value: unknown, legacy = false): ProjectSnapshotV1 {
   return {
     projectSchemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
     cards,
-    settings: projectSettings(source.settings, legacy),
+    settings: projectSettings(source.settings, schemaVersion),
   };
 }
 
@@ -587,10 +615,10 @@ export function serializeProjectSnapshot(cards: readonly WorkingCard[], settings
     return copy;
   });
   const isLegacySettings = isPlainObject(settings) && !Object.prototype.hasOwnProperty.call(settings, "registration");
-  const normalizedSettings = projectSettings(settings, isLegacySettings);
+  const normalizedSettings = projectSettings(settings, isLegacySettings ? 1 : CURRENT_PROJECT_SCHEMA_VERSION);
   const candidate = { projectSchemaVersion: CURRENT_PROJECT_SCHEMA_VERSION, cards: persistedCards, settings: normalizedSettings };
   assertJsonData(candidate, "snapshot");
-  const snapshot = validateSnapshot(candidate);
+  const snapshot = validateSnapshot(candidate, CURRENT_PROJECT_SCHEMA_VERSION);
   const serialized = JSON.stringify(snapshot);
   checkSnapshotSize(serialized);
   return serialized;
@@ -624,10 +652,9 @@ export function deserializeProjectSnapshot(value: string | unknown): ProjectSnap
   if (version > CURRENT_PROJECT_SCHEMA_VERSION) {
     throw new ProjectSnapshotError("FUTURE_PROJECT_SCHEMA_VERSION", `Project snapshot schema ${version} is newer than this application supports (${CURRENT_PROJECT_SCHEMA_VERSION}).`);
   }
-  if (version !== 1 && version !== CURRENT_PROJECT_SCHEMA_VERSION) {
+  if (version !== 1 && version !== 2 && version !== CURRENT_PROJECT_SCHEMA_VERSION) {
     throw new ProjectSnapshotError("UNSUPPORTED_PROJECT_SCHEMA_VERSION", `Project snapshot schema ${version} has no supported migration path.`);
   }
-  // v1 had only bleed/corners/cut-guide settings; the effective geometry defaults
-  // are materialized once and serialized as v2 on the next save.
-  return validateSnapshot(snapshot, version === 1);
+  // v1/v2 snapshots migrate in memory; autosave serializes them as the v3 shape.
+  return validateSnapshot(snapshot, version);
 }
