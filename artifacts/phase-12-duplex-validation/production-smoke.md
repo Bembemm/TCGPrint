@@ -19,6 +19,18 @@ Run against the optimized Next.js production build at `http://127.0.0.1:3000` on
 
 The Project reached revision 11 during the smoke. Test Projects were local-only and removed after verification. No physical printer was used. This validates software pairing and export behavior only; physical alignment and calibration remain Phase 13 work.
 
+## Audit fix smoke: provider artwork as a simple card's physical back
+
+After the manual physical-back correction, the optimized production build was opened in Chromium through `agent-browser` on 2026-10-01. The page returned HTTP 200, rendered the import and card controls, and reported no browser page errors.
+
+1. Imported `1 Sol Ring`, confirmed its Scryfall identity, and opened **Escolher artwork como verso manual**.
+2. Selected Scryfall artwork `scryfall:8ee443cc-e17a-493b-9c93-1f9e141a30e4:front`. The UI showed `Verso físico manual: Scryfall` and `Manual · user-selected`; the card still had one identity face and no `Carta dupla-face` signal.
+3. Created a Project and reopened it. The Project API snapshot retained schema v4, `backMode: manual`, one face, and the exact `manualBackArtwork` candidate/provider IDs, source `faceId: front`, and `selectionPolicy: user-selected`.
+4. Generated all four modes from the same Working Card without changing its artwork selection. The browser exposed `tcgprint-cards.pdf`, `tcgprint-back.pdf`, `tcgprint-front-back.zip`, and `tcgprint-duplex.pdf`. The back preview reported `long-edge` with 0° artwork rotation. Automated export tests assert page counts and the ZIP's two independent PDF members.
+5. Deleted the temporary local Project after the smoke.
+
+This is a software UI/API smoke. It does not validate printer alignment or calibration.
+
 ## Final rebuilt UI/API check after review fixes
 
 After correcting the `back-only` front-artwork gate and reflecting cut overlays in the back preview, `npm run build` completed again. The rebuilt production UI loaded at `http://127.0.0.1:3000/` with HTTP 200 and no browser page errors. Read-only GET checks returned HTTP 200 for `/api/back-library` and `/api/projects`. The corrected mode gate and front/back overlay matrices were exercised by focused tests and the full suite. The complete DFC/manual override/default/all-export interaction sequence above was performed earlier in this implementation run; this final check confirms the latest build and APIs start cleanly. No physical printer was used.

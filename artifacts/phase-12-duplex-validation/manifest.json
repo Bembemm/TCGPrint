@@ -595,6 +595,17 @@
       "browserPageErrors": [],
       "backOnlyGateAndPreviewOverlayCoveredBy": "focused tests and full npm test"
     },
+    "simpleCardManualPhysicalBackSmoke": {
+      "build": "Next.js production build",
+      "browserPageStatus": 200,
+      "browserPageErrors": [],
+      "identity": "Sol Ring resolved through Scryfall",
+      "manualBack": "Scryfall artwork assigned from source face front with user-selected lock; identity remained one-faced and was not labeled DFC",
+      "projectSchemaVersion": 4,
+      "reopen": "manualBackArtwork provider/candidate IDs and lock persisted",
+      "exportDownloadNames": ["tcgprint-cards.pdf", "tcgprint-back.pdf", "tcgprint-front-back.zip", "tcgprint-duplex.pdf"],
+      "temporaryProjectDeleted": true
+    },
     "physicalAlignmentValidated": false,
     "details": "production-smoke.md"
   },
