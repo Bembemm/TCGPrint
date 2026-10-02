@@ -432,7 +432,9 @@ export class MpcArtworkProvider implements ArtworkProvider {
     this.repository = options.repository;
   }
 
-  getHealth(): ProviderHealth { return this.health; }
+  getHealth(): ProviderHealth {
+    return { ...this.health, degraded: this.health.degraded || this.catalogDegraded };
+  }
 
   getDiagnostic(): MpcArtworkProviderDiagnostic {
     return {

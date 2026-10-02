@@ -13,6 +13,17 @@ interface MpcArtworkProviderExtension extends ArtworkProvider {
   refreshCandidate(id: string, signal?: AbortSignal): Promise<ArtworkCandidate | undefined>;
 }
 
+const MPC_DEGRADED_MESSAGE = "MPC artwork provider is temporarily degraded.";
+
+function publicProviderHealth(source: string, health: ProviderHealth): ProviderHealth {
+  if (source !== "mpc") return health;
+  return {
+    available: health.available,
+    degraded: health.degraded,
+    ...(health.degraded ? { message: MPC_DEGRADED_MESSAGE } : {}),
+  };
+}
+
 export interface AdvancedArtworkCatalogSearchOptions extends ArtworkCatalogSearchOptions {
   readonly mpcFilters?: MpcArtworkFilterInput;
 }
@@ -31,6 +42,7 @@ function mpcExtension(provider: ArtworkProvider | undefined): MpcArtworkProvider
 export class ArtworkCatalog {
   private readonly providers: ReadonlyMap<string, ArtworkProvider>;
   private readonly health = new Map<string, ProviderHealth>();
+  private readonly healthOverrides = new Set<string>();
 
   constructor(providers: readonly ArtworkProvider[]) {
     this.providers = new Map(providers.map((provider) => [provider.source, provider]));
@@ -53,15 +65,17 @@ export class ArtworkCatalog {
         const candidates = extension
           ? await extension.searchArtworkAdvanced(identity, { ...standardOptions, filters: options.mpcFilters ?? {} })
           : await provider.searchArtwork(identity, standardOptions);
-        this.health.set(provider.source, provider.getHealth?.() ?? { available: true, degraded: false });
+        this.healthOverrides.delete(provider.source);
+        this.health.set(provider.source, publicProviderHealth(provider.source, provider.getHealth?.() ?? { available: true, degraded: false }));
         return candidates;
       } catch (error) {
         if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError") || (error && typeof error === "object" && (error as { kind?: unknown }).kind === "aborted")) throw error;
         if (error instanceof MpcArtworkFilterValidationError) throw error;
+        this.healthOverrides.add(provider.source);
         this.health.set(provider.source, {
           available: false,
           degraded: true,
-          message: provider.source === "mpc" ? "MPC artwork provider is temporarily degraded." : error instanceof Error ? error.message : "Artwork provider failed.",
+          message: provider.source === "mpc" ? MPC_DEGRADED_MESSAGE : error instanceof Error ? error.message : "Artwork provider failed.",
         });
         return [];
       }
@@ -72,7 +86,9 @@ export class ArtworkCatalog {
   getProviderHealth(): Readonly<Record<string, ProviderHealth>> {
     for (const provider of this.providers.values()) {
       const providerHealth = provider.getHealth?.();
-      if (providerHealth?.degraded) this.health.set(provider.source, providerHealth);
+      if (providerHealth && !this.healthOverrides.has(provider.source)) {
+        this.health.set(provider.source, publicProviderHealth(provider.source, providerHealth));
+      }
     }
     return Object.fromEntries(this.health.entries());
   }
@@ -80,7 +96,10 @@ export class ArtworkCatalog {
   async getMpcFilterCatalogs(signal?: AbortSignal): Promise<MpcFilterCatalogs> {
     const provider = mpcExtension(this.providers.get("mpc"));
     if (!provider) throw new Error("MPC filter catalogs are unavailable.");
-    return provider.getFilterCatalogs(signal);
+    const catalogs = await provider.getFilterCatalogs(signal);
+    this.healthOverrides.delete(provider.source);
+    this.health.set(provider.source, publicProviderHealth(provider.source, provider.getHealth?.() ?? { available: true, degraded: false }));
+    return catalogs;
   }
 
   getMpcDiagnostic(): MpcArtworkProviderDiagnostic | undefined {
@@ -93,10 +112,11 @@ export class ArtworkCatalog {
   }
 
   markProviderDegraded(source: "scryfall" | "upload" | "mpc", error: unknown): void {
+    this.healthOverrides.add(source);
     this.health.set(source, {
       available: false,
       degraded: true,
-      message: error instanceof Error ? error.message.slice(0, 300) : "Artwork provider failed.",
+      message: source === "mpc" ? MPC_DEGRADED_MESSAGE : error instanceof Error ? error.message.slice(0, 300) : "Artwork provider failed.",
     });
   }
 

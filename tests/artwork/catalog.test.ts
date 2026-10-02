@@ -58,8 +58,46 @@ describe("ArtworkCatalog", () => {
 
     await expect(catalog.getOriginal(`mpc:${"c".repeat(64)}`)).rejects.toThrow("MPC original timed out");
     expect(catalog.getProviderHealth()).toMatchObject({
-      mpc: { available: false, degraded: true, message: "MPC original timed out" },
+      mpc: { available: false, degraded: true, message: "MPC artwork provider is temporarily degraded." },
     });
+    expect(JSON.stringify(catalog.getProviderHealth().mpc)).not.toContain("timed out");
+  });
+
+  it("synchronizes recovered provider health when read outside catalog search", () => {
+    let health: ProviderHealth = { available: false, degraded: true, message: "Provider is temporarily degraded." };
+    const recoveredProvider: ArtworkProvider = {
+      source: "mpc",
+      getHealth: () => health,
+      searchArtwork: async () => [],
+      getPreview: async () => undefined,
+      getOriginal: async () => { throw new Error("No original"); },
+      getCandidate: async () => undefined,
+    };
+    const catalog = new ArtworkCatalog([recoveredProvider]);
+
+    expect(catalog.getProviderHealth().mpc).toMatchObject({ available: false, degraded: true });
+    health = { available: true, degraded: false };
+
+    expect(catalog.getProviderHealth().mpc).toMatchObject({ available: true, degraded: false });
+  });
+
+  it("preserves catalog-marked MPC degradation and hides upstream text", () => {
+    const healthyMpc: ArtworkProvider = {
+      source: "mpc",
+      getHealth: () => ({ available: true, degraded: false }),
+      searchArtwork: async () => [],
+      getPreview: async () => undefined,
+      getOriginal: async () => { throw new Error("No original"); },
+      getCandidate: async () => undefined,
+    };
+    const catalog = new ArtworkCatalog([healthyMpc]);
+
+    catalog.markProviderDegraded("mpc", new Error("https://private.example/path?token=must-not-leak"));
+
+    const health = catalog.getProviderHealth().mpc;
+    expect(health).toMatchObject({ available: false, degraded: true });
+    expect(JSON.stringify(health)).not.toContain("private.example");
+    expect(JSON.stringify(health)).not.toContain("must-not-leak");
   });
 
   it("lets MPC filter validation errors reach the API as client errors", async () => {

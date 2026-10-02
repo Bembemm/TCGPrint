@@ -11,6 +11,7 @@ import { ArtworkMetadataCache } from "../../artwork/storage/metadata-cache";
 import { ArtworkOriginalStore } from "../../artwork/storage/original-store";
 import { ArtworkRepository } from "../../artwork/storage/repository";
 import { ArtworkThumbnailStore } from "../../artwork/storage/thumbnail-store";
+import { ArtworkCatalog } from "../../artwork/catalog";
 import { MpcArtworkProvider } from "../../artwork/mpc-provider";
 
 const temporaryDirectories: string[] = [];
@@ -280,19 +281,30 @@ describe("advanced MPC artwork provider", () => {
     vi.setSystemTime(baseTime);
     let online = true;
     const fetcher: typeof fetch = async (input, init = {}) => {
-      if (!online) throw new Error("private path token=must-not-leak");
+      if (!online) throw new Error("https://private.example/path?token=must-not-leak");
       return apiFake()(input, init);
     };
     const { database, provider } = await setup(fetcher);
+    const catalog = new ArtworkCatalog([provider]);
     try {
-      await provider.getFilterCatalogs();
+      await catalog.getMpcFilterCatalogs();
       vi.setSystemTime(baseTime + 25 * 60 * 60 * 1000);
       online = false;
-      await expect(provider.getFilterCatalogs()).resolves.toMatchObject({ sources: expect.any(Array), languages: expect.any(Array), tags: expect.any(Array) });
+      await expect(catalog.getMpcFilterCatalogs()).resolves.toMatchObject({ sources: expect.any(Array), languages: expect.any(Array), tags: expect.any(Array) });
       const diagnostic = provider.getDiagnostic();
       expect(diagnostic).toMatchObject({ degraded: true, catalogCaches: { sources: { state: "stale" }, languages: { state: "stale" }, tags: { state: "stale" } } });
+      expect(provider.getHealth()).toMatchObject({ available: true, degraded: true });
+      expect(catalog.getProviderHealth().mpc).toMatchObject({ available: true, degraded: true });
       expect(JSON.stringify(diagnostic)).not.toContain("private");
       expect(JSON.stringify(diagnostic)).not.toContain("token");
+      expect(JSON.stringify(provider.getHealth())).not.toContain("private.example");
+      expect(JSON.stringify(catalog.getProviderHealth().mpc)).not.toContain("must-not-leak");
+
+      online = true;
+      await expect(catalog.getMpcFilterCatalogs()).resolves.toMatchObject({ sources: expect.any(Array), languages: expect.any(Array), tags: expect.any(Array) });
+      expect(provider.getDiagnostic()).toMatchObject({ degraded: false });
+      expect(provider.getHealth()).toMatchObject({ available: true, degraded: false });
+      expect(catalog.getProviderHealth().mpc).toMatchObject({ available: true, degraded: false });
     } finally {
       vi.useRealTimers();
       await database.close();
