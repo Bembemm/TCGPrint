@@ -29,4 +29,15 @@ export class ArtworkMetadataCache {
       return undefined;
     }
   }
+
+  getMetadataSnapshot<T>(key: string): { readonly value: T; readonly expiresAt: number; readonly updatedAt: number } | undefined {
+    const stored = this.repository.getMetadata(key);
+    if (!stored) return undefined;
+    try {
+      return { value: JSON.parse(stored.valueJson) as T, expiresAt: stored.expiresAt, updatedAt: stored.updatedAt };
+    } catch {
+      this.repository.removeMetadata(key);
+      return undefined;
+    }
+  }
 }

@@ -570,6 +570,25 @@ describe("card APIs", () => {
     expect(body.candidates[0]).toMatchObject({ source: "mpc", originalAvailable: true, originalCached: false, metadata: { localAvailabilityHint: true } });
   });
 
+  it("normalizes the TCGPrint MPC filter contract at the artwork API and rejects raw MPC search payloads", async () => {
+    const listArtworkCandidates = vi.fn(async () => []);
+    const workbench = testWorkbench({ listArtworkCandidates });
+    const response = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", {
+      faceId: "front", source: "mpc",
+      mpcFilters: { minimumDpi: 300, maximumDpi: 1200, sources: [42, 41, 42], includeTags: ["Promo"], excludeTags: ["Foil"], languages: ["EN"] },
+    }), identity.id, workbench);
+
+    expect(response.status).toBe(200);
+    expect(listArtworkCandidates).toHaveBeenCalledWith(identity.id, "front", "mpc", expect.objectContaining({
+      mpcFilters: expect.objectContaining({ minimumDpi: 300, maximumDpi: 1200, sources: [41, 42], includeTags: ["promo"], excludeTags: ["foil"], languages: ["en"] }),
+    }));
+    const unsafe = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", {
+      faceId: "front", source: "mpc", mpcFilters: { searchSettings: { arbitrary: true } },
+    }), identity.id, workbench);
+    expect(unsafe.status).toBe(400);
+    expect(await unsafe.json()).toMatchObject({ code: "INVALID_MPC_FILTERS" });
+  });
+
   it("includes MPC source-face back references in a simple card's physical-back catalog", async () => {
     const mpcBack: ArtworkCandidate = {
       ...candidate,

@@ -8,6 +8,8 @@ import { ArtworkCatalog } from "../artwork/catalog";
 import { calculateEffectiveDpi, artworkResolutionQuality } from "../artwork/effective-dpi";
 import { LocalArtworkProvider } from "../artwork/local-provider";
 import { MpcArtworkProvider } from "../artwork/mpc-provider";
+import type { MpcArtworkProviderDiagnostic } from "../artwork/mpc-provider";
+import type { MpcArtworkFilterInput, MpcFilterCatalogs } from "../artwork/mpc-contract";
 import { ScryfallArtworkProvider } from "../artwork/scryfall-provider";
 import { ArtworkMetadataCache } from "../artwork/storage/metadata-cache";
 import { ArtworkOriginalStore } from "../artwork/storage/original-store";
@@ -94,8 +96,11 @@ export interface CardWorkbench {
   confirmWorkingCardIdentity(card: WorkingCard, scryfallId: string, options?: { signal?: AbortSignal }): Promise<WorkingCard>;
   keepWorkingCardCustom(card: WorkingCard): WorkingCard;
   restoreDefaultArtwork(card: WorkingCard, faceId: CardFaceSide, options?: { signal?: AbortSignal }): Promise<WorkingCard | undefined>;
-  listArtworkCandidates(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
+  listArtworkCandidates(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
   getArtworkCandidate(candidateId: string, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; identity?: CardIdentity; signal?: AbortSignal }): Promise<ArtworkCandidate | undefined>;
+  getMpcArtworkFilterCatalogs(signal?: AbortSignal): Promise<MpcFilterCatalogs>;
+  getMpcArtworkProviderDiagnostic?(): MpcArtworkProviderDiagnostic | undefined;
+  refreshMpcArtworkCandidate(candidateId: string, signal?: AbortSignal): Promise<ArtworkCandidate | undefined>;
   getArtworkPreview(candidateId: string, signal?: AbortSignal): Promise<ArtworkPreview | undefined>;
   getArtworkOriginal(candidateId: string, signal?: AbortSignal): ReturnType<ArtworkCatalog["getOriginal"]>;
   selectArtwork(card: WorkingCard, faceId: CardFaceSide, candidate: ArtworkCandidate): WorkingCard;
@@ -548,11 +553,11 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
       if (identity.id === "custom:artwork-picker" && source === "all") {
         const [uploads, references] = await Promise.all([
           catalog.search(identity, { source: "upload", faceId, signal: callOptions.signal }),
-          catalog.search(identity, { source: "mpc", faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), signal: callOptions.signal }),
+          catalog.search(identity, { source: "mpc", faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), signal: callOptions.signal }),
         ]);
         return [...uploads, ...references];
       }
-      return catalog.search(identity, { source, faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), signal: callOptions.signal });
+      return catalog.search(identity, { source, faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), signal: callOptions.signal });
     },
 
     async getArtworkCandidate(candidateId, callOptions = {}) {
@@ -563,6 +568,9 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     },
     getArtworkPreview(candidateId, signal) { return catalog.getPreview(candidateId, signal); },
     getArtworkOriginal(candidateId, signal) { return catalog.getOriginal(candidateId, signal); },
+    getMpcArtworkFilterCatalogs(signal) { return catalog.getMpcFilterCatalogs(signal); },
+    getMpcArtworkProviderDiagnostic() { return catalog.getMpcDiagnostic(); },
+    refreshMpcArtworkCandidate(candidateId, signal) { return catalog.refreshMpcCandidate(candidateId, signal); },
     selectArtwork(card, faceId, candidate) {
       const selection: SelectedArtwork = {
         candidateId: candidate.id,

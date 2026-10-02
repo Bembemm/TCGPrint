@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCardMpcReference } from "../core/cards/types";
 import { mpcArtworkCandidateId } from "../core/cards/ids";
 import { calculateEffectiveDpi } from "./effective-dpi";
@@ -10,6 +9,10 @@ import { ArtworkStorageError, type ArtworkOriginal } from "./storage/types";
 import { validateImageBytes } from "./storage/image-validation";
 import type { ArtworkPreview, ArtworkProvider, ArtworkSearchOptions, ProviderHealth } from "./types";
 import { validateSvgForPdfExport } from "../pdf-engine/document";
+import { MpcArtworkFilterValidationError, normalizeMpcArtworkFilters, validateMpcArtworkFiltersAgainstCatalogs } from "./mpc-contract";
+import type { MpcArtworkFilterInput, MpcArtworkFilters, MpcFilterCatalogs, MpcLanguageOption, MpcSourceOption, MpcTagOption } from "./mpc-contract";
+import { buildMpcSearchCacheKey } from "./mpc-cache-key";
+import { rankMpcCandidates } from "./mpc-ranking";
 
 const API_BASE_URL = "https://mpcfill.com";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -46,7 +49,30 @@ interface StoredCandidate {
   readonly declaredSize?: number;
 }
 
-interface SourceRecord { readonly pk: number; readonly sourceType: string; }
+interface SourceRecord { readonly pk: number; readonly sourceType: "Google Drive"; readonly name: string; }
+
+export interface MpcAdvancedArtworkSearchOptions extends ArtworkSearchOptions {
+  readonly filters?: MpcArtworkFilterInput;
+}
+
+export interface MpcCatalogCacheDiagnostic {
+  readonly state: "fresh" | "stale" | "unavailable" | "empty";
+  readonly ageMs?: number;
+}
+
+export interface MpcArtworkProviderDiagnostic {
+  readonly available: boolean;
+  readonly degraded: boolean;
+  readonly lastProtocolConfirmed: "v2" | "v3" | null;
+  readonly v3Available: boolean | null;
+  readonly fallbackV2Used: boolean;
+  readonly lastSuccessfulOperation?: "search" | "catalog-refresh" | "metadata-refresh" | "thumbnail" | "original";
+  readonly lastSuccessfulAt?: string;
+  readonly lastFailureType?: string;
+  readonly catalogCaches: Readonly<Record<"sources" | "languages" | "tags", MpcCatalogCacheDiagnostic>>;
+  readonly searchCacheHits: number;
+  readonly searchCacheMisses: number;
+}
 
 function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -87,11 +113,90 @@ function verifiedSources(payload: unknown): SourceRecord[] {
     const sourcePk = Number(value.pk ?? mapPk);
     return Number.isSafeInteger(mapPk) && mapPk > 0 && sourcePk === mapPk ? [{ ...value, pk: sourcePk }] : [];
   }) : [];
+  if (items.length > 5_000) throw new MpcArtworkProviderError("protocol", "MPC source catalog is too large.");
   return items.flatMap((item): SourceRecord[] => {
     if (!record(item) || item.sourceType !== "Google Drive") return [];
     const pk = Number(item.pk);
-    return Number.isSafeInteger(pk) && pk > 0 ? [{ pk, sourceType: "Google Drive" }] : [];
+    const name = typeof item.name === "string" ? safeCatalogText(item.name, 120) : undefined;
+    return Number.isSafeInteger(pk) && pk > 0 ? [{ pk, sourceType: "Google Drive", name: name ?? `Google Drive source ${pk}` }] : [];
   });
+}
+
+function safeCatalogText(value: unknown, maximum = 120): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.normalize("NFC").trim();
+  return normalized && normalized.length <= maximum && !/[\u0000-\u001f\u007f]/u.test(normalized) ? normalized : undefined;
+}
+
+function catalogArray(payload: unknown, key: string): unknown[] {
+  if (record(payload) && Array.isArray(payload[key])) return payload[key] as unknown[];
+  if (record(payload) && record(payload.results) && Array.isArray(payload.results[key])) return payload.results[key] as unknown[];
+  throw new MpcArtworkProviderError("protocol", `MPC ${key} catalog has an invalid response shape.`);
+}
+
+function verifiedLanguages(payload: unknown): MpcLanguageOption[] {
+  const items = catalogArray(payload, "languages");
+  if (items.length > 100) throw new MpcArtworkProviderError("protocol", "MPC language catalog is too large.");
+  return items.flatMap((item): MpcLanguageOption[] => {
+    if (!record(item)) return [];
+    const code = safeCatalogText(item.code, 16)?.toLowerCase();
+    const name = safeCatalogText(item.name, 80);
+    return code && /^[a-z0-9-]+$/.test(code) && name ? [{ code, name }] : [];
+  }).sort((left, right) => left.code < right.code ? -1 : left.code > right.code ? 1 : 0);
+}
+
+function verifiedTags(payload: unknown): MpcTagOption[] {
+  const roots = catalogArray(payload, "tags");
+  const names = new Set<string>();
+  let visited = 0;
+  const visit = (items: unknown[], depth: number) => {
+    if (depth > 8) throw new MpcArtworkProviderError("protocol", "MPC tag catalog is nested too deeply.");
+    for (const item of items) {
+      visited += 1;
+      if (visited > 2000) throw new MpcArtworkProviderError("protocol", "MPC tag catalog is too large.");
+      if (!record(item)) continue;
+      const name = safeCatalogText(item.name, 80);
+      if (name) names.add(name);
+      if (Array.isArray(item.children)) visit(item.children, depth + 1);
+    }
+  };
+  visit(roots, 0);
+  return [...names].sort((left, right) => left.toLowerCase() < right.toLowerCase() ? -1 : left.toLowerCase() > right.toLowerCase() ? 1 : 0).map((name) => ({ name }));
+}
+
+function safeTimestamp(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 64) return undefined;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
+}
+
+function safeRemoteTags(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length > 100) return undefined;
+  const tags = value.flatMap((item): string[] => {
+    const name = typeof item === "string" ? safeCatalogText(item, 80) : record(item) ? safeCatalogText(item.name, 80) : undefined;
+    return name ? [name] : [];
+  });
+  return [...new Set(tags)].sort((left, right) => left.toLowerCase() < right.toLowerCase() ? -1 : left.toLowerCase() > right.toLowerCase() ? 1 : 0);
+}
+
+function safeCanonicalCard(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  if (!record(value)) return undefined;
+  const output: Record<string, string> = {};
+  for (const key of ["name", "expansionCode", "expansionName", "collectorNumber", "rarity", "scryfallId"]) {
+    const text = safeCatalogText(value[key], key === "name" || key === "expansionName" ? 160 : 80);
+    if (text) output[key] = text;
+  }
+  return Object.keys(output).length ? output : undefined;
+}
+
+function safeCanonicalArtist(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  if (!record(value)) return undefined;
+  const output: Record<string, string> = {};
+  for (const key of ["name", "scryfallId"]) {
+    const text = safeCatalogText(value[key], key === "name" ? 160 : 80);
+    if (text) output[key] = text;
+  }
+  return Object.keys(output).length ? output : undefined;
 }
 
 function resultIds(payload: unknown, query: string, hash: string, version: "v3" | "v2"): string[] {
@@ -268,6 +373,18 @@ export class MpcArtworkProvider implements ArtworkProvider {
   private readonly metadata: ArtworkMetadataCache;
   private readonly repository: ArtworkRepository;
   private health: ProviderHealth = { available: true, degraded: false };
+  private readonly catalogStates: Record<"sources" | "languages" | "tags", MpcCatalogCacheDiagnostic> = {
+    sources: { state: "empty" }, languages: { state: "empty" }, tags: { state: "empty" },
+  };
+  private lastProtocolConfirmed: "v2" | "v3" | null = null;
+  private v3Available: boolean | null = null;
+  private fallbackV2Used = false;
+  private lastSuccessfulOperation: MpcArtworkProviderDiagnostic["lastSuccessfulOperation"];
+  private lastSuccessfulAt: string | undefined;
+  private lastFailureType: string | undefined;
+  private searchCacheHits = 0;
+  private searchCacheMisses = 0;
+  private catalogDegraded = false;
 
   constructor(options: MpcArtworkProviderOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -286,11 +403,145 @@ export class MpcArtworkProvider implements ArtworkProvider {
 
   getHealth(): ProviderHealth { return this.health; }
 
+  getDiagnostic(): MpcArtworkProviderDiagnostic {
+    return {
+      available: this.health.available,
+      degraded: this.health.degraded || this.catalogDegraded,
+      lastProtocolConfirmed: this.lastProtocolConfirmed,
+      v3Available: this.v3Available,
+      fallbackV2Used: this.fallbackV2Used,
+      ...(this.lastSuccessfulOperation ? { lastSuccessfulOperation: this.lastSuccessfulOperation } : {}),
+      ...(this.lastSuccessfulAt ? { lastSuccessfulAt: this.lastSuccessfulAt } : {}),
+      ...(this.lastFailureType ? { lastFailureType: this.lastFailureType } : {}),
+      catalogCaches: {
+        sources: { ...this.catalogStates.sources },
+        languages: { ...this.catalogStates.languages },
+        tags: { ...this.catalogStates.tags },
+      },
+      searchCacheHits: this.searchCacheHits,
+      searchCacheMisses: this.searchCacheMisses,
+    };
+  }
+
+  private operationSucceeded(operation: NonNullable<MpcArtworkProviderDiagnostic["lastSuccessfulOperation"]>): void {
+    this.lastSuccessfulOperation = operation;
+    this.lastSuccessfulAt = new Date().toISOString();
+    this.health = { available: true, degraded: false };
+  }
+
   private degrade(error: unknown): void {
-    this.health = { available: false, degraded: true, message: error instanceof Error ? error.message.slice(0, 300) : "MPC artwork provider failed." };
+    const type = error instanceof MpcArtworkProviderError ? error.kind
+      : error instanceof ArtworkStorageError ? "storage"
+        : "protocol";
+    this.lastFailureType = type;
+    // Never publish upstream text, URLs, or arbitrary error messages through
+    // MPC health. Provider-specific diagnostics expose a bounded enum only.
+    this.health = { available: false, degraded: true, message: "MPC artwork provider is temporarily degraded." };
   }
 
   async searchArtwork(identity: CardIdentity, options: ArtworkSearchOptions = {}): Promise<readonly ArtworkCandidate[]> {
+    return this.searchArtworkAdvanced(identity, { ...options, filters: {} });
+  }
+
+  async getFilterCatalogs(signal?: AbortSignal): Promise<MpcFilterCatalogs> {
+    const [sources, languages, tags] = await Promise.all([
+      this.sources(signal),
+      this.loadCatalog("languages", "mpc:catalog:languages", "/2/languages/", verifiedLanguages, signal),
+      this.loadCatalog("tags", "mpc:catalog:tags", "/2/tags/", verifiedTags, signal),
+    ]);
+    this.operationSucceeded("catalog-refresh");
+    return {
+      sources: sources.map(({ pk, name, sourceType }) => ({ id: pk, name, sourceType })),
+      languages,
+      tags,
+    };
+  }
+
+  async refreshCandidate(id: string, signal?: AbortSignal): Promise<ArtworkCandidate | undefined> {
+    if (!/^mpc:[a-f0-9]{64}$/.test(id)) return undefined;
+    if (signal?.aborted) throw new MpcArtworkProviderError("aborted", "The MPC metadata refresh was cancelled.");
+    const snapshot = this.metadata.getMetadataSnapshot<StoredCandidate>(candidateKey(id));
+    const stored = snapshot?.value;
+    if (!stored?.candidate.providerAssetId || !validAssetId(stored.candidate.providerAssetId)) return undefined;
+    const assetId = stored.candidate.providerAssetId;
+    const sources = await this.sources(signal);
+    const verifiedSourceIds = new Set(sources.map(({ pk }) => pk));
+    const response = await this.apiJson("/2/cards/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cardIdentifiers: [assetId] }),
+    }, signal);
+    let documents: Record<string, unknown>[];
+    try { documents = cardItems(response.payload, new Set([assetId])); }
+    catch (error) { this.degrade(error); throw error; }
+    const document = documents.find((item) => item.identifier === assetId);
+    const metadataCheckedAt = new Date().toISOString();
+    if (!document) {
+      const refreshed: StoredCandidate = {
+        ...stored,
+        candidate: {
+          ...stored.candidate,
+          originalAvailable: Boolean(stored.candidate.originalCached),
+          metadata: { ...stored.candidate.metadata, remoteMetadataStatus: "removed", metadataCheckedAt },
+        },
+      };
+      this.metadata.putMetadata(candidateKey(id), refreshed, Date.now() + CANDIDATE_TTL_MS);
+      this.operationSucceeded("metadata-refresh");
+      return await this.getCandidate(id) ?? refreshed.candidate;
+    }
+    const identityId = stored.candidate.identityId ?? "local:mpc-refresh";
+    const identity: CardIdentity = {
+      id: identityId,
+      provider: identityId.startsWith("scryfall:") ? "scryfall" : "local",
+      name: typeof stored.candidate.metadata?.name === "string" ? stored.candidate.metadata.name : "MPC artwork",
+      resolutionMethod: "custom",
+      confidence: 0,
+    };
+    let updated: StoredCandidate | undefined;
+    try { updated = this.candidateFromCard(document, identity, stored.candidate.faceId === "back" ? "back" : "front", verifiedSourceIds); }
+    catch (error) {
+      this.degrade(error);
+      const retained: StoredCandidate = {
+        ...stored,
+        candidate: {
+          ...stored.candidate,
+          originalAvailable: Boolean(stored.candidate.originalCached),
+          metadata: { ...stored.candidate.metadata, remoteMetadataStatus: "invalid", metadataCheckedAt },
+        },
+      };
+      this.metadata.putMetadata(candidateKey(id), retained, Date.now() + CANDIDATE_TTL_MS);
+      return await this.getCandidate(id) ?? retained.candidate;
+    }
+    if (!updated) {
+      const retained: StoredCandidate = {
+        ...stored,
+        candidate: { ...stored.candidate, originalAvailable: Boolean(stored.candidate.originalCached), metadata: { ...stored.candidate.metadata, remoteMetadataStatus: "unsupported", metadataCheckedAt } },
+      };
+      this.metadata.putMetadata(candidateKey(id), retained, Date.now() + CANDIDATE_TTL_MS);
+      this.operationSucceeded("metadata-refresh");
+      return await this.getCandidate(id) ?? retained.candidate;
+    }
+    const merged: StoredCandidate = {
+      ...updated,
+      candidate: {
+        ...updated.candidate,
+        id,
+        identityId: stored.candidate.identityId,
+        ...(stored.candidate.selectedArtworkId ? { selectedArtworkId: stored.candidate.selectedArtworkId } : {}),
+        metadata: {
+          ...updated.candidate.metadata,
+          remoteMetadataStatus: "current",
+          metadataCheckedAt,
+        },
+      },
+    };
+    this.metadata.putMetadata(candidateKey(id), merged, Date.now() + CANDIDATE_TTL_MS);
+    this.operationSucceeded("metadata-refresh");
+    return await this.getCandidate(id) ?? merged.candidate;
+  }
+
+  async searchArtworkAdvanced(identity: CardIdentity, options: MpcAdvancedArtworkSearchOptions = {}): Promise<readonly ArtworkCandidate[]> {
+    const inputFilters = normalizeMpcArtworkFilters(options.filters ?? {});
     const references = (options.mpcReferences ?? []).filter((reference) =>
       (reference.faceId === "front" || reference.faceId === "back") && (!options.faceId || reference.faceId === options.faceId),
     );
@@ -302,7 +553,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         if (hydrated) importedCandidates.push(hydrated);
       } catch (error) {
         if (isCancellation(error, options.signal)) throw error;
-        this.health = { available: false, degraded: true, message: error instanceof Error ? error.message.slice(0, 300) : "MPC reference hydration failed." };
+        this.degrade(error);
         importedCandidates.push({
           id,
           source: "mpc",
@@ -319,28 +570,51 @@ export class MpcArtworkProvider implements ArtworkProvider {
     if (identity.id === "custom:artwork-picker" || identity.provider === "local") return importedCandidates.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate));
     const query = faceQuery(identity, options.faceId);
     if (!query) return importedCandidates;
-    const searchKey = `mpc:search:${createHash("sha256").update(`${query.toLocaleLowerCase("en-US")}\0${options.faceId ?? "any"}`).digest("hex")}`;
-    const cached = this.metadata.getMetadata<readonly StoredCandidate[]>(searchKey);
-    if (cached) {
-      for (const item of cached) this.metadata.putMetadata(candidateKey(item.candidate.id), item, Date.now() + CANDIDATE_TTL_MS);
-      const refreshed = await Promise.all(cached.map(async ({ candidate }) => {
-        const current = await this.getCandidate(candidate.id);
-        return { ...(current ?? candidate), identityId: identity.id };
-      }));
-      return this.combineCandidates(importedCandidates, refreshed.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate)));
-    }
-
+    let staleSearch: readonly StoredCandidate[] | undefined;
     try {
       const sources = await this.sources(options.signal);
       if (!sources.length) throw new MpcArtworkProviderError("protocol", "MPC returned no verified Google Drive sources.");
       const verifiedSourceIds = new Set(sources.map(({ pk }) => pk));
+      const catalogs: MpcFilterCatalogs = {
+        sources: sources.map(({ pk, name, sourceType }) => ({ id: pk, name, sourceType })),
+        languages: inputFilters.languages.length || inputFilters.preferredLanguages.length
+          ? await this.loadCatalog("languages", "mpc:catalog:languages", "/2/languages/", verifiedLanguages, options.signal)
+          : [],
+        tags: inputFilters.includeTags.length || inputFilters.excludeTags.length || inputFilters.preferredTags.length
+          ? await this.loadCatalog("tags", "mpc:catalog:tags", "/2/tags/", verifiedTags, options.signal)
+          : [],
+      };
+      const filters = validateMpcArtworkFiltersAgainstCatalogs(inputFilters, catalogs);
+      const searchKey = buildMpcSearchCacheKey(query, options.faceId ?? "any", filters, [...verifiedSourceIds]);
+      const cached = this.metadata.getMetadataSnapshot<readonly StoredCandidate[]>(searchKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        this.searchCacheHits += 1;
+        const refreshed = await Promise.all(cached.value.map(async ({ candidate }) => {
+          const current = await this.getCandidate(candidate.id);
+          return { ...(current ?? candidate), identityId: identity.id };
+        }));
+        this.operationSucceeded("search");
+        return this.combineCandidates(importedCandidates, rankMpcCandidates(
+          refreshed.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate)), identity, filters,
+        ));
+      }
+      staleSearch = cached?.value;
+      this.searchCacheMisses += 1;
       const settings = {
-        filterSettings: { minimumDPI: 0, maximumDPI: 1500, maximumSize: 30, includesTags: [], excludesTags: [], languages: [] },
+        filterSettings: {
+          minimumDPI: filters.minimumDpi,
+          maximumDPI: filters.maximumDpi,
+          maximumSize: 30,
+          includesTags: [...filters.includeTags],
+          excludesTags: [...filters.excludeTags],
+          languages: [...filters.languages],
+        },
         searchTypeSettings: { fuzzySearch: false, filterCardbacks: false },
-        sourceSettings: { sources: sources.map(({ pk }) => [pk, true]) },
+        sourceSettings: { sources: sources.map(({ pk }) => [pk, filters.sources.length === 0 || filters.sources.includes(pk)]) },
       };
       const searchQuery = { query, cardType: "CARD" };
       const hash = requestHash(searchQuery);
+      this.fallbackV2Used = false;
       const v3 = await this.apiJson("/3/editorSearch/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -349,6 +623,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
       let version: "v3" | "v2" = "v3";
       let payload: unknown = v3.payload;
       if (v3.status === 404) {
+        this.v3Available = false;
         version = "v2";
         const v2 = await this.apiJson("/2/editorSearch/", {
           method: "POST",
@@ -358,6 +633,9 @@ export class MpcArtworkProvider implements ArtworkProvider {
         payload = v2.payload;
       }
       const ids = resultIds(payload, query, hash, version).slice(0, this.searchLimit);
+      this.lastProtocolConfirmed = version;
+      this.fallbackV2Used = version === "v2";
+      if (version === "v3") this.v3Available = true;
       const cardsResponse = ids.length ? await this.apiJson("/2/cards/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -371,7 +649,10 @@ export class MpcArtworkProvider implements ArtworkProvider {
       const candidates = hydratedCards.flatMap((item): StoredCandidate[] => {
         try {
           const candidate = this.candidateFromCard(item, identity, side, verifiedSourceIds);
-          return candidate ? [candidate] : [];
+          if (!candidate) return [];
+          const sourceId = candidate.candidate.metadata?.sourceId;
+          if (filters.sources.length && (typeof sourceId !== "number" || !filters.sources.includes(sourceId))) return [];
+          return [candidate];
         } catch (error) {
           rejectedCandidate = true;
           this.degrade(error);
@@ -381,14 +662,64 @@ export class MpcArtworkProvider implements ArtworkProvider {
       for (const item of candidates) this.metadata.putMetadata(candidateKey(item.candidate.id), item, Date.now() + CANDIDATE_TTL_MS);
       if (!rejectedCandidate) {
         this.metadata.putMetadata(searchKey, candidates, Date.now() + CACHE_TTL_MS);
-        this.health = { available: true, degraded: false };
+        this.operationSucceeded("search");
       }
-      return this.combineCandidates(importedCandidates, candidates.map(({ candidate }) => candidate).filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate)));
+      return this.combineCandidates(importedCandidates, rankMpcCandidates(
+        candidates.map(({ candidate }) => candidate).filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate)), identity, filters,
+      ));
     } catch (error) {
       if (isCancellation(error, options.signal)) throw error;
+      if (error instanceof MpcArtworkFilterValidationError) throw error;
       this.degrade(error);
+      if (staleSearch) {
+        const stale = await Promise.all(staleSearch.map(async ({ candidate }) => ({
+          ...(await this.getCandidate(candidate.id) ?? candidate),
+          identityId: identity.id,
+        })));
+        return this.combineCandidates(importedCandidates, stale.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate)));
+      }
       if (!importedCandidates.length) throw error;
       return importedCandidates.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate));
+    }
+  }
+
+  private async sources(signal?: AbortSignal): Promise<SourceRecord[]> {
+    return this.loadCatalog("sources", "mpc:sources:google-drive", "/2/sources/", (payload) => {
+      const result = verifiedSources(payload);
+      if (!result.length) throw new MpcArtworkProviderError("protocol", "MPC returned no verified Google Drive sources.");
+      return result;
+    }, signal);
+  }
+
+  private async loadCatalog<T>(
+    kind: "sources" | "languages" | "tags",
+    key: string,
+    path: string,
+    parse: (payload: unknown) => T,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const cached = this.metadata.getMetadataSnapshot<T>(key);
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) {
+      this.catalogStates[kind] = { state: "fresh", ageMs: Math.max(0, now - cached.updatedAt) };
+      return cached.value;
+    }
+    try {
+      const response = await this.apiJson(path, { method: "GET" }, signal);
+      const value = parse(response.payload);
+      this.metadata.putMetadata(key, value, Date.now() + CACHE_TTL_MS);
+      this.catalogStates[kind] = { state: "fresh", ageMs: 0 };
+      if (Object.values(this.catalogStates).every(({ state }) => state !== "unavailable" && state !== "stale")) this.catalogDegraded = false;
+      return value;
+    } catch (error) {
+      if (isCancellation(error, signal)) throw error;
+      this.catalogDegraded = true;
+      if (cached) {
+        this.catalogStates[kind] = { state: "stale", ageMs: Math.max(0, now - cached.updatedAt) };
+        return cached.value;
+      }
+      this.catalogStates[kind] = { state: "unavailable" };
+      throw error;
     }
   }
 
@@ -429,7 +760,8 @@ export class MpcArtworkProvider implements ArtworkProvider {
 
   async getCandidate(id: string): Promise<ArtworkCandidate | undefined> {
     if (!/^mpc:[a-f0-9]{64}$/.test(id)) return undefined;
-    const stored = this.metadata.getMetadata<StoredCandidate>(candidateKey(id));
+    const snapshot = this.metadata.getMetadataSnapshot<StoredCandidate>(candidateKey(id));
+    const stored = snapshot?.value;
     if (!stored) return undefined;
     const sourceUrl = stored.candidate.providerAssetId ? this.sourceUrl(stored.candidate.providerAssetId) : undefined;
     const originalRecord = sourceUrl && stored.candidate.providerAssetId
@@ -464,12 +796,17 @@ export class MpcArtworkProvider implements ArtworkProvider {
         ? storedFormatExportable
         : storedFormatExportable === false ? false : undefined
       : !formatKnown || isExportableOriginalExtension(actualExtension);
+    const remoteMetadataStatus = effectiveStored.candidate.metadata?.remoteMetadataStatus;
+    const remoteUnavailable = remoteMetadataStatus === "removed" || remoteMetadataStatus === "invalid" || remoteMetadataStatus === "unsupported";
     return {
       ...effectiveStored.candidate,
-      originalAvailable: formatExportable === false ? false : original ? true : effectiveStored.candidate.originalAvailable,
+      originalAvailable: formatExportable === false ? false : original ? true : remoteUnavailable ? false : effectiveStored.candidate.originalAvailable,
       originalCached: Boolean(original),
       metadata: {
         ...metadataWithoutExportability,
+        ...(snapshot && snapshot.expiresAt <= Date.now() && !metadataWithoutExportability.remoteMetadataStatus
+          ? { remoteMetadataStatus: "stale" }
+          : {}),
         ...(formatKnown ? {
           ...(actualExtension ? { extension: actualExtension } : {}),
           originalFormatKnown: true,
@@ -642,6 +979,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const sourceUrl = this.sourceUrl(candidate.providerAssetId);
     if (!sourceUrl) throw new MpcArtworkProviderError("unsafe-source", "MPC Google Drive identifier is invalid.");
     const existing = this.repository.findOriginalByProviderSource("mpc", candidate.providerAssetId, sourceUrl);
+    let localStorageFailure: ArtworkStorageError | undefined;
     if (existing) {
       try { return await this.originals.getOriginal(existing.artworkId); }
       catch (error) {
@@ -649,10 +987,22 @@ export class MpcArtworkProvider implements ArtworkProvider {
           if (error instanceof ArtworkStorageError) this.degrade(error);
           throw error;
         }
+        localStorageFailure = error;
         this.degrade(error);
       }
     }
-    const { response, bytes } = await this.fetchImage(sourceUrl, this.maximumOriginalBytes, "original", signal);
+    let response: Response;
+    let bytes: Uint8Array;
+    try {
+      ({ response, bytes } = await this.fetchImage(sourceUrl, this.maximumOriginalBytes, "original", signal));
+    } catch (error) {
+      if (!localStorageFailure || isCancellation(error, signal) || !(error instanceof MpcArtworkProviderError)) throw error;
+      throw new MpcArtworkProviderError(
+        error.kind,
+        `The cached MPC original failed local validation (${localStorageFailure.code}); remote recovery failed.`,
+        error.status,
+      );
+    }
     const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
     const stored = this.metadata.getMetadata<StoredCandidate>(candidateKey(id));
     let validatedImage: Awaited<ReturnType<typeof validateImageBytes>>;
@@ -752,7 +1102,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
     if (item.sourceType !== "Google Drive") {
       throw new MpcArtworkProviderError("unsafe-source", "MPC returned an unsupported artwork source or card type.");
     }
-    const sourceId = Number(item.sourceId);
+    const sourceId = typeof item.sourceId === "number" ? item.sourceId : Number.NaN;
     if (!Number.isSafeInteger(sourceId) || !verifiedSourceIds.has(sourceId)) {
       throw new MpcArtworkProviderError("unsafe-source", "MPC artwork does not belong to a verified Google Drive source.");
     }
@@ -763,41 +1113,50 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const rawThumbnail = item.smallThumbnailUrl ?? item.mediumThumbnailUrl;
     const thumbnailUrl = typeof rawThumbnail === "string" ? safeImageUrl(rawThumbnail, "thumbnail")?.toString() : undefined;
     if (rawThumbnail !== undefined && !thumbnailUrl) throw new MpcArtworkProviderError("unsafe-source", "MPC thumbnail URL is not on an approved HTTPS host.");
-    const dpi = Number(item.dpi);
+    const dpi = typeof item.dpi === "number" && Number.isSafeInteger(item.dpi) && item.dpi > 0 ? item.dpi : Number.NaN;
+    const name = safeCatalogText(item.name, 200);
+    const language = typeof item.language === "string" && /^[A-Za-z0-9-]{1,16}$/.test(item.language) ? item.language.toLowerCase() : undefined;
+    const sourceName = safeCatalogText(item.sourceName, 120);
+    const tags = safeRemoteTags(item.tags);
+    const priority = typeof item.priority === "number" && Number.isSafeInteger(item.priority) ? item.priority : undefined;
+    const dateCreated = safeTimestamp(item.dateCreated);
+    const dateModified = safeTimestamp(item.dateModified);
+    const canonicalCard = safeCanonicalCard(item.canonicalCard);
+    const canonicalArtist = safeCanonicalArtist(item.canonicalArtist);
     const id = mpcArtworkCandidateId(item.identifier, faceId);
     const candidate: ArtworkCandidate = {
       id,
       source: "mpc",
       identityId: identity.id,
       faceId,
-      ...(typeof item.name === "string" ? { faceName: item.name.slice(0, 200) } : {}),
+      ...(name ? { faceName: name } : {}),
       ...(thumbnailUrl ? { previewUri: thumbnailUrl } : {}),
+      ...(language ? { language } : {}),
       providerAssetId: item.identifier,
       selectedArtworkId: item.identifier,
       originalAvailable: declaredSize !== undefined && declaredSize <= this.maximumOriginalBytes,
       originalCached: false,
       metadata: {
-        ...(typeof item.name === "string" ? { name: item.name.slice(0, 200) } : {}),
+        ...(name ? { name } : {}),
         sourceType: item.sourceType,
-        ...(typeof item.sourceName === "string" ? { sourceName: item.sourceName.slice(0, 200) } : {}),
+        sourceId,
+        ...(sourceName ? { sourceName } : {}),
         ...(extension ? { extension } : {}),
         originalFormatKnown: Boolean(extension),
         ...(extension && canonicalExtension(extension) !== "svg" ? { originalFormatExportable: true } : {}),
         ...(declaredSize ? { declaredSize } : {}),
         ...(Number.isFinite(dpi) && dpi > 0 ? { dpi } : {}),
+        ...(language ? { language } : {}),
+        ...(tags ? { tags } : {}),
+        ...(priority !== undefined ? { priority } : {}),
+        ...(dateCreated ? { dateCreated } : {}),
+        ...(dateModified ? { dateModified } : {}),
+        ...(canonicalCard ? { canonicalCard } : {}),
+        ...(canonicalArtist ? { canonicalArtist } : {}),
+        remoteMetadataStatus: "current",
       },
     };
     return { candidate, ...(thumbnailUrl ? { thumbnailUrl } : {}), ...(declaredSize ? { declaredSize } : {}) };
-  }
-
-  private async sources(signal?: AbortSignal): Promise<SourceRecord[]> {
-    const key = "mpc:sources:google-drive";
-    const cached = this.metadata.getMetadata<SourceRecord[]>(key);
-    if (cached?.length) return cached;
-    const response = await this.apiJson("/2/sources/", { method: "GET" }, signal);
-    const sources = verifiedSources(response.payload);
-    this.metadata.putMetadata(key, sources, Date.now() + CACHE_TTL_MS);
-    return sources;
   }
 
   private async apiJson(path: string, init: RequestInit, signal?: AbortSignal, allowNotFound = false): Promise<{ status: number; payload?: unknown }> {

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import Image from "next/image";
 import type { ImportKind } from "../../import-engine/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard, WorkingCardBackMode } from "../../core/cards/types";
+import type { MpcArtworkFilterInput, MpcFilterCatalogs } from "../../artwork/mpc-contract";
+import type { MpcArtworkProviderDiagnostic } from "../../artwork/mpc-provider";
 import { isDoubleFacedIdentity, restoreAutomaticBackSelection, selectManualBackLibraryAsset, setWorkingCardBackMode } from "../../core/cards/back-selection";
 
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
@@ -75,7 +77,8 @@ interface Props {
 interface ApiErrorBody { readonly code?: string; readonly message?: string; }
 interface IdentityDetails extends CardIdentity { readonly layout?: string; readonly relatedCards: readonly { readonly id: string; readonly component: string; readonly name: string; readonly typeLine?: string }[]; }
 type ProviderHealth = Record<string, { available: boolean; degraded: boolean; message?: string }>;
-interface ArtworkCatalogResult { readonly candidates: CandidateDto[]; readonly providerHealth: ProviderHealth; }
+interface ArtworkCatalogResult { readonly candidates: CandidateDto[]; readonly providerHealth: ProviderHealth; readonly mpcDiagnostic?: MpcArtworkProviderDiagnostic; }
+interface MpcFilterCatalogResult { readonly catalogs: MpcFilterCatalogs; readonly diagnostic?: MpcArtworkProviderDiagnostic; }
 
 async function jsonResponse<T>(response: Response): Promise<T> {
   let body: unknown;
@@ -503,6 +506,11 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [artworkCandidates, setArtworkCandidates] = useState<CandidateDto[]>([]);
   const [artworkCatalogRevision, setArtworkCatalogRevision] = useState(0);
   const [artworkFilter, setArtworkFilter] = useState<ArtworkFilter>("all");
+  const [mpcFilters, setMpcFilters] = useState<MpcArtworkFilterInput>({});
+  const [mpcCatalogs, setMpcCatalogs] = useState<MpcFilterCatalogs | null>(null);
+  const [mpcCatalogProblem, setMpcCatalogProblem] = useState("");
+  const [mpcCatalogRetry, setMpcCatalogRetry] = useState(0);
+  const [mpcDiagnostic, setMpcDiagnostic] = useState<MpcArtworkProviderDiagnostic | null>(null);
   const [manualPhysicalBackPickerCardId, setManualPhysicalBackPickerCardId] = useState<string | null>(null);
   const [manualQuery, setManualQuery] = useState("");
   const [autocompleteEnabled, setAutocompleteEnabled] = useState(true);
@@ -630,7 +638,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       faceId: artworkFace,
       source: artworkFilter,
       mpcReferences: activeCard.mpcReferences,
-      cacheKey: JSON.stringify([activeIdentityId, artworkFace, manualPhysicalBackPicker, artworkFilter, activeCard.mpcReferences, artworkCatalogRevision]),
+      mpcFilters: artworkFilter === "mpc" ? mpcFilters : undefined,
+      cacheKey: JSON.stringify([activeIdentityId, artworkFace, manualPhysicalBackPicker, artworkFilter, activeCard.mpcReferences, artworkFilter === "mpc" ? mpcFilters : undefined, artworkCatalogRevision]),
     }
     : null;
   const visibleProblem = problem && (problemCardId === null || problemCardId === selectedCardId) ? problem : "";
@@ -683,6 +692,23 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   }, [manualQuery, autocompleteEnabled]);
 
   useEffect(() => {
+    if (artworkFilter !== "mpc" || mpcCatalogs) return;
+    const controller = new AbortController();
+    void fetch("/api/cards/artworks/mpc-catalogs", { signal: controller.signal, cache: "no-store" })
+      .then((response) => jsonResponse<MpcFilterCatalogResult>(response))
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setMpcCatalogs(result.catalogs);
+        setMpcDiagnostic(result.diagnostic ?? null);
+        setMpcCatalogProblem("");
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setMpcCatalogProblem(error instanceof Error ? error.message : "Catálogos avançados MPC indisponíveis.");
+      });
+    return () => controller.abort();
+  }, [artworkFilter, mpcCatalogs, mpcCatalogRetry]);
+
+  useEffect(() => {
     let current = true;
     const request = runProjectRestoreProviderLookup(
       projectRestoreLookupGate.current,
@@ -694,7 +720,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ faceId: artworkRequest.faceId, source: artworkRequest.source, physicalBackArtwork: manualPhysicalBackPicker, mpcReferences: artworkRequest.mpcReferences }),
+            body: JSON.stringify({ faceId: artworkRequest.faceId, source: artworkRequest.source, physicalBackArtwork: manualPhysicalBackPicker, mpcReferences: artworkRequest.mpcReferences, ...(artworkRequest.mpcFilters ? { mpcFilters: artworkRequest.mpcFilters } : {}) }),
           });
           return jsonResponse<ArtworkCatalogResult>(response);
         });
@@ -711,6 +737,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         setArtworkProblem(null);
         setArtworkCandidates(result.candidates);
         setProviderHealth((current) => ({ ...current, ...result.providerHealth }));
+        setMpcDiagnostic(result.mpcDiagnostic ?? null);
       })
       .catch((error: unknown) => {
         if (current && activeCard && artworkRequest) {
@@ -865,6 +892,23 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       });
     }
     finally { setBusy(false); }
+  }
+
+  async function refreshMpcMetadata(candidate: CandidateDto) {
+    if (candidate.source !== "mpc" || !artworkRequest) return;
+    const requestKey = artworkRequest.cacheKey;
+    setBusy(true); setArtworkProblem(null);
+    try {
+      const response = await fetch(`/api/cards/artworks/${encodeURIComponent(candidate.id)}/refresh`, { method: "POST" });
+      const result = await jsonResponse<{ candidate: CandidateDto }>(response);
+      setArtworkCandidates((current) => current.map((item) => item.id === candidate.id ? result.candidate : item));
+      updateResolvedRequestCache(artworkCatalogRequests.current, requestKey, (cached) => ({
+        ...cached,
+        candidates: cached.candidates.map((item) => item.id === candidate.id ? result.candidate : item),
+      }));
+    } catch (error) {
+      setArtworkProblem({ message: error instanceof Error ? error.message : "Não foi possível revalidar os metadados MPC.", cardId: activeCard?.id ?? "", requestKey });
+    } finally { setBusy(false); }
   }
 
   async function restoreArtworkDefault(card: WorkingCard, side: CardFaceSide) {
@@ -1208,6 +1252,24 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             <div className="artwork-filter-row" role="group" aria-label="Filtrar origem das artes">
               {([ ["all", "Todas"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"], ["upload", "Meus uploads"] ] as const).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => setArtworkFilter(value)}>{label}</button>)}
             </div>
+            {artworkFilter === "mpc" && <details className="mpc-advanced-filters">
+              <summary>Filtros e preferências avançados MPC</summary>
+              {mpcCatalogProblem && <p className="muted" role="status">Catálogos de filtros indisponíveis; a busca básica MPC continua disponível. {mpcCatalogProblem} <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => { setMpcCatalogs(null); setMpcCatalogRetry((revision) => revision + 1); }}>Tentar novamente</button></p>}
+              {!mpcCatalogs && !mpcCatalogProblem && <p className="muted">Carregando catálogos MPC…</p>}
+              <div className="mpc-filter-controls">
+                <label>DPI mínimo<input type="number" min={0} max={10000} step={1} value={mpcFilters.minimumDpi ?? ""} onChange={(event) => setMpcFilters((current) => ({ ...current, minimumDpi: event.target.value === "" ? undefined : Number(event.target.value) }))} /></label>
+                <label>DPI máximo<input type="number" min={0} max={10000} step={1} value={mpcFilters.maximumDpi ?? ""} placeholder="1500" onChange={(event) => setMpcFilters((current) => ({ ...current, maximumDpi: event.target.value === "" ? undefined : Number(event.target.value) }))} /></label>
+                <label>Sources permitidas (vazio = todas)<select multiple size={4} value={(mpcFilters.sources ?? []).map(String)} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, sources: Array.from(event.currentTarget.selectedOptions, (option) => Number(option.value)) }))}>{mpcCatalogs?.sources.map((source) => <option key={source.id} value={source.id}>{source.name} · {source.id}</option>)}</select></label>
+                <label>Languages<select multiple size={4} value={[...(mpcFilters.languages ?? [])]} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, languages: Array.from(event.currentTarget.selectedOptions, (option) => option.value) }))}>{mpcCatalogs?.languages.map((language) => <option key={language.code} value={language.code}>{language.name} · {language.code}</option>)}</select></label>
+                <label>Incluir tags<select multiple size={4} value={[...(mpcFilters.includeTags ?? [])]} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, includeTags: Array.from(event.currentTarget.selectedOptions, (option) => option.value) }))}>{mpcCatalogs?.tags.map((tag) => <option key={tag.name} value={tag.name}>{tag.name}</option>)}</select></label>
+                <label>Excluir tags<select multiple size={4} value={[...(mpcFilters.excludeTags ?? [])]} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, excludeTags: Array.from(event.currentTarget.selectedOptions, (option) => option.value) }))}>{mpcCatalogs?.tags.map((tag) => <option key={tag.name} value={tag.name}>{tag.name}</option>)}</select></label>
+                <label>Sources preferidas (IDs em ordem, separados por vírgula)<input type="text" inputMode="numeric" value={(mpcFilters.preferredSources ?? []).join(", ")} onChange={(event) => setMpcFilters((current) => ({ ...current, preferredSources: event.target.value.split(",").map((value) => value.trim()).filter(Boolean).map(Number) }))} /></label>
+                <label>Languages preferidos (códigos em ordem)<input type="text" value={(mpcFilters.preferredLanguages ?? []).join(", ")} onChange={(event) => setMpcFilters((current) => ({ ...current, preferredLanguages: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) }))} /></label>
+                <label>Tags preferidas<input type="text" value={(mpcFilters.preferredTags ?? []).join(", ")} onChange={(event) => setMpcFilters((current) => ({ ...current, preferredTags: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) }))} /></label>
+              </div>
+              <p className="muted">Preferências só ordenam resultados; não selecionam arte. A escolha atual permanece intacta.</p>
+              {mpcDiagnostic && <p className="muted">Protocolo confirmado: {mpcDiagnostic.lastProtocolConfirmed ?? "ainda não"}{mpcDiagnostic.fallbackV2Used ? " · fallback v2 usado" : ""} · cache MPC {mpcDiagnostic.degraded ? "degradado" : "operacional"}</p>}
+            </details>}
             {selected && <p className="selected-artwork-line">Selecionada: {labelSource(selected.source)} · {selected.candidateId} · {artworkPolicyLabel(selected)}</p>}
             {!manualPhysicalBackPicker && <button
               className="button secondary restore-artwork-default"
@@ -1227,10 +1289,12 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
                   <div className="candidate-meta">
                     <strong>{candidate.faceName ?? candidate.metadata?.originalFilename as string ?? labelSource(candidate.source)}</strong>
                     <span>{labelSource(candidate.source)}{candidate.setCode ? ` · ${candidate.setCode.toUpperCase()} #${candidate.collectorNumber ?? "?"}` : ""}</span>
-                    <span>{candidate.language ? candidate.language.toUpperCase() : "idioma não informado"}{candidate.effectiveDpi ? ` · ${candidate.effectiveDpi} DPI · ${resolutionQualityLabel(candidate.resolutionQuality)}` : " · DPI será calculado ao validar o original"}</span>
+                    <span>{candidate.language ? candidate.language.toUpperCase() : "idioma não informado"}{candidate.effectiveDpi ? ` · DPI efetivo ${candidate.effectiveDpi} · ${resolutionQualityLabel(candidate.resolutionQuality)}` : " · DPI efetivo será calculado ao validar o original"}{candidate.source === "mpc" && typeof candidate.metadata?.dpi === "number" ? ` · DPI informado MPC ${candidate.metadata.dpi}` : ""}</span>
                     {candidate.source === "mpc" && <span className="reference-status">{candidate.originalCached ? "original em cache local" : candidate.originalAvailable ? "original remoto informado · validação no download" : "referência sem original disponível"}</span>}
+                    {candidate.source === "mpc" && typeof candidate.metadata?.remoteMetadataStatus === "string" && <span className="reference-status">Metadata MPC: {candidate.metadata.remoteMetadataStatus === "current" ? "atual" : candidate.metadata.remoteMetadataStatus === "removed" ? "removida no provider" : candidate.metadata.remoteMetadataStatus === "stale" ? "desatualizada" : candidate.metadata.remoteMetadataStatus}</span>}
                     {candidate.source === "mpc" && candidate.metadata?.localAvailabilityHint === true && !candidate.originalCached && <span className="reference-status">XML relata disponibilidade local; bytes ainda não verificados no cache</span>}
                   </div>
+                  {candidate.source === "mpc" && <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void refreshMpcMetadata(candidate)}>Revalidar metadata</button>}
                   <button className={`button ${isSelected ? "primary" : "secondary"}`} type="button" disabled={interactionBusy} onClick={() => void chooseArtwork(candidate)}>{isSelected && candidate.originalAvailable && !candidate.effectiveDpi ? "Validar original e calcular DPI" : isSelected ? "Selecionada" : candidate.originalAvailable ? "Selecionar arte" : "Selecionar referência"}</button>
                 </article>;
               })}

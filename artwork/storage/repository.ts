@@ -181,9 +181,9 @@ export class ArtworkRepository {
     `).run(key, valueJson, expiresAt, now);
   }
 
-  getMetadata(key: string): { valueJson: string; expiresAt: number } | undefined {
-    const row = this.database.prepare("SELECT value_json, expires_at FROM artwork_metadata_cache WHERE cache_key = ?").get(key) as { value_json: string; expires_at: number } | undefined;
-    return row ? { valueJson: row.value_json, expiresAt: row.expires_at } : undefined;
+  getMetadata(key: string): { valueJson: string; expiresAt: number; updatedAt: number } | undefined {
+    const row = this.database.prepare("SELECT value_json, expires_at, updated_at FROM artwork_metadata_cache WHERE cache_key = ?").get(key) as { value_json: string; expires_at: number; updated_at: number } | undefined;
+    return row ? { valueJson: row.value_json, expiresAt: row.expires_at, updatedAt: row.updated_at } : undefined;
   }
 
   removeMetadata(key: string): void {

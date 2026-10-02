@@ -330,6 +330,107 @@ Conditions for A1:
 The gate is technical approval to begin A1, not a claim that the external
 service is stable or that community artwork has cleared content rights.
 
+## Phase 14 protocol revalidation (2026-10-02)
+
+The protocol was rechecked before Phase 14 implementation with a low-volume,
+unauthenticated probe against `https://mpcfill.com`. The inspected upstream
+`master` still resolved to `ceb7c3b2f39b8c8caebe396ec87f2bddba6c3743`, the
+snapshot recorded above. No raw API response or artwork bytes were stored.
+Catalog and hydration bodies were parsed in memory and only sanitized shapes
+were retained. The thumbnail and original checks requested at most the first
+32 bytes; no full original was downloaded.
+
+| Probe | Observed result |
+| --- | --- |
+| `GET /2/sources/` | HTTP 200, `application/json`, `{results: object}` with 279 source records; all 279 were `Google Drive`. |
+| `GET /2/languages/` | HTTP 200, `application/json`, `{languages: array}` with 11 records shaped with `code` and `name`. |
+| `GET /2/tags/` | HTTP 200, `application/json`, `{tags: array}` with 6 records; records included `name`, `aliases`, `children`, `parent`, and `isEnabledByDefault`. |
+| `POST /3/editorSearch/` | HTTP 404, `text/html`; no v3 result schema was returned. |
+| `POST /2/editorSearch/` | HTTP 200, `application/json`; the legacy query-array body returned `{results: {query: {CARD: string[]}}}`. One `Sol Ring` query returned 716 valid opaque IDs. |
+| `POST /2/cards/` | HTTP 200, `application/json`; one requested identifier was hydrated under `results[identifier]`. |
+| Small-thumbnail range request | HTTP 206, `image/png`; redirected once from `drive.google.com` to `lh3.googleusercontent.com`. Only a 32-byte range was requested. |
+| Original range request | HTTP 206, `image/png`; redirected once from `drive.google.com` to `drive.usercontent.google.com`. The 32-byte range had a PNG signature; the response advertised a 12,652,704-byte total object. No full object was read. |
+
+The hydrated sample had these fields and JSON types: `dpi` (number),
+`sourceId` (number), `sourceName` (string), `sourceType` (string), `tags`
+(array), `language` (string), `priority` (number), `dateCreated` (string),
+and `dateModified` (string). Its source was Google Drive, its declared
+extension was PNG, its declared DPI was 1200, and its tags array was empty.
+`canonicalCard` and `canonicalArtist` were omitted from this particular
+record; this does not establish that optional canonical metadata is absent
+from all records. The source and language references matched their catalog
+entries. The live sample therefore confirms that source, tag, language, DPI,
+priority, and timestamp metadata are available for candidate provenance, but
+metadata still does not validate locally stored image bytes.
+
+This revalidation confirms the historical protocol-version behavior rather
+than changing it: `/3/editorSearch/` remains unavailable on the public host,
+and `/2/editorSearch/` remains usable with its legacy body. The existing rule
+to fall back only on an explicit v3 404 remains in force; timeout, network,
+server, redirect, or schema failures must not cause an unsafe protocol
+downgrade. These few requests do not establish an availability guarantee,
+rate-limit policy, full-asset integrity, or future compatibility.
+
+## Phase 14 implementation decisions
+
+The Phase 14 provider extends the existing independent
+`artwork/mpc-provider.ts` implementation. `ArtworkCatalog`, its generic
+provider contract, and the project selection model remain shared. No upstream
+implementation code was copied. Live MPC is not used by CI.
+
+The TCGPrint filter contract contains minimum/maximum declared DPI, verified
+Google Drive source IDs, include/exclude tags, and language codes. It also
+accepts source, language, and tag preferences used only for ranking. Inputs are
+strictly bounded, normalized, checked against catalog values before query
+construction, and translated into MPC's fixed `filterSettings` and source
+boolean list. The defaults remain 0–1500 declared DPI, a fixed 30 MB search
+size, exact name search, and all currently verified Google Drive sources.
+Search keys include the normalized query, face, all filters and preferences,
+verified source IDs, the fixed size bound, and protocol/ranking behavior
+versions. Set-like arrays are sorted; explicitly ordered language/source
+preferences retain their order.
+
+Candidate ranking is a stable lexicographic order: preferred source order,
+preferred language order, descending count of preferred tags, exact canonical
+set plus collector printing, descending upstream priority, descending
+provider-declared DPI, and ascending stable candidate ID. There are no hidden
+numeric weights. Declared DPI is provenance and ranking metadata; only
+validated local original pixels produce `effectiveDpi`. Imported MPC
+references remain ahead of search results in their existing order. Ranking
+never changes a `SelectedArtwork`; refresh and filter changes only update or
+order catalog candidates.
+
+Sources, languages, and tags use independent metadata-cache keys with an
+explicit 24-hour TTL. Source cache contents include only validated Google
+Drive sources. Catalogs are loaded when needed by filters or the filter
+catalog endpoint, not as a prerequisite for an unfiltered search. Expired
+catalogs may be used as stale validated values during an outage, with a
+provider-specific degraded diagnostic. Catalog metadata never shares a key or
+storage record with thumbnails or originals.
+
+Explicit candidate refresh performs `/2/cards/` metadata hydration only. It
+does not fetch thumbnails or originals. Removed, invalid, or unsupported
+remote metadata marks the candidate status while preserving the candidate ID
+and any validated local original. A corrupt local original is detected during
+validation and is fetched again only through an explicit original retrieval
+operation, using the existing HTTPS host/redirect, size, MIME, magic-byte,
+decoder, and SVG-to-PDF checks. Local content hash and provider provenance
+remain in the existing immutable-original storage records.
+
+MPC diagnostics are provider-specific and do not extend `ProviderHealth` for
+Scryfall or uploads. They expose only bounded status enums, timestamps,
+catalog-cache age/state, and search cache hit/miss counters. They omit URLs,
+asset bytes, local paths, cookies, credentials, and arbitrary error text.
+
+Batching was reviewed against the current workbench flow. A gallery request
+searches one identity/query at a time, while each resulting search already
+hydrates its selected IDs in one bounded `/2/cards/` request (at most 30 IDs
+in TCGPrint). There is no current user flow that queues multiple compatible
+identity searches, so a cross-request search batching coordinator would add
+state and cancellation complexity without a demonstrated gain. No unlimited
+parallelism or bulk thumbnail/original download was introduced. The existing
+bounded hydration of search results remains in place.
+
 ## References
 
 - [Upstream repository](https://github.com/chilli-axe/mpc-autofill)
