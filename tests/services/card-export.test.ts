@@ -100,6 +100,17 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
       code: "CALIBRATION_NEAR_PAGE_EDGE", side: "back", pageNumber: 1, content: "card 1",
       nearestEdgeClearanceMm: 0.35,
     }));
+    const nearEdgeWithTrimGuides = await exportWorkingCardsWithDiagnostics(catalog, [card], {
+      ...nearEdgeOptions,
+      cutGuides: {
+        trim: { enabled: true, extentMm: 1, color: "blue" },
+        external: { enabled: false, strokeWidthPt: 0.3, color: "black" },
+      },
+    });
+    expect(nearEdgeWithTrimGuides.calibrationBoundsWarnings).toContainEqual(expect.objectContaining({
+      code: "CALIBRATION_NEAR_PAGE_EDGE", side: "back", pageNumber: 1,
+      content: expect.stringMatching(/^trim cut guide /),
+    }));
     await expect(exportWorkingCardsWithDiagnostics(catalog, [card], {
       ...nearEdgeOptions, printCalibration: { ...nearEdgeOptions.printCalibration, offsetXUm: -1_000 },
     })).rejects.toMatchObject({ code: "CALIBRATED_CONTENT_OUT_OF_BOUNDS" });

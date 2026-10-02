@@ -1569,6 +1569,34 @@ describe("LosslessPdfEngine", () => {
     })).rejects.toMatchObject({ name: "CalibrationError", code: "CALIBRATED_CONTENT_OUT_OF_BOUNDS" });
   });
 
+  it("blocks calibrated external cut guides that leave the page while cards and registration remain inside", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    await expect(engine.generate({
+      images: [original],
+      paperFormat: PAPER_FORMATS.A4,
+      registration: { type: "none", orientation: "portrait" },
+      cutGuides: {
+        trim: { enabled: false, extentMm: 1, color: "blue" },
+        external: { enabled: true, strokeWidthPt: 0.7, color: "black" },
+      },
+      printCalibration: parseSideCalibration({ offsetXUm: 1_000, offsetYUm: 0, rotationDeg: 0, scaleX: 1, scaleY: 1 }),
+    })).rejects.toMatchObject({ name: "CalibrationError", code: "CALIBRATED_CONTENT_OUT_OF_BOUNDS" });
+  });
+
+  it("keeps cut guide vectors nominal for identity calibration", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const cutGuides = {
+      trim: { enabled: true, extentMm: 1, color: "blue" },
+      external: { enabled: true, strokeWidthPt: 2, color: "black" },
+    } as const;
+    const nominal = await engine.generate({ images: [original], paperFormat: PAPER_FORMATS.A4, cutGuides });
+    const calibrated = await engine.generate({
+      images: [original], paperFormat: PAPER_FORMATS.A4, cutGuides,
+      printCalibration: parseSideCalibration({ offsetXUm: 0, offsetYUm: 0, rotationDeg: 0, scaleX: 1, scaleY: 1 }),
+    });
+    expect(getVectorSegments((await parsePdf(calibrated)).content)).toEqual(getVectorSegments((await parsePdf(nominal)).content));
+  });
+
   it.each([10, 100])("applies the same back page matrix to every one of %i card pages without accumulation", async (count) => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const calibration = parseSideCalibration({ offsetXUm: -683, offsetYUm: 247, rotationDeg: 0.031, scaleX: 1.00012, scaleY: 0.99987 });

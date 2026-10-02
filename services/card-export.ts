@@ -12,6 +12,7 @@ import {
   type BleedResult,
 } from "../image-engine/bleed";
 import { MAGIC_STANDARD_CARD, PAPER_FORMATS, type CardFormat, type CutGuideConfig, type PaperFormat, type TemplateLayoutGeometryMm } from "../core/geometry";
+import { CutGuideEngine, getCutGuideStrokeBoundsMm, parseCutGuideConfig } from "../core/geometry/cut-guides";
 import { createDuplexPagePairing, DuplexPairingError, type DuplexPagePairingPlan, type DuplexFlipMode } from "../core/duplex";
 import type { PageMarginsMm, PageOrientation } from "../core/geometry";
 import { generateRegistrationGeometry, transformRegistrationGeometry, type RegistrationConfig } from "../core/registration";
@@ -28,7 +29,7 @@ import { BackLibraryError } from "./back-library";
 import type { ExportContentMode, MissingBackPolicy } from "../persistence/projects/serializer";
 import { calculateSharedPagePlacements } from "../core/duplex/shared-placement";
 import type { DuplexBackPageTransform } from "../core/duplex";
-import { createPrintCalibrationTransform, getCalibrationPageOverflowMm, type CalibrationSide, type PrinterProfileSnapshot, type SideCalibration } from "../core/calibration";
+import { CalibrationError, createPrintCalibrationTransform, getCalibrationPageOverflowMm, type CalibrationSide, type PrinterProfileSnapshot, type SideCalibration } from "../core/calibration";
 
 export interface CardExportOptions {
   readonly bleedMm: number;
@@ -377,6 +378,7 @@ export async function exportWorkingCardsWithDiagnostics(
         });
       }
     };
+    const guideConfig = parseCutGuideConfig(options.cutGuides);
     for (const page of pagePlacements) {
       const pageSizeMm = page.placement.pageSizeMm;
       const transform = createPrintCalibrationTransform(pageSizeMm, options.printCalibration, side);
@@ -401,6 +403,24 @@ export async function exportWorkingCardsWithDiagnostics(
       for (const mark of pageRegistration.marks) {
         const bounds = getCalibrationPageOverflowMm(pageSizeMm, mark.bounds, transform.matrix);
         addWarning(page.pageIndex + 1, `registration mark ${mark.id}`, bounds.minimumClearanceMm);
+      }
+      const guideCards = page.placement.slots.map((slot, localCardIndex) => {
+        const bleed = composedBleeds[page.startCardIndex + localCardIndex];
+        return {
+          trim: slot.trim,
+          bleedMm: bleed?.status === "derived" ? bleed.bleedMm : 0,
+        };
+      });
+      const guideGeometry = new CutGuideEngine().generate({ cards: guideCards, pageSizeMm, config: guideConfig });
+      for (const guide of getCutGuideStrokeBoundsMm(guideGeometry, guideConfig)) {
+        const bounds = getCalibrationPageOverflowMm(pageSizeMm, guide.bounds, transform.matrix);
+        if (bounds.maximumMm > 0.001) {
+          throw new CalibrationError(
+            "CALIBRATED_CONTENT_OUT_OF_BOUNDS",
+            `Calibrated ${guide.kind} cut guide ${guide.index + 1} extends ${bounds.maximumMm.toFixed(3)} mm beyond the printable page bounds.`,
+          );
+        }
+        addWarning(page.pageIndex + 1, `${guide.kind} cut guide ${guide.index + 1}`, bounds.minimumClearanceMm);
       }
     }
   }

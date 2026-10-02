@@ -1,5 +1,6 @@
 import type { GridPlacementPage } from "../geometry/page-placement";
 import type { CardSlotMm, GridPlacementMm } from "../geometry/placement";
+import { getDuplexPhysicalBackPageMapping, getDuplexReflectionAxis } from "./page-reflection";
 import {
   DuplexPairingError,
   type DuplexArtworkOrientation,
@@ -9,26 +10,6 @@ import {
   type DuplexReflectionAxis,
   type DuplexSlotPair,
 } from "./types";
-
-function artworkOrientation(axis: DuplexReflectionAxis): DuplexArtworkOrientation {
-  return Object.freeze({
-    rotationDegrees: axis === "y" ? 180 : 0,
-    mirrorX: false,
-    mirrorY: false,
-  });
-}
-
-function reflectionAxis(options: DuplexPagePairingOptions): DuplexReflectionAxis {
-  if (options.pageOrientation !== "portrait" && options.pageOrientation !== "landscape") {
-    throw new DuplexPairingError("DUPLEX_PAIRING_FAILED", "Duplex page orientation must be portrait or landscape.");
-  }
-  if (options.flipMode !== "long-edge" && options.flipMode !== "short-edge") {
-    throw new DuplexPairingError("INVALID_DUPLEX_FLIP", "Duplex flip mode must be long-edge or short-edge.");
-  }
-  const reflectsX = (options.pageOrientation === "portrait" && options.flipMode === "long-edge")
-    || (options.pageOrientation === "landscape" && options.flipMode === "short-edge");
-  return reflectsX ? "x" : "y";
-}
 
 function mirroredIndex(slot: CardSlotMm, rows: number, columns: number, axis: DuplexReflectionAxis): number {
   const column = axis === "x" ? columns - slot.column - 1 : slot.column;
@@ -131,15 +112,21 @@ export function createDuplexPagePairing(
   pages: readonly GridPlacementPage[],
   options: DuplexPagePairingOptions,
 ): DuplexPagePairingPlan {
-  const axis = reflectionAxis(options);
+  getDuplexReflectionAxis(options.pageOrientation, options.flipMode);
   const pagePairs: DuplexPagePair[] = [];
   for (let index = 0; index < pages.length; index += 1) {
     const frontPage = pages[index]!;
     if (frontPage.pageIndex !== index) {
       throw new DuplexPairingError("DUPLEX_PAIRING_FAILED", "Shared page placements must have contiguous zero-based page indexes.");
     }
+    const physicalMapping = getDuplexPhysicalBackPageMapping(
+      options.pageOrientation,
+      options.flipMode,
+      frontPage.placement.pageSizeMm,
+    );
+    const axis = physicalMapping.reflectionAxis;
     const backPage = transformPlacement(frontPage, axis);
-    const backArtworkOrientation = artworkOrientation(axis);
+    const backArtworkOrientation = physicalMapping.artworkOrientation;
     pagePairs.push(Object.freeze({
       frontPageIndex: frontPage.pageIndex,
       backPageIndex: backPage.pageIndex,

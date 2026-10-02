@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CutGuideEngine,
+  getCutGuideStrokeBoundsMm,
   parseCutGuideConfig,
   type CutGuideConfig,
   type CutGuideCardMm,
@@ -254,5 +255,23 @@ describe("CutGuideEngine physical geometry", () => {
       { trim: TRIM, bleedMm: 0 },
       { trim: { xMm: 70, yMm: 20, widthMm: 63.5, heightMm: 88.9 }, bleedMm: 0 },
     ])).toThrow(/trim rectangles .* overlap/i);
+  });
+
+  it("expands guide centerlines by their configured physical stroke width", () => {
+    const geometry = {
+      trimSegments: [{ x1Mm: 10, y1Mm: 30, x2Mm: 20, y2Mm: 30 }],
+      externalSegments: [{ x1Mm: 40, y1Mm: 50, x2Mm: 40, y2Mm: 60 }],
+    };
+    const bounds = getCutGuideStrokeBoundsMm(geometry, {
+      trim: { enabled: true, extentMm: 1, color: "blue" },
+      external: { enabled: true, strokeWidthPt: 2, color: "black" },
+    });
+    const halfTrimStrokeMm = 0.2 * 25.4 / 72 / 2;
+    const halfExternalStrokeMm = 2 * 25.4 / 72 / 2;
+
+    expect(bounds).toEqual([
+      { kind: "trim", index: 0, bounds: { xMm: 10, yMm: 30 - halfTrimStrokeMm, widthMm: 10, heightMm: 2 * halfTrimStrokeMm } },
+      { kind: "external", index: 0, bounds: { xMm: 40 - halfExternalStrokeMm, yMm: 50, widthMm: 2 * halfExternalStrokeMm, heightMm: 10 } },
+    ]);
   });
 });

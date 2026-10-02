@@ -49,24 +49,24 @@
   "duplexMode": "manual-long-edge",
   "targetPointsMm": {
     "center": {
-      "xMm": 105,
-      "yMm": 148.5
+      "xMm": 104.31700000000001,
+      "yMm": 148.747
     },
     "top-left": {
-      "xMm": 15,
-      "yMm": 282
+      "xMm": 194.2555657676277,
+      "yMm": 282.2783259894402
     },
     "top-right": {
-      "xMm": 195,
-      "yMm": 282
+      "xMm": 14.233992117149283,
+      "yMm": 282.1809249352064
     },
     "bottom-left": {
-      "xMm": 15,
-      "yMm": 15
+      "xMm": 194.40000788285073,
+      "yMm": 15.313075064793676
     },
     "bottom-right": {
-      "xMm": 195,
-      "yMm": 15
+      "xMm": 14.378434232372303,
+      "yMm": 15.215674010559875
     }
   },
   "expectedBackMatrixPdfYUp": {
@@ -100,6 +100,7 @@
       },
       "duplexMode": "manual-long-edge",
       "side": "front",
+      "targetPointsSpace": "pdf-page-y-up-after-duplex-and-calibration",
       "targetPointsMm": {
         "center": {
           "xMm": 105,
@@ -121,7 +122,106 @@
           "xMm": 195,
           "yMm": 15
         }
-      }
+      },
+      "pages": [
+        {
+          "pageNumber": 1,
+          "side": "front",
+          "nominalTargetPointsMm": {
+            "center": {
+              "xMm": 105,
+              "yMm": 148.5
+            },
+            "top-left": {
+              "xMm": 15,
+              "yMm": 282
+            },
+            "top-right": {
+              "xMm": 195,
+              "yMm": 282
+            },
+            "bottom-left": {
+              "xMm": 15,
+              "yMm": 15
+            },
+            "bottom-right": {
+              "xMm": 195,
+              "yMm": 15
+            }
+          },
+          "duplexTargetPointsMm": {
+            "center": {
+              "xMm": 105,
+              "yMm": 148.5
+            },
+            "top-left": {
+              "xMm": 15,
+              "yMm": 282
+            },
+            "top-right": {
+              "xMm": 195,
+              "yMm": 282
+            },
+            "bottom-left": {
+              "xMm": 15,
+              "yMm": 15
+            },
+            "bottom-right": {
+              "xMm": 195,
+              "yMm": 15
+            }
+          },
+          "pdfTargetPointsMm": {
+            "center": {
+              "xMm": 105,
+              "yMm": 148.5
+            },
+            "top-left": {
+              "xMm": 15,
+              "yMm": 282
+            },
+            "top-right": {
+              "xMm": 195,
+              "yMm": 282
+            },
+            "bottom-left": {
+              "xMm": 15,
+              "yMm": 15
+            },
+            "bottom-right": {
+              "xMm": 195,
+              "yMm": 15
+            }
+          },
+          "orientationMark": {
+            "label": "TOP",
+            "nominalPointMm": {
+              "xMm": 105,
+              "yMm": 253
+            },
+            "duplexPointMm": {
+              "xMm": 105,
+              "yMm": 253
+            },
+            "pdfPointMm": {
+              "xMm": 105,
+              "yMm": 253
+            },
+            "nominalDirection": {
+              "xMm": 0,
+              "yMm": 1
+            },
+            "duplexDirection": {
+              "xMm": 0,
+              "yMm": 1
+            },
+            "pdfDirection": {
+              "xMm": 0,
+              "yMm": 1
+            }
+          }
+        }
+      ]
     },
     "back": {
       "schemaVersion": 1,
@@ -137,26 +237,164 @@
       },
       "duplexMode": "manual-long-edge",
       "side": "back",
+      "targetPointsSpace": "pdf-page-y-up-after-duplex-and-calibration",
       "targetPointsMm": {
         "center": {
           "xMm": 105,
           "yMm": 148.5
         },
         "top-left": {
-          "xMm": 15,
+          "xMm": 195,
           "yMm": 282
         },
         "top-right": {
-          "xMm": 195,
+          "xMm": 15,
           "yMm": 282
         },
         "bottom-left": {
-          "xMm": 15,
+          "xMm": 195,
           "yMm": 15
         },
         "bottom-right": {
-          "xMm": 195,
+          "xMm": 15,
           "yMm": 15
+        }
+      },
+      "pages": [
+        {
+          "pageNumber": 1,
+          "side": "back",
+          "nominalTargetPointsMm": {
+            "center": {
+              "xMm": 105,
+              "yMm": 148.5
+            },
+            "top-left": {
+              "xMm": 15,
+              "yMm": 282
+            },
+            "top-right": {
+              "xMm": 195,
+              "yMm": 282
+            },
+            "bottom-left": {
+              "xMm": 15,
+              "yMm": 15
+            },
+            "bottom-right": {
+              "xMm": 195,
+              "yMm": 15
+            }
+          },
+          "duplexTargetPointsMm": {
+            "center": {
+              "xMm": 105,
+              "yMm": 148.5
+            },
+            "top-left": {
+              "xMm": 195,
+              "yMm": 282
+            },
+            "top-right": {
+              "xMm": 15,
+              "yMm": 282
+            },
+            "bottom-left": {
+              "xMm": 195,
+              "yMm": 15
+            },
+            "bottom-right": {
+              "xMm": 15,
+              "yMm": 15
+            }
+          },
+          "pdfTargetPointsMm": {
+            "center": {
+              "xMm": 105,
+              "yMm": 148.5
+            },
+            "top-left": {
+              "xMm": 195,
+              "yMm": 282
+            },
+            "top-right": {
+              "xMm": 15,
+              "yMm": 282
+            },
+            "bottom-left": {
+              "xMm": 195,
+              "yMm": 15
+            },
+            "bottom-right": {
+              "xMm": 15,
+              "yMm": 15
+            }
+          },
+          "duplexPhysicalMapping": {
+            "pageOrientation": "portrait",
+            "edgeMode": "long-edge",
+            "reflectionAxis": "x",
+            "matrixCoordinateSpace": "page-top-left-y-down",
+            "matrix": {
+              "a": -1,
+              "b": 0,
+              "c": 0,
+              "d": 1,
+              "e": 210,
+              "f": 0
+            },
+            "artworkOrientation": {
+              "rotationDegrees": 0,
+              "mirrorX": false,
+              "mirrorY": false
+            }
+          },
+          "orientationMark": {
+            "label": "TOP",
+            "nominalPointMm": {
+              "xMm": 105,
+              "yMm": 253
+            },
+            "duplexPointMm": {
+              "xMm": 105,
+              "yMm": 253
+            },
+            "pdfPointMm": {
+              "xMm": 105,
+              "yMm": 253
+            },
+            "nominalDirection": {
+              "xMm": 0,
+              "yMm": 1
+            },
+            "duplexDirection": {
+              "xMm": 0,
+              "yMm": 1
+            },
+            "pdfDirection": {
+              "xMm": 0,
+              "yMm": 1
+            }
+          }
+        }
+      ],
+      "duplexPhysicalMapping": {
+        "pageOrientation": "portrait",
+        "edgeMode": "long-edge",
+        "reflectionAxis": "x",
+        "matrixCoordinateSpace": "page-top-left-y-down",
+        "matrix": {
+          "a": -1,
+          "b": 0,
+          "c": 0,
+          "d": 1,
+          "e": 210,
+          "f": 0
+        },
+        "artworkOrientation": {
+          "rotationDegrees": 0,
+          "mirrorX": false,
+          "mirrorY": false
         }
       }
     },
@@ -174,26 +412,179 @@
       },
       "duplexMode": "manual-long-edge",
       "side": "back",
+      "targetPointsSpace": "pdf-page-y-up-after-duplex-and-calibration",
       "targetPointsMm": {
         "center": {
-          "xMm": 105,
-          "yMm": 148.5
+          "xMm": 104.31700000000001,
+          "yMm": 148.747
         },
         "top-left": {
-          "xMm": 15,
-          "yMm": 282
+          "xMm": 194.2555657676277,
+          "yMm": 282.2783259894402
         },
         "top-right": {
-          "xMm": 195,
-          "yMm": 282
+          "xMm": 14.233992117149283,
+          "yMm": 282.1809249352064
         },
         "bottom-left": {
-          "xMm": 15,
-          "yMm": 15
+          "xMm": 194.40000788285073,
+          "yMm": 15.313075064793676
         },
         "bottom-right": {
-          "xMm": 195,
-          "yMm": 15
+          "xMm": 14.378434232372303,
+          "yMm": 15.215674010559875
+        }
+      },
+      "pages": [
+        {
+          "pageNumber": 1,
+          "side": "back",
+          "nominalTargetPointsMm": {
+            "center": {
+              "xMm": 105,
+              "yMm": 148.5
+            },
+            "top-left": {
+              "xMm": 15,
+              "yMm": 282
+            },
+            "top-right": {
+              "xMm": 195,
+              "yMm": 282
+            },
+            "bottom-left": {
+              "xMm": 15,
+              "yMm": 15
+            },
+            "bottom-right": {
+              "xMm": 195,
+              "yMm": 15
+            }
+          },
+          "duplexTargetPointsMm": {
+            "center": {
+              "xMm": 105,
+              "yMm": 148.5
+            },
+            "top-left": {
+              "xMm": 195,
+              "yMm": 282
+            },
+            "top-right": {
+              "xMm": 15,
+              "yMm": 282
+            },
+            "bottom-left": {
+              "xMm": 195,
+              "yMm": 15
+            },
+            "bottom-right": {
+              "xMm": 15,
+              "yMm": 15
+            }
+          },
+          "pdfTargetPointsMm": {
+            "center": {
+              "xMm": 104.31700000000001,
+              "yMm": 148.747
+            },
+            "top-left": {
+              "xMm": 194.2555657676277,
+              "yMm": 282.2783259894402
+            },
+            "top-right": {
+              "xMm": 14.233992117149283,
+              "yMm": 282.1809249352064
+            },
+            "bottom-left": {
+              "xMm": 194.40000788285073,
+              "yMm": 15.313075064793676
+            },
+            "bottom-right": {
+              "xMm": 14.378434232372303,
+              "yMm": 15.215674010559875
+            }
+          },
+          "duplexPhysicalMapping": {
+            "pageOrientation": "portrait",
+            "edgeMode": "long-edge",
+            "reflectionAxis": "x",
+            "matrixCoordinateSpace": "page-top-left-y-down",
+            "matrix": {
+              "a": -1,
+              "b": 0,
+              "c": 0,
+              "d": 1,
+              "e": 210,
+              "f": 0
+            },
+            "artworkOrientation": {
+              "rotationDegrees": 0,
+              "mirrorX": false,
+              "mirrorY": false
+            }
+          },
+          "orientationMark": {
+            "label": "TOP",
+            "nominalPointMm": {
+              "xMm": 105,
+              "yMm": 253
+            },
+            "duplexPointMm": {
+              "xMm": 105,
+              "yMm": 253
+            },
+            "pdfPointMm": {
+              "xMm": 104.2604674118322,
+              "yMm": 253.23339970646276
+            },
+            "nominalDirection": {
+              "xMm": 0,
+              "yMm": 1
+            },
+            "duplexDirection": {
+              "xMm": 0,
+              "yMm": 1
+            },
+            "pdfDirection": {
+              "xMm": -0.0005409817049551283,
+              "yMm": 0.9998698536503613
+            }
+          },
+          "calibration": {
+            "offsetXUm": -683,
+            "offsetYUm": 247,
+            "rotationDeg": 0.031,
+            "scaleX": 1.00012,
+            "scaleY": 0.99987
+          },
+          "transform": {
+            "a": 1.000119853613769,
+            "b": 0.0005411169679655583,
+            "c": -0.0005409817049551283,
+            "d": 0.9998698536503613,
+            "e": -0.6152488462599038,
+            "f": 0.20950945128497278
+          }
+        }
+      ],
+      "duplexPhysicalMapping": {
+        "pageOrientation": "portrait",
+        "edgeMode": "long-edge",
+        "reflectionAxis": "x",
+        "matrixCoordinateSpace": "page-top-left-y-down",
+        "matrix": {
+          "a": -1,
+          "b": 0,
+          "c": 0,
+          "d": 1,
+          "e": 210,
+          "f": 0
+        },
+        "artworkOrientation": {
+          "rotationDegrees": 0,
+          "mirrorX": false,
+          "mirrorY": false
         }
       },
       "calibration": {
@@ -215,20 +606,20 @@
   },
   "artifacts": {
     "calibration-front-a4-portrait.pdf": {
-      "sha256": "dfc5ecacacea386d16ae34ec25334f5ae7ac020084f28713ec7b1b9588a5f7e6",
-      "bytes": 3968
+      "sha256": "403ace2ad5492d2133c33efd13ad60435d26f5fb6e245e688e3e3be281560290",
+      "bytes": 4036
     },
     "calibration-back-a4-portrait.pdf": {
-      "sha256": "8bcc6cec397df5b9d4a46209bcf64409dc4e9b29fefaccaf992279cca7ad6d11",
-      "bytes": 4060
+      "sha256": "b8e6a83618a2e9e53a7f90ff6b09008e12a8c8f6aaeda47dc566c68fa275ce01",
+      "bytes": 4134
     },
     "verification-back-a4-portrait.pdf": {
-      "sha256": "4087c14f71b61d8e93c038a5ebea95cd020d7a7736996302f317a392812cd892",
-      "bytes": 4141
+      "sha256": "a40607055d4273ad2377dfe20437da618a0f7a7104f7dde1982074d57fdd9e55",
+      "bytes": 4214
     }
   },
   "profileExport": {
     "file": "example-profile.json",
-    "sha256": "020e79db6182a7ef69413d842a3f4168367986d535b0ff490df4dae8815aed4c"
+    "sha256": "78e9025193fcc08528639a62e7efe8170110de2adbad1c21185e334fbae7600c"
   }
 }

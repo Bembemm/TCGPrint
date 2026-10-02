@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PDFDocument } from "@pdfme/pdf-lib";
 import { describe, expect, it } from "vitest";
@@ -78,7 +78,8 @@ describe("Phase 13 software-only calibration artifacts", () => {
     };
     for (const [name, bytes] of Object.entries(files)) await writeFile(join(ARTIFACT_DIRECTORY, name), bytes);
     const profileJson = serializePrinterProfileExport(profile);
-    await writeFile(join(ARTIFACT_DIRECTORY, "example-profile.json"), `${profileJson}\n`, "utf8");
+    const profileJsonBytes = new TextEncoder().encode(`${profileJson}\n`);
+    await writeFile(join(ARTIFACT_DIRECTORY, "example-profile.json"), profileJsonBytes);
     const manifest = {
       schemaVersion: 1,
       phase: "13-precision-print-calibration",
@@ -93,7 +94,7 @@ describe("Phase 13 software-only calibration artifacts", () => {
       expectedBackMatrixSvgYDown: expectedTransform.svgMatrix,
       sheetManifests: { front: front.manifest, back: back.manifest, verification: verification.manifest },
       artifacts: Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, { sha256: sha256(bytes), bytes: bytes.byteLength }])),
-      profileExport: { file: "example-profile.json", sha256: sha256(new TextEncoder().encode(profileJson)) },
+      profileExport: { file: "example-profile.json", sha256: sha256(profileJsonBytes) },
     };
     await writeFile(join(ARTIFACT_DIRECTORY, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     await writeFile(join(ARTIFACT_DIRECTORY, "README.md"), [
@@ -118,5 +119,6 @@ describe("Phase 13 software-only calibration artifacts", () => {
       "calibration-back-a4-portrait.pdf": { sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
       "verification-back-a4-portrait.pdf": { sha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
     });
+    expect(manifest.profileExport.sha256).toBe(sha256(new Uint8Array(await readFile(join(ARTIFACT_DIRECTORY, "example-profile.json")))));
   });
 });

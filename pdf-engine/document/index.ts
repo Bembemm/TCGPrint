@@ -43,6 +43,7 @@ import {
 import { mmToPoints } from "../../core/units";
 import { generateRegistrationGeometry, type RegistrationConfig, type RegistrationPrimitive } from "../../core/registration";
 import { transformRegistrationGeometry } from "../../core/registration";
+import { getCutGuideStrokeBoundsMm } from "../../core/geometry/cut-guides";
 import type { DuplexBackPageTransform } from "../../core/duplex";
 import { CalibrationError, createPrintCalibrationTransform, getCalibrationPageOverflowMm, parseSideCalibration, type CalibrationSide, type SideCalibration } from "../../core/calibration";
 
@@ -752,14 +753,9 @@ function drawCutGuides(
   page: ReturnType<PDFDocument["addPage"]>,
   pageSize: PaperFormat,
   config: CutGuideConfig,
-  cards: readonly CutGuideCardMm[],
+  geometry: CutGuideGeometry,
 ): void {
   const normalizedConfig = parseCutGuideConfig(config);
-  const geometry = new CutGuideEngine().generate({
-    cards,
-    pageSizeMm: { widthMm: pageSize.widthMm, heightMm: pageSize.heightMm },
-    config: normalizedConfig,
-  });
 
   const drawSegments = (segments: CutGuideGeometry["trimSegments"], colorHex: string, strokeWidthPoints: number) => {
     if (segments.length === 0) return;
@@ -898,6 +894,16 @@ export class LosslessPdfEngine {
     for (const { startCardIndex, endCardIndex, placement: pagePlacement } of pagePlacements) {
       const pageSizeMm = pagePlacement.pageSizeMm;
       const page = pdf.addPage([mmToPoints(pageSizeMm.widthMm), mmToPoints(pageSizeMm.heightMm)]);
+      const guideConfig = request.cutGuides ? parseCutGuideConfig(request.cutGuides) : undefined;
+      const guideCards = pagePlacement.slots.map((slot, localCardIndex) => ({
+        trim: slot.trim,
+        bleedMm: bleedByImageMm[startCardIndex + localCardIndex],
+      }));
+      const guideGeometry = guideConfig ? new CutGuideEngine().generate({
+        cards: guideCards,
+        pageSizeMm,
+        config: guideConfig,
+      }) : undefined;
       const pageRegistrationGeometry = request.duplexBackPageTransform
         ? transformRegistrationGeometry(registrationGeometry, pageSizeMm, request.duplexBackPageTransform.registrationReflectionAxis)
         : registrationGeometry;
@@ -925,6 +931,17 @@ export class LosslessPdfEngine {
             const overflow = getCalibrationPageOverflowMm(pageSizeMm, mark.bounds, transform.matrix);
             if (overflow.maximumMm > overflowEpsilonMm) {
               throw new CalibrationError("CALIBRATED_CONTENT_OUT_OF_BOUNDS", `Calibrated registration mark ${mark.id} extends ${overflow.maximumMm.toFixed(3)} mm beyond the printable page bounds.`);
+            }
+          }
+          if (guideConfig && guideGeometry) {
+            for (const guide of getCutGuideStrokeBoundsMm(guideGeometry, guideConfig)) {
+              const overflow = getCalibrationPageOverflowMm(pageSizeMm, guide.bounds, transform.matrix);
+              if (overflow.maximumMm > overflowEpsilonMm) {
+                throw new CalibrationError(
+                  "CALIBRATED_CONTENT_OUT_OF_BOUNDS",
+                  `Calibrated ${guide.kind} cut guide ${guide.index + 1} extends ${overflow.maximumMm.toFixed(3)} mm beyond the printable page bounds.`,
+                );
+              }
             }
           }
           const { a, b, c, d, e, f } = transform.matrix;
@@ -1129,15 +1146,12 @@ export class LosslessPdfEngine {
         }
       }
 
-      if (request.cutGuides) {
+      if (guideConfig && guideGeometry) {
         drawCutGuides(
           page,
           { ...effectivePaper, widthMm: pageSizeMm.widthMm, heightMm: pageSizeMm.heightMm },
-          request.cutGuides,
-          pagePlacement.slots.map((slot, localCardIndex) => ({
-            trim: slot.trim,
-            bleedMm: bleedByImageMm[startCardIndex + localCardIndex],
-          })),
+          guideConfig,
+          guideGeometry,
         );
       }
       drawRegistrationMarks(page, pageSizeMm, pageRegistrationGeometry);

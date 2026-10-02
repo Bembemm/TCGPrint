@@ -30,4 +30,22 @@ describe("printer calibration Project panel", () => {
     expect(markup).toContain("Criar profile");
     expect(markup).toContain("Modo da impressora");
   });
+
+  it.each(["automatic-long-edge", "automatic-short-edge"] as const)("explains that %s prints one two-page automatic duplex job", (printerDuplexMode) => {
+    const markup = renderToStaticMarkup(createElement(PrinterCalibrationPanel, {
+      paperFormat: DEFAULT_PROJECT_SETTINGS.paperFormat,
+      pageOrientation: "portrait",
+      printerProfileSelection: null,
+      printerDuplexMode,
+      exportContentMode: "front-back-separated",
+      duplexFlipMode: printerDuplexMode.endsWith("long-edge") ? "long-edge" : "short-edge",
+      disabled: false,
+      onProjectSelectionChange: vi.fn(),
+    }));
+
+    expect(markup).toContain("Imprima este PDF de 2 páginas usando duplex automático e o binding selecionado.");
+    expect(markup).toContain("Não faça reinserção manual.");
+    expect(markup).toContain("Calibration PDF duplex (2 páginas)");
+    expect(markup).toContain("Verification PDF duplex (2 páginas)");
+  });
 });

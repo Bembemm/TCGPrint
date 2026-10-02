@@ -8,6 +8,7 @@ import {
 } from "@pdfme/pdf-lib";
 import {
   CalibrationError,
+  applyCalibrationMatrix,
   createPrintCalibrationTransform,
   getCalibrationTargetPoints,
   parseSideCalibration,
@@ -16,6 +17,12 @@ import {
   type SideCalibration,
 } from "../core/calibration";
 import type { CalibrationPointId, CalibrationPointMm } from "../core/calibration";
+import {
+  getDuplexPhysicalBackPageMapping,
+  transformPhysicalPointByDuplexMatrix,
+  type DuplexFlipMode,
+  type DuplexPhysicalBackPageMapping,
+} from "../core/duplex";
 import type { PageOrientation, PaperFormat } from "../core/geometry";
 import { mmToPoints } from "../core/units";
 
@@ -30,7 +37,39 @@ export interface CalibrationSheetRequest {
 }
 
 export interface VerificationSheetRequest extends CalibrationSheetRequest {
-  readonly calibration: SideCalibration;
+  /** One side for manual or single-sided verification sheets. */
+  readonly calibration?: SideCalibration;
+  /** Both independent side corrections for an automatic duplex print job. */
+  readonly calibrations?: Readonly<Record<CalibrationSide, SideCalibration>>;
+}
+
+export interface CalibrationSheetPageManifest {
+  readonly pageNumber: number;
+  readonly side: CalibrationSide;
+  readonly nominalTargetPointsMm: Readonly<Record<CalibrationPointId, CalibrationPointMm>>;
+  /** Target centers after physical duplex page mapping and before printer calibration. */
+  readonly duplexTargetPointsMm: Readonly<Record<CalibrationPointId, CalibrationPointMm>>;
+  /** Target centers in the generated PDF's physical Y-up page coordinates after calibration. */
+  readonly pdfTargetPointsMm: Readonly<Record<CalibrationPointId, CalibrationPointMm>>;
+  readonly duplexPhysicalMapping?: {
+    readonly pageOrientation: PageOrientation;
+    readonly edgeMode: DuplexFlipMode;
+    readonly reflectionAxis: "x" | "y";
+    readonly matrixCoordinateSpace: "page-top-left-y-down";
+    readonly matrix: DuplexPhysicalBackPageMapping["matrix"];
+    readonly artworkOrientation: DuplexPhysicalBackPageMapping["artworkOrientation"];
+  };
+  readonly orientationMark: {
+    readonly label: "TOP";
+    readonly nominalPointMm: CalibrationPointMm;
+    readonly duplexPointMm: CalibrationPointMm;
+    readonly pdfPointMm: CalibrationPointMm;
+    readonly nominalDirection: CalibrationPointMm;
+    readonly duplexDirection: CalibrationPointMm;
+    readonly pdfDirection: CalibrationPointMm;
+  };
+  readonly calibration?: SideCalibration;
+  readonly transform?: ReturnType<typeof createPrintCalibrationTransform>["matrix"];
 }
 
 export interface CalibrationSheetManifest {
@@ -46,11 +85,17 @@ export interface CalibrationSheetManifest {
     readonly heightMm: number;
   };
   readonly duplexMode: PrinterDuplexMode;
-  readonly side: CalibrationSide;
+  readonly side: CalibrationSide | "duplex";
+  /** `targetPointsMm` uses physical PDF coordinates, after duplex mapping and calibration. */
+  readonly targetPointsSpace: "pdf-page-y-up-after-duplex-and-calibration";
   readonly targetPointsMm: Readonly<Record<CalibrationPointId, CalibrationPointMm>>;
+  readonly pages: readonly CalibrationSheetPageManifest[];
+  readonly duplexPhysicalMapping?: CalibrationSheetPageManifest["duplexPhysicalMapping"];
   readonly generatedAt?: string;
   readonly calibration?: SideCalibration;
   readonly transform?: ReturnType<typeof createPrintCalibrationTransform>["matrix"];
+  readonly calibrations?: Readonly<Record<CalibrationSide, SideCalibration>>;
+  readonly transforms?: Readonly<Record<CalibrationSide, ReturnType<typeof createPrintCalibrationTransform>["matrix"]>>;
 }
 
 export interface CalibrationSheetArtifact {
@@ -75,7 +120,7 @@ function identifier(value: unknown, key: string): string {
 
 function validateRequest(request: CalibrationSheetRequest, allowCalibration: boolean): { paper: PaperFormat; widthMm: number; heightMm: number } {
   if (!request || typeof request !== "object" || Array.isArray(request)) invalid("Calibration sheet request must be an object.");
-  const allowedKeys = new Set(["sessionId", "draftProfileId", "paperFormat", "pageOrientation", "duplexMode", "side", "generatedAt", ...(allowCalibration ? ["calibration"] : [])]);
+  const allowedKeys = new Set(["sessionId", "draftProfileId", "paperFormat", "pageOrientation", "duplexMode", "side", "generatedAt", ...(allowCalibration ? ["calibration", "calibrations"] : [])]);
   if (Reflect.ownKeys(request).some((key) => typeof key !== "string" || !allowedKeys.has(key))) invalid("Calibration sheet request contains an unsupported property such as an arbitrary matrix.");
   identifier(request.sessionId, "sessionId");
   identifier(request.draftProfileId, "draftProfileId");
@@ -99,6 +144,46 @@ function validateRequest(request: CalibrationSheetRequest, allowCalibration: boo
 
 function topPoint(xMm: number, yMm: number, pageHeightMm: number) {
   return { x: mmToPoints(xMm), y: mmToPoints(pageHeightMm - yMm) };
+}
+
+function effectiveFlipMode(duplexMode: PrinterDuplexMode): DuplexFlipMode | undefined {
+  if (duplexMode === "single-sided") return undefined;
+  return duplexMode.endsWith("long-edge") ? "long-edge" : "short-edge";
+}
+
+function createDuplexMapping(
+  request: CalibrationSheetRequest,
+  pageSizeMm: { readonly widthMm: number; readonly heightMm: number },
+  side: CalibrationSide,
+): DuplexPhysicalBackPageMapping | undefined {
+  const flipMode = effectiveFlipMode(request.duplexMode);
+  if (side !== "back" || !flipMode) return undefined;
+  return getDuplexPhysicalBackPageMapping(request.pageOrientation, flipMode, pageSizeMm);
+}
+
+function mapTargetPoints(
+  points: Readonly<Record<CalibrationPointId, CalibrationPointMm>>,
+  mapping: DuplexPhysicalBackPageMapping | undefined,
+  pageHeightMm: number,
+): Readonly<Record<CalibrationPointId, CalibrationPointMm>> {
+  if (!mapping) return points;
+  return Object.freeze(Object.fromEntries(Object.entries(points).map(([id, point]) => [
+    id,
+    transformPhysicalPointByDuplexMatrix(point, mapping.matrix, pageHeightMm),
+  ])) as Record<CalibrationPointId, CalibrationPointMm>);
+}
+
+function rotateDirection(direction: CalibrationPointMm, degrees: 0 | 180): CalibrationPointMm {
+  return degrees === 180
+    ? Object.freeze({ xMm: direction.xMm === 0 ? 0 : -direction.xMm, yMm: direction.yMm === 0 ? 0 : -direction.yMm })
+    : Object.freeze({ ...direction });
+}
+
+function applyMatrixToDirection(direction: CalibrationPointMm, matrix: ReturnType<typeof createPrintCalibrationTransform>["matrix"]): CalibrationPointMm {
+  return Object.freeze({
+    xMm: matrix.a * direction.xMm + matrix.c * direction.yMm,
+    yMm: matrix.b * direction.xMm + matrix.d * direction.yMm,
+  });
 }
 
 function drawLineTop(
@@ -131,6 +216,22 @@ function drawTarget(page: ReturnType<PDFDocument["addPage"]>, widthMm: number, h
   page.drawText(id, { x: mmToPoints(labelX), y: mmToPoints(heightMm - labelY), size: 7, color: rgb(0, 0, 0) });
 }
 
+function drawOrientationMark(
+  page: ReturnType<PDFDocument["addPage"]>,
+  heightMm: number,
+  point: CalibrationPointMm,
+  rotationDegrees: 0 | 180,
+  font: Awaited<ReturnType<PDFDocument["embedFont"]>>,
+): void {
+  const directionY = rotationDegrees === 180 ? -1 : 1;
+  const tip = { xMm: point.xMm, yMm: point.yMm + directionY * 8 };
+  const baseY = tip.yMm - directionY * 2.4;
+  drawLineTop(page, heightMm, point.xMm, heightMm - point.yMm, tip.xMm, heightMm - tip.yMm, rgb(0, 0, 0), 0.8);
+  drawLineTop(page, heightMm, tip.xMm - 2.3, heightMm - (baseY), tip.xMm, heightMm - tip.yMm, rgb(0, 0, 0), 0.8);
+  drawLineTop(page, heightMm, tip.xMm + 2.3, heightMm - (baseY), tip.xMm, heightMm - tip.yMm, rgb(0, 0, 0), 0.8);
+  page.drawText("TOP", { x: mmToPoints(point.xMm + 4), y: mmToPoints(point.yMm - 2), size: 6, font, color: rgb(0, 0, 0) });
+}
+
 function drawSheetGeometry(
   page: ReturnType<PDFDocument["addPage"]>,
   widthMm: number,
@@ -140,16 +241,18 @@ function drawSheetGeometry(
   duplexMode: PrinterDuplexMode,
   sessionId: string,
   draftProfileId: string,
+  targetPoints: Readonly<Record<CalibrationPointId, CalibrationPointMm>>,
+  orientationMark: CalibrationPointMm,
+  artworkRotationDegrees: 0 | 180,
 ): void {
   const light = rgb(0.84, 0.86, 0.88);
   const muted = rgb(0.37, 0.39, 0.42);
-  const targets = getCalibrationTargetPoints({ widthMm, heightMm });
   const targetCoordinates = [
-    { id: "CENTER", point: targets.center },
-    { id: "TOP-LEFT", point: targets["top-left"] },
-    { id: "TOP-RIGHT", point: targets["top-right"] },
-    { id: "BOTTOM-LEFT", point: targets["bottom-left"] },
-    { id: "BOTTOM-RIGHT", point: targets["bottom-right"] },
+    { id: "C", point: targetPoints.center },
+    { id: "TL", point: targetPoints["top-left"] },
+    { id: "TR", point: targetPoints["top-right"] },
+    { id: "BL", point: targetPoints["bottom-left"] },
+    { id: "BR", point: targetPoints["bottom-right"] },
   ] as const;
 
   page.drawText(`TCGPrint precision calibration · ${side.toUpperCase()}`, {
@@ -178,6 +281,7 @@ function drawSheetGeometry(
   }
 
   for (const target of targetCoordinates) drawTarget(page, widthMm, heightMm, target.point.xMm, heightMm - target.point.yMm, target.id, side);
+  drawOrientationMark(page, heightMm, orientationMark, artworkRotationDegrees, font);
 
   // A longer asymmetric angle marker makes clockwise/counter-clockwise drift observable.
   const cx = widthMm / 2;
@@ -211,10 +315,15 @@ function drawSheetGeometry(
     ? "Single-sided profile: no reverse pass is used."
     : duplexMode.startsWith("manual-")
       ? `Manual duplex: print FRONT first, then flip/reinsert for BACK (${duplexMode.endsWith("long-edge") ? "turn like a book at the long edge" : "turn like a calendar at the short edge"}).`
-      : `Automatic duplex: use the driver's ${duplexMode.endsWith("long-edge") ? "long-edge" : "short-edge"} binding; do not reinsert manually.`;
+      : `Automatic duplex: print this two-page PDF as one job using ${duplexMode.endsWith("long-edge") ? "long-edge" : "short-edge"} binding.`;
   page.drawText(modeInstruction, {
     x: mmToPoints(10), y: mmToPoints(heightMm - instructionY - 16), size: 6, font, color: rgb(0, 0, 0),
   });
+  if (duplexMode.startsWith("automatic-")) {
+    page.drawText("Do not manually reinsert the sheet.", {
+      x: mmToPoints(10), y: mmToPoints(heightMm - instructionY - 23), size: 6, font, color: rgb(0, 0, 0),
+    });
+  }
   if (duplexMode.startsWith("manual-")) {
     // The arrows show the selected sheet turn in a diagram that survives grayscale printing.
     const arrowY = instructionY + 3;
@@ -231,24 +340,140 @@ function drawSheetGeometry(
   }
 }
 
-async function generate(request: CalibrationSheetRequest, kind: "calibration" | "verification", calibration?: SideCalibration): Promise<CalibrationSheetArtifact> {
+function resolveVerificationCalibrations(
+  request: CalibrationSheetRequest,
+  verificationRequest: VerificationSheetRequest | undefined,
+): Partial<Record<CalibrationSide, SideCalibration>> {
+  if (!verificationRequest) return {};
+  if (request.duplexMode.startsWith("automatic-")) {
+    const calibrations = verificationRequest.calibrations;
+    if (!calibrations || verificationRequest.calibration !== undefined
+      || Object.keys(calibrations).length !== 2 || !Object.hasOwn(calibrations, "front") || !Object.hasOwn(calibrations, "back")) {
+      invalid("Automatic duplex verification requires both validated front and back calibrations in the same print job.");
+    }
+    return {
+      front: parseSideCalibration(calibrations.front),
+      back: parseSideCalibration(calibrations.back),
+    };
+  }
+  if (verificationRequest.calibrations !== undefined || verificationRequest.calibration === undefined) {
+    invalid("Manual or single-sided verification requires one calibration for the requested side.");
+  }
+  return { [request.side]: parseSideCalibration(verificationRequest.calibration) };
+}
+
+function createPageManifest(
+  request: CalibrationSheetRequest,
+  pageNumber: number,
+  side: CalibrationSide,
+  pageSizeMm: { readonly widthMm: number; readonly heightMm: number },
+  nominalTargetPointsMm: Readonly<Record<CalibrationPointId, CalibrationPointMm>>,
+  calibration: SideCalibration | undefined,
+): { readonly manifest: CalibrationSheetPageManifest; readonly mapping?: DuplexPhysicalBackPageMapping } {
+  const mapping = createDuplexMapping(request, pageSizeMm, side);
+  const duplexTargetPointsMm = mapTargetPoints(nominalTargetPointsMm, mapping, pageSizeMm.heightMm);
+  const transform = calibration === undefined
+    ? undefined
+    : createPrintCalibrationTransform(pageSizeMm, calibration, side);
+  const pdfTargetPointsMm = transform
+    ? Object.freeze(Object.fromEntries(Object.entries(duplexTargetPointsMm).map(([id, point]) => [
+      id,
+      applyCalibrationMatrix(point, transform.matrix),
+    ])) as Record<CalibrationPointId, CalibrationPointMm>)
+    : duplexTargetPointsMm;
+  const nominalOrientationPoint = Object.freeze({ xMm: pageSizeMm.widthMm / 2, yMm: pageSizeMm.heightMm - 44 });
+  const duplexOrientationPoint = mapping
+    ? transformPhysicalPointByDuplexMatrix(nominalOrientationPoint, mapping.matrix, pageSizeMm.heightMm)
+    : nominalOrientationPoint;
+  const nominalDirection = Object.freeze({ xMm: 0, yMm: 1 });
+  const duplexDirection = rotateDirection(nominalDirection, mapping?.artworkOrientation.rotationDegrees ?? 0);
+  const pdfDirection = transform ? applyMatrixToDirection(duplexDirection, transform.matrix) : duplexDirection;
+  const pdfOrientationPoint = transform
+    ? applyCalibrationMatrix(duplexOrientationPoint, transform.matrix)
+    : duplexOrientationPoint;
+  return {
+    ...(mapping ? { mapping } : {}),
+    manifest: Object.freeze({
+      pageNumber,
+      side,
+      nominalTargetPointsMm,
+      duplexTargetPointsMm,
+      pdfTargetPointsMm,
+      ...(mapping ? {
+        duplexPhysicalMapping: {
+          pageOrientation: mapping.pageOrientation,
+          edgeMode: mapping.flipMode,
+          reflectionAxis: mapping.reflectionAxis,
+          matrixCoordinateSpace: "page-top-left-y-down",
+          matrix: mapping.matrix,
+          artworkOrientation: mapping.artworkOrientation,
+        } as const,
+      } : {}),
+      orientationMark: Object.freeze({
+        label: "TOP" as const,
+        nominalPointMm: nominalOrientationPoint,
+        duplexPointMm: duplexOrientationPoint,
+        pdfPointMm: pdfOrientationPoint,
+        nominalDirection,
+        duplexDirection,
+        pdfDirection,
+      }),
+      ...(calibration ? { calibration } : {}),
+      ...(transform ? { transform: transform.matrix } : {}),
+    }),
+  };
+}
+
+async function generate(request: CalibrationSheetRequest, kind: "calibration" | "verification", verificationRequest?: VerificationSheetRequest): Promise<CalibrationSheetArtifact> {
   const { paper, widthMm, heightMm } = validateRequest(request, kind === "verification");
-  const checkedCalibration = calibration === undefined ? undefined : parseSideCalibration(calibration);
-  if (kind === "verification" && checkedCalibration === undefined) invalid("Verification sheet requires validated side calibration parameters.");
-  const transform = checkedCalibration === undefined ? undefined : createPrintCalibrationTransform({ widthMm, heightMm }, checkedCalibration, request.side);
-  const targetPointsMm = getCalibrationTargetPoints({ widthMm, heightMm });
+  const pageSizeMm = { widthMm, heightMm };
+  const checkedCalibrations = resolveVerificationCalibrations(request, verificationRequest);
+  const automaticDuplex = request.duplexMode.startsWith("automatic-");
+  const pageSides: readonly CalibrationSide[] = automaticDuplex ? ["front", "back"] : [request.side];
+  const nominalTargetPointsMm = getCalibrationTargetPoints(pageSizeMm);
   const pdf = await PDFDocument.create();
-  pdf.setTitle(`TCGPrint ${kind} sheet ${request.side.toUpperCase()}`);
+  pdf.setTitle(`TCGPrint ${kind} sheet ${automaticDuplex ? "DUPLEX" : request.side.toUpperCase()}`);
   pdf.setSubject(`session:${request.sessionId}; draft:${request.draftProfileId}; ${paper.name}; ${request.pageOrientation}; ${request.duplexMode}`);
   pdf.setCreator("TCGPrint Phase 13 calibration sheet generator");
   const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const page = pdf.addPage([mmToPoints(widthMm), mmToPoints(heightMm)]);
-  if (transform && !transform.isIdentity) {
-    const { a, b, c, d, e, f } = transform.matrix;
-    page.pushOperators(pushGraphicsState(), concatTransformationMatrix(a, b, c, d, mmToPoints(e), mmToPoints(f)));
+  const pageManifests: CalibrationSheetPageManifest[] = [];
+
+  for (const [index, side] of pageSides.entries()) {
+    const calibration = checkedCalibrations[side];
+    const pageDetails = createPageManifest(request, index + 1, side, pageSizeMm, nominalTargetPointsMm, calibration);
+    const page = pdf.addPage([mmToPoints(widthMm), mmToPoints(heightMm)]);
+    const transform = calibration === undefined ? undefined : createPrintCalibrationTransform(pageSizeMm, calibration, side);
+    if (transform && !transform.isIdentity) {
+      const { a, b, c, d, e, f } = transform.matrix;
+      page.pushOperators(pushGraphicsState(), concatTransformationMatrix(a, b, c, d, mmToPoints(e), mmToPoints(f)));
+    }
+    drawSheetGeometry(
+      page,
+      widthMm,
+      heightMm,
+      side,
+      font,
+      request.duplexMode,
+      request.sessionId,
+      request.draftProfileId,
+      pageDetails.manifest.duplexTargetPointsMm,
+      pageDetails.manifest.orientationMark.duplexPointMm,
+      pageDetails.mapping?.artworkOrientation.rotationDegrees ?? 0,
+    );
+    if (transform && !transform.isIdentity) page.pushOperators(popGraphicsState());
+    pageManifests.push(pageDetails.manifest);
   }
-  drawSheetGeometry(page, widthMm, heightMm, request.side, font, request.duplexMode, request.sessionId, request.draftProfileId);
-  if (transform && !transform.isIdentity) page.pushOperators(popGraphicsState());
+
+  const outputSide = automaticDuplex ? "duplex" : request.side;
+  const backMapping = pageManifests.find(({ side }) => side === "back")?.duplexPhysicalMapping;
+  const frontCalibration = checkedCalibrations.front;
+  const backCalibration = checkedCalibrations.back;
+  const transforms = kind === "verification" && automaticDuplex
+    ? Object.freeze({
+      front: pageManifests[0]!.transform!,
+      back: pageManifests[1]!.transform!,
+    })
+    : undefined;
   const manifest: CalibrationSheetManifest = {
     schemaVersion: 1,
     softwareSchemaVersion: "phase-13-v1",
@@ -257,11 +482,16 @@ async function generate(request: CalibrationSheetRequest, kind: "calibration" | 
     draftProfileId: request.draftProfileId,
     pageFormat: { paperSize: paper.name, pageOrientation: request.pageOrientation, widthMm, heightMm },
     duplexMode: request.duplexMode,
-    side: request.side,
-    targetPointsMm,
+    side: outputSide,
+    targetPointsSpace: "pdf-page-y-up-after-duplex-and-calibration",
+    targetPointsMm: pageManifests[0]!.pdfTargetPointsMm,
+    pages: Object.freeze(pageManifests),
+    ...(backMapping ? { duplexPhysicalMapping: backMapping } : {}),
     ...(request.generatedAt ? { generatedAt: request.generatedAt } : {}),
-    ...(checkedCalibration ? { calibration: checkedCalibration } : {}),
-    ...(transform ? { transform: transform.matrix } : {}),
+    ...(!automaticDuplex && checkedCalibrations[request.side] ? { calibration: checkedCalibrations[request.side] } : {}),
+    ...(!automaticDuplex && pageManifests[0]!.transform ? { transform: pageManifests[0]!.transform } : {}),
+    ...(automaticDuplex && frontCalibration && backCalibration ? { calibrations: Object.freeze({ front: frontCalibration, back: backCalibration }) } : {}),
+    ...(transforms ? { transforms } : {}),
   };
   return { pdfBytes: new Uint8Array(await pdf.save()), manifest: Object.freeze(manifest) };
 }
@@ -271,5 +501,5 @@ export function generateCalibrationSheet(request: CalibrationSheetRequest): Prom
 }
 
 export function generateVerificationSheet(request: VerificationSheetRequest): Promise<CalibrationSheetArtifact> {
-  return generate(request, "verification", request.calibration);
+  return generate(request, "verification", request);
 }

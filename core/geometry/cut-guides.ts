@@ -86,8 +86,54 @@ export interface CutGuideGeometry {
   readonly externalSegments: readonly CutGuideSegmentMm[];
 }
 
+export interface CutGuideStrokeBoundsMm {
+  readonly kind: "trim" | "external";
+  readonly index: number;
+  /** Page-space Y-down bounds including the physical stroke and butt-cap endpoints. */
+  readonly bounds: TrimRectangleMm;
+}
+
 const GEOMETRY_TOLERANCE_MM = 1e-9;
 const POINTS_PER_MM = 72 / 25.4;
+
+/** Returns exact page-frame bounds for the orthogonal CutGuideEngine strokes. */
+export function getCutGuideStrokeBoundsMm(
+  geometry: CutGuideGeometry,
+  config: CutGuideConfig,
+): readonly CutGuideStrokeBoundsMm[] {
+  if (!geometry || !Array.isArray(geometry.trimSegments) || !Array.isArray(geometry.externalSegments)) {
+    throw new TypeError("Cut guide geometry must contain trim and external segment arrays.");
+  }
+  const normalized = parseCutGuideConfig(config);
+  const bounds: CutGuideStrokeBoundsMm[] = [];
+  const append = (kind: CutGuideStrokeBoundsMm["kind"], segments: readonly CutGuideSegmentMm[], strokeWidthPt: number) => {
+    const radiusMm = strokeWidthPt / POINTS_PER_MM / 2;
+    for (const [index, segment] of segments.entries()) {
+      const { x1Mm, y1Mm, x2Mm, y2Mm } = segment;
+      if (![x1Mm, y1Mm, x2Mm, y2Mm].every(Number.isFinite)) {
+        throw new RangeError(`Cut guide ${kind} segment ${index + 1} must have finite coordinates.`);
+      }
+      const horizontal = Math.abs(y1Mm - y2Mm) <= GEOMETRY_TOLERANCE_MM;
+      const vertical = Math.abs(x1Mm - x2Mm) <= GEOMETRY_TOLERANCE_MM;
+      const left = Math.min(x1Mm, x2Mm);
+      const right = Math.max(x1Mm, x2Mm);
+      const top = Math.min(y1Mm, y2Mm);
+      const bottom = Math.max(y1Mm, y2Mm);
+      const rect = horizontal
+        ? { xMm: left, yMm: top - radiusMm, widthMm: right - left, heightMm: 2 * radiusMm }
+        : vertical
+          ? { xMm: left - radiusMm, yMm: top, widthMm: 2 * radiusMm, heightMm: bottom - top }
+          : { xMm: left - radiusMm, yMm: top - radiusMm, widthMm: right - left + 2 * radiusMm, heightMm: bottom - top + 2 * radiusMm };
+      if (rect.widthMm <= 0 || rect.heightMm <= 0) {
+        throw new RangeError(`Cut guide ${kind} segment ${index + 1} must have non-zero length.`);
+      }
+      bounds.push(Object.freeze({ kind, index, bounds: Object.freeze(rect) }));
+    }
+  };
+  if (normalized.trim.enabled) append("trim", geometry.trimSegments, TRIM_GUIDE_STROKE_WIDTH_PT);
+  if (normalized.external.enabled) append("external", geometry.externalSegments, normalized.external.strokeWidthPt);
+  return Object.freeze(bounds);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
