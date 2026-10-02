@@ -48,6 +48,7 @@ describe("MPC TCGPrint search contract", () => {
       preferredSources: [8, 3],
       preferredLanguages: ["fr", "en"],
       preferredTags: ["extended", "full art"],
+      rankingMode: "balanced",
     });
   });
 
@@ -78,6 +79,7 @@ describe("MPC TCGPrint search contract", () => {
       normalizeMpcArtworkFilters({ preferredSources: [41] }),
       normalizeMpcArtworkFilters({ preferredLanguages: ["en"] }),
       normalizeMpcArtworkFilters({ preferredTags: ["Proxy"] }),
+      normalizeMpcArtworkFilters({ rankingMode: "provider" }),
     ];
     const key = buildMpcSearchCacheKey("Sol Ring", "front", base, [41]);
 
@@ -110,5 +112,15 @@ describe("MPC deterministic ranking", () => {
 
     expect(rankMpcCandidates(tied, identity, filters).map(({ id }) => id)).toEqual(["mpc:a", "mpc:z"]);
     expect(rankMpcCandidates(tied.slice().reverse(), identity, filters).map(({ id }) => id)).toEqual(["mpc:a", "mpc:z"]);
+  });
+
+  it("supports explicit provider ordering and balances cache/exportability before providerRank", () => {
+    const providerFirst = candidate("mpc:provider-first", { providerRank: 0, priority: 0, dpi: 600, originalFormatExportable: false }, { originalCached: false, originalAvailable: false });
+    const cachedLater = candidate("mpc:cached-later", { providerRank: 1, priority: 0, dpi: 600, originalFormatExportable: true }, { originalCached: true, originalAvailable: true });
+    const balanced = normalizeMpcArtworkFilters({ rankingMode: "balanced" });
+    const provider = normalizeMpcArtworkFilters({ rankingMode: "provider" });
+
+    expect(rankMpcCandidates([providerFirst, cachedLater], identity, balanced).map(({ id }) => id)).toEqual(["mpc:cached-later", "mpc:provider-first"]);
+    expect(rankMpcCandidates([providerFirst, cachedLater], identity, provider).map(({ id }) => id)).toEqual(["mpc:provider-first", "mpc:cached-later"]);
   });
 });

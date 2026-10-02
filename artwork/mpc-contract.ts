@@ -9,6 +9,7 @@ export interface MpcArtworkFilterInput {
   readonly preferredSources?: readonly number[];
   readonly preferredLanguages?: readonly string[];
   readonly preferredTags?: readonly string[];
+  readonly rankingMode?: "balanced" | "provider";
 }
 
 export interface MpcArtworkFilters {
@@ -21,6 +22,7 @@ export interface MpcArtworkFilters {
   readonly preferredSources: readonly number[];
   readonly preferredLanguages: readonly string[];
   readonly preferredTags: readonly string[];
+  readonly rankingMode: "balanced" | "provider";
 }
 
 export interface MpcSourceOption {
@@ -117,7 +119,7 @@ export function normalizeMpcArtworkFilters(input: unknown): MpcArtworkFilters {
   if (!isRecord(input)) throw new MpcArtworkFilterValidationError("MPC filters must be a TCGPrint filter object.");
   const allowed = new Set([
     "minimumDpi", "maximumDpi", "sources", "includeTags", "excludeTags", "languages",
-    "preferredSources", "preferredLanguages", "preferredTags",
+    "preferredSources", "preferredLanguages", "preferredTags", "rankingMode",
   ]);
   if (Object.keys(input).some((key) => !allowed.has(key))) throw new MpcArtworkFilterValidationError("MPC filters contain an unsupported field.");
 
@@ -128,6 +130,8 @@ export function normalizeMpcArtworkFilters(input: unknown): MpcArtworkFilters {
   const includeTags = stringArray(input.includeTags, "includeTags", MPC_FILTER_LIMITS.tagCount);
   const excludeTags = stringArray(input.excludeTags, "excludeTags", MPC_FILTER_LIMITS.tagCount);
   if (includeTags.some((tag) => excludeTags.includes(tag))) throw new MpcArtworkFilterValidationError("A tag cannot be included and excluded at the same time.");
+  const rankingMode = input.rankingMode === undefined ? "balanced" : input.rankingMode;
+  if (rankingMode !== "balanced" && rankingMode !== "provider") throw new MpcArtworkFilterValidationError("rankingMode must be balanced or provider.");
 
   return {
     minimumDpi,
@@ -139,6 +143,7 @@ export function normalizeMpcArtworkFilters(input: unknown): MpcArtworkFilters {
     preferredSources: orderedIntegerArray(input.preferredSources, "preferredSources", MPC_FILTER_LIMITS.sourceCount),
     preferredLanguages: stringArray(input.preferredLanguages, "preferredLanguages", MPC_FILTER_LIMITS.languageCount, true),
     preferredTags: stringArray(input.preferredTags, "preferredTags", MPC_FILTER_LIMITS.tagCount),
+    rankingMode,
   };
 }
 
@@ -183,5 +188,6 @@ export function validateMpcArtworkFiltersAgainstCatalogs(filters: MpcArtworkFilt
       return canonical;
     }),
     preferredTags,
+    rankingMode: filters.rankingMode,
   };
 }

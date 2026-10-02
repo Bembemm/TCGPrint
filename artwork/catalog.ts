@@ -4,13 +4,14 @@ import { ArtworkStorageError } from "./storage/types";
 import type { ArtworkCatalogSearchOptions, ArtworkProvider, ProviderHealth } from "./types";
 import type { MpcArtworkFilterInput, MpcFilterCatalogs } from "./mpc-contract";
 import { MpcArtworkFilterValidationError } from "./mpc-contract";
-import type { MpcArtworkProviderDiagnostic } from "./mpc-provider";
+import type { MpcArtworkProviderDiagnostic, MpcCandidateRevalidationResult } from "./mpc-provider";
 
 interface MpcArtworkProviderExtension extends ArtworkProvider {
-  searchArtworkAdvanced(identity: CardIdentity, options: ArtworkCatalogSearchOptions & { readonly filters?: MpcArtworkFilterInput }): Promise<readonly ArtworkCandidate[]>;
+  searchArtworkAdvanced(identity: CardIdentity, options: ArtworkCatalogSearchOptions & { readonly filters?: MpcArtworkFilterInput; readonly forceRefresh?: boolean }): Promise<readonly ArtworkCandidate[]>;
   getFilterCatalogs(signal?: AbortSignal): Promise<MpcFilterCatalogs>;
   getDiagnostic(): MpcArtworkProviderDiagnostic;
   refreshCandidate(id: string, signal?: AbortSignal): Promise<ArtworkCandidate | undefined>;
+  revalidateCandidates?(ids: readonly string[], signal?: AbortSignal): Promise<readonly MpcCandidateRevalidationResult[]>;
 }
 
 const MPC_DEGRADED_MESSAGE = "MPC artwork provider is temporarily degraded.";
@@ -26,6 +27,7 @@ function publicProviderHealth(source: string, health: ProviderHealth): ProviderH
 
 export interface AdvancedArtworkCatalogSearchOptions extends ArtworkCatalogSearchOptions {
   readonly mpcFilters?: MpcArtworkFilterInput;
+  readonly forceMpcRefresh?: boolean;
 }
 
 function mpcExtension(provider: ArtworkProvider | undefined): MpcArtworkProviderExtension | undefined {
@@ -43,6 +45,7 @@ export class ArtworkCatalog {
   private readonly providers: ReadonlyMap<string, ArtworkProvider>;
   private readonly health = new Map<string, ProviderHealth>();
   private readonly healthOverrides = new Set<string>();
+  private readonly providerReportedDegraded = new Set<string>();
 
   constructor(providers: readonly ArtworkProvider[]) {
     this.providers = new Map(providers.map((provider) => [provider.source, provider]));
@@ -63,15 +66,17 @@ export class ArtworkCatalog {
         };
         const extension = mpcExtension(provider);
         const candidates = extension
-          ? await extension.searchArtworkAdvanced(identity, { ...standardOptions, filters: options.mpcFilters ?? {} })
+          ? await extension.searchArtworkAdvanced(identity, { ...standardOptions, filters: options.mpcFilters ?? {}, ...(options.forceMpcRefresh ? { forceRefresh: true } : {}) })
           : await provider.searchArtwork(identity, standardOptions);
         this.healthOverrides.delete(provider.source);
+        this.providerReportedDegraded.delete(provider.source);
         this.health.set(provider.source, publicProviderHealth(provider.source, provider.getHealth?.() ?? { available: true, degraded: false }));
         return candidates;
       } catch (error) {
         if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError") || (error && typeof error === "object" && (error as { kind?: unknown }).kind === "aborted")) throw error;
         if (error instanceof MpcArtworkFilterValidationError) throw error;
         this.healthOverrides.add(provider.source);
+        if (provider.getHealth?.().degraded) this.providerReportedDegraded.add(provider.source);
         this.health.set(provider.source, {
           available: false,
           degraded: true,
@@ -86,8 +91,13 @@ export class ArtworkCatalog {
   getProviderHealth(): Readonly<Record<string, ProviderHealth>> {
     for (const provider of this.providers.values()) {
       const providerHealth = provider.getHealth?.();
-      if (providerHealth && !this.healthOverrides.has(provider.source)) {
-        this.health.set(provider.source, publicProviderHealth(provider.source, providerHealth));
+      if (providerHealth) {
+        if (providerHealth.degraded) this.providerReportedDegraded.add(provider.source);
+        else if (this.healthOverrides.has(provider.source) && this.providerReportedDegraded.has(provider.source)) {
+          this.healthOverrides.delete(provider.source);
+          this.providerReportedDegraded.delete(provider.source);
+        }
+        if (!this.healthOverrides.has(provider.source)) this.health.set(provider.source, publicProviderHealth(provider.source, providerHealth));
       }
     }
     return Object.fromEntries(this.health.entries());
@@ -98,6 +108,7 @@ export class ArtworkCatalog {
     if (!provider) throw new Error("MPC filter catalogs are unavailable.");
     const catalogs = await provider.getFilterCatalogs(signal);
     this.healthOverrides.delete(provider.source);
+    this.providerReportedDegraded.delete(provider.source);
     this.health.set(provider.source, publicProviderHealth(provider.source, provider.getHealth?.() ?? { available: true, degraded: false }));
     return catalogs;
   }
@@ -111,8 +122,14 @@ export class ArtworkCatalog {
     return provider?.refreshCandidate(candidateId, signal);
   }
 
+  async revalidateMpcCandidates(candidateIds: readonly string[], signal?: AbortSignal): Promise<readonly MpcCandidateRevalidationResult[]> {
+    const provider = mpcExtension(this.providers.get("mpc"));
+    return provider?.revalidateCandidates?.(candidateIds, signal) ?? [];
+  }
+
   markProviderDegraded(source: "scryfall" | "upload" | "mpc", error: unknown): void {
     this.healthOverrides.add(source);
+    if (this.providers.get(source)?.getHealth?.().degraded) this.providerReportedDegraded.add(source);
     this.health.set(source, {
       available: false,
       degraded: true,

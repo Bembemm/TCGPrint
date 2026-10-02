@@ -10,6 +10,7 @@ import { appDataPaths, originalPathForHash } from "../../artwork/storage/paths";
 import { TesseractOcrRecognizer } from "../../providers/ocr/tesseract-recognizer";
 import type { ScryfallClient } from "../../providers/scryfall/client";
 import type { ScryfallCard } from "../../providers/scryfall/types";
+import type { ArtworkCandidate } from "../../core/cards/types";
 import { mapScryfallCard } from "../../providers/scryfall/mapper";
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
 import { mpcArtworkCandidateId } from "../../core/cards/ids";
@@ -368,6 +369,62 @@ describe("card workbench services", () => {
     expect(uploadBack.manualBackArtwork).toMatchObject({ source: "upload", candidateId: uploadCandidate.id, identityId: identified.identity!.id, selectionPolicy: "user-selected" });
     expect(uploadBack.localArtworkIds).toContain(uploadCandidate.id);
     expect(frontChanged.manualBackArtwork).toEqual(scryfallBack.manualBackArtwork);
+  });
+
+  it("keeps DFC face selections independent across Scryfall, MPC, and upload and applies face-local filters", async () => {
+    const identityCard = mapScryfallCard(delverCard);
+    const fake = fakeScryfallClient([identityCard]);
+    const root = await mkdtemp(join(tmpdir(), "tcgprint-mpc-dfc-faces-"));
+    roots.push(root);
+    const assetIds = { front: "synthetic-dfc-front-123456", back: "synthetic-dfc-back-123456" };
+    const mpcFetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/2/sources/") return Response.json({ results: { "41": { pk: 41, sourceType: "Google Drive", name: "Synthetic source" } } });
+      if (url.pathname === "/3/editorSearch/") return new Response("route missing", { status: 404 });
+      if (url.pathname === "/2/editorSearch/") {
+        const body = JSON.parse(String(init.body)) as { queries: Array<{ query: string; cardType: string }> };
+        const side = body.queries[0]!.query.toLocaleLowerCase().includes("insectile") ? "back" : "front";
+        return Response.json({ results: { [body.queries[0]!.query]: { CARD: [assetIds[side]] } } });
+      }
+      if (url.pathname === "/2/cards/") {
+        const body = JSON.parse(String(init.body)) as { cardIdentifiers: string[] };
+        return Response.json({ results: Object.fromEntries(body.cardIdentifiers.map((id) => {
+          const side = id === assetIds.back ? "back" : "front";
+          return [id, {
+            identifier: id, cardType: "CARD", name: side === "front" ? "Synthetic DFC Front" : "Synthetic DFC Back",
+            sourceId: 41, sourceType: "Google Drive", extension: "png", size: 1000, dpi: side === "front" ? 300 : 600,
+          }];
+        })) });
+      }
+      throw new Error(`Unexpected MPC route: ${url.pathname}`);
+    };
+    const workbench = await createCardWorkbench({ dataDirectory: root, scryfallClient: fake.client, mpcFetchImpl, minIntervalMs: 0 });
+    workbenches.push(workbench);
+    const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
+    const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0]!, identityCard.id);
+    const identityId = identified.identity!.id;
+    const scryfallFront: ArtworkCandidate = { id: `scryfall:${identityCard.id}:front`, source: "scryfall", identityId, faceId: "front", originalAvailable: true };
+    const mpcFront: ArtworkCandidate = { id: mpcArtworkCandidateId(assetIds.front, "front"), source: "mpc", identityId, faceId: "front", providerAssetId: assetIds.front, selectedArtworkId: assetIds.front, originalAvailable: true };
+    const mpcBack: ArtworkCandidate = { id: mpcArtworkCandidateId(assetIds.back, "back"), source: "mpc", identityId, faceId: "back", providerAssetId: assetIds.back, selectedArtworkId: assetIds.back, originalAvailable: true };
+    const uploadBytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
+    const uploadImport = await workbench.importForWorkingSet({ files: [{ filename: "dfc-back.png", bytes: uploadBytes }] });
+    const uploadSource = await workbench.getArtworkCandidate(uploadImport.workingCards[0]!.localArtworkIds[0]!);
+    if (!uploadSource) throw new Error("Expected a validated upload candidate.");
+    const uploadBack: ArtworkCandidate = { ...uploadSource, faceId: "back", identityId };
+
+    const scryfallFrontMpcBack = workbench.selectArtwork(workbench.selectArtwork(identified, "front", scryfallFront), "back", mpcBack);
+    const mpcFrontUploadBack = workbench.selectArtwork(workbench.selectArtwork(identified, "front", mpcFront), "back", uploadBack);
+    const mpcFrontMpcBack = workbench.selectArtwork(workbench.selectArtwork(identified, "front", mpcFront), "back", mpcBack);
+    expect([scryfallFrontMpcBack.selectedArtworkByFace.front?.source, scryfallFrontMpcBack.selectedArtworkByFace.back?.source]).toEqual(["scryfall", "mpc"]);
+    expect([mpcFrontUploadBack.selectedArtworkByFace.front?.source, mpcFrontUploadBack.selectedArtworkByFace.back?.source]).toEqual(["mpc", "upload"]);
+    expect([mpcFrontMpcBack.selectedArtworkByFace.front?.source, mpcFrontMpcBack.selectedArtworkByFace.back?.source]).toEqual(["mpc", "mpc"]);
+
+    const beforeFilters = structuredClone(mpcFrontMpcBack.selectedArtworkByFace);
+    await expect(workbench.listArtworkCandidates(identityId, "front", "mpc", { mpcFilters: { minimumDpi: 500 } })).resolves.toEqual([]);
+    await expect(workbench.listArtworkCandidates(identityId, "back", "mpc", { mpcFilters: { minimumDpi: 500 } })).resolves.toMatchObject([{ faceId: "back", metadata: { dpi: 600 } }]);
+    await expect(workbench.listArtworkCandidates(identityId, "front", "mpc", { mpcFilters: { minimumDpi: 100 } })).resolves.toMatchObject([{ faceId: "front", metadata: { dpi: 300 } }]);
+    await expect(workbench.listArtworkCandidates(identityId, "back", "mpc", { mpcFilters: { maximumDpi: 500 } })).resolves.toEqual([]);
+    expect(mpcFrontMpcBack.selectedArtworkByFace).toEqual(beforeFilters);
   });
 
   it("restores default artwork independently on each DFC face without replacing the opposite face", async () => {
@@ -757,7 +814,7 @@ describe("card workbench services", () => {
       throw new Error(`Unexpected MPC request: ${url.href}`);
     };
     const scryfall = fakeScryfallClient(resolvedDeckPrintings);
-    const workbench = await createCardWorkbench({ dataDirectory: root, scryfallClient: scryfall.client, mpcFetchImpl, minIntervalMs: 0 });
+    const workbench = await createCardWorkbench({ dataDirectory: root, scryfallClient: scryfall.client, mpcFetchImpl, minIntervalMs: 0, mpcWaitForRetry: async () => undefined });
     workbenches.push(workbench);
     vi.useFakeTimers();
     vi.setSystemTime(new Date(baseTime));

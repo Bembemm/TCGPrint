@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "provider": "mpc",
+  "synthetic": true,
+  "balancedOrder": [
+    "explicit-preferences",
+    "exact-canonical-printing",
+    "validated-original-cache",
+    "known-exportability",
+    "original-availability",
+    "measured-effective-dpi",
+    "provider-priority-and-declared-dpi",
+    "providerRank",
+    "stable-candidate-id"
+  ],
+  "providerOrderMode": ["explicit-preferences", "providerRank", "stable-candidate-id"],
+  "candidates": [
+    { "id": "synthetic:provider-first", "providerRank": 0, "declaredDpi": 600, "effectiveDpi": null, "originalCached": false, "originalAvailable": false },
+    { "id": "synthetic:validated-later", "providerRank": 1, "declaredDpi": 600, "effectiveDpi": 825, "originalCached": true, "originalAvailable": true }
+  ],
+  "expected": {
+    "balanced": ["synthetic:validated-later", "synthetic:provider-first"],
+    "provider": ["synthetic:provider-first", "synthetic:validated-later"]
+  },
+  "selectionSideEffect": false
+}

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "phase": "14-mpc-advanced",
+  "provider": "mpc",
+  "syntheticAndSanitized": true,
+  "containsCopyrightedImages": false,
+  "containsRawUpstreamResponses": false,
+  "files": [
+    "README.md",
+    "protocol-capabilities.json",
+    "filter-fixtures.json",
+    "ranking-fixtures.json",
+    "batch-benchmark.json",
+    "diagnostic-example.json"
+  ]
+}

@@ -5,7 +5,7 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function numberField(candidate: ArtworkCandidate, name: "sourceId" | "priority" | "dpi"): number | undefined {
+function numberField(candidate: ArtworkCandidate, name: "sourceId" | "priority" | "dpi" | "providerRank"): number | undefined {
   const value = candidate.metadata?.[name];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -44,6 +44,19 @@ function compareString(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function exportabilityRank(candidate: ArtworkCandidate): number {
+  return candidate.metadata?.originalFormatExportable === true ? 2
+    : candidate.metadata?.originalFormatExportable === false ? 0
+      : 1;
+}
+
+function descendingKnown(left: number | undefined, right: number | undefined): number {
+  if (left === undefined && right === undefined) return 0;
+  if (left === undefined) return 1;
+  if (right === undefined) return -1;
+  return right - left;
+}
+
 /**
  * Ranks MPC search results only. Callers keep imported/explicit MPC
  * references in front and never use this ordering to change a selection.
@@ -67,16 +80,41 @@ export function rankMpcCandidates(
     const tagRank = preferredTagCount(right, filters.preferredTags) - preferredTagCount(left, filters.preferredTags);
     if (tagRank !== 0) return tagRank;
 
+    const leftProviderRank = numberField(left, "providerRank");
+    const rightProviderRank = numberField(right, "providerRank");
+    const compareProviderOrder = () => leftProviderRank === undefined && rightProviderRank === undefined ? 0
+      : leftProviderRank === undefined ? 1
+        : rightProviderRank === undefined ? -1
+          : leftProviderRank - rightProviderRank;
+    if (filters.rankingMode === "provider") {
+      const providerOrder = compareProviderOrder();
+      return providerOrder || compareString(left.id, right.id);
+    }
+
     const exactRank = Number(exactPrinting(right, identity)) - Number(exactPrinting(left, identity));
     if (exactRank !== 0) return exactRank;
+
+    const cachedRank = Number(right.originalCached === true) - Number(left.originalCached === true);
+    if (cachedRank !== 0) return cachedRank;
+
+    const exportableRank = exportabilityRank(right) - exportabilityRank(left);
+    if (exportableRank !== 0) return exportableRank;
+
+    const availableRank = Number(right.originalAvailable) - Number(left.originalAvailable);
+    if (availableRank !== 0) return availableRank;
+
+    const effectiveDpiRank = descendingKnown(left.effectiveDpi, right.effectiveDpi);
+    if (effectiveDpiRank !== 0) return effectiveDpiRank;
 
     const priorityRank = (numberField(right, "priority") ?? 0) - (numberField(left, "priority") ?? 0);
     if (priorityRank !== 0) return priorityRank;
 
-    // This uses provider-declared DPI as provenance. effectiveDpi is based on
-    // decoded local original pixels and is intentionally not used here.
     const dpiRank = (numberField(right, "dpi") ?? 0) - (numberField(left, "dpi") ?? 0);
     if (dpiRank !== 0) return dpiRank;
+
+    // editorSearch ID order is the provider's only observed ranking signal.
+    const providerRank = compareProviderOrder();
+    if (providerRank !== 0) return providerRank;
 
     return compareString(left.id, right.id);
   });

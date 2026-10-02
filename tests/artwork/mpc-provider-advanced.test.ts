@@ -12,7 +12,7 @@ import { ArtworkOriginalStore } from "../../artwork/storage/original-store";
 import { ArtworkRepository } from "../../artwork/storage/repository";
 import { ArtworkThumbnailStore } from "../../artwork/storage/thumbnail-store";
 import { ArtworkCatalog } from "../../artwork/catalog";
-import { MpcArtworkProvider } from "../../artwork/mpc-provider";
+import { MpcArtworkProvider, MPC_HYDRATION_CHUNK_SIZE } from "../../artwork/mpc-provider";
 
 const temporaryDirectories: string[] = [];
 afterEach(async () => Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -57,8 +57,8 @@ async function setup(fetchImpl: typeof fetch) {
   const originals = new ArtworkOriginalStore(paths.originalsDirectory, repository);
   const thumbnails = new ArtworkThumbnailStore(paths.thumbnailsDirectory, repository);
   const metadata = new ArtworkMetadataCache(repository);
-  const provider = new MpcArtworkProvider({ fetchImpl, originals, thumbnails, metadata, repository, timeoutMs: 1000 });
-  return { database, provider, originals, repository, paths };
+  const provider = new MpcArtworkProvider({ fetchImpl, originals, thumbnails, metadata, repository, timeoutMs: 1000, waitForRetry: async () => undefined });
+  return { database, provider, originals, repository, metadata, paths };
 }
 
 function apiFake(options: { records?: Record<string, Record<string, unknown>>; calls?: Array<{ path: string; body?: unknown }>; v3Status?: number } = {}): typeof fetch {
@@ -305,6 +305,381 @@ describe("advanced MPC artwork provider", () => {
       expect(provider.getDiagnostic()).toMatchObject({ degraded: false });
       expect(provider.getHealth()).toMatchObject({ available: true, degraded: false });
       expect(catalog.getProviderHealth().mpc).toMatchObject({ available: true, degraded: false });
+    } finally {
+      vi.useRealTimers();
+      await database.close();
+    }
+  });
+
+  it("preserves the MPC search order as providerRank and ranks by that signal after explicit preferences", async () => {
+    const first = "provider-rank-first-123456";
+    const second = "provider-rank-second-12345";
+    const records = { [first]: card(first), [second]: card(second) };
+    const { database, provider } = await setup(apiFake({ records }));
+
+    const candidates = await provider.searchArtworkAdvanced(identity);
+
+    expect(candidates.map(({ providerAssetId }) => providerAssetId)).toEqual([first, second]);
+    expect(candidates.map(({ metadata }) => metadata?.providerRank)).toEqual([0, 1]);
+    await database.close();
+  });
+
+  it("confirms UI capabilities only after the corresponding MPC protocol and catalogs are observed", async () => {
+    const { database, provider } = await setup(apiFake());
+    expect(provider.getDiagnostic().capabilities).toMatchObject({
+      search: false,
+      filters: { dpi: false, sources: false, tags: false, languages: false },
+    });
+
+    await provider.getFilterCatalogs();
+    expect(provider.getDiagnostic().capabilities.filters).toMatchObject({ sources: true, tags: true, languages: true, dpi: false });
+    await provider.searchArtwork(identity);
+    expect(provider.getDiagnostic().capabilities).toMatchObject({
+      search: true,
+      preview: true,
+      original: true,
+      filters: { dpi: true, sources: true, tags: true, languages: true },
+      protocol: { confirmedVersion: "v3", v3Available: true, fallbackV2Used: false },
+    });
+    await database.close();
+  });
+
+  it("tracks successful remote contact separately from a cached successful search", async () => {
+    vi.useFakeTimers();
+    const baseTime = Date.parse("2026-01-01T00:00:00.000Z");
+    vi.setSystemTime(baseTime);
+    const calls: Array<{ path: string; body?: unknown }> = [];
+    const { database, provider } = await setup(apiFake({ calls }));
+    try {
+      await provider.searchArtwork(identity);
+      const afterRemoteSearch = provider.getDiagnostic();
+      const contactAt = afterRemoteSearch.lastSuccessfulContactAt;
+      const requests = afterRemoteSearch.metrics.remoteRequestCount;
+      expect(contactAt).toBeDefined();
+
+      vi.setSystemTime(baseTime + 10_000);
+      await provider.searchArtwork(identity);
+      const afterCachedSearch = provider.getDiagnostic();
+
+      expect(afterCachedSearch.lastSuccessfulAt).not.toBe(afterRemoteSearch.lastSuccessfulAt);
+      expect(afterCachedSearch.lastSuccessfulContactAt).toBe(contactAt);
+      expect(afterCachedSearch.metrics.remoteRequestCount).toBe(requests);
+    } finally {
+      await database.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps valid cards from partial hydration, marks health degraded, and records omitted IDs", async () => {
+    const first = "partial-hydration-first-12345";
+    const missing = "partial-hydration-missing-1234";
+    const fetcher: typeof fetch = async (input, init = {}) => {
+      if (new URL(String(input)).pathname === "/3/editorSearch/") {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return json({ results: { [Object.keys(body.queries)[0]!]: [first, missing] } });
+      }
+      if (new URL(String(input)).pathname === "/2/cards/") return json({ results: { [first]: card(first) } });
+      return apiFake()(input, init);
+    };
+    const { database, provider } = await setup(fetcher);
+
+    const candidates = await provider.searchArtworkAdvanced(identity);
+
+    expect(candidates.map(({ providerAssetId }) => providerAssetId)).toEqual([first]);
+    expect(provider.getDiagnostic()).toMatchObject({ degraded: true, metrics: { omittedHydrationCount: 1 } });
+    expect(provider.getDiagnostic().metrics.inFlightRequests).toEqual({ api: 0, images: 0 });
+    await database.close();
+  });
+
+  it("hydrates repeated candidate references once per unique provider asset using bounded chunks", async () => {
+    const records: Record<string, Record<string, unknown>> = {};
+    const calls: Array<{ path: string; body?: unknown }> = [];
+    const { database, provider, metadata } = await setup(apiFake({ records, calls }));
+    const candidateIds: string[] = [];
+    const uniqueAssetIds = Array.from({ length: 20 }, (_, index) => `batch-asset-${String(index).padStart(2, "0")}-12345`);
+    for (let index = 0; index < 100; index += 1) {
+      const id = `mpc:${index.toString(16).padStart(64, "0")}`;
+      const assetId = uniqueAssetIds[index % uniqueAssetIds.length]!;
+      candidateIds.push(id);
+      records[assetId] = card(assetId);
+      metadata.putMetadata(`mpc:candidate:${id}`, { candidate: { id, source: "mpc", identityId: identity.id, faceId: index % 2 ? "back" : "front", providerAssetId: assetId, selectedArtworkId: assetId, originalAvailable: false, originalCached: false, metadata: { name: `Candidate ${index}`, sourceId: 41, dpi: 1200 } } }, Date.now() + 60_000);
+    }
+
+    const results = await provider.revalidateCandidates(candidateIds);
+
+    expect(results).toHaveLength(100);
+    expect(calls.filter(({ path }) => path === "/2/cards/")).toHaveLength(Math.ceil(20 / MPC_HYDRATION_CHUNK_SIZE));
+    expect(provider.getDiagnostic().metrics).toMatchObject({ hydrationBatchCount: Math.ceil(20 / MPC_HYDRATION_CHUNK_SIZE), revalidation: { candidates: 100 } });
+    await database.close();
+  });
+
+  it("isolates a malformed hydration chunk while keeping successful revalidation results", async () => {
+    const records: Record<string, Record<string, unknown>> = {};
+    const calls: Array<{ path: string; body?: unknown }> = [];
+    const assetIds = Array.from({ length: MPC_HYDRATION_CHUNK_SIZE + 1 }, (_, index) => `chunk-${String(index).padStart(2, "0")}-asset-12345`);
+    for (const assetId of assetIds) records[assetId] = card(assetId);
+    const baseFetch = apiFake({ records, calls });
+    const fetcher: typeof fetch = async (input, init = {}) => {
+      if (new URL(String(input)).pathname === "/2/cards/") {
+        const body = JSON.parse(String(init.body)) as { cardIdentifiers: string[] };
+        if (body.cardIdentifiers.includes(assetIds.at(-1)!)) {
+          calls.push({ path: "/2/cards/", body });
+          return new Response("malformed json", { headers: { "content-type": "application/json" } });
+        }
+      }
+      return baseFetch(input, init);
+    };
+    const { database, provider, metadata } = await setup(fetcher);
+    const candidateIds = assetIds.map((assetId, index) => {
+      const id = `mpc:${index.toString(16).padStart(64, "0")}`;
+      metadata.putMetadata(`mpc:candidate:${id}`, {
+        candidate: { id, source: "mpc", identityId: identity.id, faceId: "front", providerAssetId: assetId, selectedArtworkId: assetId, originalAvailable: false, originalCached: false, metadata: { sourceId: 41, dpi: 1200 } },
+      }, Date.now() + 60_000);
+      return id;
+    });
+
+    const results = await provider.revalidateCandidates(candidateIds);
+
+    expect(results).toHaveLength(assetIds.length);
+    expect(results.slice(0, MPC_HYDRATION_CHUNK_SIZE).every(({ status }) => status !== "remote-unavailable")).toBe(true);
+    expect(results.at(-1)).toMatchObject({ status: "remote-unavailable", failureKind: "protocol" });
+    expect(calls.filter(({ path }) => path === "/2/cards/")).toHaveLength(2);
+    expect(provider.getDiagnostic()).toMatchObject({ degraded: true, metrics: { inFlightRequests: { api: 0, images: 0 } } });
+    await database.close();
+  });
+
+  it("cancels every active hydration chunk and clears its shared request state", async () => {
+    let enteredHydration!: () => void;
+    const hydrationStarted = new Promise<void>((resolve) => { enteredHydration = resolve; });
+    const fetcher: typeof fetch = async (input, init = {}) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/2/sources/") return json(sourceCatalog());
+      if (path === "/2/cards/") {
+        enteredHydration();
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = init.signal as AbortSignal;
+          signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+        });
+      }
+      throw new Error(`unexpected request: ${path}`);
+    };
+    const { database, provider, metadata } = await setup(fetcher);
+    const candidateId = `mpc:${"b".repeat(64)}`;
+    const stored = {
+      candidate: { id: candidateId, source: "mpc" as const, identityId: identity.id, faceId: "front" as const, providerAssetId: "cancel-batch-asset-123456", originalAvailable: false, originalCached: false, metadata: { dpi: 1200 } },
+    };
+    metadata.putMetadata(`mpc:candidate:${candidateId}`, stored, Date.now() + 60_000);
+    const controller = new AbortController();
+    const revalidation = provider.revalidateCandidates([candidateId], controller.signal);
+    await hydrationStarted;
+    controller.abort();
+
+    await expect(revalidation).rejects.toMatchObject({ kind: "aborted" });
+    expect(metadata.getMetadataSnapshot(`mpc:candidate:${candidateId}`)?.value).toEqual(stored);
+    expect(provider.getDiagnostic().metrics.inFlightRequests).toEqual({ api: 0, images: 0 });
+    await database.close();
+  });
+
+  it("coalesces simultaneous identical searches while one cancelled consumer leaves the other active", async () => {
+    const calls: string[] = [];
+    const baseFetcher = apiFake();
+    let releaseSearch!: () => void;
+    let enteredSearch!: () => void;
+    const searchStarted = new Promise<void>((resolve) => { enteredSearch = resolve; });
+    const waitForSearch = new Promise<void>((resolve) => { releaseSearch = resolve; });
+    const fetcher: typeof fetch = async (input, init = {}) => {
+      const path = new URL(String(input)).pathname;
+      calls.push(path);
+      if (path === "/3/editorSearch/") { enteredSearch(); await waitForSearch; }
+      return baseFetcher(input, init);
+    };
+    const { database, provider } = await setup(fetcher);
+    const firstController = new AbortController();
+    const first = provider.searchArtworkAdvanced(identity, { signal: firstController.signal });
+    const second = provider.searchArtworkAdvanced(identity);
+    await searchStarted;
+    firstController.abort();
+    releaseSearch();
+
+    await expect(first).rejects.toMatchObject({ kind: "aborted" });
+    await expect(second).resolves.toHaveLength(1);
+    expect(calls.filter((path) => path === "/3/editorSearch/")).toHaveLength(1);
+    expect(calls.filter((path) => path === "/2/cards/")).toHaveLength(1);
+    await database.close();
+  });
+
+  it("coalesces concurrent revalidation of the same candidate and returns structured outcomes", async () => {
+    const calls: Array<{ path: string; body?: unknown }> = [];
+    const records: Record<string, Record<string, unknown>> = { "asset-id-1234567890": card("asset-id-1234567890") };
+    const { database, provider } = await setup(apiFake({ calls, records }));
+    const [candidate] = await provider.searchArtwork(identity);
+    records["asset-id-1234567890"] = card("asset-id-1234567890", { dpi: 2400, name: "Updated metadata" });
+    const before = calls.filter(({ path }) => path === "/2/cards/").length;
+
+    const [first, second] = await Promise.all([
+      provider.revalidateCandidates([candidate!.id]),
+      provider.revalidateCandidates([candidate!.id]),
+    ]);
+
+    expect(first[0]).toMatchObject({ status: "metadata-updated", localOriginal: "missing", candidate: { metadata: { name: "Updated metadata", dpi: 2400 } } });
+    expect(second[0]).toMatchObject({ status: "metadata-updated" });
+    expect(calls.filter(({ path }) => path === "/2/cards/")).toHaveLength(before + 1);
+    expect(provider.getDiagnostic().metrics.inFlightRequests).toEqual({ api: 0, images: 0 });
+    await database.close();
+  });
+
+  it("uses bounded Retry-After for 429 and recovers without caching rate limits as empty searches", async () => {
+    let searchAttempts = 0;
+    const delays: number[] = [];
+    const fetcher: typeof fetch = async (input, init = {}) => {
+      if (new URL(String(input)).pathname === "/3/editorSearch/" && searchAttempts++ < 2) {
+        return new Response("rate limited", { status: 429, headers: { "retry-after": "20" } });
+      }
+      return apiFake()(input, init);
+    };
+    const base = await mkdtemp(join(tmpdir(), "tcgprint-mpc-retry-"));
+    temporaryDirectories.push(base);
+    const paths = appDataPaths(base);
+    await mkdir(dirname(paths.databaseFile), { recursive: true });
+    const database = new Database(paths.databaseFile);
+    const repository = new ArtworkRepository(database);
+    const provider = new MpcArtworkProvider({
+      fetchImpl: fetcher,
+      originals: new ArtworkOriginalStore(paths.originalsDirectory, repository),
+      thumbnails: new ArtworkThumbnailStore(paths.thumbnailsDirectory, repository),
+      metadata: new ArtworkMetadataCache(repository),
+      repository,
+      waitForRetry: async (milliseconds) => { delays.push(milliseconds); },
+    });
+
+    await expect(provider.searchArtworkAdvanced(identity)).resolves.toHaveLength(1);
+    expect(delays).toEqual([2_000, 2_000]);
+    expect(provider.getDiagnostic()).toMatchObject({ metrics: { httpStatusSummary: { "429": 2 }, rateLimits: 2 } });
+    expect(searchAttempts).toBe(3);
+    await database.close();
+  });
+
+  it("returns a distinct rate-limit error after bounded retries and does not cache it as a missing search", async () => {
+    let rateLimited = true;
+    let searchCalls = 0;
+    const fetcher: typeof fetch = async (input, init = {}) => {
+      if (new URL(String(input)).pathname === "/3/editorSearch/") {
+        searchCalls += 1;
+        if (rateLimited) return new Response("private upstream content", { status: 429, headers: { "retry-after": "99999" } });
+      }
+      return apiFake()(input, init);
+    };
+    const base = await mkdtemp(join(tmpdir(), "tcgprint-mpc-rate-limit-"));
+    temporaryDirectories.push(base);
+    const paths = appDataPaths(base);
+    await mkdir(dirname(paths.databaseFile), { recursive: true });
+    const database = new Database(paths.databaseFile);
+    const repository = new ArtworkRepository(database);
+    const delays: number[] = [];
+    const provider = new MpcArtworkProvider({
+      fetchImpl: fetcher,
+      originals: new ArtworkOriginalStore(paths.originalsDirectory, repository),
+      thumbnails: new ArtworkThumbnailStore(paths.thumbnailsDirectory, repository),
+      metadata: new ArtworkMetadataCache(repository),
+      repository,
+      waitForRetry: async (milliseconds) => { delays.push(milliseconds); },
+    });
+
+    await expect(provider.searchArtworkAdvanced(identity)).rejects.toMatchObject({ kind: "rate-limited", status: 429, retryAfterMs: 2_000 });
+    expect(delays).toEqual([2_000, 2_000]);
+    expect(provider.getDiagnostic()).toMatchObject({ degraded: true, lastFailureType: "rate-limited", metrics: { rateLimits: 3 } });
+    rateLimited = false;
+    await expect(provider.searchArtworkAdvanced(identity)).resolves.toHaveLength(1);
+    expect(searchCalls).toBe(4);
+    expect(provider.getDiagnostic().metrics.inFlightRequests).toEqual({ api: 0, images: 0 });
+    await database.close();
+  });
+
+  it("retries transient 5xx responses without negative caching and then recovers", async () => {
+    let offline = true;
+    let searchAttempts = 0;
+    const fetcher: typeof fetch = async (input, init = {}) => {
+      if (new URL(String(input)).pathname === "/3/editorSearch/") {
+        searchAttempts += 1;
+        if (offline) return new Response("upstream body", { status: 503 });
+      }
+      return apiFake()(input, init);
+    };
+    const { database, provider } = await setup(fetcher);
+
+    await expect(provider.searchArtworkAdvanced(identity)).rejects.toMatchObject({ kind: "http", status: 503 });
+    expect(searchAttempts).toBe(3);
+    expect(provider.getDiagnostic()).toMatchObject({ degraded: true, metrics: { httpStatusSummary: { "503": 3 } } });
+    offline = false;
+    await expect(provider.searchArtworkAdvanced(identity)).resolves.toHaveLength(1);
+    expect(searchAttempts).toBe(4);
+    await database.close();
+  });
+
+  it.each(["thumbnail", "original"] as const)("does not abort another consumer when a coalesced %s request is cancelled", async (role) => {
+    const png = new Uint8Array(await sharp({ create: { width: 60, height: 90, channels: 3, background: "#497" } }).png().toBuffer());
+    let releaseImage!: () => void;
+    let startedImage!: () => void;
+    const imageEntered = new Promise<void>((resolve) => { startedImage = resolve; });
+    const imageGate = new Promise<void>((resolve) => { releaseImage = resolve; });
+    let imageRequests = 0;
+    const fetcher: typeof fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.hostname === "drive.google.com") {
+        imageRequests += 1;
+        startedImage();
+        await imageGate;
+        return new Response(png, { headers: { "content-type": "image/png", "content-length": String(png.byteLength) } });
+      }
+      return apiFake({ records: { "asset-id-1234567890": card("asset-id-1234567890", { size: png.byteLength }) } })(input, init);
+    };
+    const { database, provider } = await setup(fetcher);
+    const [candidate] = await provider.searchArtwork(identity);
+    const firstController = new AbortController();
+    const first = role === "thumbnail" ? provider.getPreview(candidate!.id, firstController.signal) : provider.getOriginal(candidate!.id, firstController.signal);
+    const second = role === "thumbnail" ? provider.getPreview(candidate!.id) : provider.getOriginal(candidate!.id);
+    await imageEntered;
+    firstController.abort();
+    releaseImage();
+
+    await expect(first).rejects.toMatchObject({ kind: "aborted" });
+    await expect(second).resolves.toBeDefined();
+    expect(imageRequests).toBe(1);
+    expect(provider.getDiagnostic().metrics.inFlightRequests).toEqual({ api: 0, images: 0 });
+    await database.close();
+  });
+
+  it("records empty searches briefly but does not cache transient failures", async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    vi.setSystemTime(startedAt);
+    let online = true;
+    let empty = true;
+    let searchCalls = 0;
+    const fetcher: typeof fetch = async (input, init = {}) => {
+      const path = new URL(String(input)).pathname;
+      if (!online && path === "/3/editorSearch/") throw new Error("offline");
+      if (path === "/3/editorSearch/") {
+        searchCalls += 1;
+        if (empty) {
+          const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+          return json({ results: { [Object.keys(body.queries)[0]!]: [] } });
+        }
+      }
+      return apiFake()(input, init);
+    };
+    const { database, provider } = await setup(fetcher);
+    try {
+      await expect(provider.searchArtworkAdvanced(identity)).resolves.toEqual([]);
+      await expect(provider.searchArtworkAdvanced(identity)).resolves.toEqual([]);
+      expect(searchCalls).toBe(1);
+      vi.setSystemTime(startedAt + 31_000);
+      online = false;
+      await expect(provider.searchArtworkAdvanced(identity)).resolves.toEqual([]);
+      online = true;
+      empty = false;
+      await expect(provider.searchArtworkAdvanced(identity)).resolves.toHaveLength(1);
+      expect(searchCalls).toBe(2);
     } finally {
       vi.useRealTimers();
       await database.close();

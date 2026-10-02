@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "provider": "mpc",
+  "synthetic": true,
+  "fixtures": [
+    {
+      "name": "bounded-filter-and-preference-order",
+      "input": {
+        "minimumDpi": 300,
+        "maximumDpi": 1200,
+        "sources": [41, 42, 41],
+        "includeTags": ["Borderless"],
+        "excludeTags": ["Foil"],
+        "languages": ["EN"],
+        "preferredSources": [42, 41],
+        "preferredLanguages": ["fr", "en"],
+        "preferredTags": ["Promo"],
+        "rankingMode": "balanced"
+      },
+      "normalized": {
+        "minimumDpi": 300,
+        "maximumDpi": 1200,
+        "sources": [41, 42],
+        "includeTags": ["borderless"],
+        "excludeTags": ["foil"],
+        "languages": ["en"],
+        "preferredSources": [42, 41],
+        "preferredLanguages": ["fr", "en"],
+        "preferredTags": ["promo"],
+        "rankingMode": "balanced"
+      }
+    },
+    {
+      "name": "catalog-validation-rejects-unknown-source",
+      "input": { "sources": [999] },
+      "catalogs": { "sources": [41, 42], "languages": ["en"], "tags": ["Borderless"] },
+      "expected": "client validation error; no upstream query"
+    },
+    {
+      "name": "metadata-absent-does-not-match-active-language-filter",
+      "input": { "languages": ["en"] },
+      "candidate": { "language": null, "providerRank": 0 },
+      "expectedMatch": false
+    }
+  ]
+}

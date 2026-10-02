@@ -81,6 +81,30 @@ describe("ArtworkCatalog", () => {
     expect(catalog.getProviderHealth().mpc).toMatchObject({ available: true, degraded: false });
   });
 
+  it("clears catalog error overrides when a provider reports recovery outside search", async () => {
+    let health: ProviderHealth = { available: true, degraded: false };
+    const failingThenRecovered: ArtworkProvider = {
+      source: "mpc",
+      getHealth: () => health,
+      searchArtwork: async () => {
+        health = { available: false, degraded: true, message: "MPC is temporarily degraded." };
+        throw new Error("request failed");
+      },
+      getPreview: async () => undefined,
+      getOriginal: async () => {
+        health = { available: true, degraded: false };
+        throw new Error("unused original");
+      },
+      getCandidate: async () => undefined,
+    };
+    const catalog = new ArtworkCatalog([failingThenRecovered]);
+
+    await catalog.search(identity, { source: "mpc" });
+    expect(catalog.getProviderHealth().mpc).toMatchObject({ degraded: true, available: false });
+    health = { available: true, degraded: false };
+    expect(catalog.getProviderHealth().mpc).toMatchObject({ degraded: false, available: true });
+  });
+
   it("preserves catalog-marked MPC degradation and hides upstream text", () => {
     const healthyMpc: ArtworkProvider = {
       source: "mpc",

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "provider": "mpc",
+  "evidence": {
+    "kind": "historical-live-probe",
+    "adr": "docs/decisions/0006-mpc-artwork-provider.md",
+    "observedAt": "2026-09-26",
+    "warning": "Historical low-volume observations do not guarantee current route availability or upstream semantics."
+  },
+  "routes": {
+    "searchV3": { "method": "POST", "path": "/3/editorSearch/", "observed": "404 at probe time", "currentPolicy": "fallback only on HTTP 404" },
+    "searchV2": { "method": "POST", "path": "/2/editorSearch/", "observed": "200 with legacy query-array shape", "currentPolicy": "used after explicit v3 404" },
+    "cards": { "method": "POST", "path": "/2/cards/", "observed": "200 keyed by requested identifiers", "currentPolicy": "local chunks of 20; partial results degrade health" },
+    "sources": { "method": "GET", "path": "/2/sources/", "observed": "200 with Google Drive sources" },
+    "languages": { "method": "GET", "path": "/2/languages/", "observed": "catalog route implemented; capability requires non-empty verified catalog" },
+    "tags": { "method": "GET", "path": "/2/tags/", "observed": "catalog route implemented; capability requires non-empty verified catalog" }
+  },
+  "observedCapabilities": {
+    "search": "v2 confirmed by historical probe; v3 is tried first by current client",
+    "preview": "safe thumbnail metadata and redirects are supported when returned",
+    "original": "one public Google Drive original path was observed; each asset is validated on download",
+    "dpiFilter": "sent to search and enforced again against hydrated metadata locally",
+    "sourceFilter": "verified source catalog plus local hydrated-source enforcement",
+    "tagFilter": "conditional on a verified non-empty tag catalog and local enforcement",
+    "languageFilter": "conditional on a verified non-empty language catalog and local enforcement"
+  },
+  "clientSafetyLimits": {
+    "hydrationChunkSize": 20,
+    "maximumBatchCandidates": 500,
+    "batchConcurrency": 3,
+    "providerRequestConcurrency": 4,
+    "retryCount": 2,
+    "retryAfterMaximumMs": 2000,
+    "emptySearchTtlMs": 30000,
+    "catalogTtlMs": 86400000
+  },
+  "notEstablished": [
+    "current v3 availability",
+    "upstream maximum /2/cards/ request size",
+    "rate-limit quota or service SLA",
+    "complete result hydration",
+    "permanent asset availability",
+    "guaranteed ranking stability"
+  ]
+}

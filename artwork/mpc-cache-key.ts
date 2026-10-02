@@ -3,7 +3,7 @@ import type { CardFaceSide } from "../core/cards/types";
 import type { MpcArtworkFilters } from "./mpc-contract";
 
 export const MPC_PROTOCOL_BEHAVIOR_VERSION = "editor-v3-first-v2-only-on-404-v1";
-export const MPC_RANKING_VERSION = "mpc-ranking-v1";
+export const MPC_RANKING_VERSION = "mpc-ranking-v2-provider-rank";
 export const MPC_SEARCH_MAXIMUM_SIZE_MB = 30;
 
 export function buildMpcSearchCacheKey(
@@ -25,6 +25,7 @@ export function buildMpcSearchCacheKey(
       preferredSources: [...filters.preferredSources],
       preferredLanguages: [...filters.preferredLanguages],
       preferredTags: [...filters.preferredTags].sort((a, b) => a < b ? -1 : a > b ? 1 : 0),
+      rankingMode: filters.rankingMode,
     },
     verifiedSourceIds: [...new Set(verifiedSourceIds)].sort((a, b) => a - b),
     maximumSizeMb: MPC_SEARCH_MAXIMUM_SIZE_MB,

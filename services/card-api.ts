@@ -25,6 +25,8 @@ import type { BackLibraryOriginalSource } from "./card-export";
 import { createSeparatePdfArchive } from "./separate-pdf-archive";
 import { CalibrationError, checkPrinterProfileCompatibility, type PrinterProfileSnapshot } from "../core/calibration";
 import { verifyPrinterProfileSnapshot } from "../persistence/printer-profiles/hash";
+import { MPC_MAX_BATCH_CANDIDATES, type MpcCandidateRevalidationResult } from "../artwork/mpc-provider";
+import { createMpcDiagnosticReport } from "../artwork/mpc-diagnostic-report";
 
 const FORBIDDEN_PROPERTIES = new Set(["originalBytes", "bytes", "sourcePath", "localOriginalPath", "originalUri", "previewUri", "filePaths", "absolutePath", "filesystemPath"]);
 const SOURCES = new Set(["scryfall", "upload", "mpc", "url", "custom"]);
@@ -389,6 +391,7 @@ function respondError(error: unknown): Response {
   if (error instanceof MpcArtworkProviderError) {
     const status = error.kind === "aborted" ? 499
       : error.kind === "timeout" ? 504
+        : error.kind === "rate-limited" ? 429
         : error.kind === "asset-too-large" ? 413
           : error.kind === "unsafe-source" || error.kind === "invalid-image" ? 422
             : error.kind === "http" && error.status && error.status < 500 ? 502
@@ -396,6 +399,7 @@ function respondError(error: unknown): Response {
                 : 502;
     const safeMessages: Readonly<Record<MpcArtworkProviderError["kind"], string>> = {
       http: "MPC artwork service returned an error.",
+      "rate-limited": "MPC artwork service is rate limited. Try again shortly.",
       protocol: "MPC artwork service returned an invalid response.",
       "unsafe-source": "MPC artwork source failed security validation.",
       "invalid-image": "MPC artwork bytes failed validation.",
@@ -417,15 +421,17 @@ function respondError(error: unknown): Response {
 function candidateDto(candidate: ArtworkCandidate) {
   const metadata = candidate.metadata ?? {};
   const safeMetadata: Record<string, unknown> = {};
-  for (const key of ["layout", "digital", "promo", "fullArt", "imageStatus", "borderColor", "referenceOnly", "slots", "importedAssetId", "originalFilename", "originalFormat", "contentHash", "provenanceCount", "name", "sourceType", "sourceId", "sourceName", "extension", "declaredSize", "dpi", "language", "tags", "priority", "dateCreated", "dateModified", "remoteMetadataStatus", "metadataCheckedAt"]) {
-    if (metadata[key] !== undefined) safeMetadata[key] = metadata[key];
+  for (const key of ["layout", "digital", "promo", "fullArt", "imageStatus", "borderColor", "referenceOnly", "slots", "importedAssetId", "originalFilename", "originalFormat", "contentHash", "provenanceCount", "name", "sourceType", "sourceId", "sourceName", "extension", "declaredSize", "dpi", "language", "tags", "priority", "providerRank", "dateCreated", "dateModified", "remoteMetadataStatus", "metadataFreshness", "metadataCheckedAt", "originalFormatKnown", "originalFormatExportable"]) {
+    if (metadata[key] === undefined) continue;
+    const value = candidate.source === "mpc" ? safeMpcMetadataValue(key, metadata[key]) : metadata[key];
+    if (value !== undefined) safeMetadata[key] = value;
   }
   for (const key of ["canonicalCard", "canonicalArtist"] as const) {
     const canonical = record(metadata[key]);
     if (!canonical) continue;
     const safe: Record<string, string> = {};
     const allowed = key === "canonicalCard" ? ["name", "expansionCode", "expansionName", "collectorNumber", "rarity", "scryfallId"] : ["name", "scryfallId"];
-    for (const field of allowed) if (typeof canonical[field] === "string" && canonical[field].length <= 160 && !/[\u0000-\u001f\u007f]/u.test(canonical[field] as string)) safe[field] = canonical[field] as string;
+    for (const field of allowed) if (typeof canonical[field] === "string" && canonical[field].length <= 160 && !/[\u0000-\u001f\u007f]/u.test(canonical[field] as string) && !/^https?:\/\//i.test(canonical[field] as string)) safe[field] = canonical[field] as string;
     if (Object.keys(safe).length) safeMetadata[key] = safe;
   }
   if (typeof metadata.localAvailabilityHint === "boolean") safeMetadata.localAvailabilityHint = metadata.localAvailabilityHint;
@@ -455,6 +461,32 @@ function candidateDto(candidate: ArtworkCandidate) {
     ...(candidate.originalCached !== undefined ? { originalCached: candidate.originalCached } : {}),
     metadata: safeMetadata,
   };
+}
+
+function safeMpcMetadataValue(key: string, value: unknown): unknown {
+  const safeText = (text: unknown, maximum: number) => typeof text === "string" && text.length > 0 && text.length <= maximum
+    && !/[\u0000-\u001f\u007f]/u.test(text) && !/^https?:\/\//i.test(text) ? text : undefined;
+  if (["digital", "promo", "fullArt", "referenceOnly", "originalFormatKnown", "originalFormatExportable", "localAvailabilityHint"].includes(key)) return typeof value === "boolean" ? value : undefined;
+  if (["sourceId", "priority", "providerRank", "declaredSize", "dpi", "provenanceCount"].includes(key)) {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100_000_000 ? value : undefined;
+  }
+  if (["sourceType", "layout", "imageStatus", "borderColor"].includes(key)) return safeText(value, 80);
+  if (key === "sourceName" || key === "name") return safeText(value, 200);
+  if (key === "language") return typeof value === "string" && /^[a-z0-9-]{1,16}$/i.test(value) ? value.toLowerCase() : undefined;
+  if (key === "extension" || key === "originalFormat") return typeof value === "string" && /^(png|jpe?g|svg)$/i.test(value) ? value.toLowerCase() : undefined;
+  if (key === "importedAssetId") return typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(value) ? value : undefined;
+  if (key === "contentHash") return typeof value === "string" && /^[a-f0-9]{64}$/.test(value) ? value : undefined;
+  if (["dateCreated", "dateModified", "metadataCheckedAt"].includes(key)) {
+    return typeof value === "string" && value.length <= 64 && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : undefined;
+  }
+  if (key === "remoteMetadataStatus") return ["current", "removed", "invalid", "unsupported", "stale"].includes(String(value)) ? value : undefined;
+  if (key === "metadataFreshness") return ["fresh", "stale", "revalidated"].includes(String(value)) ? value : undefined;
+  if (["tags", "slots"].includes(key) && Array.isArray(value)) return value.slice(0, 100).flatMap((item) => {
+    const text = safeText(item, 120);
+    return text ? [text] : [];
+  });
+  if (key === "originalFilename") return typeof value === "string" ? safeText(value.split(/[\\/]/).pop()?.replace(/[\u0000-\u001f]/g, ""), 200) : undefined;
+  return undefined;
 }
 
 function safeProviderHealth(value: Readonly<Record<string, { available: boolean; degraded: boolean; message?: string }>>) {
@@ -627,15 +659,16 @@ export async function handleArtworkList(request: Request, identityId: string, wo
     const sourceValue = body.source === undefined ? "all" : body.source;
     if (typeof sourceValue !== "string" || !["all", ...SOURCES].includes(sourceValue)) throw new ApiRequestError(400, "INVALID_SOURCE", "Artwork source filter is invalid.");
     if (body.physicalBackArtwork !== undefined && typeof body.physicalBackArtwork !== "boolean") throw new ApiRequestError(400, "INVALID_REQUEST", "physicalBackArtwork must be a boolean.");
+    if (body.forceMpcRefresh !== undefined && typeof body.forceMpcRefresh !== "boolean") throw new ApiRequestError(400, "INVALID_REQUEST", "forceMpcRefresh must be a boolean.");
     const mpcFilters = body.mpcFilters === undefined ? undefined : normalizeMpcArtworkFilters(body.mpcFilters);
     const references: WorkingCardMpcReference[] = Array.isArray(body.mpcReferences) ? body.mpcReferences.slice(0, 100).flatMap((value): WorkingCardMpcReference[] => {
       const ref = record(value);
       if (!ref || (ref.faceId !== "front" && ref.faceId !== "back")) return [];
       return [{ faceId: ref.faceId, importedAssetId: requiredString(ref.importedAssetId, "MPC importedAssetId", 180), ...(optionalString(ref.providerAssetId, "MPC providerAssetId", 200) ? { providerAssetId: ref.providerAssetId as string } : {}), ...(optionalString(ref.selectedArtworkId, "MPC selectedArtworkId", 200) ? { selectedArtworkId: ref.selectedArtworkId as string } : {}), slots: Array.isArray(ref.slots) ? ref.slots.filter((slot): slot is string => typeof slot === "string").slice(0, 100) : [], availableLocally: ref.availableLocally === true }];
     }) : [];
-    const candidates = await workbench.listArtworkCandidates(identityId, faceId, sourceValue as ArtworkCatalogSource, { mpcReferences: references, ...(mpcFilters ? { mpcFilters } : {}), signal: request.signal });
+    const candidates = await workbench.listArtworkCandidates(identityId, faceId, sourceValue as ArtworkCatalogSource, { mpcReferences: references, ...(mpcFilters ? { mpcFilters } : {}), ...(body.forceMpcRefresh === true ? { forceMpcRefresh: true } : {}), signal: request.signal });
     const manualMpcBackCandidates = body.physicalBackArtwork === true && (sourceValue === "all" || sourceValue === "mpc")
-      ? await workbench.listArtworkCandidates(identityId, "back", "mpc", { mpcReferences: references, ...(mpcFilters ? { mpcFilters } : {}), signal: request.signal })
+      ? await workbench.listArtworkCandidates(identityId, "back", "mpc", { mpcReferences: references, ...(mpcFilters ? { mpcFilters } : {}), ...(body.forceMpcRefresh === true ? { forceMpcRefresh: true } : {}), signal: request.signal })
       : [];
     const uniqueCandidates = [...new Map([...candidates, ...manualMpcBackCandidates].map((candidate) => [candidate.id, candidate])).values()];
     return Response.json({ candidates: uniqueCandidates.map(candidateDto), providerHealth: safeProviderHealth(workbench.getProviderHealth()), mpcDiagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
@@ -654,12 +687,34 @@ export function handleMpcArtworkDiagnostics(workbench: CardWorkbench): Response 
   return Response.json({ diagnostic: diagnostic ?? { available: false, degraded: true, lastFailureType: "unavailable" } });
 }
 
+export function handleMpcArtworkDiagnosticsReport(workbench: CardWorkbench): Response {
+  return Response.json(createMpcDiagnosticReport(workbench.getMpcArtworkProviderDiagnostic?.()));
+}
+
 export async function handleMpcArtworkRefresh(request: Request, candidateId: string, workbench: CardWorkbench): Promise<Response> {
   try {
     if (!/^mpc:[a-f0-9]{64}$/.test(candidateId)) throw new ApiRequestError(400, "INVALID_ID", "MPC artwork ID is invalid.");
     const candidate = await workbench.refreshMpcArtworkCandidate(candidateId, request.signal);
     if (!candidate) throw new ApiRequestError(404, "ARTWORK_MISSING", "MPC artwork candidate is unavailable for refresh.");
     return Response.json({ candidate: candidateDto(candidate), diagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
+  } catch (error) { return respondError(error); }
+}
+
+export async function handleMpcArtworkBatchRevalidation(request: Request, workbench: CardWorkbench): Promise<Response> {
+  try {
+    const body = await parseJsonRequest(request, 64_000);
+    if (!Array.isArray(body.candidateIds) || body.candidateIds.length > MPC_MAX_BATCH_CANDIDATES) throw new ApiRequestError(400, "INVALID_REQUEST", `candidateIds must contain at most ${MPC_MAX_BATCH_CANDIDATES} MPC artwork IDs.`);
+    const candidateIds = body.candidateIds.map((value) => requiredString(value, "candidateId", 72));
+    if (candidateIds.some((id) => !/^mpc:[a-f0-9]{64}$/.test(id))) throw new ApiRequestError(400, "INVALID_ID", "MPC artwork ID is invalid.");
+    const results = await workbench.revalidateMpcArtworkCandidates(candidateIds, request.signal);
+    return Response.json({ results: results.map((result: MpcCandidateRevalidationResult) => ({
+      candidateId: result.candidateId,
+      ...(result.providerAssetId ? { providerAssetId: result.providerAssetId } : {}),
+      status: result.status,
+      localOriginal: result.localOriginal,
+      ...(result.failureKind ? { failureKind: result.failureKind } : {}),
+      ...(result.candidate ? { candidate: candidateDto(result.candidate) } : {}),
+    })), diagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
   } catch (error) { return respondError(error); }
 }
 

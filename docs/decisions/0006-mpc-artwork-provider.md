@@ -371,7 +371,11 @@ server, redirect, or schema failures must not cause an unsafe protocol
 downgrade. These few requests do not establish an availability guarantee,
 rate-limit policy, full-asset integrity, or future compatibility.
 
-## Phase 14 implementation decisions
+## Phase 14 initial implementation decisions
+
+This section records the initial Phase 14 behavior. The later advanced ranking,
+diagnostic, and batching contracts in [ADR 0017](0017-mpc-advanced-provider.md)
+extend these decisions and take precedence where their details differ.
 
 The Phase 14 provider extends the existing independent
 `artwork/mpc-provider.ts` implementation. `ArtworkCatalog`, its generic

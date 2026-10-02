@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "provider": "mpc",
+  "synthetic": true,
+  "method": "deterministic request-count planning using provider hydration chunk size, candidate dedupe, batch concurrency, and remote semaphore limits",
+  "network": false,
+  "elapsedTimeGate": false,
+  "scenarios": [
+    { "name": "one-identity", "identities": 1, "resultIdsPerIdentity": 8, "hydrationRequests": 1, "hydrationBatches": 1, "candidateCacheHits": 0, "peakConcurrencyLimit": 4 },
+    { "name": "ten-identities", "identities": 10, "resultIdsPerIdentity": 8, "hydrationRequests": 10, "hydrationBatches": 10, "candidateCacheHits": 0, "peakConcurrencyLimit": 4 },
+    { "name": "one-hundred-identities", "identities": 100, "resultIdsPerIdentity": 8, "hydrationRequests": 100, "hydrationBatches": 100, "candidateCacheHits": 0, "peakConcurrencyLimit": 4 },
+    { "name": "one-hundred-candidates-twenty-unique-assets", "candidateReferences": 100, "uniqueProviderAssetIds": 20, "hydrationRequests": 1, "duplicatesAvoided": 80, "hydrationBatches": 1, "batchConcurrencyLimit": 3 },
+    { "name": "search-and-candidate-metadata-all-cached", "identities": 1, "searchCacheHits": 1, "candidateMetadataCacheHits": 8, "hydrationRequests": 0, "hydrationBatches": 0 },
+    { "name": "mixed-local-cache-and-remote-metadata", "candidateReferences": 16, "uniqueProviderAssetIds": 16, "locallyValidatedOriginals": 8, "metadataRefreshStillRequired": 16, "hydrationRequests": 1, "hydrationBatches": 1 }
+  ],
+  "limits": { "hydrationChunkSize": 20, "batchConcurrency": 3, "providerRequestConcurrency": 4 }
+}

@@ -45,6 +45,7 @@ async function setup(fetchImpl: typeof fetch, options: { timeoutMs?: number; max
     metadata,
     repository,
     timeoutMs: options.timeoutMs ?? 100,
+    waitForRetry: async () => undefined,
     ...(options.maxOriginalBytes !== undefined ? { maxOriginalBytes: options.maxOriginalBytes } : {}),
   });
   return { database, provider: createProvider(), createProvider, originals, thumbnails, metadata, repository, paths };
@@ -824,7 +825,7 @@ describe("MPC artwork provider", () => {
 
     expect(candidates).toMatchObject([{ id: mpcArtworkCandidateId("xml-import-id", "front"), originalAvailable: true }]);
     expect(provider.getHealth()).toMatchObject({ available: false, degraded: true });
-    expect(requests).toEqual(["/2/sources/", "/2/cards/", "/3/editorSearch/"]);
+    expect(requests).toEqual(["/2/sources/", "/2/cards/", "/3/editorSearch/", "/3/editorSearch/", "/3/editorSearch/"]);
     database.close();
   });
 

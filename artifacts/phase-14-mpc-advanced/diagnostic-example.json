@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "provider": "mpc",
+  "health": { "available": true, "degraded": true, "lastSuccessfulAt": "2026-10-03T00:00:05.000Z", "lastSuccessfulContactAt": "2026-10-03T00:00:00.000Z", "lastFailureType": "rate-limited" },
+  "capabilities": {
+    "search": true,
+    "preview": true,
+    "original": true,
+    "filters": { "dpi": true, "sources": true, "tags": true, "languages": false },
+    "protocol": { "confirmedVersion": "v2", "v3Available": false, "fallbackV2Used": true }
+  },
+  "metrics": {
+    "catalogCounts": { "sources": 2, "languages": 0, "tags": 3 },
+    "searchCache": { "hits": 4, "misses": 8 },
+    "candidateMetadataCache": { "hits": 12, "misses": 2 },
+    "thumbnailCache": { "hits": 3, "misses": 1 },
+    "originalCache": { "hits": 1, "misses": 1 },
+    "inFlightRequests": { "api": 0, "images": 0 },
+    "remoteConcurrency": { "limit": 4, "active": 0, "peak": 3 },
+    "remoteRequestCount": 17,
+    "negativeSearchCacheHits": 1,
+    "negativeSearchCacheWrites": 1,
+    "timeouts": 1,
+    "httpStatusSummary": { "200": 14, "429": 2, "503": 1 },
+    "protocolFailures": 0,
+    "rateLimits": 2,
+    "omittedHydrationCount": 1,
+    "hydrationBatchCount": 3,
+    "revalidation": { "batches": 1, "candidates": 20, "outcomes": { "unchanged": 16, "metadata-updated": 2, "remote-unavailable": 2 } }
+  },
+  "recentFailures": [
+    { "at": "2026-10-03T00:00:00.000Z", "kind": "rate-limited", "status": 429 },
+    { "at": "2026-10-02T23:59:00.000Z", "kind": "timeout" }
+  ]
+}

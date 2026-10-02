@@ -7,6 +7,9 @@ import {
   handleArtworkList,
   handleArtworkPreview,
   handleArtworkPrepare,
+  handleMpcArtworkBatchRevalidation,
+  handleMpcArtworkDiagnosticsReport,
+  handleMpcArtworkRefresh,
   handleAutocomplete,
   handleCardSearch,
   handleCardExport,
@@ -23,6 +26,7 @@ import { BleedEngine } from "../../image-engine/bleed";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 import { ScryfallError } from "../../providers/scryfall/errors";
 import { FULL_TRIM_GUIDES, NO_CUT_GUIDES } from "../helpers/cut-guides";
+import { MpcArtworkProviderError } from "../../artwork/mpc-provider";
 import { openProjectDatabase } from "../../persistence/projects/database";
 import { ProjectRepository } from "../../persistence/projects/repository";
 import { DEFAULT_PROJECT_SETTINGS, deserializeProjectSnapshot, serializeProjectSnapshot } from "../../persistence/projects/serializer";
@@ -570,6 +574,31 @@ describe("card APIs", () => {
     expect(body.candidates[0]).toMatchObject({ source: "mpc", originalAvailable: true, originalCached: false, metadata: { localAvailabilityHint: true } });
   });
 
+  it("keeps providerRank and freshness while excluding upstream URLs and free-form MPC text from candidate DTOs", async () => {
+    const mpcCandidate: ArtworkCandidate = {
+      ...candidate,
+      id: `mpc:${"a".repeat(64)}`,
+      source: "mpc",
+      originalAvailable: true,
+      metadata: {
+        providerRank: 2,
+        metadataFreshness: "revalidated",
+        sourceName: "https://private.example/?token=secret",
+        name: "https://private.example/art.png",
+        canonicalArtist: { name: "https://private.example/artist" },
+        extension: "png",
+      },
+    };
+    const workbench = testWorkbench({ listArtworkCandidates: vi.fn(async () => [mpcCandidate]) });
+    const response = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", { faceId: "front", source: "mpc" }), identity.id, workbench);
+    const body = await response.json();
+    const serialized = JSON.stringify(body);
+
+    expect(body).toMatchObject({ candidates: [{ metadata: { providerRank: 2, metadataFreshness: "revalidated", extension: "png" } }] });
+    expect(serialized).not.toContain("private.example");
+    expect(serialized).not.toContain("token=secret");
+  });
+
   it("normalizes the TCGPrint MPC filter contract at the artwork API and rejects raw MPC search payloads", async () => {
     const listArtworkCandidates = vi.fn(async () => []);
     const workbench = testWorkbench({ listArtworkCandidates });
@@ -587,6 +616,54 @@ describe("card APIs", () => {
     }), identity.id, workbench);
     expect(unsafe.status).toBe(400);
     expect(await unsafe.json()).toMatchObject({ code: "INVALID_MPC_FILTERS" });
+  });
+
+  it("passes an explicit MPC search refresh through the API without changing artwork selection", async () => {
+    const listArtworkCandidates = vi.fn(async () => [candidate]);
+    const workbench = testWorkbench({ listArtworkCandidates });
+    const response = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", {
+      faceId: "front", source: "mpc", forceMpcRefresh: true,
+    }), identity.id, workbench);
+
+    expect(response.status).toBe(200);
+    expect(listArtworkCandidates).toHaveBeenCalledWith(identity.id, "front", "mpc", expect.objectContaining({ forceMpcRefresh: true }));
+    expect(card.selectedArtworkByFace.front?.candidateId).toBe(candidateId);
+  });
+
+  it("returns bounded structured MPC batch revalidation results and rejects oversized input", async () => {
+    const ids = [`mpc:${"a".repeat(64)}`, `mpc:${"b".repeat(64)}`];
+    const result = { candidateId: ids[0]!, providerAssetId: "asset-id-123456", status: "metadata-updated", localOriginal: "valid", candidate };
+    const revalidateMpcArtworkCandidates = vi.fn(async () => [result]);
+    const workbench = testWorkbench({ revalidateMpcArtworkCandidates });
+
+    const response = await handleMpcArtworkBatchRevalidation(jsonRequest("http://localhost/api/cards/artworks/mpc-revalidation", { candidateIds: ids }), workbench);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ results: [{ candidateId: ids[0], providerAssetId: "asset-id-123456", status: "metadata-updated", localOriginal: "valid" }] });
+    expect(revalidateMpcArtworkCandidates).toHaveBeenCalledWith(ids, expect.anything());
+
+    const tooMany = await handleMpcArtworkBatchRevalidation(jsonRequest("http://localhost/api/cards/artworks/mpc-revalidation", { candidateIds: Array.from({ length: 501 }, () => ids[0]) }), workbench);
+    expect(tooMany.status).toBe(400);
+  });
+
+  it("maps MPC HTTP 429 to a safe rate-limit response and provides a safe diagnostics report", async () => {
+    const mpcDiagnostic = {
+      available: false, degraded: true, lastProtocolConfirmed: null, v3Available: null, fallbackV2Used: false,
+      lastFailureType: "rate-limited", catalogCaches: { sources: { state: "empty" }, languages: { state: "empty" }, tags: { state: "empty" } },
+      searchCacheHits: 0, searchCacheMisses: 0,
+      capabilities: { search: false, preview: false, original: false, filters: { dpi: false, sources: false, tags: false, languages: false }, protocol: { confirmedVersion: null, v3Available: null, fallbackV2Used: false } },
+      metrics: { candidateMetadataCache: { hits: 0, misses: 0 }, thumbnailCache: { hits: 0, misses: 0 }, originalCache: { hits: 0, misses: 0 }, inFlightRequests: { api: 0, images: 0 }, remoteRequestCount: 1, negativeSearchCacheHits: 0, negativeSearchCacheWrites: 0, timeouts: 0, httpStatusSummary: { "429": 1 }, protocolFailures: 0, rateLimits: 1, omittedHydrationCount: 0, hydrationBatchCount: 0, revalidation: { batches: 0, candidates: 0, outcomes: {} } },
+      recentFailures: [{ at: new Date(0).toISOString(), kind: "rate-limited", status: 429 }],
+    } as const;
+    const workbench = testWorkbench({ getMpcArtworkProviderDiagnostic: () => mpcDiagnostic });
+
+    const mapped = await handleMpcArtworkRefresh(new Request("http://localhost", { method: "POST" }), `mpc:${"a".repeat(64)}`, testWorkbench({ refreshMpcArtworkCandidate: vi.fn(async () => { throw new MpcArtworkProviderError("rate-limited", "https://private.example/?token=secret", 429); }) }));
+    expect(mapped.status).toBe(429);
+    expect(await mapped.json()).toMatchObject({ code: "MPC_RATE_LIMITED", message: "MPC artwork service is rate limited. Try again shortly." });
+    const report = await handleMpcArtworkDiagnosticsReport(workbench);
+    const body = await report.json();
+    expect(body).toMatchObject({ schemaVersion: 1, provider: "mpc", health: { degraded: true } });
+    expect(JSON.stringify(body)).not.toContain("private.example");
+    expect(JSON.stringify(body)).not.toContain("secret");
   });
 
   it("includes MPC source-face back references in a simple card's physical-back catalog", async () => {

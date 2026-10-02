@@ -13,6 +13,7 @@ import { MpcArtworkFilterValidationError, normalizeMpcArtworkFilters, validateMp
 import type { MpcArtworkFilterInput, MpcArtworkFilters, MpcFilterCatalogs, MpcLanguageOption, MpcSourceOption, MpcTagOption } from "./mpc-contract";
 import { buildMpcSearchCacheKey } from "./mpc-cache-key";
 import { rankMpcCandidates } from "./mpc-ranking";
+import { createBoundedSemaphore, createCoalescedRequestRegistry, mapConcurrent } from "./mpc-request-coalescer";
 
 const API_BASE_URL = "https://mpcfill.com";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -23,9 +24,71 @@ const SVG_PDF_VALIDATION_VERSION = 1;
 const THUMBNAIL_HOSTS = new Set(["drive.google.com", "lh3.googleusercontent.com", "lh4.googleusercontent.com"]);
 const ORIGINAL_HOSTS = new Set(["drive.google.com", "drive.usercontent.google.com"]);
 const API_HOSTS = new Set(["mpcfill.com"]);
+export const MPC_HYDRATION_CHUNK_SIZE = 20;
+export const MPC_MAX_BATCH_CANDIDATES = 500;
+export const MPC_BATCH_CONCURRENCY = 3;
+export const MPC_REMOTE_CONCURRENCY = 4;
+const EMPTY_SEARCH_TTL_MS = 30_000;
+const MAX_RETRY_AFTER_MS = 2_000;
+const MAX_COUNTER = 1_000_000;
+const MAX_RECENT_FAILURES = 20;
+
+export interface MpcProviderCapabilities {
+  readonly search: boolean;
+  readonly preview: boolean;
+  readonly original: boolean;
+  readonly filters: {
+    readonly dpi: boolean;
+    readonly sources: boolean;
+    readonly tags: boolean;
+    readonly languages: boolean;
+  };
+  readonly protocol: {
+    readonly confirmedVersion: "v2" | "v3" | null;
+    readonly v3Available: boolean | null;
+    readonly fallbackV2Used: boolean;
+  };
+}
+
+export type MpcRevalidationStatus = "unchanged" | "metadata-updated" | "remote-missing" | "remote-unavailable" | "local-original-valid" | "local-original-corrupt" | "unsupported";
+export type MpcRevalidationFailureKind = "rate-limited" | "timeout" | "network" | "http" | "protocol" | "unsafe-source";
+
+export interface MpcCandidateRevalidationResult {
+  readonly candidateId: string;
+  readonly providerAssetId?: string;
+  readonly status: MpcRevalidationStatus;
+  readonly localOriginal: "valid" | "corrupt" | "missing" | "unknown";
+  readonly failureKind?: MpcRevalidationFailureKind;
+  readonly candidate?: ArtworkCandidate;
+}
+
+export interface MpcArtworkProviderMetrics {
+  readonly catalogCounts: { readonly sources: number; readonly languages: number; readonly tags: number };
+  readonly candidateMetadataCache: { readonly hits: number; readonly misses: number };
+  readonly thumbnailCache: { readonly hits: number; readonly misses: number };
+  readonly originalCache: { readonly hits: number; readonly misses: number };
+  readonly inFlightRequests: { readonly api: number; readonly images: number };
+  readonly remoteConcurrency: { readonly limit: number; readonly active: number; readonly peak: number };
+  readonly remoteRequestCount: number;
+  readonly negativeSearchCacheHits: number;
+  readonly negativeSearchCacheWrites: number;
+  readonly timeouts: number;
+  readonly httpStatusSummary: Readonly<Record<string, number>>;
+  readonly protocolFailures: number;
+  readonly rateLimits: number;
+  readonly omittedHydrationCount: number;
+  readonly hydrationBatchCount: number;
+  readonly revalidation: { readonly batches: number; readonly candidates: number; readonly outcomes: Readonly<Partial<Record<MpcRevalidationStatus, number>>> };
+}
+
+export interface MpcDiagnosticFailure {
+  readonly at: string;
+  readonly kind: string;
+  readonly status?: number;
+}
 
 export class MpcArtworkProviderError extends Error {
-  constructor(readonly kind: "http" | "protocol" | "unsafe-source" | "invalid-image" | "unsupported-format" | "asset-too-large" | "timeout" | "aborted" | "network", message: string, readonly status?: number) {
+  constructor(readonly kind: "http" | "rate-limited" | "protocol" | "unsafe-source" | "invalid-image" | "unsupported-format" | "asset-too-large" | "timeout" | "aborted" | "network", message: string, readonly status?: number, readonly retryAfterMs?: number) {
     super(message);
     this.name = "MpcArtworkProviderError";
   }
@@ -37,6 +100,7 @@ export interface MpcArtworkProviderOptions {
   readonly timeoutMs?: number;
   readonly maxOriginalBytes?: number;
   readonly searchLimit?: number;
+  readonly waitForRetry?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   readonly originals: ArtworkOriginalStore;
   readonly thumbnails: ArtworkThumbnailStore;
   readonly metadata: ArtworkMetadataCache;
@@ -53,6 +117,7 @@ interface SourceRecord { readonly pk: number; readonly sourceType: "Google Drive
 
 export interface MpcAdvancedArtworkSearchOptions extends ArtworkSearchOptions {
   readonly filters?: MpcArtworkFilterInput;
+  readonly forceRefresh?: boolean;
 }
 
 export interface MpcCatalogCacheDiagnostic {
@@ -68,10 +133,14 @@ export interface MpcArtworkProviderDiagnostic {
   readonly fallbackV2Used: boolean;
   readonly lastSuccessfulOperation?: "search" | "catalog-refresh" | "metadata-refresh" | "thumbnail" | "original";
   readonly lastSuccessfulAt?: string;
+  readonly lastSuccessfulContactAt?: string;
   readonly lastFailureType?: string;
   readonly catalogCaches: Readonly<Record<"sources" | "languages" | "tags", MpcCatalogCacheDiagnostic>>;
   readonly searchCacheHits: number;
   readonly searchCacheMisses: number;
+  readonly capabilities: MpcProviderCapabilities;
+  readonly metrics: MpcArtworkProviderMetrics;
+  readonly recentFailures: readonly MpcDiagnosticFailure[];
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -125,7 +194,7 @@ function verifiedSources(payload: unknown): SourceRecord[] {
 function safeCatalogText(value: unknown, maximum = 120): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.normalize("NFC").trim();
-  return normalized && normalized.length <= maximum && !/[\u0000-\u001f\u007f]/u.test(normalized) ? normalized : undefined;
+  return normalized && normalized.length <= maximum && !/[\u0000-\u001f\u007f]/u.test(normalized) && !/^https?:\/\//i.test(normalized) ? normalized : undefined;
 }
 
 function catalogArray(payload: unknown, key: string): unknown[] {
@@ -334,6 +403,57 @@ interface RequestScope {
   close(): void;
 }
 
+function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new MpcArtworkProviderError("aborted", "The MPC request was cancelled."));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(new MpcArtworkProviderError("aborted", "The MPC request was cancelled."));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function retryAfterMilliseconds(value: string | null, now = Date.now()): number | undefined {
+  if (!value || value.length > 128) return undefined;
+  const trimmed = value.trim();
+  const seconds = /^\d{1,8}$/.test(trimmed) ? Number(trimmed) * 1000 : Date.parse(trimmed) - now;
+  if (!Number.isFinite(seconds) || seconds < 0) return undefined;
+  return Math.min(MAX_RETRY_AFTER_MS, Math.floor(seconds));
+}
+
+function retryable(error: MpcArtworkProviderError): boolean {
+  return error.kind === "rate-limited" || error.kind === "network" || (error.kind === "http" && (error.status ?? 0) >= 500);
+}
+
+function safeFailureKind(error: unknown): string {
+  if (error instanceof MpcArtworkProviderError) return error.kind;
+  if (error instanceof ArtworkStorageError) return "storage";
+  return "protocol";
+}
+
+function revalidationFailureKind(error: unknown): MpcRevalidationFailureKind {
+  const kind = safeFailureKind(error);
+  return ["rate-limited", "timeout", "network", "http", "protocol", "unsafe-source"].includes(kind)
+    ? kind as MpcRevalidationFailureKind
+    : "protocol";
+}
+
+function increment(current: number): number { return Math.min(MAX_COUNTER, current + 1); }
+
+export function planMpcHydrationBatches(assetIds: readonly string[]): readonly (readonly string[])[] {
+  if (assetIds.length > MPC_MAX_BATCH_CANDIDATES) throw new MpcArtworkProviderError("protocol", "MPC hydration exceeds its bounded asset limit.");
+  const uniqueIds = [...new Set(assetIds)];
+  const chunks: string[][] = [];
+  for (let offset = 0; offset < uniqueIds.length; offset += MPC_HYDRATION_CHUNK_SIZE) chunks.push(uniqueIds.slice(offset, offset + MPC_HYDRATION_CHUNK_SIZE));
+  return chunks;
+}
+
 function createRequestScope(parentSignal: AbortSignal | undefined, timeoutMs: number): RequestScope {
   if (parentSignal?.aborted) throw new MpcArtworkProviderError("aborted", "The MPC request was cancelled.");
   const controller = new AbortController();
@@ -403,6 +523,10 @@ export class MpcArtworkProvider implements ArtworkProvider {
   private readonly thumbnails: ArtworkThumbnailStore;
   private readonly metadata: ArtworkMetadataCache;
   private readonly repository: ArtworkRepository;
+  private readonly waitForRetry: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  private readonly apiRequests = createCoalescedRequestRegistry<{ readonly status: number; readonly payload?: unknown }>();
+  private readonly imageRequests = createCoalescedRequestRegistry<{ readonly status: number; readonly headers: Headers; readonly bytes: Uint8Array }>();
+  private readonly remoteSemaphore = createBoundedSemaphore(MPC_REMOTE_CONCURRENCY);
   private health: ProviderHealth = { available: true, degraded: false };
   private readonly catalogStates: Record<"sources" | "languages" | "tags", MpcCatalogCacheDiagnostic> = {
     sources: { state: "empty" }, languages: { state: "empty" }, tags: { state: "empty" },
@@ -412,10 +536,35 @@ export class MpcArtworkProvider implements ArtworkProvider {
   private fallbackV2Used = false;
   private lastSuccessfulOperation: MpcArtworkProviderDiagnostic["lastSuccessfulOperation"];
   private lastSuccessfulAt: string | undefined;
+  private lastSuccessfulContactAt: string | undefined;
   private lastFailureType: string | undefined;
   private searchCacheHits = 0;
   private searchCacheMisses = 0;
   private catalogDegraded = false;
+  private hasConfirmedSearch = false;
+  private hasPreview = false;
+  private hasOriginal = false;
+  private hasSourcesCatalog = false;
+  private hasLanguagesCatalog = false;
+  private hasTagsCatalog = false;
+  private readonly metricState = {
+    catalogCounts: { sources: 0, languages: 0, tags: 0 },
+    candidateMetadataCache: { hits: 0, misses: 0 },
+    thumbnailCache: { hits: 0, misses: 0 },
+    originalCache: { hits: 0, misses: 0 },
+    remoteRequestCount: 0,
+    negativeSearchCacheHits: 0,
+    negativeSearchCacheWrites: 0,
+    timeouts: 0,
+    httpStatusSummary: {} as Record<string, number>,
+    protocolFailures: 0,
+    rateLimits: 0,
+    omittedHydrationCount: 0,
+    hydrationBatchCount: 0,
+    revalidation: { batches: 0, candidates: 0, outcomes: {} as Partial<Record<MpcRevalidationStatus, number>> },
+  };
+  private recentFailures: MpcDiagnosticFailure[] = [];
+  private readonly recordedFailures = new WeakSet<object>();
 
   constructor(options: MpcArtworkProviderOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -426,6 +575,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.maximumOriginalBytes = Math.max(1, options.maxOriginalBytes ?? DEFAULT_MAX_ORIGINAL_BYTES);
     this.searchLimit = Math.min(30, Math.max(1, options.searchLimit ?? 30));
+    this.waitForRetry = options.waitForRetry ?? abortableDelay;
     this.originals = options.originals;
     this.thumbnails = options.thumbnails;
     this.metadata = options.metadata;
@@ -445,6 +595,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
       fallbackV2Used: this.fallbackV2Used,
       ...(this.lastSuccessfulOperation ? { lastSuccessfulOperation: this.lastSuccessfulOperation } : {}),
       ...(this.lastSuccessfulAt ? { lastSuccessfulAt: this.lastSuccessfulAt } : {}),
+      ...(this.lastSuccessfulContactAt ? { lastSuccessfulContactAt: this.lastSuccessfulContactAt } : {}),
       ...(this.lastFailureType ? { lastFailureType: this.lastFailureType } : {}),
       catalogCaches: {
         sources: { ...this.catalogStates.sources },
@@ -453,6 +604,45 @@ export class MpcArtworkProvider implements ArtworkProvider {
       },
       searchCacheHits: this.searchCacheHits,
       searchCacheMisses: this.searchCacheMisses,
+      capabilities: this.getCapabilities(),
+      metrics: {
+        catalogCounts: { ...this.metricState.catalogCounts },
+        candidateMetadataCache: { ...this.metricState.candidateMetadataCache },
+        thumbnailCache: { ...this.metricState.thumbnailCache },
+        originalCache: { ...this.metricState.originalCache },
+        inFlightRequests: { api: this.apiRequests.size, images: this.imageRequests.size },
+        remoteConcurrency: { limit: this.remoteSemaphore.limit, active: this.remoteSemaphore.active, peak: this.remoteSemaphore.peak },
+        remoteRequestCount: this.metricState.remoteRequestCount,
+        negativeSearchCacheHits: this.metricState.negativeSearchCacheHits,
+        negativeSearchCacheWrites: this.metricState.negativeSearchCacheWrites,
+        timeouts: this.metricState.timeouts,
+        httpStatusSummary: { ...this.metricState.httpStatusSummary },
+        protocolFailures: this.metricState.protocolFailures,
+        rateLimits: this.metricState.rateLimits,
+        omittedHydrationCount: this.metricState.omittedHydrationCount,
+        hydrationBatchCount: this.metricState.hydrationBatchCount,
+        revalidation: { ...this.metricState.revalidation, outcomes: { ...this.metricState.revalidation.outcomes } },
+      },
+      recentFailures: this.recentFailures.map((failure) => ({ ...failure })),
+    };
+  }
+
+  getCapabilities(): MpcProviderCapabilities {
+    return {
+      search: this.hasConfirmedSearch,
+      preview: this.hasPreview,
+      original: this.hasOriginal,
+      filters: {
+        dpi: this.hasConfirmedSearch,
+        sources: this.hasSourcesCatalog,
+        tags: this.hasTagsCatalog,
+        languages: this.hasLanguagesCatalog,
+      },
+      protocol: {
+        confirmedVersion: this.lastProtocolConfirmed,
+        v3Available: this.v3Available,
+        fallbackV2Used: this.fallbackV2Used,
+      },
     };
   }
 
@@ -462,11 +652,23 @@ export class MpcArtworkProvider implements ArtworkProvider {
     this.health = { available: true, degraded: false };
   }
 
+  private recordSuccessfulRemoteContact(): void {
+    this.lastSuccessfulContactAt = new Date().toISOString();
+  }
+
   private degrade(error: unknown): void {
     const type = error instanceof MpcArtworkProviderError ? error.kind
       : error instanceof ArtworkStorageError ? "storage"
         : "protocol";
     this.lastFailureType = type;
+    const failure = error instanceof MpcArtworkProviderError ? error : undefined;
+    if (error && typeof error === "object" && !this.recordedFailures.has(error)) {
+      this.recordedFailures.add(error);
+      if (type === "timeout") this.metricState.timeouts = increment(this.metricState.timeouts);
+      if (type === "protocol") this.metricState.protocolFailures = increment(this.metricState.protocolFailures);
+      this.recentFailures.push({ at: new Date().toISOString(), kind: type, ...(failure?.status ? { status: failure.status } : {}) });
+      if (this.recentFailures.length > MAX_RECENT_FAILURES) this.recentFailures.splice(0, this.recentFailures.length - MAX_RECENT_FAILURES);
+    }
     // Never publish upstream text, URLs, or arbitrary error messages through
     // MPC health. Provider-specific diagnostics expose a bounded enum only.
     this.health = { available: false, degraded: true, message: "MPC artwork provider is temporarily degraded." };
@@ -491,86 +693,214 @@ export class MpcArtworkProvider implements ArtworkProvider {
   }
 
   async refreshCandidate(id: string, signal?: AbortSignal): Promise<ArtworkCandidate | undefined> {
-    if (!/^mpc:[a-f0-9]{64}$/.test(id)) return undefined;
+    const result = (await this.revalidateCandidates([id], signal))[0];
+    return result?.candidate;
+  }
+
+  async revalidateCandidates(ids: readonly string[], signal?: AbortSignal): Promise<readonly MpcCandidateRevalidationResult[]> {
+    if (ids.length > MPC_MAX_BATCH_CANDIDATES) throw new MpcArtworkProviderError("protocol", "MPC revalidation batch exceeds its bounded candidate limit.");
     if (signal?.aborted) throw new MpcArtworkProviderError("aborted", "The MPC metadata refresh was cancelled.");
-    const snapshot = this.metadata.getMetadataSnapshot<StoredCandidate>(candidateKey(id));
-    const stored = snapshot?.value;
-    if (!stored?.candidate.providerAssetId || !validAssetId(stored.candidate.providerAssetId)) return undefined;
-    const assetId = stored.candidate.providerAssetId;
-    const sources = await this.sources(signal);
-    const verifiedSourceIds = new Set(sources.map(({ pk }) => pk));
-    const response = await this.apiJson("/2/cards/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cardIdentifiers: [assetId] }),
-    }, signal);
-    let documents: Record<string, unknown>[];
-    try { documents = cardItems(response.payload, new Set([assetId])); }
-    catch (error) { this.degrade(error); throw error; }
-    const document = documents.find((item) => item.identifier === assetId);
-    const metadataCheckedAt = new Date().toISOString();
-    if (!document) {
-      const refreshed: StoredCandidate = {
-        ...stored,
-        candidate: {
-          ...stored.candidate,
-          originalAvailable: Boolean(stored.candidate.originalCached),
-          metadata: { ...stored.candidate.metadata, remoteMetadataStatus: "removed", metadataCheckedAt },
-        },
-      };
-      this.metadata.putMetadata(candidateKey(id), refreshed, Date.now() + CANDIDATE_TTL_MS);
-      this.operationSucceeded("metadata-refresh");
-      return await this.getCandidate(id) ?? refreshed.candidate;
+    const uniqueIds = [...new Set(ids)].slice(0, MPC_MAX_BATCH_CANDIDATES);
+    const storedById = new Map<string, StoredCandidate>();
+    const resultById = new Map<string, MpcCandidateRevalidationResult>();
+    const groups = new Map<string, string[]>();
+    for (const id of uniqueIds) {
+      if (!/^mpc:[a-f0-9]{64}$/.test(id)) {
+        resultById.set(id, { candidateId: id, status: "unsupported", localOriginal: "unknown" });
+        continue;
+      }
+      const stored = this.metadata.getMetadataSnapshot<StoredCandidate>(candidateKey(id))?.value;
+      const assetId = stored?.candidate.providerAssetId;
+      if (!stored || !assetId || !validAssetId(assetId)) {
+        resultById.set(id, { candidateId: id, status: "unsupported", localOriginal: "unknown" });
+        continue;
+      }
+      storedById.set(id, stored);
+      const group = groups.get(assetId) ?? [];
+      group.push(id);
+      groups.set(assetId, group);
     }
-    const identityId = stored.candidate.identityId ?? "local:mpc-refresh";
-    const identity: CardIdentity = {
-      id: identityId,
-      provider: identityId.startsWith("scryfall:") ? "scryfall" : "local",
-      name: typeof stored.candidate.metadata?.name === "string" ? stored.candidate.metadata.name : "MPC artwork",
-      resolutionMethod: "custom",
-      confidence: 0,
-    };
-    let updated: StoredCandidate | undefined;
-    try { updated = this.candidateFromCard(document, identity, stored.candidate.faceId === "back" ? "back" : "front", verifiedSourceIds); }
+    if (groups.size > MPC_MAX_BATCH_CANDIDATES) throw new MpcArtworkProviderError("protocol", "MPC revalidation batch exceeds its bounded unique-asset limit.");
+
+    const assets = [...groups.keys()];
+    const localStates = new Map<string, MpcCandidateRevalidationResult["localOriginal"]>();
+    await mapConcurrent([...storedById.entries()], MPC_BATCH_CONCURRENCY, async ([id, stored]) => {
+      try { localStates.set(id, await this.localOriginalState(stored.candidate)); }
+      catch (error) { this.degrade(error); localStates.set(id, "unknown"); }
+    });
+    if (signal?.aborted) throw new MpcArtworkProviderError("aborted", "The MPC metadata refresh was cancelled.");
+    if (!assets.length) return uniqueIds.map((id) => resultById.get(id)!).filter(Boolean);
+
+    this.metricState.revalidation.batches = increment(this.metricState.revalidation.batches);
+    this.metricState.revalidation.candidates = Math.min(MAX_COUNTER, this.metricState.revalidation.candidates + uniqueIds.length);
+    let sources: SourceRecord[];
+    try { sources = await this.sources(signal); }
     catch (error) {
-      this.degrade(error);
-      const retained: StoredCandidate = {
-        ...stored,
-        candidate: {
-          ...stored.candidate,
-          originalAvailable: Boolean(stored.candidate.originalCached),
-          metadata: { ...stored.candidate.metadata, remoteMetadataStatus: "invalid", metadataCheckedAt },
-        },
-      };
-      this.metadata.putMetadata(candidateKey(id), retained, Date.now() + CANDIDATE_TTL_MS);
-      return await this.getCandidate(id) ?? retained.candidate;
+      if (isCancellation(error, signal)) throw error;
+      for (const [id, stored] of storedById) {
+        resultById.set(id, { candidateId: id, providerAssetId: stored.candidate.providerAssetId, status: "remote-unavailable", localOriginal: localStates.get(id) ?? "unknown", failureKind: revalidationFailureKind(error), candidate: stored.candidate });
+        this.recordRevalidationOutcome("remote-unavailable");
+      }
+      return uniqueIds.map((id) => resultById.get(id)!).filter(Boolean);
     }
-    if (!updated) {
-      const retained: StoredCandidate = {
-        ...stored,
-        candidate: { ...stored.candidate, originalAvailable: Boolean(stored.candidate.originalCached), metadata: { ...stored.candidate.metadata, remoteMetadataStatus: "unsupported", metadataCheckedAt } },
-      };
-      this.metadata.putMetadata(candidateKey(id), retained, Date.now() + CANDIDATE_TTL_MS);
-      this.operationSucceeded("metadata-refresh");
-      return await this.getCandidate(id) ?? retained.candidate;
+    const verifiedSourceIds = new Set(sources.map(({ pk }) => pk));
+    const hydration = await this.hydrateCards(assets, signal);
+    for (const assetId of assets) {
+        const candidateIds = groups.get(assetId) ?? [];
+        const document = hydration.byId.get(assetId);
+        for (const id of candidateIds) {
+          const stored = storedById.get(id)!;
+          const localOriginal = localStates.get(id) ?? "unknown";
+          const failureKind = hydration.failedAssets.get(assetId);
+          if (failureKind) {
+            resultById.set(id, { candidateId: id, providerAssetId: assetId, status: "remote-unavailable", localOriginal, failureKind: ["rate-limited", "timeout", "network", "http", "protocol", "unsafe-source"].includes(failureKind) ? failureKind as MpcRevalidationFailureKind : "protocol", candidate: stored.candidate });
+            this.recordRevalidationOutcome("remote-unavailable");
+            continue;
+          }
+          if (!document) {
+            const metadataCheckedAt = new Date().toISOString();
+            const refreshed: StoredCandidate = {
+              ...stored,
+              candidate: {
+                ...stored.candidate,
+                originalAvailable: localOriginal === "valid" || Boolean(stored.candidate.originalCached),
+                originalCached: localOriginal === "valid",
+                metadata: { ...stored.candidate.metadata, remoteMetadataStatus: "removed", metadataFreshness: "revalidated", metadataCheckedAt },
+              },
+            };
+            this.metadata.putMetadata(candidateKey(id), refreshed, Date.now() + CANDIDATE_TTL_MS);
+            const candidate = await this.getCandidate(id) ?? refreshed.candidate;
+            resultById.set(id, { candidateId: id, providerAssetId: assetId, status: "remote-missing", localOriginal, candidate });
+            this.recordRevalidationOutcome("remote-missing");
+            continue;
+          }
+          const identityId = stored.candidate.identityId ?? "local:mpc-refresh";
+          const identity: CardIdentity = {
+            id: identityId,
+            provider: identityId.startsWith("scryfall:") ? "scryfall" : "local",
+            name: typeof stored.candidate.metadata?.name === "string" ? stored.candidate.metadata.name : "MPC artwork",
+            resolutionMethod: "custom",
+            confidence: 0,
+          };
+          let updated: StoredCandidate | undefined;
+          try {
+            updated = this.candidateFromCard(document, identity, stored.candidate.faceId === "back" ? "back" : "front", verifiedSourceIds);
+          } catch (error) {
+            this.degrade(error);
+            resultById.set(id, { candidateId: id, providerAssetId: assetId, status: "remote-unavailable", localOriginal, failureKind: revalidationFailureKind(error), candidate: stored.candidate });
+            this.recordRevalidationOutcome("remote-unavailable");
+            continue;
+          }
+          if (!updated) {
+            const metadataCheckedAt = new Date().toISOString();
+            const retained: StoredCandidate = {
+              ...stored,
+              candidate: { ...stored.candidate, originalAvailable: localOriginal === "valid", originalCached: localOriginal === "valid", metadata: { ...stored.candidate.metadata, remoteMetadataStatus: "unsupported", metadataFreshness: "revalidated", metadataCheckedAt } },
+            };
+            this.metadata.putMetadata(candidateKey(id), retained, Date.now() + CANDIDATE_TTL_MS);
+            const candidate = await this.getCandidate(id) ?? retained.candidate;
+            resultById.set(id, { candidateId: id, providerAssetId: assetId, status: "unsupported", localOriginal, candidate });
+            this.recordRevalidationOutcome("unsupported");
+            continue;
+          }
+          const metadataCheckedAt = new Date().toISOString();
+          const providerRank = stored.candidate.metadata?.providerRank;
+          const merged: StoredCandidate = {
+            ...updated,
+            candidate: {
+              ...updated.candidate,
+              id,
+              identityId: stored.candidate.identityId,
+              ...(stored.candidate.selectedArtworkId ? { selectedArtworkId: stored.candidate.selectedArtworkId } : {}),
+              originalCached: localOriginal === "valid",
+              metadata: {
+                ...updated.candidate.metadata,
+                ...(typeof providerRank === "number" ? { providerRank } : {}),
+                remoteMetadataStatus: "current",
+                metadataFreshness: "revalidated",
+                metadataCheckedAt,
+              },
+            },
+          };
+          const metadataChanged = this.remoteMetadataChanged(stored.candidate.metadata, merged.candidate.metadata);
+          this.metadata.putMetadata(candidateKey(id), merged, Date.now() + CANDIDATE_TTL_MS);
+          const candidate = await this.getCandidate(id) ?? merged.candidate;
+          const status: MpcRevalidationStatus = localOriginal === "corrupt" && !metadataChanged ? "local-original-corrupt" : localOriginal === "valid" && !metadataChanged ? "local-original-valid" : metadataChanged ? "metadata-updated" : "unchanged";
+          resultById.set(id, { candidateId: id, providerAssetId: assetId, status, localOriginal, candidate });
+          this.recordRevalidationOutcome(status);
+        }
     }
-    const merged: StoredCandidate = {
-      ...updated,
-      candidate: {
-        ...updated.candidate,
-        id,
-        identityId: stored.candidate.identityId,
-        ...(stored.candidate.selectedArtworkId ? { selectedArtworkId: stored.candidate.selectedArtworkId } : {}),
-        metadata: {
-          ...updated.candidate.metadata,
-          remoteMetadataStatus: "current",
-          metadataCheckedAt,
-        },
-      },
-    };
-    this.metadata.putMetadata(candidateKey(id), merged, Date.now() + CANDIDATE_TTL_MS);
-    this.operationSucceeded("metadata-refresh");
-    return await this.getCandidate(id) ?? merged.candidate;
+    if (hydration.failedAssets.size === 0 && hydration.omittedIds.length === 0) this.operationSucceeded("metadata-refresh");
+    return uniqueIds.map((id) => resultById.get(id)!).filter(Boolean);
+  }
+
+  private async localOriginalState(candidate: ArtworkCandidate): Promise<MpcCandidateRevalidationResult["localOriginal"]> {
+    if (!candidate.providerAssetId) return "missing";
+    const sourceUrl = this.sourceUrl(candidate.providerAssetId);
+    const local = sourceUrl ? this.repository.findOriginalByProviderSource("mpc", candidate.providerAssetId, sourceUrl) : undefined;
+    if (!local) return "missing";
+    try {
+      await this.originals.getOriginal(local.artworkId);
+      return "valid";
+    } catch (error) {
+      if (error instanceof ArtworkStorageError && error.code === "ARTWORK_CONTENT_CORRUPT") return "corrupt";
+      if (error instanceof ArtworkStorageError && error.code === "ARTWORK_MISSING") return "missing";
+      throw error;
+    }
+  }
+
+  private remoteMetadataChanged(previous: Readonly<Record<string, unknown>> | undefined, next: Readonly<Record<string, unknown>> | undefined): boolean {
+    const keys = ["sourceId", "sourceName", "dpi", "language", "tags", "priority", "dateCreated", "dateModified", "extension", "declaredSize", "canonicalCard", "canonicalArtist", "name"];
+    return keys.some((key) => JSON.stringify(previous?.[key]) !== JSON.stringify(next?.[key]));
+  }
+
+  private recordRevalidationOutcome(status: MpcRevalidationStatus): void {
+    const current = this.metricState.revalidation.outcomes[status] ?? 0;
+    this.metricState.revalidation.outcomes[status] = increment(current);
+  }
+
+  private async hydrateCards(assetIds: readonly string[], signal?: AbortSignal): Promise<{
+    readonly byId: ReadonlyMap<string, Record<string, unknown>>;
+    readonly omittedIds: readonly string[];
+    readonly failedAssets: ReadonlyMap<string, string>;
+    readonly failedErrors: ReadonlyMap<string, unknown>;
+  }> {
+    const chunks = planMpcHydrationBatches(assetIds);
+    const chunksResults = await mapConcurrent(chunks, MPC_BATCH_CONCURRENCY, async (chunk) => {
+      this.metricState.hydrationBatchCount = increment(this.metricState.hydrationBatchCount);
+      try {
+        const response = await this.apiJson("/2/cards/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cardIdentifiers: chunk }),
+        }, signal);
+        return { chunk, documents: cardItems(response.payload, new Set(chunk)), error: undefined as unknown };
+      } catch (error) {
+        if (isCancellation(error, signal)) throw error;
+        this.degrade(error);
+        return { chunk, documents: [] as Record<string, unknown>[], error };
+      }
+    });
+    const byId = new Map<string, Record<string, unknown>>();
+    const omittedIds: string[] = [];
+    const failedAssets = new Map<string, string>();
+    const failedErrors = new Map<string, unknown>();
+    for (const result of chunksResults) {
+      if (result.error) {
+        for (const id of result.chunk) {
+          failedAssets.set(id, safeFailureKind(result.error));
+          failedErrors.set(id, result.error);
+        }
+        continue;
+      }
+      for (const document of result.documents) byId.set(String(document.identifier), document);
+      for (const id of result.chunk) if (!byId.has(id)) omittedIds.push(id);
+    }
+    if (omittedIds.length) {
+      this.metricState.omittedHydrationCount = Math.min(MAX_COUNTER, this.metricState.omittedHydrationCount + omittedIds.length);
+      this.degrade(new MpcArtworkProviderError("protocol", "MPC card hydration omitted one or more requested asset IDs."));
+    }
+    return { byId, omittedIds, failedAssets, failedErrors };
   }
 
   async searchArtworkAdvanced(identity: CardIdentity, options: MpcAdvancedArtworkSearchOptions = {}): Promise<readonly ArtworkCandidate[]> {
@@ -622,8 +952,9 @@ export class MpcArtworkProvider implements ArtworkProvider {
       appliedFilters = filters;
       const searchKey = buildMpcSearchCacheKey(query, options.faceId ?? "any", filters, [...verifiedSourceIds]);
       const cached = this.metadata.getMetadataSnapshot<readonly StoredCandidate[]>(searchKey);
-      if (cached && cached.expiresAt > Date.now()) {
-        this.searchCacheHits += 1;
+      if (cached && cached.expiresAt > Date.now() && !options.forceRefresh) {
+        this.searchCacheHits = increment(this.searchCacheHits);
+        if (cached.value.length === 0) this.metricState.negativeSearchCacheHits = increment(this.metricState.negativeSearchCacheHits);
         const refreshed = await Promise.all(cached.value.map(async ({ candidate }) => {
           const current = await this.getCandidate(candidate.id);
           return { ...(current ?? candidate), identityId: identity.id };
@@ -634,7 +965,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         ));
       }
       staleSearch = cached?.value;
-      this.searchCacheMisses += 1;
+      this.searchCacheMisses = increment(this.searchCacheMisses);
       const settings = {
         filterSettings: {
           minimumDPI: filters.minimumDpi,
@@ -668,22 +999,19 @@ export class MpcArtworkProvider implements ArtworkProvider {
         payload = v2.payload;
       }
       const ids = resultIds(payload, query, hash, version).slice(0, this.searchLimit);
+      this.hasConfirmedSearch = true;
       this.lastProtocolConfirmed = version;
       this.fallbackV2Used = version === "v2";
       if (version === "v3") this.v3Available = true;
-      const cardsResponse = ids.length ? await this.apiJson("/2/cards/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cardIdentifiers: ids }),
-      }, options.signal) : undefined;
       const side = options.faceId ?? "front";
-      const requestedIds = new Set(ids);
-      const hydratedCards = ids.length ? cardItems(cardsResponse?.payload, requestedIds) : [];
-      let rejectedCandidate = hydratedCards.length < ids.length;
-      if (rejectedCandidate) this.degrade(new MpcArtworkProviderError("protocol", "MPC card hydration omitted one or more requested asset IDs."));
-      const candidates = hydratedCards.flatMap((item): StoredCandidate[] => {
+      const hydration = ids.length ? await this.hydrateCards(ids, options.signal) : { byId: new Map<string, Record<string, unknown>>(), omittedIds: [] as string[], failedAssets: new Map<string, string>(), failedErrors: new Map<string, unknown>() };
+      let rejectedCandidate = hydration.omittedIds.length > 0 || hydration.failedAssets.size > 0;
+      const candidates = ids.flatMap((assetId): StoredCandidate[] => {
+        const item = hydration.byId.get(assetId);
+        if (!item) return [];
         try {
-          const candidate = this.candidateFromCard(item, identity, side, verifiedSourceIds);
+          const providerRank = ids.indexOf(assetId);
+          const candidate = this.candidateFromCard(item, identity, side, verifiedSourceIds, providerRank);
           if (!candidate) return [];
           if (!candidateMatchesFilters(candidate.candidate, filters)) return [];
           return [candidate];
@@ -693,9 +1021,11 @@ export class MpcArtworkProvider implements ArtworkProvider {
           return [];
         }
       });
+      if (candidates.length === 0 && hydration.failedAssets.size > 0) throw hydration.failedErrors.values().next().value;
       for (const item of candidates) this.metadata.putMetadata(candidateKey(item.candidate.id), item, Date.now() + CANDIDATE_TTL_MS);
       if (!rejectedCandidate) {
-        this.metadata.putMetadata(searchKey, candidates, Date.now() + CACHE_TTL_MS);
+        this.metadata.putMetadata(searchKey, candidates, Date.now() + (candidates.length ? CACHE_TTL_MS : EMPTY_SEARCH_TTL_MS));
+        if (candidates.length === 0) this.metricState.negativeSearchCacheWrites = increment(this.metricState.negativeSearchCacheWrites);
         this.operationSucceeded("search");
       }
       return this.combineCandidates(importedCandidates, rankMpcCandidates(
@@ -709,6 +1039,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         const stale = await Promise.all(staleSearch.map(async ({ candidate }) => ({
           ...(await this.getCandidate(candidate.id) ?? candidate),
           identityId: identity.id,
+          metadata: { ...candidate.metadata, metadataFreshness: "stale", remoteMetadataStatus: "stale" },
         })));
         return this.combineCandidates(importedCandidates, rankMpcCandidates(
           stale.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate) && candidateMatchesFilters(candidate, appliedFilters)),
@@ -740,6 +1071,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const now = Date.now();
     if (cached && cached.expiresAt > now) {
       this.catalogStates[kind] = { state: "fresh", ageMs: Math.max(0, now - cached.updatedAt) };
+      this.setCatalogCapability(kind, cached.value);
       return cached.value;
     }
     try {
@@ -747,6 +1079,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
       const value = parse(response.payload);
       this.metadata.putMetadata(key, value, Date.now() + CACHE_TTL_MS);
       this.catalogStates[kind] = { state: "fresh", ageMs: 0 };
+      this.setCatalogCapability(kind, value);
       if (Object.values(this.catalogStates).every(({ state }) => state !== "unavailable" && state !== "stale")) this.catalogDegraded = false;
       return value;
     } catch (error) {
@@ -754,11 +1087,21 @@ export class MpcArtworkProvider implements ArtworkProvider {
       this.catalogDegraded = true;
       if (cached) {
         this.catalogStates[kind] = { state: "stale", ageMs: Math.max(0, now - cached.updatedAt) };
+        this.setCatalogCapability(kind, cached.value);
         return cached.value;
       }
       this.catalogStates[kind] = { state: "unavailable" };
       throw error;
     }
+  }
+
+  private setCatalogCapability(kind: "sources" | "languages" | "tags", value: unknown): void {
+    const count = Array.isArray(value) ? Math.min(5_000, value.length) : 0;
+    const available = count > 0;
+    this.metricState.catalogCounts[kind] = count;
+    if (kind === "sources") this.hasSourcesCatalog = available;
+    else if (kind === "languages") this.hasLanguagesCatalog = available;
+    else this.hasTagsCatalog = available;
   }
 
   private combineCandidates(imported: readonly ArtworkCandidate[], searched: readonly ArtworkCandidate[]): readonly ArtworkCandidate[] {
@@ -800,7 +1143,11 @@ export class MpcArtworkProvider implements ArtworkProvider {
     if (!/^mpc:[a-f0-9]{64}$/.test(id)) return undefined;
     const snapshot = this.metadata.getMetadataSnapshot<StoredCandidate>(candidateKey(id));
     const stored = snapshot?.value;
-    if (!stored) return undefined;
+    if (!stored) {
+      this.metricState.candidateMetadataCache.misses = increment(this.metricState.candidateMetadataCache.misses);
+      return undefined;
+    }
+    this.metricState.candidateMetadataCache.hits = increment(this.metricState.candidateMetadataCache.hits);
     const sourceUrl = stored.candidate.providerAssetId ? this.sourceUrl(stored.candidate.providerAssetId) : undefined;
     const originalRecord = sourceUrl && stored.candidate.providerAssetId
       ? this.repository.findOriginalByProviderSource("mpc", stored.candidate.providerAssetId, sourceUrl)
@@ -842,8 +1189,8 @@ export class MpcArtworkProvider implements ArtworkProvider {
       originalCached: Boolean(original),
       metadata: {
         ...metadataWithoutExportability,
-        ...(snapshot && snapshot.expiresAt <= Date.now() && !metadataWithoutExportability.remoteMetadataStatus
-          ? { remoteMetadataStatus: "stale" }
+        ...(snapshot && snapshot.expiresAt <= Date.now()
+          ? { remoteMetadataStatus: "stale", metadataFreshness: "stale" }
           : {}),
         ...(formatKnown ? {
           ...(actualExtension ? { extension: actualExtension } : {}),
@@ -992,7 +1339,11 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const candidate = await this.getCandidate(id);
     if (!candidate) return undefined;
     const cached = await this.thumbnails.getThumbnail(id);
-    if (cached) return { candidateId: id, source: "mpc", bytes: cached.bytes, contentType: `image/${cached.extension === "jpg" ? "jpeg" : cached.extension}`, widthPx: cached.widthPx, heightPx: cached.heightPx };
+    if (cached) {
+      this.metricState.thumbnailCache.hits = increment(this.metricState.thumbnailCache.hits);
+      return { candidateId: id, source: "mpc", bytes: cached.bytes, contentType: `image/${cached.extension === "jpg" ? "jpeg" : cached.extension}`, widthPx: cached.widthPx, heightPx: cached.heightPx };
+    }
+    this.metricState.thumbnailCache.misses = increment(this.metricState.thumbnailCache.misses);
     const stored = this.metadata.getMetadata<StoredCandidate>(candidateKey(id));
     if (!stored?.thumbnailUrl) return undefined;
     const { response, bytes } = await this.fetchImage(stored.thumbnailUrl, THUMBNAIL_LIMIT, "thumbnail", signal);
@@ -1019,7 +1370,11 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const existing = this.repository.findOriginalByProviderSource("mpc", candidate.providerAssetId, sourceUrl);
     let localStorageFailure: ArtworkStorageError | undefined;
     if (existing) {
-      try { return await this.originals.getOriginal(existing.artworkId); }
+      try {
+        const original = await this.originals.getOriginal(existing.artworkId);
+        this.metricState.originalCache.hits = increment(this.metricState.originalCache.hits);
+        return original;
+      }
       catch (error) {
         if (!(error instanceof ArtworkStorageError) || (error.code !== "ARTWORK_MISSING" && error.code !== "ARTWORK_CONTENT_CORRUPT")) {
           if (error instanceof ArtworkStorageError) this.degrade(error);
@@ -1029,6 +1384,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         this.degrade(error);
       }
     }
+    this.metricState.originalCache.misses = increment(this.metricState.originalCache.misses);
     let response: Response;
     let bytes: Uint8Array;
     try {
@@ -1112,6 +1468,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
       contentType,
       importMetadata: { candidateId: id, faceId: candidate.faceId, selectedArtworkId: candidate.selectedArtworkId, ...(candidate.metadata ?? {}) },
     });
+    this.hasOriginal = true;
     if (stored) this.metadata.putMetadata(candidateKey(id), {
       ...stored,
       candidate: {
@@ -1134,7 +1491,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
     return original;
   }
 
-  private candidateFromCard(item: Record<string, unknown>, identity: CardIdentity, faceId: CardFaceSide, verifiedSourceIds: ReadonlySet<number>): StoredCandidate | undefined {
+  private candidateFromCard(item: Record<string, unknown>, identity: CardIdentity, faceId: CardFaceSide, verifiedSourceIds: ReadonlySet<number>, providerRank?: number): StoredCandidate | undefined {
     if (!validAssetId(item.identifier)) return undefined;
     if (item.cardType !== "CARD") throw new MpcArtworkProviderError("protocol", "MPC card hydration omitted or returned an unsupported cardType.");
     if (item.sourceType !== "Google Drive") {
@@ -1192,41 +1549,79 @@ export class MpcArtworkProvider implements ArtworkProvider {
         ...(canonicalCard ? { canonicalCard } : {}),
         ...(canonicalArtist ? { canonicalArtist } : {}),
         remoteMetadataStatus: "current",
+        metadataFreshness: "fresh",
+        ...(providerRank !== undefined ? { providerRank } : {}),
       },
     };
+    if (thumbnailUrl) this.hasPreview = true;
+    if (candidate.originalAvailable) this.hasOriginal = true;
     return { candidate, ...(thumbnailUrl ? { thumbnailUrl } : {}), ...(declaredSize ? { declaredSize } : {}) };
   }
 
   private async apiJson(path: string, init: RequestInit, signal?: AbortSignal, allowNotFound = false): Promise<{ status: number; payload?: unknown }> {
+    const url = new URL(path, this.baseUrl).toString();
+    const key = JSON.stringify([url, init.method ?? "GET", typeof init.body === "string" ? init.body : "", allowNotFound]);
+    return this.apiRequests.run(key, signal, (sharedSignal) => this.remoteSemaphore.run(() => this.apiJsonUnshared(path, init, sharedSignal, allowNotFound), sharedSignal,
+      () => new MpcArtworkProviderError("aborted", "The MPC request was cancelled.")),
+      () => new MpcArtworkProviderError("aborted", "The MPC request was cancelled."));
+  }
+
+  private async apiJsonUnshared(path: string, init: RequestInit, signal?: AbortSignal, allowNotFound = false): Promise<{ status: number; payload?: unknown }> {
     const scope = createRequestScope(signal, this.timeoutMs);
     try {
-      let url = safeUrl(new URL(path, this.baseUrl).toString(), API_HOSTS);
-      if (!url) throw new MpcArtworkProviderError("unsafe-source", "MPC API URL is not on the configured HTTPS host.");
-      for (let redirects = 0; redirects <= 3; redirects += 1) {
-        const response: Response = await scope.run(this.fetchImpl(url, { ...init, credentials: "omit", cache: "no-store", signal: scope.signal, redirect: "manual" }));
-        if ([301, 302, 303, 307, 308].includes(response.status)) {
-          if (redirects === 3) throw new MpcArtworkProviderError("unsafe-source", "MPC API exceeded the redirect limit.");
-          const location: string | null = response.headers.get("location");
-          let next: URL | undefined;
-          try { next = location ? safeUrl(new URL(location, url).toString(), API_HOSTS) : undefined; } catch { next = undefined; }
-          await response.body?.cancel().catch(() => undefined);
-          if (!next) throw new MpcArtworkProviderError("unsafe-source", "MPC API redirected to an unapproved URL.");
-          url = next;
-          continue;
-        }
-        if (allowNotFound && response.status === 404) return { status: 404 };
-        if (!response.ok) throw new MpcArtworkProviderError("http", `MPC API returned HTTP ${response.status}.`, response.status);
-        const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
-        if (type !== "application/json") throw new MpcArtworkProviderError("protocol", "MPC API response was not JSON.");
-        const bytes = await readLimited(response, 8 * 1024 * 1024, scope);
+      const initialUrl = safeUrl(new URL(path, this.baseUrl).toString(), API_HOSTS);
+      if (!initialUrl) throw new MpcArtworkProviderError("unsafe-source", "MPC API URL is not on the configured HTTPS host.");
+      for (let attempt = 0; attempt <= 2; attempt += 1) {
+        let url = initialUrl;
         try {
-          const payload = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
-          this.health = { available: true, degraded: false };
-          return { status: response.status, payload };
+          for (let redirects = 0; redirects <= 3; redirects += 1) {
+            this.metricState.remoteRequestCount = increment(this.metricState.remoteRequestCount);
+            const response: Response = await scope.run(this.fetchImpl(url, { ...init, credentials: "omit", cache: "no-store", signal: scope.signal, redirect: "manual" }));
+            this.recordHttpStatus(response.status);
+            if ([301, 302, 303, 307, 308].includes(response.status)) {
+              if (redirects === 3) throw new MpcArtworkProviderError("unsafe-source", "MPC API exceeded the redirect limit.");
+              const location: string | null = response.headers.get("location");
+              let next: URL | undefined;
+              try { next = location ? safeUrl(new URL(location, url).toString(), API_HOSTS) : undefined; } catch { next = undefined; }
+              await response.body?.cancel().catch(() => undefined);
+              if (!next) throw new MpcArtworkProviderError("unsafe-source", "MPC API redirected to an unapproved URL.");
+              url = next;
+              continue;
+            }
+            if (allowNotFound && response.status === 404) {
+              await response.body?.cancel().catch(() => undefined);
+              this.recordSuccessfulRemoteContact();
+              return { status: 404 };
+            }
+            if (response.status === 429) {
+              const retryAfterMs = retryAfterMilliseconds(response.headers.get("retry-after"));
+              await response.body?.cancel().catch(() => undefined);
+              throw new MpcArtworkProviderError("rate-limited", "MPC artwork service is rate limited.", 429, retryAfterMs);
+            }
+            if (!response.ok) {
+              await response.body?.cancel().catch(() => undefined);
+              throw new MpcArtworkProviderError("http", `MPC API returned HTTP ${response.status}.`, response.status);
+            }
+            const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+            if (type !== "application/json") throw new MpcArtworkProviderError("protocol", "MPC API response was not JSON.");
+            const bytes = await readLimited(response, 8 * 1024 * 1024, scope);
+            try {
+              const payload = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+              this.health = { available: true, degraded: false };
+              this.recordSuccessfulRemoteContact();
+              return { status: response.status, payload };
+            } catch { throw new MpcArtworkProviderError("protocol", "MPC API returned invalid JSON."); }
+          }
+          throw new MpcArtworkProviderError("unsafe-source", "MPC API exceeded the redirect limit.");
+        } catch (error) {
+          const failure = error instanceof MpcArtworkProviderError ? error : new MpcArtworkProviderError("network", "MPC API request failed.");
+          if (!retryable(failure) || attempt === 2 || isCancellation(failure, scope.signal)) throw failure;
+          const retryAfter = failure.kind === "rate-limited" ? failure.retryAfterMs : undefined;
+          const delay = Math.min(MAX_RETRY_AFTER_MS, retryAfter ?? Math.min(500, 100 * (2 ** attempt)));
+          await this.waitForRetry(delay, scope.signal);
         }
-        catch { throw new MpcArtworkProviderError("protocol", "MPC API returned invalid JSON."); }
       }
-      throw new MpcArtworkProviderError("unsafe-source", "MPC API exceeded the redirect limit.");
+      throw new MpcArtworkProviderError("network", "MPC API request failed after the bounded retry policy.");
     } catch (error) {
       const failure = error instanceof MpcArtworkProviderError ? error : new MpcArtworkProviderError("network", "MPC API request failed.");
       if (!isCancellation(failure, signal)) this.degrade(failure);
@@ -1234,6 +1629,12 @@ export class MpcArtworkProvider implements ArtworkProvider {
     } finally {
       scope.close();
     }
+  }
+
+  private recordHttpStatus(status: number): void {
+    const key = String(Math.max(100, Math.min(599, Math.floor(status))));
+    this.metricState.httpStatusSummary[key] = increment(this.metricState.httpStatusSummary[key] ?? 0);
+    if (status === 429) this.metricState.rateLimits = increment(this.metricState.rateLimits);
   }
 
   private sourceUrl(identifier: string): string | undefined {
@@ -1245,25 +1646,58 @@ export class MpcArtworkProvider implements ArtworkProvider {
   }
 
   private async fetchImage(initialUrl: string, maximumBytes: number, role: "thumbnail" | "original", signal?: AbortSignal): Promise<{ response: Response; bytes: Uint8Array }> {
+    const key = JSON.stringify([initialUrl, maximumBytes, role]);
+    const result = await this.imageRequests.run(key, signal, (sharedSignal) => this.remoteSemaphore.run(async () => {
+      const fetched = await this.fetchImageUnshared(initialUrl, maximumBytes, role, sharedSignal);
+      return { status: fetched.response.status, headers: new Headers(fetched.response.headers), bytes: fetched.bytes };
+    }, sharedSignal, () => new MpcArtworkProviderError("aborted", "The MPC artwork request was cancelled.")),
+    () => new MpcArtworkProviderError("aborted", "The MPC artwork request was cancelled."));
+    return { response: new Response(new Uint8Array(result.bytes), { status: result.status, headers: result.headers }), bytes: new Uint8Array(result.bytes) };
+  }
+
+  private async fetchImageUnshared(initialUrl: string, maximumBytes: number, role: "thumbnail" | "original", signal?: AbortSignal): Promise<{ response: Response; bytes: Uint8Array }> {
     const scope = createRequestScope(signal, this.timeoutMs);
     try {
-      let url = safeImageUrl(initialUrl, role);
-      if (!url) throw new MpcArtworkProviderError("unsafe-source", "MPC artwork URL is not on an approved HTTPS host.");
-      for (let redirects = 0; redirects <= 3; redirects += 1) {
-        const response: Response = await scope.run(this.fetchImpl(url, { method: "GET", credentials: "omit", cache: "no-store", signal: scope.signal, redirect: "manual" }));
-        if (![301, 302, 303, 307, 308].includes(response.status)) {
-          if (!response.ok) throw new MpcArtworkProviderError("http", `MPC artwork returned HTTP ${response.status}.`, response.status);
-          return { response, bytes: await readLimited(response, maximumBytes, scope) };
+      const initial = safeImageUrl(initialUrl, role);
+      if (!initial) throw new MpcArtworkProviderError("unsafe-source", "MPC artwork URL is not on an approved HTTPS host.");
+      for (let attempt = 0; attempt <= 2; attempt += 1) {
+        let url = initial;
+        try {
+          for (let redirects = 0; redirects <= 3; redirects += 1) {
+            this.metricState.remoteRequestCount = increment(this.metricState.remoteRequestCount);
+            const response: Response = await scope.run(this.fetchImpl(url, { method: "GET", credentials: "omit", cache: "no-store", signal: scope.signal, redirect: "manual" }));
+            this.recordHttpStatus(response.status);
+            if (![301, 302, 303, 307, 308].includes(response.status)) {
+              if (response.status === 429) {
+                const retryAfterMs = retryAfterMilliseconds(response.headers.get("retry-after"));
+                await response.body?.cancel().catch(() => undefined);
+                throw new MpcArtworkProviderError("rate-limited", "MPC artwork service is rate limited.", 429, retryAfterMs);
+              }
+              if (!response.ok) {
+                await response.body?.cancel().catch(() => undefined);
+                throw new MpcArtworkProviderError("http", `MPC artwork returned HTTP ${response.status}.`, response.status);
+              }
+              const bytes = await readLimited(response, maximumBytes, scope);
+              this.recordSuccessfulRemoteContact();
+              return { response, bytes };
+            }
+            if (redirects === 3) throw new MpcArtworkProviderError("unsafe-source", "MPC artwork exceeded the redirect limit.");
+            const location: string | null = response.headers.get("location");
+            let next: URL | undefined;
+            try { next = location ? safeImageUrl(new URL(location, url).toString(), role) : undefined; } catch { next = undefined; }
+            await response.body?.cancel().catch(() => undefined);
+            if (!next) throw new MpcArtworkProviderError("unsafe-source", "MPC artwork redirected to an unapproved URL.");
+            url = next;
+          }
+          throw new MpcArtworkProviderError("unsafe-source", "MPC artwork exceeded the redirect limit.");
+        } catch (error) {
+          const failure = error instanceof MpcArtworkProviderError ? error : new MpcArtworkProviderError("network", "MPC artwork request failed.");
+          if (!retryable(failure) || attempt === 2 || isCancellation(failure, scope.signal)) throw failure;
+          const retryAfter = failure.kind === "rate-limited" ? failure.retryAfterMs : undefined;
+          await this.waitForRetry(Math.min(MAX_RETRY_AFTER_MS, retryAfter ?? Math.min(500, 100 * (2 ** attempt))), scope.signal);
         }
-        if (redirects === 3) throw new MpcArtworkProviderError("unsafe-source", "MPC artwork exceeded the redirect limit.");
-        const location: string | null = response.headers.get("location");
-        let next: URL | undefined;
-        try { next = location ? safeImageUrl(new URL(location, url).toString(), role) : undefined; } catch { next = undefined; }
-        await response.body?.cancel().catch(() => undefined);
-        if (!next) throw new MpcArtworkProviderError("unsafe-source", "MPC artwork redirected to an unapproved URL.");
-        url = next;
       }
-      throw new MpcArtworkProviderError("unsafe-source", "MPC artwork exceeded the redirect limit.");
+      throw new MpcArtworkProviderError("network", "MPC artwork request failed after the bounded retry policy.");
     } catch (error) {
       const failure = error instanceof MpcArtworkProviderError ? error : new MpcArtworkProviderError("network", "MPC artwork request failed.");
       if (!isCancellation(failure, signal)) this.degrade(failure);

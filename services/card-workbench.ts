@@ -8,7 +8,7 @@ import { ArtworkCatalog } from "../artwork/catalog";
 import { calculateEffectiveDpi, artworkResolutionQuality } from "../artwork/effective-dpi";
 import { LocalArtworkProvider } from "../artwork/local-provider";
 import { MpcArtworkProvider } from "../artwork/mpc-provider";
-import type { MpcArtworkProviderDiagnostic } from "../artwork/mpc-provider";
+import type { MpcArtworkProviderDiagnostic, MpcCandidateRevalidationResult } from "../artwork/mpc-provider";
 import type { MpcArtworkFilterInput, MpcFilterCatalogs } from "../artwork/mpc-contract";
 import { ScryfallArtworkProvider } from "../artwork/scryfall-provider";
 import { ArtworkMetadataCache } from "../artwork/storage/metadata-cache";
@@ -75,6 +75,8 @@ export interface CardWorkbenchOptions {
   /** Injectable MPC protocol transport for offline and deterministic environments. */
   readonly mpcFetchImpl?: typeof fetch;
   readonly mpcTimeoutMs?: number;
+  /** Injectable bounded retry wait for deterministic MPC provider environments. */
+  readonly mpcWaitForRetry?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   readonly minIntervalMs?: number;
   readonly timeoutMs?: number;
   readonly maxUploadBytes?: number;
@@ -96,11 +98,12 @@ export interface CardWorkbench {
   confirmWorkingCardIdentity(card: WorkingCard, scryfallId: string, options?: { signal?: AbortSignal }): Promise<WorkingCard>;
   keepWorkingCardCustom(card: WorkingCard): WorkingCard;
   restoreDefaultArtwork(card: WorkingCard, faceId: CardFaceSide, options?: { signal?: AbortSignal }): Promise<WorkingCard | undefined>;
-  listArtworkCandidates(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
+  listArtworkCandidates(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
   getArtworkCandidate(candidateId: string, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; identity?: CardIdentity; signal?: AbortSignal }): Promise<ArtworkCandidate | undefined>;
   getMpcArtworkFilterCatalogs(signal?: AbortSignal): Promise<MpcFilterCatalogs>;
   getMpcArtworkProviderDiagnostic?(): MpcArtworkProviderDiagnostic | undefined;
   refreshMpcArtworkCandidate(candidateId: string, signal?: AbortSignal): Promise<ArtworkCandidate | undefined>;
+  revalidateMpcArtworkCandidates(candidateIds: readonly string[], signal?: AbortSignal): Promise<readonly MpcCandidateRevalidationResult[]>;
   getArtworkPreview(candidateId: string, signal?: AbortSignal): Promise<ArtworkPreview | undefined>;
   getArtworkOriginal(candidateId: string, signal?: AbortSignal): ReturnType<ArtworkCatalog["getOriginal"]>;
   selectArtwork(card: WorkingCard, faceId: CardFaceSide, candidate: ArtworkCandidate): WorkingCard;
@@ -314,6 +317,7 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     repository,
     timeoutMs: options.mpcTimeoutMs,
     maxOriginalBytes: options.maxUploadBytes ?? MAX_UPLOAD_BYTES,
+    ...(options.mpcWaitForRetry ? { waitForRetry: options.mpcWaitForRetry } : {}),
   });
   const catalog = new ArtworkCatalog([scryfall, local, mpc]);
   const resolver = new IdentityResolver(client);
@@ -553,11 +557,11 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
       if (identity.id === "custom:artwork-picker" && source === "all") {
         const [uploads, references] = await Promise.all([
           catalog.search(identity, { source: "upload", faceId, signal: callOptions.signal }),
-          catalog.search(identity, { source: "mpc", faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), signal: callOptions.signal }),
+          catalog.search(identity, { source: "mpc", faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), ...(callOptions.forceMpcRefresh ? { forceMpcRefresh: true } : {}), signal: callOptions.signal }),
         ]);
         return [...uploads, ...references];
       }
-      return catalog.search(identity, { source, faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), signal: callOptions.signal });
+      return catalog.search(identity, { source, faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), ...(callOptions.forceMpcRefresh ? { forceMpcRefresh: true } : {}), signal: callOptions.signal });
     },
 
     async getArtworkCandidate(candidateId, callOptions = {}) {
@@ -571,6 +575,7 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     getMpcArtworkFilterCatalogs(signal) { return catalog.getMpcFilterCatalogs(signal); },
     getMpcArtworkProviderDiagnostic() { return catalog.getMpcDiagnostic(); },
     refreshMpcArtworkCandidate(candidateId, signal) { return catalog.refreshMpcCandidate(candidateId, signal); },
+    revalidateMpcArtworkCandidates(candidateIds, signal) { return catalog.revalidateMpcCandidates(candidateIds, signal); },
     selectArtwork(card, faceId, candidate) {
       const selection: SelectedArtwork = {
         candidateId: candidate.id,
