@@ -179,6 +179,37 @@ function safeRemoteTags(value: unknown): string[] | undefined {
   return [...new Set(tags)].sort((left, right) => left.toLowerCase() < right.toLowerCase() ? -1 : left.toLowerCase() > right.toLowerCase() ? 1 : 0);
 }
 
+function candidateMatchesFilters(candidate: ArtworkCandidate, filters: MpcArtworkFilters): boolean {
+  const sourceId = candidate.metadata?.sourceId;
+  if (filters.sources.length && (typeof sourceId !== "number" || !filters.sources.includes(sourceId))) return false;
+
+  const declaredDpi = candidate.metadata?.dpi;
+  const validDpi = typeof declaredDpi === "number" && Number.isSafeInteger(declaredDpi) && declaredDpi > 0
+    ? declaredDpi
+    : undefined;
+  if (filters.minimumDpi > 0 && (validDpi === undefined || validDpi < filters.minimumDpi)) return false;
+  // The legacy/basic search already defaults to 1500 DPI. Preserve candidates
+  // with missing remote DPI metadata at that default, but require metadata for
+  // every non-default maximum and reject known values outside the selected range.
+  if (validDpi !== undefined && validDpi > filters.maximumDpi) return false;
+  if (filters.maximumDpi !== 1500 && validDpi === undefined) return false;
+
+  if (filters.languages.length) {
+    const language = candidate.language ?? candidate.metadata?.language;
+    const normalized = typeof language === "string" ? language.toLocaleLowerCase("en-US") : undefined;
+    if (!normalized || !filters.languages.includes(normalized)) return false;
+  }
+
+  if (filters.includeTags.length || filters.excludeTags.length) {
+    const metadataTags = candidate.metadata?.tags;
+    if (!Array.isArray(metadataTags)) return false;
+    const tags = new Set(metadataTags.flatMap((tag) => typeof tag === "string" ? [tag.toLocaleLowerCase("en-US")] : []));
+    if (!filters.includeTags.every((tag) => tags.has(tag.toLocaleLowerCase("en-US")))) return false;
+    if (filters.excludeTags.some((tag) => tags.has(tag.toLocaleLowerCase("en-US")))) return false;
+  }
+  return true;
+}
+
 function safeCanonicalCard(value: unknown): Readonly<Record<string, unknown>> | undefined {
   if (!record(value)) return undefined;
   const output: Record<string, string> = {};
@@ -571,6 +602,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const query = faceQuery(identity, options.faceId);
     if (!query) return importedCandidates;
     let staleSearch: readonly StoredCandidate[] | undefined;
+    let appliedFilters = inputFilters;
     try {
       const sources = await this.sources(options.signal);
       if (!sources.length) throw new MpcArtworkProviderError("protocol", "MPC returned no verified Google Drive sources.");
@@ -585,6 +617,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
           : [],
       };
       const filters = validateMpcArtworkFiltersAgainstCatalogs(inputFilters, catalogs);
+      appliedFilters = filters;
       const searchKey = buildMpcSearchCacheKey(query, options.faceId ?? "any", filters, [...verifiedSourceIds]);
       const cached = this.metadata.getMetadataSnapshot<readonly StoredCandidate[]>(searchKey);
       if (cached && cached.expiresAt > Date.now()) {
@@ -595,7 +628,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         }));
         this.operationSucceeded("search");
         return this.combineCandidates(importedCandidates, rankMpcCandidates(
-          refreshed.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate)), identity, filters,
+          refreshed.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate) && candidateMatchesFilters(candidate, filters)), identity, filters,
         ));
       }
       staleSearch = cached?.value;
@@ -650,8 +683,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         try {
           const candidate = this.candidateFromCard(item, identity, side, verifiedSourceIds);
           if (!candidate) return [];
-          const sourceId = candidate.candidate.metadata?.sourceId;
-          if (filters.sources.length && (typeof sourceId !== "number" || !filters.sources.includes(sourceId))) return [];
+          if (!candidateMatchesFilters(candidate.candidate, filters)) return [];
           return [candidate];
         } catch (error) {
           rejectedCandidate = true;
@@ -676,7 +708,11 @@ export class MpcArtworkProvider implements ArtworkProvider {
           ...(await this.getCandidate(candidate.id) ?? candidate),
           identityId: identity.id,
         })));
-        return this.combineCandidates(importedCandidates, stale.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate)));
+        return this.combineCandidates(importedCandidates, rankMpcCandidates(
+          stale.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate) && candidateMatchesFilters(candidate, appliedFilters)),
+          identity,
+          appliedFilters,
+        ));
       }
       if (!importedCandidates.length) throw error;
       return importedCandidates.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate));

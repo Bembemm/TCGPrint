@@ -3,6 +3,7 @@ import type { ArtworkCandidate } from "../core/cards/types";
 import { ArtworkStorageError } from "./storage/types";
 import type { ArtworkCatalogSearchOptions, ArtworkProvider, ProviderHealth } from "./types";
 import type { MpcArtworkFilterInput, MpcFilterCatalogs } from "./mpc-contract";
+import { MpcArtworkFilterValidationError } from "./mpc-contract";
 import type { MpcArtworkProviderDiagnostic } from "./mpc-provider";
 
 interface MpcArtworkProviderExtension extends ArtworkProvider {
@@ -56,6 +57,7 @@ export class ArtworkCatalog {
         return candidates;
       } catch (error) {
         if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError") || (error && typeof error === "object" && (error as { kind?: unknown }).kind === "aborted")) throw error;
+        if (error instanceof MpcArtworkFilterValidationError) throw error;
         this.health.set(provider.source, {
           available: false,
           degraded: true,

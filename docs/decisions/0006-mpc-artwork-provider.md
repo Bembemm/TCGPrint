@@ -383,8 +383,13 @@ Google Drive source IDs, include/exclude tags, and language codes. It also
 accepts source, language, and tag preferences used only for ranking. Inputs are
 strictly bounded, normalized, checked against catalog values before query
 construction, and translated into MPC's fixed `filterSettings` and source
-boolean list. The defaults remain 0–1500 declared DPI, a fixed 30 MB search
-size, exact name search, and all currently verified Google Drive sources.
+boolean list. Hydrated metadata is checked locally against the same filters:
+all requested include-tags must match, any excluded tag removes a candidate,
+and non-default DPI, language, or tag filters require the corresponding
+validated metadata. The default 0–1500 DPI search retains candidates whose
+remote record omits DPI to preserve the basic-search behavior. Defaults remain
+a fixed 30 MB search size, exact name search, and all currently verified
+Google Drive sources.
 Search keys include the normalized query, face, all filters and preferences,
 verified source IDs, the fixed size bound, and protocol/ranking behavior
 versions. Set-like arrays are sorted; explicitly ordered language/source

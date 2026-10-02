@@ -116,6 +116,67 @@ describe("advanced MPC artwork provider", () => {
     await database.close();
   });
 
+  it.each([
+    ["minimum DPI", { minimumDpi: 1300 }, { dpi: 1200 }],
+    ["maximum DPI", { maximumDpi: 1000 }, { dpi: 1200 }],
+    ["language", { languages: ["ja"] }, { language: "en" }],
+    ["included tags", { includeTags: ["Promo"] }, { tags: ["Borderless"] }],
+    ["excluded tags", { excludeTags: ["Borderless"] }, { tags: ["Borderless"] }],
+  ] as const)("locally enforces hydrated %s filters when MPC returns broader results", async (_name, filters, overrides) => {
+    const assetId = "filter-check-id-123456";
+    const { database, provider } = await setup(apiFake({ records: { [assetId]: card(assetId, overrides) } }));
+
+    const candidates = await provider.searchArtworkAdvanced(identity, { filters });
+
+    expect(candidates).toEqual([]);
+    await database.close();
+  });
+
+  it("keeps hydrated candidates that satisfy all active filters", async () => {
+    const assetId = "filter-match-id-123456";
+    const records = {
+      [assetId]: card(assetId, { sourceId: 42, sourceName: "Drive B", dpi: 800, language: "ja", tags: ["Promo", "Borderless"] }),
+    };
+    const { database, provider } = await setup(apiFake({ records }));
+
+    const candidates = await provider.searchArtworkAdvanced(identity, {
+      filters: { minimumDpi: 700, maximumDpi: 900, sources: [42], includeTags: ["Promo"], excludeTags: ["Showcase"], languages: ["ja"] },
+    });
+
+    expect(candidates.map(({ providerAssetId }) => providerAssetId)).toEqual([assetId]);
+    await database.close();
+  });
+
+  it("ranks expired cached search results consistently while MPC is offline", async () => {
+    vi.useFakeTimers();
+    const baseTime = Date.now();
+    vi.setSystemTime(baseTime);
+    let online = true;
+    const records = {
+      "source-a-id-123456": card("source-a-id-123456", { sourceId: 41 }),
+      "source-b-id-123456": card("source-b-id-123456", { sourceId: 42, sourceName: "Drive B" }),
+    };
+    const fetcher: typeof fetch = async (input, init = {}) => {
+      if (!online) throw new Error("MPC is offline");
+      return apiFake({ records })(input, init);
+    };
+    const { database, provider } = await setup(fetcher);
+    try {
+      const filters = { preferredSources: [42] };
+      const onlineCandidates = await provider.searchArtworkAdvanced(identity, { filters });
+      expect(onlineCandidates.map(({ providerAssetId }) => providerAssetId)).toEqual(["source-b-id-123456", "source-a-id-123456"]);
+
+      vi.setSystemTime(baseTime + 25 * 60 * 60 * 1000);
+      online = false;
+      const offlineCandidates = await provider.searchArtworkAdvanced(identity, { filters });
+
+      expect(offlineCandidates.map(({ providerAssetId }) => providerAssetId)).toEqual(["source-b-id-123456", "source-a-id-123456"]);
+    } finally {
+      vi.useRealTimers();
+      await database.close();
+    }
+  });
+
   it("sends advanced filters unchanged through the documented legacy route after an explicit v3 404", async () => {
     const calls: Array<{ path: string; body?: unknown }> = [];
     const { database, provider } = await setup(apiFake({ calls, v3Status: 404 }));

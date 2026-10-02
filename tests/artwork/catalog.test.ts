@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CardIdentity } from "../../core/cards/types";
 import type { ArtworkProvider, ProviderHealth } from "../../artwork/types";
 import { ArtworkCatalog } from "../../artwork/catalog";
+import { MpcArtworkFilterValidationError } from "../../artwork/mpc-contract";
 
 const identity: CardIdentity = { id: "identity:sol-ring", provider: "scryfall", name: "Sol Ring", resolutionMethod: "manual", confidence: 1 };
 function provider(source: "scryfall" | "upload" | "mpc", items = [] as any[], shouldFail = false): ArtworkProvider {
@@ -59,5 +60,21 @@ describe("ArtworkCatalog", () => {
     expect(catalog.getProviderHealth()).toMatchObject({
       mpc: { available: false, degraded: true, message: "MPC original timed out" },
     });
+  });
+
+  it("lets MPC filter validation errors reach the API as client errors", async () => {
+    const mpc = Object.assign(provider("mpc"), {
+      searchArtworkAdvanced: vi.fn(async () => {
+        throw new MpcArtworkFilterValidationError("A source ID is not present in the verified MPC catalog.");
+      }),
+      getFilterCatalogs: vi.fn(async () => ({ sources: [], languages: [], tags: [] })),
+      getDiagnostic: vi.fn(() => ({ available: true, degraded: false })),
+      refreshCandidate: vi.fn(async () => undefined),
+    });
+    const catalog = new ArtworkCatalog([mpc]);
+
+    await expect(catalog.search(identity, { source: "mpc", mpcFilters: { sources: [999] } }))
+      .rejects.toBeInstanceOf(MpcArtworkFilterValidationError);
+    expect(catalog.getProviderHealth().mpc).toMatchObject({ available: true, degraded: false });
   });
 });
