@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { editorHistoryReducer, WorkingCardList, workingCardEditorReducer, type EditorUiState } from "../../../src/app/card-identity-workbench";
 import * as workbenchModule from "../../../src/app/card-identity-workbench";
+import { artworkWindowLimitForRequest, ArtworkCandidateGrid, type ArtworkCandidateView } from "../../../src/app/artwork-candidate-grid";
 import { createWorkingCardEditorState } from "../../../core/cards/working-card-editor";
 import { createEditorHistoryState } from "../../../core/cards/editor-history";
 import { projectSnapshotKey } from "../../../src/app/project-session";
@@ -28,6 +29,66 @@ const card: WorkingCard = {
 };
 
 describe("working card editor list UI", () => {
+  it("resets the artwork window when a card, face, provider, filter, or catalog request changes", () => {
+    const expanded = { requestKey: "card-a/front/mpc/filter-1/revision-2", limit: 840 };
+
+    expect(artworkWindowLimitForRequest(expanded, expanded.requestKey)).toBe(840);
+    expect(artworkWindowLimitForRequest(expanded, "card-b/front/mpc/filter-1/revision-2")).toBe(60);
+    expect(artworkWindowLimitForRequest(expanded, "card-a/back/mpc/filter-1/revision-2")).toBe(60);
+    expect(artworkWindowLimitForRequest(expanded, "card-a/front/scryfall/filter-1/revision-2")).toBe(60);
+    expect(artworkWindowLimitForRequest(expanded, "card-a/front/mpc/filter-2/revision-2")).toBe(60);
+    expect(artworkWindowLimitForRequest(expanded, "card-a/front/mpc/filter-1/revision-3")).toBe(60);
+  });
+
+  it("renders only the requested artwork window with lazy previews and real catalog/filter counts", () => {
+    const candidates: ArtworkCandidateView[] = Array.from({ length: 1200 }, (_, index) => ({
+      id: `scryfall:printing-${index}:front`, source: "scryfall", identityId: "identity", faceId: "front",
+      faceName: `Printing ${index}`, previewUri: `/api/cards/artworks/printing-${index}/preview`, originalAvailable: true,
+    }));
+    const renderGrid = (windowLimit: number) => renderToStaticMarkup(createElement(ArtworkCandidateGrid, {
+      candidates, windowLimit, catalogTotal: 1200, filterTotal: 247, catalogLabel: "Scryfall", cardName: "Sol Ring",
+      onSelect: vi.fn(), onLoadMore: vi.fn(),
+    }));
+
+    const initial = renderGrid(60);
+    expect([...initial.matchAll(/class="artwork-candidate/g)]).toHaveLength(60);
+    expect([...initial.matchAll(/loading="lazy"/g)]).toHaveLength(60);
+    expect(initial).toContain("60 de 1200 exibidas");
+    expect(initial).toContain("247 de 1200 correspondem ao filtro");
+    expect(initial).toContain("Carregar mais artes (1140 restantes)");
+    expect(initial).not.toContain("Printing 800");
+
+    const laterWindow = renderGrid(840);
+    expect(laterWindow).toContain("Printing 800");
+    expect([...laterWindow.matchAll(/class="artwork-candidate/g)]).toHaveLength(840);
+  });
+
+  it("separates verified, provider-reported, unknown, and unavailable quality labels", () => {
+    const base: ArtworkCandidateView = { id: "candidate", source: "mpc", identityId: "identity", faceId: "front", originalAvailable: true };
+    const markup = renderToStaticMarkup(createElement(ArtworkCandidateGrid, {
+      candidates: [
+        { ...base, id: "provider", metadata: { dpi: 800 } },
+        { ...base, id: "verified", effectiveDpi: 798, resolutionQuality: "excellent" },
+        { ...base, id: "unknown" },
+        { ...base, id: "unavailable", originalAvailable: false },
+      ],
+      windowLimit: 60, catalogTotal: 4, filterTotal: 4, catalogLabel: "MPC Autofill", cardName: "Sol Ring",
+      onSelect: vi.fn(), onLoadMore: vi.fn(),
+    }));
+
+    expect(markup).toContain("800 DPI · informado pelo MPC · DPI efetivo · desconhecido");
+    expect(markup).toContain("798 DPI efetivo · verificado ✓");
+    expect(markup).toContain("DPI efetivo · desconhecido");
+    expect(markup).toContain("DPI efetivo · original indisponível");
+
+    const noMatches = renderToStaticMarkup(createElement(ArtworkCandidateGrid, {
+      candidates: [], windowLimit: 60, catalogTotal: 1200, filterTotal: 0, catalogLabel: "MPC Autofill", cardName: "Sol Ring",
+      onSelect: vi.fn(), onLoadMore: vi.fn(),
+    }));
+    expect(noMatches).toContain("0 de 1200 exibidas");
+    expect(noMatches).toContain("0 de 1200 correspondem ao filtro");
+  });
+
   it("blocks selection, quantity, reorder, duplicate, and delete controls while locked", () => {
     const markup = renderToStaticMarkup(createElement(WorkingCardList, {
       cards: [card, { ...card, id: "second-card", order: 1 }],

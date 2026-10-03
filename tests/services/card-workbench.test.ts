@@ -4,11 +4,11 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { PDFDocument } from "@pdfme/pdf-lib";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCardWorkbench, type CardWorkbenchOptions, type WorkingSetImportResult } from "../../services/card-workbench";
+import { artworkQualityFromCandidate, createCardWorkbench, type CardWorkbenchOptions, type WorkingSetImportResult } from "../../services/card-workbench";
 import { handleArtworkList, handleCardExport, handleCardImport, handleResolve, parseWorkingCards } from "../../services/card-api";
 import { ArtworkCatalog } from "../../artwork/catalog";
 import { appDataPaths, originalPathForHash } from "../../artwork/storage/paths";
-import type { ScryfallClient } from "../../providers/scryfall/client";
+import { ScryfallClient, type ScryfallClient as ScryfallClientType } from "../../providers/scryfall/client";
 import type { CardWorkbench } from "../../services/card-workbench";
 import type { ScryfallCard } from "../../providers/scryfall/types";
 import type { ArtworkCandidate } from "../../core/cards/types";
@@ -41,7 +41,7 @@ const basicLand = {
 };
 const delverCard = JSON.parse(await readFile(new URL("../fixtures/scryfall/dmf-card.json", import.meta.url), "utf8")) as Record<string, unknown>;
 
-async function setup(fetchImpl?: typeof fetch, scryfallClient?: ScryfallClient, mpcFetchImpl?: typeof fetch) {
+async function setup(fetchImpl?: typeof fetch, scryfallClient?: ScryfallClientType, mpcFetchImpl?: typeof fetch) {
   const root = await mkdtemp(join(tmpdir(), "tcgprint-workbench-"));
   roots.push(root);
   const workbench = await createCardWorkbench({ dataDirectory: root, fetchImpl, minIntervalMs: 0, ...(mpcFetchImpl ? { mpcFetchImpl } : {}), ...(scryfallClient ? { scryfallClient } : {}) });
@@ -73,7 +73,7 @@ function fakeScryfallClient(cards: readonly ScryfallCard[], printingsPerIdentity
     });
   });
   const searchCards = vi.fn(async () => [...cards]);
-  const downloadAsset = vi.fn(async () => ({ bytes: new Uint8Array(), contentType: "image/png", sourceUrl: "https://cards.scryfall.io/test.png", kind: "thumbnail" as const }));
+  const downloadAsset = vi.fn(async (sourceUrl: string, options: { kind: "thumbnail" | "original" }) => ({ bytes: new Uint8Array(), contentType: "image/png", sourceUrl, kind: options.kind }));
   const client = { lookupByName, lookupById, lookupBySetCollector, listPrintings, searchCards, downloadAsset, autocomplete: vi.fn(async () => []), getRateLimitState: vi.fn() } as unknown as ScryfallClient;
   return { client, lookupByName, lookupById, lookupBySetCollector, listPrintings, searchCards, downloadAsset };
 }
@@ -129,6 +129,75 @@ function cardApiFetcher(workbench: CardWorkbench) {
 }
 
 describe("card workbench services", () => {
+  it("does not treat dimensions as effective DPI until original validation records it", () => {
+    expect(artworkQualityFromCandidate({ id: "remote", source: "scryfall", identityId: "scryfall:oracle:sol-ring", faceId: "front", originalAvailable: true, widthPx: 3000, heightPx: 4200 })).toBe("unknown");
+    expect(artworkQualityFromCandidate({ id: "validated", source: "scryfall", identityId: "scryfall:oracle:sol-ring", faceId: "front", originalAvailable: true, widthPx: 3000, heightPx: 4200, effectiveDpi: 798 })).toBe("excellent");
+  });
+
+  it("keeps a Scryfall printing at index 800 selectable and sends it through validated original storage", async () => {
+    const source = resolvedCard("Sol Ring", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "cmm", "396");
+    const fake = fakeScryfallClient([source], 1200);
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 1995, height: 2793, channels: 3, background: "#579" } }).png().toBuffer());
+    fake.downloadAsset.mockResolvedValue({ bytes: originalBytes, contentType: "image/png", sourceUrl: source.imageUris!.png!, kind: "original" });
+    const { workbench } = await setup(undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
+    const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0]!, source.id);
+
+    const catalog = await workbench.listArtworkCandidates(identified.identity!.id, "front", "scryfall");
+    expect(fake.downloadAsset).not.toHaveBeenCalled();
+    const distant = catalog[800]!;
+    const selected = workbench.selectArtwork(identified, "front", distant);
+    const original = await workbench.getArtworkOriginal(distant.id);
+    const exportResponse = await handleCardExport(new Request("http://localhost/api/cards/export", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cards: [selected], options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES } }),
+    }), workbench);
+
+    expect(catalog).toHaveLength(1200);
+    expect(selected.selectedArtworkByFace.front).toMatchObject({ candidateId: distant.id, source: "scryfall" });
+    expect(original.bytes).toEqual(originalBytes);
+    expect(await workbench.getArtworkCandidate(distant.id)).toMatchObject({ effectiveDpi: 798, widthPx: 1995, heightPx: 2793 });
+    expect(exportResponse.status).toBe(200);
+    expect(exportResponse.headers.get("Content-Type")).toBe("application/pdf");
+    expect(await PDFDocument.load(await exportResponse.arrayBuffer()).then((pdf) => pdf.getPageCount())).toBe(1);
+    expect(fake.downloadAsset).toHaveBeenCalledOnce();
+  }, 30_000);
+
+  it("passes three Scryfall printing pages through CardWorkbench and the artwork API without mixing DFC faces", async () => {
+    const pages: number[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === `/cards/${String(delverCard.id)}`) return Response.json(delverCard);
+      if (url.pathname === "/cards/search") {
+        const page = Number(url.searchParams.get("page") ?? 1);
+        pages.push(page);
+        const printing = { ...delverCard, id: `dfc-printing-${page}`, collector_number: String(page) };
+        const nextPage = page < 3
+          ? `https://api.scryfall.com/cards/search?q=oracleid%3A${String(delverCard.oracle_id)}&unique=prints&order=released&page=${page + 1}`
+          : undefined;
+        return Response.json({ data: [printing], has_more: page < 3, ...(nextPage ? { next_page: nextPage } : {}) });
+      }
+      throw new Error(`Unexpected Scryfall request: ${url.pathname}`);
+    };
+    const client = new ScryfallClient({ fetchImpl, minIntervalMs: 0 });
+    const { workbench } = await setup(undefined, client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
+    const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0]!, String(delverCard.id));
+    const request = (faceId: "front" | "back") => new Request("http://localhost/api/cards/artworks", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ faceId, source: "scryfall" }),
+    });
+
+    const frontResponse = await handleArtworkList(request("front"), identified.identity!.id, workbench);
+    const frontBody = await frontResponse.json() as { candidates: Array<Record<string, unknown>> };
+    const backResponse = await handleArtworkList(request("back"), identified.identity!.id, workbench);
+    const backBody = await backResponse.json() as { candidates: Array<Record<string, unknown>> };
+
+    expect(pages).toEqual([1, 2, 3]);
+    expect(frontBody.candidates).toHaveLength(3);
+    expect(backBody.candidates).toHaveLength(3);
+    expect(frontBody.candidates.every((candidate) => candidate.faceId === "front" && candidate.faceName === "Delver of Secrets")).toBe(true);
+    expect(backBody.candidates.every((candidate) => candidate.faceId === "back" && candidate.faceName === "Insectile Aberration")).toBe(true);
+  });
   it("keeps deck quantities, sections and order in one session WorkingCard per entry", async () => {
     const { workbench } = await setup();
     const result = await workbench.importForWorkingSet({ text: "Mainboard\n1 Sol Ring\n6 Island\nSideboard\n2 Counterspell" });

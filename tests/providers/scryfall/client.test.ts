@@ -58,6 +58,36 @@ describe("ScryfallClient", () => {
     expect(urls.some((url) => url.searchParams.get("q") === "oracleid:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" && url.searchParams.get("unique") === "prints")).toBe(true);
   });
 
+  it("follows every unique printing page beyond the former 100-page ceiling", async () => {
+    const pageCount = 101;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      const pageNumber = Number(url.searchParams.get("page") ?? 1);
+      const card = { ...normal, id: `printing-${pageNumber}`, collector_number: String(pageNumber) };
+      const nextPage = pageNumber < pageCount ? `https://api.scryfall.com/cards/search?q=oracleid%3Atest&page=${pageNumber + 1}` : undefined;
+      return json(cardPage([card], nextPage));
+    });
+    const client = fakeClient(fetchImpl);
+
+    const printings = await client.listPrintings("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+
+    expect(printings).toHaveLength(101);
+    expect(printings[0]?.collectorNumber).toBe("1");
+    expect(printings.at(-1)?.collectorNumber).toBe("101");
+    expect(fetchImpl).toHaveBeenCalledTimes(101);
+  });
+
+  it("rejects incomplete or cyclic printing pagination instead of silently returning a partial catalog", async () => {
+    const missingNextPage = fakeClient(vi.fn(async () => json({ ...cardPage([normal]), has_more: true })));
+    await expect(missingNextPage.listPrintings("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).rejects.toMatchObject({ kind: "invalid-payload" });
+
+    const cycle = "https://api.scryfall.com/cards/search?q=oracleid%3Abbbb&page=2";
+    const cyclicFetch = vi.fn(async () => json(cardPage([normal], cycle)));
+    const cyclic = fakeClient(cyclicFetch);
+    await expect(cyclic.listPrintings("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).rejects.toMatchObject({ kind: "invalid-payload" });
+    expect(cyclicFetch).toHaveBeenCalledTimes(2);
+  });
+
   it("maps 404, 429/Retry-After, and 5xx to typed errors and delays subsequent calls", async () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce(new Response("{}", { status: 404 })).mockResolvedValueOnce(new Response("{}", { status: 429, headers: { "retry-after": "1" } })).mockResolvedValueOnce(new Response("{}", { status: 503 }));
     const client = fakeClient(fetchImpl);

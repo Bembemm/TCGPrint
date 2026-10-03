@@ -28,7 +28,7 @@ const identity: CardIdentity = {
   confidence: 1,
 };
 
-async function setup(fetchImpl: typeof fetch, options: { timeoutMs?: number; maxOriginalBytes?: number; searchLimit?: number } = {}) {
+async function setup(fetchImpl: typeof fetch, options: { timeoutMs?: number; maxOriginalBytes?: number } = {}) {
   const base = await mkdtemp(join(tmpdir(), "tcgprint-mpc-provider-"));
   temporaryDirectories.push(base);
   const paths = appDataPaths(base);
@@ -45,7 +45,6 @@ async function setup(fetchImpl: typeof fetch, options: { timeoutMs?: number; max
     metadata,
     repository,
     timeoutMs: options.timeoutMs ?? 100,
-    ...(options.searchLimit !== undefined ? { searchLimit: options.searchLimit } : {}),
     waitForRetry: async () => undefined,
     ...(options.maxOriginalBytes !== undefined ? { maxOriginalBytes: options.maxOriginalBytes } : {}),
   });
@@ -97,6 +96,88 @@ function staticProvider(source: "scryfall" | "upload", id: string): ArtworkProvi
 }
 
 describe("MPC artwork provider", () => {
+  it.each([75, 501, 1200])("keeps all %i search results in the logical catalog and hydrates in bounded batches", async (count) => {
+    const ids = Array.from({ length: count }, (_, index) => `asset_${String(index).padStart(5, "0")}`);
+    let activeHydrations = 0;
+    let peakHydrations = 0;
+    let hydrationBatches = 0;
+    let previewOrOriginalDownloads = 0;
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/2/sources/") return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.pathname === "/3/editorSearch/") {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]!]: ids } });
+      }
+      if (url.pathname === "/2/cards/") {
+        hydrationBatches += 1;
+        activeHydrations += 1;
+        peakHydrations = Math.max(peakHydrations, activeHydrations);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        const body = JSON.parse(String(init.body)) as { cardIdentifiers: string[] };
+        const records = Object.fromEntries(body.cardIdentifiers.map((identifier) => [identifier, {
+          identifier, cardType: "CARD", name: identifier, sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000, dpi: 800,
+        }]));
+        activeHydrations -= 1;
+        return jsonResponse({ results: records });
+      }
+      previewOrOriginalDownloads += 1;
+      throw new Error(`Unexpected non-metadata MPC request: ${url.pathname}`);
+    };
+    const { database, provider } = await setup(fetchImpl, { timeoutMs: 30_000 });
+
+    const candidates = await provider.searchArtwork(identity);
+
+    expect(candidates).toHaveLength(count);
+    expect(candidates[0]?.metadata?.providerRank).toBe(0);
+    expect(candidates.at(-1)?.metadata?.providerRank).toBe(count - 1);
+    expect(hydrationBatches).toBe(Math.ceil(count / 20));
+    expect(peakHydrations).toBeLessThanOrEqual(3);
+    expect(previewOrOriginalDownloads).toBe(0);
+    const cached = await provider.searchArtwork(identity);
+    expect(cached).toHaveLength(count);
+    expect(hydrationBatches).toBe(Math.ceil(count / 20));
+    database.close();
+  }, 30_000);
+
+  it("lets a late candidate satisfy whole-catalog filters and outrank the first provider result by reported DPI", async () => {
+    const ids = Array.from({ length: 1200 }, (_, index) => `rank_${String(index).padStart(5, "0")}`);
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/2/sources/") return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.pathname === "/2/languages/") return jsonResponse({ languages: [{ code: "en", name: "English" }] });
+      if (url.pathname === "/2/tags/") return jsonResponse({ tags: [{ name: "foil" }] });
+      if (url.pathname === "/3/editorSearch/") {
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]!]: ids } });
+      }
+      if (url.pathname === "/2/cards/") {
+        const body = JSON.parse(String(init.body)) as { cardIdentifiers: string[] };
+        return jsonResponse({ results: Object.fromEntries(body.cardIdentifiers.map((identifier) => [identifier, {
+          identifier, cardType: "CARD", name: identifier, sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000,
+          dpi: identifier === ids[1199] ? 2400 : 800, language: "en", tags: identifier === ids[1199] ? ["foil"] : [],
+        }])) });
+      }
+      throw new Error(`Unexpected MPC request: ${url.pathname}`);
+    };
+    const { database, provider } = await setup(fetchImpl, { timeoutMs: 30_000 });
+
+    const ranked = await provider.searchArtworkAdvanced(identity, {
+      filters: { maximumDpi: 3000, preferredTags: ["foil"], rankingMode: "balanced" },
+    });
+    const filtered = await provider.searchArtworkAdvanced(identity, {
+      filters: { minimumDpi: 2200, maximumDpi: 3000, includeTags: ["foil"], rankingMode: "balanced" },
+    });
+
+    expect(ranked).toHaveLength(1200);
+    expect(ranked[0]).toMatchObject({ providerAssetId: ids[1199], metadata: { providerRank: 1199, dpi: 2400 } });
+    expect(ranked[1]?.metadata?.providerRank).toBe(0);
+    expect(ranked.at(-1)?.metadata?.providerRank).toBe(1198);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]).toMatchObject({ providerAssetId: ids[1199], metadata: { providerRank: 1199, dpi: 2400 } });
+    database.close();
+  }, 30_000);
+
   it("lists only MPC endpoint documents hydrated as CARDBACK, never ordinary CARD artwork", async () => {
     const requests: Array<{ path: string; body?: unknown }> = [];
     const ids = ["verified-cardback-123", "ordinary-card-asset-456"];
@@ -112,7 +193,7 @@ describe("MPC artwork provider", () => {
       } });
       throw new Error(`Unexpected MPC request: ${url.pathname}`);
     };
-    const { database, provider } = await setup(fetchImpl);
+    const { database, provider } = await setup(fetchImpl, { timeoutMs: 30_000 });
 
     const candidates = await provider.searchCardbacks();
 
@@ -121,7 +202,7 @@ describe("MPC artwork provider", () => {
     expect(requests.map(({ path }) => path)).toEqual(["/2/sources/", "/2/cardbacks/", "/2/cards/"]);
     expect(requests[1]?.body).toMatchObject({ searchSettings: { filterSettings: { maximumSize: 30 } } });
     database.close();
-  });
+  }, 30_000);
 
   it("sends selected filters to the cardback endpoint and retains only matching hydrated results", async () => {
     const requests: Array<{ path: string; body?: unknown }> = [];
@@ -142,7 +223,7 @@ describe("MPC artwork provider", () => {
       if (url.pathname === "/2/cards/") return jsonResponse({ results: Object.fromEntries(records.map((item) => [item.identifier, item])) });
       throw new Error(`Unexpected fake request: ${url.pathname}`);
     };
-    const { database, provider } = await setup(fetchImpl);
+    const { database, provider } = await setup(fetchImpl, { timeoutMs: 30_000 });
 
     const candidates = await provider.searchCardbacks({ filters: {
       minimumDpi: 600,
@@ -167,14 +248,16 @@ describe("MPC artwork provider", () => {
     database.close();
   });
 
-  it("accepts cardback catalogs above the old batch cap and hydrates only the configured bounded subset", async () => {
-    const ids = Array.from({ length: 501 }, (_, index) => `cardback-${String(index).padStart(4, "0")}-asset`);
+  it("keeps a 1200 item cardback catalog complete while validating every hydrated record as CARDBACK", async () => {
+    const ids = Array.from({ length: 1200 }, (_, index) => `cardback-${String(index).padStart(4, "0")}-asset`);
     const hydratedIds: string[] = [];
+    let batches = 0;
     const fetchImpl: typeof fetch = async (input, init = {}) => {
       const url = new URL(String(input));
       if (url.pathname === "/2/sources/") return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
       if (url.pathname === "/2/cardbacks/") return jsonResponse({ cardbacks: ids });
       if (url.pathname === "/2/cards/") {
+        batches += 1;
         const body = JSON.parse(String(init.body)) as { cardIdentifiers: string[] };
         hydratedIds.push(...body.cardIdentifiers);
         return jsonResponse({ results: Object.fromEntries(body.cardIdentifiers.map((identifier) => [identifier, {
@@ -183,14 +266,16 @@ describe("MPC artwork provider", () => {
       }
       throw new Error(`Unexpected fake request: ${url.pathname}`);
     };
-    const { database, provider } = await setup(fetchImpl, { searchLimit: 2 });
+    const { database, provider } = await setup(fetchImpl, { timeoutMs: 30_000 });
 
     const candidates = await provider.searchCardbacks();
 
-    expect(candidates).toHaveLength(2);
-    expect(hydratedIds).toEqual(ids.slice(0, 2));
+    expect(candidates).toHaveLength(1200);
+    expect(hydratedIds).toEqual(ids);
+    expect(batches).toBe(60);
+    expect(candidates.every(({ metadata }) => metadata?.cardType === "CARDBACK")).toBe(true);
     database.close();
-  });
+  }, 30_000);
 
   it("uses the legacy query-array contract only after v3 returns 404", async () => {
     const requests: Array<{ url: string; method: string; body?: unknown }> = [];

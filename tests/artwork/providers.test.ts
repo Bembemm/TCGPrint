@@ -14,7 +14,9 @@ import { calculateEffectiveDpi, artworkResolutionQuality } from "../../artwork/e
 import { LocalArtworkProvider } from "../../artwork/local-provider";
 import { ScryfallArtworkProvider } from "../../artwork/scryfall-provider";
 import type { ScryfallClient } from "../../providers/scryfall/client";
+import { ScryfallClient as RealScryfallClient } from "../../providers/scryfall/client";
 import type { ScryfallCard, ScryfallDownloadedAsset } from "../../providers/scryfall/types";
+import delverFixture from "../fixtures/scryfall/dmf-card.json";
 
 const temporaryDirectories: string[] = [];
 afterEach(async () => Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -69,8 +71,31 @@ describe("artwork providers", () => {
     expect(fake.downloadAsset).toHaveBeenCalledTimes(2);
     expect(fake.downloadAsset.mock.calls.map(([uri]) => uri)).toContain(solRing.imageUris?.png);
     expect(original.provenance).toContainEqual(expect.objectContaining({ provider: "scryfall", providerAssetId: solRing.id, scryfallId: solRing.id, oracleId: identity.oracleId, sourceUrl: solRing.imageUris?.png }));
-    expect(await provider.getCandidate(candidate.id)).toMatchObject({ widthPx: 1500, heightPx: 2100, effectiveDpi: 600 });
+    expect(await provider.getCandidate(candidate.id)).toMatchObject({ widthPx: 1500, heightPx: 2100, effectiveDpi: 600, originalCached: true, metadata: { originalFormat: "png", byteLength: bytes.byteLength } });
     await expect(provider.getOriginal("missing")).rejects.toMatchObject({ code: "ARTWORK_MISSING" });
+    storage.database.close();
+  }, 15_000);
+
+  it("coalesces simultaneous Scryfall original requests and reuses the validated cache", async () => {
+    const storage = await setup();
+    const bytes = await png(900, 1260);
+    const downloadAsset = vi.fn(async (sourceUrl: string, options: { kind: "thumbnail" | "original" }) => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return { bytes, contentType: "image/png", sourceUrl, kind: options.kind } satisfies ScryfallDownloadedAsset;
+    });
+    const client = {
+      listPrintings: vi.fn(async () => [solRing]), lookupById: vi.fn(async () => solRing), lookupByName: vi.fn(async () => solRing), downloadAsset,
+    } as unknown as ScryfallClient;
+    const provider = new ScryfallArtworkProvider(client, storage.originals, storage.thumbnails, storage.metadata, storage.repository);
+    const [candidate] = await provider.searchArtwork(identity);
+
+    const [first, concurrent] = await Promise.all([provider.getOriginal(candidate.id), provider.getOriginal(candidate.id)]);
+    await provider.getOriginal(candidate.id);
+
+    expect(first.contentHash).toBe(concurrent.contentHash);
+    expect(downloadAsset).toHaveBeenCalledTimes(1);
+    expect(downloadAsset).toHaveBeenCalledWith(solRing.imageUris?.png, expect.objectContaining({ kind: "original" }));
+    expect(await provider.getCandidate(candidate.id)).toMatchObject({ effectiveDpi: expect.any(Number), originalCached: true });
     storage.database.close();
   }, 15_000);
 
@@ -95,6 +120,36 @@ describe("artwork providers", () => {
       ["back", "Insectile Aberration", "https://cards.scryfall.io/png/back.png"],
     ]);
     expect(candidates.map((item) => item.id)).toEqual([`scryfall:${dmf.id}:front`, `scryfall:${dmf.id}:back`]);
+    storage.database.close();
+  });
+
+  it("carries every page of multi-printing DFC results into isolated front and back catalogs", async () => {
+    const storage = await setup();
+    const calls: number[] = [];
+    const pageCount = 3;
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      const page = Number(url.searchParams.get("page") ?? 1);
+      calls.push(page);
+      const card = { ...(delverFixture as Record<string, unknown>), id: `dfc-printing-${page}`, collector_number: String(page) };
+      const nextPage = page < pageCount
+        ? `https://api.scryfall.com/cards/search?q=oracleid%3A${identity.oracleId}&unique=prints&order=released&page=${page + 1}`
+        : undefined;
+      return Response.json({ data: [card], has_more: page < pageCount, ...(nextPage ? { next_page: nextPage } : {}) });
+    };
+    const client = new RealScryfallClient({ fetchImpl, minIntervalMs: 0 });
+    const provider = new ScryfallArtworkProvider(client, storage.originals, storage.thumbnails, storage.metadata, storage.repository);
+    const dfcIdentity = { ...identity, name: "Delver of Secrets // Insectile Aberration", oracleId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" };
+
+    const front = await provider.searchArtwork(dfcIdentity, { faceId: "front" });
+    const back = await provider.searchArtwork(dfcIdentity, { faceId: "back" });
+
+    expect(calls).toEqual([1, 2, 3]);
+    expect(front).toHaveLength(3);
+    expect(back).toHaveLength(3);
+    expect(front.every((candidate) => candidate.faceId === "front" && candidate.faceName === "Delver of Secrets")).toBe(true);
+    expect(back.every((candidate) => candidate.faceId === "back" && candidate.faceName === "Insectile Aberration")).toBe(true);
+    expect(front.map(({ id }) => id)).not.toEqual(back.map(({ id }) => id));
     storage.database.close();
   });
 

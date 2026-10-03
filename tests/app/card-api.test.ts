@@ -641,6 +641,24 @@ describe("card APIs", () => {
     expect(body.candidates[0]).toMatchObject({ metadata: { originalFilename: "Sol Ring.png" } });
   });
 
+  it("returns all 1200 artwork DTOs and distinguishes verified, provider-reported, unknown, and unavailable quality", async () => {
+    const candidates: ArtworkCandidate[] = Array.from({ length: 1200 }, (_, index) => ({
+      id: `scryfall:printing-${index}:front`, source: index === 1 ? "mpc" : "scryfall", identityId: identity.id,
+      faceId: "front", originalAvailable: index !== 3, previewUri: `https://cards.scryfall.io/printing-${index}.jpg`,
+      ...(index === 0 ? { widthPx: 1995, heightPx: 2793, effectiveDpi: 798 } : {}),
+      ...(index === 1 ? { metadata: { dpi: 800 } } : {}),
+      ...(index === 2 ? { widthPx: 1995, heightPx: 2793 } : {}),
+    }));
+    const workbench = testWorkbench({ listArtworkCandidates: vi.fn(async () => candidates) });
+
+    const response = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", { faceId: "front", source: "all" }), identity.id, workbench);
+    const body = await response.json() as { candidates: Array<Record<string, unknown>> };
+
+    expect(body.candidates).toHaveLength(1200);
+    expect(body.candidates.at(-1)?.id).toBe("scryfall:printing-1199:front");
+    expect(body.candidates.slice(0, 4).map(({ qualityStatus }) => qualityStatus)).toEqual(["verified", "provider-reported", "unknown", "unavailable"]);
+  });
+
   it("preserves MPC online-versus-cached original status in artwork candidate DTOs", async () => {
     const mpcCandidate: ArtworkCandidate = { ...candidate, id: "mpc:opaque", source: "mpc", originalAvailable: true, originalCached: false, metadata: { ...(candidate.metadata ?? {}), localAvailabilityHint: true } };
     const workbench = testWorkbench({ listArtworkCandidates: vi.fn(async () => [mpcCandidate]) });
