@@ -7,6 +7,7 @@ import { exportWorkingCardsByContentMode } from "../../services/card-export";
 import type { CardWorkbench } from "../../services/card-workbench";
 import { NO_CUT_GUIDES } from "../helpers/cut-guides";
 import { mpcArtworkCandidateId } from "../../core/cards/ids";
+import { DEFAULT_PROJECT_SETTINGS, deserializeProjectSnapshot, serializeProjectSnapshot } from "../../persistence/projects/serializer";
 
 async function png(color: string) {
   return new Uint8Array(await sharp({ create: { width: 42, height: 63, channels: 3, background: color } }).png().toBuffer());
@@ -273,11 +274,14 @@ describe("duplex export modes", () => {
       backModeSelectionPolicy: "explicit" as const,
       ...(source === "mpc" ? { mpcReferences: [{ faceId: "back" as const, importedAssetId: providerAssetId, providerAssetId, selectedArtworkId: "mpc-selected-back", slots: [], availableLocally: true }] } : {}),
     };
-    const result = await exportWorkingCardsByContentMode(catalog, undefined, [simpleManual], options("back-only"));
+    const exportCard = source === "scryfall"
+      ? deserializeProjectSnapshot(serializeProjectSnapshot([simpleManual], DEFAULT_PROJECT_SETTINGS)).cards[0]!
+      : simpleManual;
+    const result = await exportWorkingCardsByContentMode(catalog, undefined, [exportCard], options("back-only"));
 
     expect((await PDFDocument.load(result.pdfBytes!)).getPages()).toHaveLength(1);
     expect(result.preflight?.backs.manual).toBe(1);
-    expect(catalog.getArtworkCandidate).toHaveBeenCalledWith(id, expect.objectContaining({ mpcReferences: simpleManual.mpcReferences }));
+    expect(catalog.getArtworkCandidate).toHaveBeenCalledWith(id, expect.objectContaining({ mpcReferences: exportCard.mpcReferences }));
     expect(simpleManual.faces).toHaveLength(1);
   });
 
