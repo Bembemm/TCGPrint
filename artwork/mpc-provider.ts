@@ -25,7 +25,7 @@ const THUMBNAIL_HOSTS = new Set(["drive.google.com", "lh3.googleusercontent.com"
 const ORIGINAL_HOSTS = new Set(["drive.google.com", "drive.usercontent.google.com"]);
 const API_HOSTS = new Set(["mpcfill.com"]);
 export const MPC_HYDRATION_CHUNK_SIZE = 20;
-export const MPC_MAX_BATCH_CANDIDATES = 500;
+export const MPC_MAX_REVALIDATION_CANDIDATES = 500;
 export const MPC_BATCH_CONCURRENCY = 3;
 export const MPC_REMOTE_CONCURRENCY = 4;
 const EMPTY_SEARCH_TTL_MS = 30_000;
@@ -99,7 +99,6 @@ export interface MpcArtworkProviderOptions {
   readonly baseUrl?: string;
   readonly timeoutMs?: number;
   readonly maxOriginalBytes?: number;
-  readonly searchLimit?: number;
   readonly waitForRetry?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   readonly originals: ArtworkOriginalStore;
   readonly thumbnails: ArtworkThumbnailStore;
@@ -311,7 +310,7 @@ function resultIds(payload: unknown, query: string, hash: string, version: "v3" 
     result = queryResults.CARD;
   }
   if (!Array.isArray(result) || result.some((item) => !validAssetId(item))) throw new MpcArtworkProviderError("protocol", "MPC editor search returned an invalid asset-ID list.");
-  return [...new Set(result)].slice(0, 30);
+  return [...new Set(result)];
 }
 
 function cardItems(payload: unknown, expectedIds?: ReadonlySet<string>): Record<string, unknown>[] {
@@ -374,7 +373,7 @@ function referenceMetadata(reference: WorkingCardMpcReference): Readonly<Record<
   };
 }
 
-function cardbackIds(payload: unknown, candidateLimit: number): string[] {
+function cardbackIds(payload: unknown): string[] {
   const values = record(payload) && Array.isArray(payload.cardbacks)
     ? payload.cardbacks
     : record(payload) && record(payload.results) && Array.isArray(payload.results.cardbacks)
@@ -387,7 +386,7 @@ function cardbackIds(payload: unknown, candidateLimit: number): string[] {
   const selectedSet = new Set<string>();
   for (const value of values) {
     if (!validAssetId(value)) throw new MpcArtworkProviderError("protocol", "MPC cardback catalog returned an invalid asset identifier.");
-    if (selected.length >= candidateLimit || selectedSet.has(value)) continue;
+    if (selectedSet.has(value)) continue;
     selectedSet.add(value);
     selected.push(value);
   }
@@ -467,7 +466,6 @@ function revalidationFailureKind(error: unknown): MpcRevalidationFailureKind {
 function increment(current: number): number { return Math.min(MAX_COUNTER, current + 1); }
 
 export function planMpcHydrationBatches(assetIds: readonly string[]): readonly (readonly string[])[] {
-  if (assetIds.length > MPC_MAX_BATCH_CANDIDATES) throw new MpcArtworkProviderError("protocol", "MPC hydration exceeds its bounded asset limit.");
   const uniqueIds = [...new Set(assetIds)];
   const chunks: string[][] = [];
   for (let offset = 0; offset < uniqueIds.length; offset += MPC_HYDRATION_CHUNK_SIZE) chunks.push(uniqueIds.slice(offset, offset + MPC_HYDRATION_CHUNK_SIZE));
@@ -538,7 +536,6 @@ export class MpcArtworkProvider implements ArtworkProvider {
   private readonly baseUrl: URL;
   private readonly timeoutMs: number;
   private readonly maximumOriginalBytes: number;
-  private readonly searchLimit: number;
   private readonly originals: ArtworkOriginalStore;
   private readonly thumbnails: ArtworkThumbnailStore;
   private readonly metadata: ArtworkMetadataCache;
@@ -594,7 +591,6 @@ export class MpcArtworkProvider implements ArtworkProvider {
     }
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.maximumOriginalBytes = Math.max(1, options.maxOriginalBytes ?? DEFAULT_MAX_ORIGINAL_BYTES);
-    this.searchLimit = Math.min(30, Math.max(1, options.searchLimit ?? 30));
     this.waitForRetry = options.waitForRetry ?? abortableDelay;
     this.originals = options.originals;
     this.thumbnails = options.thumbnails;
@@ -745,17 +741,18 @@ export class MpcArtworkProvider implements ArtworkProvider {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ searchSettings: settings }),
       }, options.signal);
-      const ids = cardbackIds(response.payload, this.searchLimit);
+      const ids = cardbackIds(response.payload);
       this.hasConfirmedSearch = true;
       this.lastProtocolConfirmed = "v2";
       const identity: CardIdentity = { id: "mpc:generic-cardback-catalog", provider: "mpc", name: "MPC cardback", resolutionMethod: "custom", confidence: 1 };
       const hydration = ids.length ? await this.hydrateCards(ids, options.signal) : { byId: new Map<string, Record<string, unknown>>(), omittedIds: [] as string[], failedAssets: new Map<string, string>(), failedErrors: new Map<string, unknown>() };
       let rejectedCandidate = hydration.omittedIds.length > 0 || hydration.failedAssets.size > 0;
+      const providerRanks = new Map(ids.map((assetId, rank) => [assetId, rank]));
       const candidates = ids.flatMap((assetId): StoredCandidate[] => {
         const item = hydration.byId.get(assetId);
         if (!item) return [];
         try {
-          const stored = this.candidateFromCard(item, identity, "back", verifiedSourceIds, ids.indexOf(assetId), "CARDBACK");
+          const stored = this.candidateFromCard(item, identity, "back", verifiedSourceIds, providerRanks.get(assetId), "CARDBACK");
           if (!stored || !candidateMatchesFilters(stored.candidate, filters)) return [];
           return [{ ...stored, candidate: { ...stored.candidate, identityId: null } }];
         } catch (error) {
@@ -805,9 +802,9 @@ export class MpcArtworkProvider implements ArtworkProvider {
   }
 
   async revalidateCandidates(ids: readonly string[], signal?: AbortSignal): Promise<readonly MpcCandidateRevalidationResult[]> {
-    if (ids.length > MPC_MAX_BATCH_CANDIDATES) throw new MpcArtworkProviderError("protocol", "MPC revalidation batch exceeds its bounded candidate limit.");
+    if (ids.length > MPC_MAX_REVALIDATION_CANDIDATES) throw new MpcArtworkProviderError("protocol", "MPC revalidation batch exceeds its bounded candidate limit.");
     if (signal?.aborted) throw new MpcArtworkProviderError("aborted", "The MPC metadata refresh was cancelled.");
-    const uniqueIds = [...new Set(ids)].slice(0, MPC_MAX_BATCH_CANDIDATES);
+    const uniqueIds = [...new Set(ids)];
     const storedById = new Map<string, StoredCandidate>();
     const resultById = new Map<string, MpcCandidateRevalidationResult>();
     const groups = new Map<string, string[]>();
@@ -827,7 +824,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
       group.push(id);
       groups.set(assetId, group);
     }
-    if (groups.size > MPC_MAX_BATCH_CANDIDATES) throw new MpcArtworkProviderError("protocol", "MPC revalidation batch exceeds its bounded unique-asset limit.");
+    if (groups.size > MPC_MAX_REVALIDATION_CANDIDATES) throw new MpcArtworkProviderError("protocol", "MPC revalidation batch exceeds its bounded unique-asset limit.");
 
     const assets = [...groups.keys()];
     const localStates = new Map<string, MpcCandidateRevalidationResult["localOriginal"]>();
@@ -1112,7 +1109,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         }, options.signal);
         payload = v2.payload;
       }
-      const ids = resultIds(payload, query, hash, version).slice(0, this.searchLimit);
+      const ids = resultIds(payload, query, hash, version);
       this.hasConfirmedSearch = true;
       this.lastProtocolConfirmed = version;
       this.fallbackV2Used = version === "v2";
@@ -1120,12 +1117,12 @@ export class MpcArtworkProvider implements ArtworkProvider {
       const side = options.faceId ?? "front";
       const hydration = ids.length ? await this.hydrateCards(ids, options.signal) : { byId: new Map<string, Record<string, unknown>>(), omittedIds: [] as string[], failedAssets: new Map<string, string>(), failedErrors: new Map<string, unknown>() };
       let rejectedCandidate = hydration.omittedIds.length > 0 || hydration.failedAssets.size > 0;
+      const providerRanks = new Map(ids.map((assetId, rank) => [assetId, rank]));
       const candidates = ids.flatMap((assetId): StoredCandidate[] => {
         const item = hydration.byId.get(assetId);
         if (!item) return [];
         try {
-          const providerRank = ids.indexOf(assetId);
-          const candidate = this.candidateFromCard(item, identity, side, verifiedSourceIds, providerRank);
+          const candidate = this.candidateFromCard(item, identity, side, verifiedSourceIds, providerRanks.get(assetId));
           if (!candidate) return [];
           if (!candidateMatchesFilters(candidate.candidate, filters)) return [];
           return [candidate];

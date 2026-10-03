@@ -10,6 +10,7 @@ import { calculateEffectiveDpi } from "./effective-dpi";
 import type { ArtworkPreview, ArtworkProvider, ArtworkSearchOptions, ProviderHealth } from "./types";
 import type { ArtworkOriginal, ArtworkOriginalRecord } from "./storage/types";
 import { ArtworkStorageError } from "./storage/types";
+import { createCoalescedRequestRegistry } from "./mpc-request-coalescer";
 
 const METADATA_TTL_MS = 24 * 60 * 60 * 1000;
 const CANDIDATE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -52,6 +53,7 @@ export class ScryfallArtworkProvider implements ArtworkProvider {
   private readonly thumbnails: ArtworkThumbnailStore;
   private readonly metadata: ArtworkMetadataCache;
   private readonly repository: ArtworkRepository;
+  private readonly originalRequests = createCoalescedRequestRegistry<ArtworkOriginal>();
   private health: ProviderHealth = { available: true, degraded: false };
 
   constructor(client: ScryfallClient, originals: ArtworkOriginalStore, thumbnails: ArtworkThumbnailStore, metadata: ArtworkMetadataCache, repository: ArtworkRepository) {
@@ -167,19 +169,23 @@ export class ScryfallArtworkProvider implements ArtworkProvider {
   }
 
   async getOriginal(id: string, signal?: AbortSignal): Promise<ArtworkOriginal> {
-    const candidate = await this.getCandidate(id);
-    if (!candidate?.originalUri || !candidate.originalAvailable) throw new ArtworkStorageError("ARTWORK_MISSING", `Scryfall candidate ${id} has no original image.`);
-    const existing = this.repository.findOriginalByProviderSource("scryfall", candidate.providerAssetId ?? "", candidate.originalUri);
-    const original = existing
-      ? await this.originals.getOriginal(existing.artworkId)
-      : await this.downloadOriginal(candidate, signal);
-    this.metadata.putMetadata(`scryfall:candidate:${id}`, {
-      ...candidate,
-      widthPx: original.widthPx,
-      heightPx: original.heightPx,
-      effectiveDpi: calculateEffectiveDpi(original.widthPx, original.heightPx),
-    }, Date.now() + CANDIDATE_TTL_MS);
-    return original;
+    return this.originalRequests.run(id, signal, async (sharedSignal) => {
+      const candidate = await this.getCandidate(id);
+      if (!candidate?.originalUri || !candidate.originalAvailable) throw new ArtworkStorageError("ARTWORK_MISSING", `Scryfall candidate ${id} has no original image.`);
+      const existing = this.repository.findOriginalByProviderSource("scryfall", candidate.providerAssetId ?? "", candidate.originalUri);
+      const original = existing
+        ? await this.originals.getOriginal(existing.artworkId)
+        : await this.downloadOriginal(candidate, sharedSignal);
+      this.metadata.putMetadata(`scryfall:candidate:${id}`, {
+        ...candidate,
+        widthPx: original.widthPx,
+        heightPx: original.heightPx,
+        effectiveDpi: calculateEffectiveDpi(original.widthPx, original.heightPx),
+        originalCached: true,
+        metadata: { ...candidate.metadata, originalFormat: original.format, byteLength: original.byteLength },
+      }, Date.now() + CANDIDATE_TTL_MS);
+      return original;
+    });
   }
 
   private async downloadOriginal(candidate: ArtworkCandidate, signal?: AbortSignal): Promise<ArtworkOriginal> {
@@ -220,7 +226,8 @@ export class ScryfallArtworkProvider implements ArtworkProvider {
       heightPx: record.heightPx,
       effectiveDpi: calculateEffectiveDpi(record.widthPx, record.heightPx),
       originalAvailable: true,
-      metadata: { ...Object.fromEntries(Object.entries(metadata).filter(([key, value]) => ["layout", "digital", "promo", "fullArt", "imageStatus", "borderColor"].includes(key) && (typeof value === "string" || typeof value === "boolean"))) },
+      originalCached: true,
+      metadata: { ...Object.fromEntries(Object.entries(metadata).filter(([key, value]) => ["layout", "digital", "promo", "fullArt", "imageStatus", "borderColor"].includes(key) && (typeof value === "string" || typeof value === "boolean"))), originalFormat: record.format, byteLength: record.byteLength },
     };
     return candidate;
   }
@@ -232,6 +239,8 @@ export class ScryfallArtworkProvider implements ArtworkProvider {
       widthPx: record.widthPx,
       heightPx: record.heightPx,
       effectiveDpi: calculateEffectiveDpi(record.widthPx, record.heightPx),
+      originalCached: true,
+      metadata: { ...candidate.metadata, originalFormat: record.format, byteLength: record.byteLength },
       ...(provenance?.sourceUrl ? { originalUri: provenance.sourceUrl } : {}),
     };
   }

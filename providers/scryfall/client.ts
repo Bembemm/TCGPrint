@@ -152,14 +152,15 @@ export class ScryfallClient {
     url.searchParams.set("order", "released");
     const cards: ScryfallCard[] = [];
     let pageUrl: URL | undefined = url;
-    let pageCount = 0;
-    while (pageUrl && pageCount < 100) {
+    const seenPages = new Set<string>();
+    while (pageUrl) {
+      if (seenPages.has(pageUrl.href)) throw new ScryfallError("invalid-payload", "Scryfall returned a cyclic printing pagination link.");
+      seenPages.add(pageUrl.href);
       const page = await this.getPrintingPage(pageUrl, options.signal);
       cards.push(...page.cards);
+      if (page.hasMore && !page.nextPage) throw new ScryfallError("invalid-payload", "Scryfall omitted next_page while has_more is true.");
       pageUrl = page.hasMore && page.nextPage ? this.validateApiUrl(page.nextPage) : undefined;
-      pageCount += 1;
     }
-    if (pageUrl) throw new ScryfallError("invalid-payload", "Scryfall returned too many printing pages.");
     return cards;
   }
 

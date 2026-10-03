@@ -25,7 +25,7 @@ import type { BackLibraryOriginalSource } from "./card-export";
 import { createSeparatePdfArchive } from "./separate-pdf-archive";
 import { CalibrationError, checkPrinterProfileCompatibility, type PrinterProfileSnapshot } from "../core/calibration";
 import { verifyPrinterProfileSnapshot } from "../persistence/printer-profiles/hash";
-import { MPC_MAX_BATCH_CANDIDATES, type MpcCandidateRevalidationResult } from "../artwork/mpc-provider";
+import { MPC_MAX_REVALIDATION_CANDIDATES, type MpcCandidateRevalidationResult } from "../artwork/mpc-provider";
 import { createMpcDiagnosticReport } from "../artwork/mpc-diagnostic-report";
 
 const FORBIDDEN_PROPERTIES = new Set(["originalBytes", "bytes", "sourcePath", "localOriginalPath", "originalUri", "previewUri", "filePaths", "absolutePath", "filesystemPath"]);
@@ -433,7 +433,7 @@ function respondError(error: unknown): Response {
 function candidateDto(candidate: ArtworkCandidate) {
   const metadata = candidate.metadata ?? {};
   const safeMetadata: Record<string, unknown> = {};
-  for (const key of ["layout", "digital", "promo", "fullArt", "imageStatus", "borderColor", "referenceOnly", "slots", "importedAssetId", "originalFilename", "originalFormat", "contentHash", "provenanceCount", "cardType", "name", "sourceType", "sourceId", "sourceName", "extension", "declaredSize", "dpi", "language", "tags", "priority", "providerRank", "dateCreated", "dateModified", "remoteMetadataStatus", "metadataFreshness", "metadataCheckedAt", "originalFormatKnown", "originalFormatExportable"]) {
+  for (const key of ["layout", "digital", "promo", "fullArt", "imageStatus", "borderColor", "referenceOnly", "slots", "importedAssetId", "originalFilename", "originalFormat", "contentHash", "provenanceCount", "byteLength", "cardType", "name", "sourceType", "sourceId", "sourceName", "extension", "declaredSize", "dpi", "language", "tags", "priority", "providerRank", "dateCreated", "dateModified", "remoteMetadataStatus", "metadataFreshness", "metadataCheckedAt", "originalFormatKnown", "originalFormatExportable"]) {
     if (metadata[key] === undefined) continue;
     const value = candidate.source === "mpc" ? safeMpcMetadataValue(key, metadata[key]) : metadata[key];
     if (value !== undefined) safeMetadata[key] = value;
@@ -465,6 +465,10 @@ function candidateDto(candidate: ArtworkCandidate) {
     ...(candidate.heightPx ? { heightPx: candidate.heightPx } : {}),
     ...(candidate.effectiveDpi ? { effectiveDpi: candidate.effectiveDpi } : {}),
     ...(candidate.effectiveDpi ? { resolutionQuality: artworkQualityFromCandidate(candidate) } : {}),
+    qualityStatus: candidate.effectiveDpi ? "verified"
+      : !candidate.originalAvailable ? "unavailable"
+        : candidate.source === "mpc" && typeof metadata.dpi === "number" && Number.isFinite(metadata.dpi) && metadata.dpi > 0 ? "provider-reported"
+          : "unknown",
     ...(candidate.setCode ? { setCode: candidate.setCode } : {}),
     ...(candidate.collectorNumber ? { collectorNumber: candidate.collectorNumber } : {}),
     ...(candidate.language ? { language: candidate.language } : {}),
@@ -479,7 +483,7 @@ function safeMpcMetadataValue(key: string, value: unknown): unknown {
   const safeText = (text: unknown, maximum: number) => typeof text === "string" && text.length > 0 && text.length <= maximum
     && !/[\u0000-\u001f\u007f]/u.test(text) && !/^https?:\/\//i.test(text) ? text : undefined;
   if (["digital", "promo", "fullArt", "referenceOnly", "originalFormatKnown", "originalFormatExportable", "localAvailabilityHint"].includes(key)) return typeof value === "boolean" ? value : undefined;
-  if (["sourceId", "priority", "providerRank", "declaredSize", "dpi", "provenanceCount"].includes(key)) {
+  if (["sourceId", "priority", "providerRank", "declaredSize", "byteLength", "dpi", "provenanceCount"].includes(key)) {
     return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100_000_000 ? value : undefined;
   }
   if (["sourceType", "layout", "imageStatus", "borderColor"].includes(key)) return safeText(value, 80);
@@ -730,7 +734,7 @@ export async function handleMpcArtworkRefresh(request: Request, candidateId: str
 export async function handleMpcArtworkBatchRevalidation(request: Request, workbench: CardWorkbench): Promise<Response> {
   try {
     const body = await parseJsonRequest(request, 64_000);
-    if (!Array.isArray(body.candidateIds) || body.candidateIds.length > MPC_MAX_BATCH_CANDIDATES) throw new ApiRequestError(400, "INVALID_REQUEST", `candidateIds must contain at most ${MPC_MAX_BATCH_CANDIDATES} MPC artwork IDs.`);
+    if (!Array.isArray(body.candidateIds) || body.candidateIds.length > MPC_MAX_REVALIDATION_CANDIDATES) throw new ApiRequestError(400, "INVALID_REQUEST", `candidateIds must contain at most ${MPC_MAX_REVALIDATION_CANDIDATES} MPC artwork IDs.`);
     const candidateIds = body.candidateIds.map((value) => requiredString(value, "candidateId", 72));
     if (candidateIds.some((id) => !/^mpc:[a-f0-9]{64}$/.test(id))) throw new ApiRequestError(400, "INVALID_ID", "MPC artwork ID is invalid.");
     const results = await workbench.revalidateMpcArtworkCandidates(candidateIds, request.signal);

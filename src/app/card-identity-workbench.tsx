@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import Image from "next/image";
 import type { ImportKind } from "../../import-engine/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard, WorkingCardBackMode } from "../../core/cards/types";
 import type { MpcArtworkFilterInput, MpcFilterCatalogs } from "../../artwork/mpc-contract";
@@ -61,13 +60,12 @@ import BackLibraryControls, { type BackLibraryAssetDto } from "./back-library-co
 import { createBackValidationSummary, exportModeRequiresFrontArtwork } from "./back-validation";
 import { applyTemplateLayoutDefaults } from "./template-layout-defaults";
 import { createProjectRestoreLookupGate, runProjectRestoreProviderLookup } from "./project-restore-provider-gate";
+import { ARTWORK_WINDOW_SIZE, artworkWindowLimitForRequest, ArtworkCandidateGrid, sliceArtworkWindow, type ArtworkCandidateView } from "./artwork-candidate-grid";
+import { ArtworkQualityHydrator } from "./artwork-quality-hydration";
 import type { ResolveWorkingCardsResult, SafeImportReport, WorkingSetImportResult } from "../../services/card-workbench";
 
 type ArtworkFilter = "all" | "scryfall" | "mpc" | "upload";
-type CandidateDto = Omit<ArtworkCandidate, "originalUri" | "localOriginalPath" | "previewUri"> & {
-  readonly previewUri?: string;
-  readonly resolutionQuality?: "excellent" | "good" | "warning" | "low" | "unknown";
-};
+type CandidateDto = ArtworkCandidateView;
 
 interface Props {
   readonly files: readonly File[];
@@ -134,14 +132,6 @@ export function tryAcquireAddCardsOperation(inFlight: { current: boolean }): boo
 
 function labelSource(source: string): string {
   return source === "scryfall" ? "Scryfall" : source === "mpc" ? "MPC Autofill" : source === "upload" ? "Meus uploads" : source;
-}
-
-function resolutionQualityLabel(value: CandidateDto["resolutionQuality"]): string {
-  if (value === "excellent") return "excelente";
-  if (value === "good") return "bom";
-  if (value === "warning") return "warning";
-  if (value === "low") return "baixa resolução";
-  return "desconhecida";
 }
 
 function displayCard(card: WorkingCard): string {
@@ -549,6 +539,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const selectedCardId = editorState.selectedCardId;
   const face = editorState.face;
   const [artworkCandidates, setArtworkCandidates] = useState<CandidateDto[]>([]);
+  const [artworkWindow, setArtworkWindow] = useState<{ requestKey: string; limit: number }>({ requestKey: "", limit: ARTWORK_WINDOW_SIZE });
+  const [qualityChecking, setQualityChecking] = useState<{ requestKey: string; candidateIds: ReadonlySet<string> }>({ requestKey: "", candidateIds: new Set() });
   const [artworkCatalogRevision, setArtworkCatalogRevision] = useState(0);
   const [forcedMpcRefreshRevision, setForcedMpcRefreshRevision] = useState<number | null>(null);
   const [artworkFilter, setArtworkFilter] = useState<ArtworkFilter>("all");
@@ -608,6 +600,27 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [providerHealth, setProviderHealth] = useState<ProviderHealth>({});
   const [identityDetails, setIdentityDetails] = useState<IdentityDetails | null>(null);
   const artworkCatalogRequests = useRef(createRequestCache<ArtworkCatalogResult>());
+  const artworkRequestKeyRef = useRef("");
+  const artworkCatalogKeyRef = useRef("");
+  const qualityHydratorRef = useRef<ArtworkQualityHydrator<CandidateDto> | null>(null);
+  if (!qualityHydratorRef.current) {
+    qualityHydratorRef.current = new ArtworkQualityHydrator<CandidateDto>(
+      async (candidate, signal) => {
+        const response = await fetch(`/api/cards/artworks/${encodeURIComponent(candidate.id)}/prepare`, { method: "POST", signal });
+        return (await jsonResponse<{ candidate: CandidateDto }>(response)).candidate;
+      },
+      (requestKey, candidate) => {
+        if (artworkRequestKeyRef.current !== requestKey) return;
+        updateResolvedRequestCache(artworkCatalogRequests.current, artworkCatalogKeyRef.current, (cached) => ({
+          ...cached,
+          candidates: cached.candidates.map((item) => item.id === candidate.id ? candidate : item),
+        }));
+        setArtworkCandidates((current) => current.map((item) => item.id === candidate.id ? candidate : item));
+      },
+      (requestKey, candidateIds) => setQualityChecking({ requestKey, candidateIds }),
+      3,
+    );
+  }
   const identityDetailsRequests = useRef(createRequestCache<IdentityDetails>());
   const projectRestoreLookupGate = useRef(createProjectRestoreLookupGate(-1));
   const [pdfUrl, setPdfUrl] = useState("");
@@ -708,6 +721,14 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       cacheKey: JSON.stringify([activeIdentityId, artworkFace, manualPhysicalBackPicker, manualPhysicalBackPicker ? "mpc-cardbacks" : artworkFilter, activeCard.mpcReferences, manualPhysicalBackPicker || artworkFilter === "mpc" ? mpcFilters : undefined, artworkCatalogRevision]),
     }
     : null;
+  const currentArtworkCatalogKey = artworkRequest?.cacheKey ?? "";
+  const currentArtworkRequestKey = artworkRequest ? JSON.stringify([activeCard?.id, artworkRequest.cacheKey]) : "";
+  const artworkWindowLimit = artworkWindowLimitForRequest(artworkWindow, currentArtworkRequestKey);
+  const windowedArtworkCandidates = sliceArtworkWindow(filterCards, artworkWindowLimit);
+  const windowedCandidateKey = windowedArtworkCandidates.map(({ id }) => id).join("\n");
+  const qualityCheckingIds = qualityChecking.requestKey === currentArtworkRequestKey ? qualityChecking.candidateIds : new Set<string>();
+  artworkRequestKeyRef.current = currentArtworkRequestKey;
+  artworkCatalogKeyRef.current = currentArtworkCatalogKey;
   const visibleProblem = problem && (problemCardId === null || problemCardId === selectedCardId) ? problem : "";
   const visibleArtworkProblem = artworkProblem
     && artworkProblem.cardId === activeCard?.id
@@ -820,6 +841,16 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       });
     return () => { current = false; };
   }, [artworkRequest?.cacheKey, activeCard?.id, projectRestoreVersion]);
+
+  useEffect(() => {
+    qualityHydratorRef.current?.reset(currentArtworkRequestKey);
+    setArtworkWindow({ requestKey: currentArtworkRequestKey, limit: ARTWORK_WINDOW_SIZE });
+    return () => qualityHydratorRef.current?.cancel(currentArtworkRequestKey);
+  }, [currentArtworkRequestKey]);
+
+  useEffect(() => {
+    qualityHydratorRef.current?.schedule(currentArtworkRequestKey, windowedArtworkCandidates);
+  }, [currentArtworkRequestKey, windowedCandidateKey]);
 
   useEffect(() => {
     let current = true;
@@ -1404,30 +1435,23 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             {!activeCard.identity && <p className="muted">Não há identidade resolvida para determinar uma artwork padrão.</p>}
             {visibleArtworkProblem && <p className="error-message" role="alert">{visibleArtworkProblem}</p>}
             {filterCards.length === 0 && !visibleArtworkProblem && <p className="muted">Nenhuma arte disponível neste filtro. Referências MPC não possuem original se não foram importadas localmente.</p>}
-            <div className="artwork-grid">
-              {filterCards.map((candidate) => {
-                const isSelected = selected?.candidateId === candidate.id;
-                const mpcSourceName = typeof candidate.metadata?.sourceName === "string" ? candidate.metadata.sourceName : undefined;
-                const mpcFormat = typeof candidate.metadata?.extension === "string" ? candidate.metadata.extension.toUpperCase() : undefined;
-                const mpcDeclaredSize = typeof candidate.metadata?.declaredSize === "number" ? candidate.metadata.declaredSize : undefined;
-                const mpcFreshness = typeof candidate.metadata?.metadataFreshness === "string" ? candidate.metadata.metadataFreshness : undefined;
-                return <article className={`artwork-candidate ${isSelected ? "is-selected" : ""}`} key={candidate.id}>
-                  {candidate.previewUri ? <Image src={candidate.previewUri} alt={`${displayCard(activeCard)} · ${candidate.setCode ?? labelSource(candidate.source)} ${candidate.collectorNumber ?? ""}`} width={300} height={420} unoptimized /> : <div className="artwork-reference-thumb">{candidate.source === "mpc" ? "MPC reference" : "Preview indisponível"}</div>}
-                  <div className="candidate-meta">
-                    <strong>{candidate.faceName ?? candidate.metadata?.originalFilename as string ?? labelSource(candidate.source)}</strong>
-                    <span>{labelSource(candidate.source)}{candidate.setCode ? ` · ${candidate.setCode.toUpperCase()} #${candidate.collectorNumber ?? "?"}` : ""}</span>
-                    <span>{candidate.language ? candidate.language.toUpperCase() : "idioma não informado"}{candidate.effectiveDpi ? ` · DPI efetivo ${candidate.effectiveDpi} · ${resolutionQualityLabel(candidate.resolutionQuality)}` : " · DPI efetivo será calculado ao validar o original"}{candidate.source === "mpc" && typeof candidate.metadata?.dpi === "number" ? ` · DPI informado MPC ${candidate.metadata.dpi}` : ""}</span>
-                    {candidate.source === "mpc" && <span>{mpcSourceName ? `Source: ${mpcSourceName}` : "Source não informada"}{mpcFormat ? ` · formato ${mpcFormat}` : " · formato não informado"}{mpcDeclaredSize !== undefined ? ` · ${Math.ceil(mpcDeclaredSize / 1024)} KB` : " · tamanho não informado"}</span>}
-                    {candidate.source === "mpc" && <span className="reference-status">{candidate.originalCached ? "original em cache local" : candidate.originalAvailable ? "original remoto informado · validação no download" : "referência sem original disponível"}</span>}
-                    {candidate.source === "mpc" && typeof candidate.metadata?.remoteMetadataStatus === "string" && <span className="reference-status">Metadata MPC: {candidate.metadata.remoteMetadataStatus === "current" ? "atual" : candidate.metadata.remoteMetadataStatus === "removed" ? "removida no provider" : candidate.metadata.remoteMetadataStatus === "stale" ? "desatualizada" : candidate.metadata.remoteMetadataStatus}</span>}
-                    {candidate.source === "mpc" && mpcFreshness && <span className="reference-status">Atualidade da metadata: {mpcFreshness === "fresh" ? "atual" : mpcFreshness === "stale" ? "cache desatualizado" : mpcFreshness === "revalidated" ? "revalidada" : mpcFreshness}</span>}
-                    {candidate.source === "mpc" && candidate.metadata?.localAvailabilityHint === true && !candidate.originalCached && <span className="reference-status">XML relata disponibilidade local; bytes ainda não verificados no cache</span>}
-                  </div>
-                  {candidate.source === "mpc" && <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void refreshMpcMetadata(candidate)}>Revalidar metadata</button>}
-                  <button className={`button ${isSelected ? "primary" : "secondary"}`} type="button" disabled={interactionBusy} onClick={() => void chooseArtwork(candidate)}>{isSelected && candidate.originalAvailable && !candidate.effectiveDpi ? "Validar original e calcular DPI" : isSelected ? "Selecionada" : candidate.originalAvailable ? "Selecionar arte" : "Selecionar referência"}</button>
-                </article>;
-              })}
-            </div>
+            <ArtworkCandidateGrid
+              candidates={filterCards}
+              windowLimit={artworkWindowLimit}
+              catalogTotal={artworkCandidates.length}
+              filterTotal={filterCards.length}
+              catalogLabel={artworkRequest?.source && artworkRequest.source !== "all" ? labelSource(artworkRequest.source) : "Catálogo de arte"}
+              cardName={displayCard(activeCard)}
+              selectedCandidateId={selected?.candidateId}
+              disabled={interactionBusy}
+              qualityCheckingIds={qualityCheckingIds}
+              onSelect={(candidate) => void chooseArtwork(candidate)}
+              onRevalidate={(candidate) => void refreshMpcMetadata(candidate)}
+              onLoadMore={() => setArtworkWindow((current) => ({
+                requestKey: currentArtworkRequestKey,
+                limit: Math.min(filterCards.length, (current.requestKey === currentArtworkRequestKey ? current.limit : ARTWORK_WINDOW_SIZE) + ARTWORK_WINDOW_SIZE),
+              }))}
+            />
           </div>
         </div>}
       </div>}

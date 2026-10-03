@@ -5,7 +5,7 @@ import { ImportFailureError, importFiles } from "../import-engine";
 import type { ImportReport, ImportResult, ImportedAsset, ImportedEntry, UniversalImportRequest } from "../import-engine/types";
 import { sanitizeRelativeImportPath } from "../import-engine/source-path";
 import { ArtworkCatalog } from "../artwork/catalog";
-import { calculateEffectiveDpi, artworkResolutionQuality } from "../artwork/effective-dpi";
+import { artworkResolutionQuality } from "../artwork/effective-dpi";
 import { LocalArtworkProvider } from "../artwork/local-provider";
 import { MpcArtworkProvider } from "../artwork/mpc-provider";
 import type { MpcArtworkProviderDiagnostic, MpcCandidateRevalidationResult } from "../artwork/mpc-provider";
@@ -643,5 +643,5 @@ export async function resetCardWorkbenchForTests(): Promise<void> {
 }
 
 export function artworkQualityFromCandidate(candidate: ArtworkCandidate): ReturnType<typeof artworkResolutionQuality> {
-  return artworkResolutionQuality(candidate.effectiveDpi ?? (candidate.widthPx && candidate.heightPx ? calculateEffectiveDpi(candidate.widthPx, candidate.heightPx) : undefined));
+  return artworkResolutionQuality(candidate.effectiveDpi);
 }
