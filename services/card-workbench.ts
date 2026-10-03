@@ -19,13 +19,12 @@ import { ArtworkThumbnailStore } from "../artwork/storage/thumbnail-store";
 import type { ArtworkCatalogSource, ArtworkPreview, ProviderHealth } from "../artwork/types";
 import { confirmIdentity, IdentityResolver, isDoubleFacedIdentity, keepCustom, reconcileArtworkAfterIdentityChange, restoreAutomaticBackSelection, selectDefaultArtworkForFace, selectResolvedPrintingArtwork } from "../core/cards/identity-resolver";
 import { selectArtwork as updateSelectedArtwork, createWorkingSet } from "../core/cards/working-set";
-import { selectManualBackArtwork as selectManualBackArtworkCore } from "../core/cards/back-selection";
+import { BackSelectionPolicyError, isEligibleGenericPhysicalBack, selectManualBackArtwork as selectManualBackArtworkCore } from "../core/cards/back-selection";
 import { mpcArtworkCandidateId } from "../core/cards/ids";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
 import { ScryfallClient } from "../providers/scryfall/client";
 import { ScryfallError } from "../providers/scryfall/errors";
 import type { ScryfallCard } from "../providers/scryfall/types";
-import { TesseractOcrRecognizer } from "../providers/ocr/tesseract-recognizer";
 import { openArtworkDatabase } from "../persistence/sqlite";
 
 const METADATA_TTL_MS = 24 * 60 * 60 * 1000;
@@ -80,10 +79,6 @@ export interface CardWorkbenchOptions {
   readonly minIntervalMs?: number;
   readonly timeoutMs?: number;
   readonly maxUploadBytes?: number;
-  readonly recognizer?: {
-    recognizeName(bytes: Uint8Array, options?: { signal?: AbortSignal }): Promise<string | undefined>;
-    dispose?(): Promise<void>;
-  };
   /** Injectable client for controlled environments and structural provider tests. */
   readonly scryfallClient?: ScryfallClient;
 }
@@ -99,6 +94,7 @@ export interface CardWorkbench {
   keepWorkingCardCustom(card: WorkingCard): WorkingCard;
   restoreDefaultArtwork(card: WorkingCard, faceId: CardFaceSide, options?: { signal?: AbortSignal }): Promise<WorkingCard | undefined>;
   listArtworkCandidates(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
+  listMpcCardbackCandidates(options?: { mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
   getArtworkCandidate(candidateId: string, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; identity?: CardIdentity; signal?: AbortSignal }): Promise<ArtworkCandidate | undefined>;
   getMpcArtworkFilterCatalogs(signal?: AbortSignal): Promise<MpcFilterCatalogs>;
   getMpcArtworkProviderDiagnostic?(): MpcArtworkProviderDiagnostic | undefined;
@@ -211,12 +207,12 @@ function identityKey(identityId: string): string {
 }
 
 function resolutionKey(card: WorkingCard): string {
-  const query = {
+  const semanticInput = {
     hints: card.identityHints,
-    filename: card.importSource.filename,
-    imageIds: card.localArtworkIds,
+    entryKind: card.importSource.entryKind,
+    identityHintOrigin: card.importSource.identityHintOrigin ?? null,
   };
-  return `card-resolution:${createHash("sha256").update(JSON.stringify(query)).digest("hex")}`;
+  return `card-resolution:${createHash("sha256").update(JSON.stringify(semanticInput)).digest("hex")}`;
 }
 
 function storeIdentity(cache: ArtworkMetadataCache, identity: CardIdentity): void {
@@ -321,7 +317,6 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
   });
   const catalog = new ArtworkCatalog([scryfall, local, mpc]);
   const resolver = new IdentityResolver(client);
-  const recognizer = options.recognizer ?? new TesseractOcrRecognizer({ cachePath: paths.rootDirectory });
   const resolutionCache = new Map<string, { identity: CardIdentity | null; resolution: WorkingCard["identityResolution"]; printing?: ScryfallCard }>();
   let closePromise: Promise<void> | undefined;
 
@@ -336,14 +331,7 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
       };
     }
 
-    const selected = card.selectedArtworkByFace.front;
-    const original = selected?.source === "upload" ? await local.getOriginal(selected.candidateId).then((item) => item.bytes).catch(() => undefined) : undefined;
-    const resolved = await resolver.resolveWithPrinting(card, {
-      filename: card.importSource.filename,
-      ...(original ? { imageBytes: original } : {}),
-      ...(signal ? { signal } : {}),
-      recognizer,
-    });
+    const resolved = await resolver.resolveWithPrinting(card, signal ? { signal } : {});
     const resolution = {
       identity: resolved.workingCard.identity,
       resolution: resolved.workingCard.identityResolution,
@@ -486,6 +474,13 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
 
     async reresolveWorkingCard(card, callOptions = {}) {
       if (callOptions.signal?.aborted) throw new ScryfallError("aborted", "The Scryfall request was cancelled.");
+      const customImport = card.importSource.entryKind === "custom-card" || card.importSource.entryKind === "asset";
+      if (customImport && card.importSource.identityHintOrigin !== "explicit-card-hint") {
+        return card.identity ? card : {
+          ...card,
+          identityResolution: { status: "custom", candidates: [], confirmed: true },
+        };
+      }
       const unresolved: WorkingCard = {
         ...card,
         identity: null,
@@ -564,6 +559,14 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
       return catalog.search(identity, { source, faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), ...(callOptions.forceMpcRefresh ? { forceMpcRefresh: true } : {}), signal: callOptions.signal });
     },
 
+    async listMpcCardbackCandidates(callOptions = {}) {
+      return mpc.searchCardbacks({
+        ...(callOptions.mpcFilters ? { filters: callOptions.mpcFilters } : {}),
+        ...(callOptions.forceMpcRefresh ? { forceRefresh: true } : {}),
+        signal: callOptions.signal,
+      });
+    },
+
     async getArtworkCandidate(candidateId, callOptions = {}) {
       const candidate = await catalog.getCandidate(candidateId);
       if (candidate || !candidateId.startsWith("mpc:") || !callOptions.mpcReferences?.length) return candidate;
@@ -590,37 +593,26 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
       return updateSelectedArtwork(card, faceId, selection);
     },
     selectManualBackArtwork(card, candidate) {
-      if (candidate.faceId !== "front" && candidate.faceId !== "back") throw new Error("Manual physical back artwork has an invalid provider source face.");
-      const faceId: CardFaceSide = candidate.faceId;
-      const selection: SelectedArtwork = {
-        candidateId: candidate.id,
-        source: candidate.source,
-        identityId: candidate.identityId ?? card.identity?.id ?? null,
-        faceId,
-        ...(candidate.providerAssetId ? { providerAssetId: candidate.providerAssetId } : {}),
-        ...(candidate.selectedArtworkId ? { selectedArtworkId: candidate.selectedArtworkId } : {}),
-        selectionPolicy: "user-selected",
-      };
-      if (candidate.source === "upload" && card.identity) local.linkUpload(card.identity.id, candidate.id, faceId);
-      const next = selectManualBackArtworkCore(card, selection);
-      if (candidate.source === "upload") return { ...next, localArtworkIds: [...new Set([...next.localArtworkIds, candidate.id])] };
-      if (candidate.source !== "mpc") return next;
+      if (!isEligibleGenericPhysicalBack(card, candidate)) throw new BackSelectionPolicyError();
+      const next = selectManualBackArtworkCore(card, candidate);
       const alreadyReferenced = next.mpcReferences.some((reference) =>
-        reference.faceId === faceId && mpcArtworkCandidateId(reference.importedAssetId, faceId) === candidate.id,
+        reference.faceId === "back" && reference.providerCardType === "CARDBACK"
+          && mpcArtworkCandidateId(reference.importedAssetId, "back") === candidate.id,
       );
       if (alreadyReferenced) return next;
       const metadataImportedAssetId = candidate.metadata?.importedAssetId;
       const importedAssetId = typeof metadataImportedAssetId === "string"
         ? metadataImportedAssetId
         : candidate.providerAssetId ?? candidate.selectedArtworkId;
-      if (!importedAssetId || mpcArtworkCandidateId(importedAssetId, faceId) !== candidate.id) return next;
+      if (!importedAssetId || mpcArtworkCandidateId(importedAssetId, "back") !== candidate.id) return next;
       return {
         ...next,
         mpcReferences: [...next.mpcReferences, {
-          faceId,
+          faceId: "back",
           importedAssetId,
           ...(candidate.providerAssetId ? { providerAssetId: candidate.providerAssetId } : {}),
           ...(candidate.selectedArtworkId ? { selectedArtworkId: candidate.selectedArtworkId } : {}),
+          providerCardType: "CARDBACK",
           referenceOrigin: "gallery-selection",
           slots: [],
           availableLocally: candidate.originalCached === true,
@@ -630,8 +622,7 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     getProviderHealth() { return catalog.getProviderHealth(); },
     close() {
       closePromise ??= (async () => {
-        try { await recognizer.dispose?.(); }
-        finally { database.close(); }
+        database.close();
       })();
       return closePromise;
     },

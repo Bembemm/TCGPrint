@@ -31,6 +31,25 @@ function singleFaceCard(): WorkingCard {
 }
 
 describe("project snapshot serializer", () => {
+  it.each(["filename", "ocr"] as const)("round-trips legacy %s identity resolution metadata without migration", (method) => {
+    const card: WorkingCard = {
+      ...singleFaceCard(),
+      importSource: { sourceId: "legacy-upload", filename: "Island.png", importKind: "image", entryKind: "custom-card" },
+      identityHints: { name: "Island" },
+      identity: { id: "scryfall:oracle:legacy-island", provider: "scryfall", name: "Island", resolutionMethod: method, confidence: 0.99 },
+      identityResolution: { status: "resolved", method, query: "Island", candidates: [], confirmed: false },
+    };
+    const roundTrip = deserializeProjectSnapshot(serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS));
+
+    expect(roundTrip.projectSchemaVersion).toBe(5);
+    expect(roundTrip.cards[0]).toMatchObject({
+      importSource: { filename: "Island.png", entryKind: "custom-card" },
+      identityHints: { name: "Island" },
+      identity: { name: "Island", resolutionMethod: method },
+      identityResolution: { status: "resolved", method, query: "Island", confirmed: false },
+    });
+  });
+
   it("serializes and validates snapshots without relying on Node Buffer", () => {
     vi.stubGlobal("Buffer", undefined);
 
@@ -245,6 +264,42 @@ describe("project snapshot serializer", () => {
       manualBackArtwork: { source: "scryfall", candidateId: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", faceId: "front", providerAssetId: "printing-123", selectedArtworkId: "artwork-123", selectionPolicy: "user-selected" },
       backMode: "manual",
       backModeSelectionPolicy: "explicit",
+    });
+  });
+
+  it("round-trips an MPC generic CARDBACK selection and its validated provider type", () => {
+    const providerAssetId = "verified-mpc-cardback";
+    const candidateId = mpcArtworkCandidateId(providerAssetId, "back");
+    const card: WorkingCard = {
+      ...singleFaceCard(),
+      manualBackArtwork: {
+        candidateId,
+        source: "mpc",
+        identityId: null,
+        faceId: "back",
+        providerAssetId,
+        selectedArtworkId: providerAssetId,
+        selectionPolicy: "user-selected",
+      },
+      backMode: "manual",
+      backModeSelectionPolicy: "explicit",
+      mpcReferences: [{
+        faceId: "back",
+        importedAssetId: providerAssetId,
+        providerAssetId,
+        selectedArtworkId: providerAssetId,
+        referenceOrigin: "gallery-selection",
+        providerCardType: "CARDBACK",
+        slots: [],
+        availableLocally: false,
+      }],
+    };
+    const restored = deserializeProjectSnapshot(serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS)).cards[0];
+
+    expect(restored).toMatchObject({
+      manualBackArtwork: { candidateId, source: "mpc", faceId: "back", selectionPolicy: "user-selected" },
+      mpcReferences: [{ importedAssetId: providerAssetId, providerCardType: "CARDBACK" }],
+      backMode: "manual",
     });
   });
 

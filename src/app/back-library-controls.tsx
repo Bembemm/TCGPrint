@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { BackLibraryAssetReference, WorkingCard, WorkingCardBackMode } from "../../core/cards/types";
+import { isDoubleFacedIdentity } from "../../core/cards/back-selection";
 
 export interface BackLibraryAssetDto extends BackLibraryAssetReference {
   readonly name: string;
@@ -100,7 +101,8 @@ export default function BackLibraryControls({ assets, selectedDefault, selectedC
       </li>)}
     </ul>}
 
-    {selectedCard && <div className="card-back-controls" aria-label={`Verso de ${selectedCard.identity?.name ?? selectedCard.identityHints.name ?? "carta selecionada"}`}>
+    {selectedCard && isDoubleFacedIdentity(selectedCard.identity) && <p className="muted">Esta carta usa sua face traseira DFC como verso físico. O verso padrão e a Back Library não substituem essa face.</p>}
+    {selectedCard && !isDoubleFacedIdentity(selectedCard.identity) && <div className="card-back-controls" aria-label={`Verso de ${selectedCard.identity?.name ?? selectedCard.identityHints.name ?? "carta selecionada"}`}>
       <label>Modo de verso da carta
         <select aria-label="Modo de verso da carta" value={selectedCard.backMode} disabled={disabled || busy} onChange={(event) => onCardModeChange(event.currentTarget.value as WorkingCardBackMode)}>
           <option value="auto">Auto · face traseira DFC</option>

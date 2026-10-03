@@ -1,5 +1,6 @@
 import type {
   BackLibraryAssetReference,
+  ArtworkCandidate,
   CardIdentity,
   SelectedArtwork,
   WorkingCard,
@@ -43,11 +44,34 @@ export function isDoubleFacedIdentity(identity: CardIdentity | null | undefined)
     && (face as { name: string }).name.trim().length > 0));
 }
 
+/** A generic physical back must be an MPC cardback document, never an ordinary card face. */
+export function isEligibleGenericPhysicalBack(card: WorkingCard, candidate: ArtworkCandidate): boolean {
+  return !isDoubleFacedIdentity(card.identity)
+    && candidate.source === "mpc"
+    && candidate.faceId === "back"
+    && candidate.metadata?.cardType === "CARDBACK"
+    && typeof candidate.providerAssetId === "string"
+    && /^[A-Za-z0-9_-]{1,200}$/.test(candidate.providerAssetId);
+}
+
+export class BackSelectionPolicyError extends Error {
+  constructor(message = "Only a verified MPC cardback can be selected as a generic physical back on a simple card.") {
+    super(message);
+    this.name = "BackSelectionPolicyError";
+  }
+}
+
 /** Resolves mode and origin explicitly. MPC's shared order cardback is never an implicit source. */
 export function resolveEffectiveCardBack(
   card: WorkingCard,
   projectDefault?: BackLibraryAssetReference | null,
 ): EffectiveCardBack {
+  if (isDoubleFacedIdentity(card.identity)) {
+    const artwork = card.faces.some((face) => face.side === "back") ? card.selectedArtworkByFace.back : undefined;
+    return artwork
+      ? { mode: "auto", status: "available", source: "dfc-face", artwork }
+      : { mode: "auto", status: "missing", source: "dfc-face" };
+  }
   if (card.backMode === "none") return { mode: "none", status: "intentional-none", source: "none" };
   if (card.backMode === "project-default") {
     return projectDefault
@@ -62,12 +86,6 @@ export function resolveEffectiveCardBack(
       return { mode: "manual", status: "available", source: "dfc-face", artwork };
     }
     return { mode: "manual", status: "missing", source: "manual-library" };
-  }
-  if (isDoubleFacedIdentity(card.identity) && card.faces.some((face) => face.side === "back")) {
-    const artwork = card.selectedArtworkByFace.back;
-    return artwork
-      ? { mode: "auto", status: "available", source: "dfc-face", artwork }
-      : { mode: "auto", status: "missing", source: "dfc-face" };
   }
   return { mode: "auto", status: "missing", source: "dfc-face" };
 }
@@ -85,6 +103,9 @@ export function fallbackToProjectDefaultBack(
 
 /** Marks an explicit mode choice; selecting a print mode never changes artwork. */
 export function setWorkingCardBackMode(card: WorkingCard, mode: WorkingCardBackMode): WorkingCard {
+  if (isDoubleFacedIdentity(card.identity) && mode !== "auto") {
+    throw new BackSelectionPolicyError("A double-faced card uses its real back face and cannot select a generic physical back mode.");
+  }
   if (mode === "auto") return restoreAutomaticBackSelection(card);
   if (mode === "manual") {
     return { ...card, backMode: mode, backModeSelectionPolicy: "explicit" };
@@ -97,6 +118,9 @@ export function selectManualBackLibraryAsset(
   card: WorkingCard,
   asset: BackLibraryAssetReference,
 ): WorkingCard {
+  if (isDoubleFacedIdentity(card.identity)) {
+    throw new BackSelectionPolicyError("A Back Library asset cannot replace a double-faced card's real back face.");
+  }
   const { manualBackArtwork: _manualBackArtwork, ...withoutArtwork } = card;
   return {
     ...withoutArtwork,
@@ -106,10 +130,18 @@ export function selectManualBackLibraryAsset(
   };
 }
 
-/** Assigns provider artwork to the physical back without declaring a DFC identity face. */
-export function selectManualBackArtwork(card: WorkingCard, artwork: SelectedArtwork): WorkingCard {
-  if (artwork.faceId !== "front" && artwork.faceId !== "back") throw new Error("Manual physical back artwork must preserve a valid source face ID.");
-  if (artwork.selectionPolicy !== "user-selected") throw new Error("Manual physical back artwork must carry a user-selected lock.");
+/** Assigns only a semantically verified MPC cardback to a simple card's physical back. */
+export function selectManualBackArtwork(card: WorkingCard, candidate: ArtworkCandidate): WorkingCard {
+  if (!isEligibleGenericPhysicalBack(card, candidate)) throw new BackSelectionPolicyError();
+  const artwork: SelectedArtwork = {
+    candidateId: candidate.id,
+    source: "mpc",
+    identityId: null,
+    faceId: "back",
+    ...(candidate.providerAssetId ? { providerAssetId: candidate.providerAssetId } : {}),
+    ...(candidate.selectedArtworkId ? { selectedArtworkId: candidate.selectedArtworkId } : {}),
+    selectionPolicy: "user-selected",
+  };
   const { manualBackAsset: _manualBackAsset, ...withoutLibraryAsset } = card;
   return {
     ...withoutLibraryAsset,
@@ -121,6 +153,9 @@ export function selectManualBackArtwork(card: WorkingCard, artwork: SelectedArtw
 
 /** Explicitly clears a manual lock and returns to the face or Project default policy. */
 export function restoreAutomaticBackSelection(card: WorkingCard): WorkingCard {
+  if (isDoubleFacedIdentity(card.identity)) {
+    return { ...card, backMode: "auto", backModeSelectionPolicy: "automatic" };
+  }
   const selectedArtworkByFace = { ...card.selectedArtworkByFace };
   if (card.backMode === "manual" || selectedArtworkByFace.back?.selectionPolicy === "user-selected") delete selectedArtworkByFace.back;
   const { manualBackAsset: _manualBackAsset, manualBackArtwork: _manualBackArtwork, ...rest } = card;

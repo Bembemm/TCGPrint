@@ -54,6 +54,41 @@ describe("session Working Set", () => {
     expect(createWorkingSet(result(entries), { idFactory: (entry) => `working-${entry.id}` })[1].id).toBe(cards[1].id);
   });
 
+  it.each([
+    ["Island.png", "Island"],
+    ["1x Sol Ring [MPC].png", "1x Sol Ring [MPC]"],
+  ])("keeps uploaded custom image %s custom instead of promoting its display label to an identity hint", (filename, suggestion) => {
+    const custom: ImportedEntry = {
+      id: "custom-upload", kind: "custom-card", order: 0, quantity: 1, sourceId: "upload",
+      sourceFilename: filename, nameSuggestion: suggestion,
+      asset: { id: "uploaded-original", sourceId: "upload", originalFormat: "png", originalBytes: new Uint8Array([1]) },
+    };
+
+    const [card] = createWorkingSet(result([custom]), { idFactory: () => "custom-card" });
+
+    expect(card).toMatchObject({
+      identity: null,
+      identityResolution: { status: "custom", confirmed: true },
+      importSource: { filename },
+    });
+    expect(card.identityHints).toEqual({});
+    expect(card.localArtworkIds).toEqual(["uploaded-original"]);
+    expect(card.importSource.identityHintOrigin).toBeUndefined();
+  });
+
+  it("retains explicit cardHint provenance on a custom image without using its display label as identity", () => {
+    const custom: ImportedEntry = {
+      id: "custom-with-card-hint", kind: "custom-card", order: 0, quantity: 1, sourceId: "upload",
+      sourceFilename: "Island.png", nameSuggestion: "Island", cardHint: { name: "Sol Ring" },
+      asset: { id: "uploaded-original", sourceId: "upload", originalFormat: "png", originalBytes: new Uint8Array([1]) },
+    };
+
+    const [card] = createWorkingSet(result([custom]), { idFactory: () => "custom-card" });
+
+    expect(card.identityHints).toEqual({ name: "Sol Ring" });
+    expect(card.importSource.identityHintOrigin).toBe("explicit-card-hint");
+  });
+
   it("carries the import engine's folder front/back pairing into its WorkingCard", () => {
     const front: ImportedEntry = { id: "front-entry", kind: "custom-card", order: 0, quantity: 1, sourceId: "front", asset: { id: "front-asset", sourceId: "front", originalFormat: "png" } };
     const back: ImportedEntry = { id: "back-entry", kind: "custom-card", order: 1, quantity: 1, sourceId: "back", asset: { id: "back-asset", sourceId: "back", originalFormat: "png" } };

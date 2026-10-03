@@ -345,7 +345,7 @@ function cardFace(value: unknown, path: string): CardFace {
 
 function mpcReference(value: unknown, path: string): WorkingCardMpcReference {
   const source = object(value, path,
-    ["faceId", "importedAssetId", "providerAssetId", "selectedArtworkId", "referenceOrigin", "slots", "availableLocally"],
+    ["faceId", "importedAssetId", "providerAssetId", "selectedArtworkId", "referenceOrigin", "providerCardType", "slots", "availableLocally"],
     ["faceId", "importedAssetId", "slots", "availableLocally"]);
   const faceId = string(source.faceId, `${path}.faceId`, 8);
   if (faceId !== "front" && faceId !== "back") invalid(`${path}.faceId`, "must be front or back.");
@@ -353,12 +353,15 @@ function mpcReference(value: unknown, path: string): WorkingCardMpcReference {
   const selectedArtworkId = optionalString(source, "selectedArtworkId", `${path}.selectedArtworkId`, 200);
   const referenceOrigin = optionalString(source, "referenceOrigin", `${path}.referenceOrigin`, 32);
   if (referenceOrigin !== undefined && referenceOrigin !== "order-import" && referenceOrigin !== "gallery-selection") invalid(`${path}.referenceOrigin`, "is not supported.");
+  const providerCardType = optionalString(source, "providerCardType", `${path}.providerCardType`, 16);
+  if (providerCardType !== undefined && providerCardType !== "CARD" && providerCardType !== "CARDBACK") invalid(`${path}.providerCardType`, "is not supported.");
   return {
     faceId,
     importedAssetId: string(source.importedAssetId, `${path}.importedAssetId`, 180),
     ...(providerAssetId !== undefined ? { providerAssetId } : {}),
     ...(selectedArtworkId !== undefined ? { selectedArtworkId } : {}),
     ...(referenceOrigin !== undefined ? { referenceOrigin } : {}),
+    ...(providerCardType !== undefined ? { providerCardType } : {}),
     slots: stringArray(source.slots, `${path}.slots`, 100, 64),
     availableLocally: boolean(source.availableLocally, `${path}.availableLocally`),
   };
@@ -426,8 +429,10 @@ function persistedCard(value: unknown, index: number, schemaVersion = CURRENT_PR
   if (!Number.isSafeInteger(source.quantity) || (source.quantity as number) < 1 || (source.quantity as number) > 999) invalid(`${path}.quantity`, "must be a positive integer no greater than 999.");
   if (!Number.isSafeInteger(source.order) || (source.order as number) < 0) invalid(`${path}.order`, "must be a non-negative integer.");
   const section = optionalString(source, "section", `${path}.section`, 80);
-  const importSource = object(source.importSource, `${path}.importSource`, ["sourceId", "filename", "importKind", "entryKind"], ["sourceId", "importKind", "entryKind"]);
+  const importSource = object(source.importSource, `${path}.importSource`, ["sourceId", "filename", "importKind", "entryKind", "identityHintOrigin"], ["sourceId", "importKind", "entryKind"]);
   const importFilename = optionalFilename(importSource, "filename", `${path}.importSource.filename`, 240);
+  const identityHintOrigin = optionalString(importSource, "identityHintOrigin", `${path}.importSource.identityHintOrigin`, 32);
+  if (identityHintOrigin !== undefined && identityHintOrigin !== "explicit-card-hint") invalid(`${path}.importSource.identityHintOrigin`, "is not supported.");
   const hints = object(source.identityHints, `${path}.identityHints`, ["name", "setCode", "collectorNumber", "scryfallId", "language"], []);
   const identityHints = {
     ...(optionalString(hints, "name", `${path}.identityHints.name`, 200) !== undefined ? { name: hints.name as string } : {}),
@@ -511,6 +516,7 @@ function persistedCard(value: unknown, index: number, schemaVersion = CURRENT_PR
       ...(importFilename !== undefined ? { filename: importFilename } : {}),
       importKind: string(importSource.importKind, `${path}.importSource.importKind`, 60),
       entryKind: string(importSource.entryKind, `${path}.importSource.entryKind`, 60),
+      ...(identityHintOrigin !== undefined ? { identityHintOrigin } : {}),
     },
     identityHints,
     identity: currentIdentity,

@@ -6,7 +6,7 @@ import type { ImportKind } from "../../import-engine/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard, WorkingCardBackMode } from "../../core/cards/types";
 import type { MpcArtworkFilterInput, MpcFilterCatalogs } from "../../artwork/mpc-contract";
 import type { MpcArtworkProviderDiagnostic } from "../../artwork/mpc-provider";
-import { isDoubleFacedIdentity, restoreAutomaticBackSelection, selectManualBackLibraryAsset, setWorkingCardBackMode } from "../../core/cards/back-selection";
+import { isDoubleFacedIdentity, isEligibleGenericPhysicalBack, restoreAutomaticBackSelection, selectManualBackLibraryAsset, setWorkingCardBackMode } from "../../core/cards/back-selection";
 
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
 import {
@@ -643,8 +643,10 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const activeCard = useMemo(() => workingCards.find((card) => card.id === selectedCardId), [workingCards, selectedCardId]);
   const physicalCardCount = useMemo(() => workingCards.reduce((sum, card) => sum + card.quantity, 0), [workingCards]);
   const backValidation = useMemo(() => createBackValidationSummary(workingCards, projectDefaultBack, missingBackPolicy), [workingCards, projectDefaultBack, missingBackPolicy]);
-  const filterCards = useMemo(() => artworkCandidates.filter((candidate) => artworkFilter === "all" || candidate.source === artworkFilter), [artworkCandidates, artworkFilter]);
   const manualPhysicalBackPicker = Boolean(activeCard && manualPhysicalBackPickerCardId === activeCard.id && !isDoubleFacedIdentity(activeCard.identity));
+  const filterCards = useMemo(() => manualPhysicalBackPicker && activeCard
+    ? artworkCandidates.filter((candidate) => isEligibleGenericPhysicalBack(activeCard, candidate))
+    : artworkCandidates.filter((candidate) => artworkFilter === "all" || candidate.source === artworkFilter), [activeCard, artworkCandidates, artworkFilter, manualPhysicalBackPicker]);
   const artworkFace = manualPhysicalBackPicker ? "front" : face;
   const activeFaceExists = Boolean(manualPhysicalBackPicker || activeCard?.faces.some((item) => item.side === face));
   const activeIdentityId = activeCard?.identity?.id ?? null;
@@ -652,11 +654,11 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     ? {
       identityId: activeIdentityId ?? "custom:artwork-picker",
       faceId: artworkFace,
-      source: artworkFilter,
+      source: manualPhysicalBackPicker ? "mpc" : artworkFilter,
       mpcReferences: activeCard.mpcReferences,
-      mpcFilters: artworkFilter === "mpc" ? mpcFilters : undefined,
-      forceMpcRefresh: artworkFilter === "mpc" && forcedMpcRefreshRevision === artworkCatalogRevision,
-      cacheKey: JSON.stringify([activeIdentityId, artworkFace, manualPhysicalBackPicker, artworkFilter, activeCard.mpcReferences, artworkFilter === "mpc" ? mpcFilters : undefined, artworkCatalogRevision]),
+      mpcFilters: manualPhysicalBackPicker || artworkFilter === "mpc" ? mpcFilters : undefined,
+      forceMpcRefresh: (manualPhysicalBackPicker || artworkFilter === "mpc") && forcedMpcRefreshRevision === artworkCatalogRevision,
+      cacheKey: JSON.stringify([activeIdentityId, artworkFace, manualPhysicalBackPicker, manualPhysicalBackPicker ? "mpc-cardbacks" : artworkFilter, activeCard.mpcReferences, manualPhysicalBackPicker || artworkFilter === "mpc" ? mpcFilters : undefined, artworkCatalogRevision]),
     }
     : null;
   const visibleProblem = problem && (problemCardId === null || problemCardId === selectedCardId) ? problem : "";
@@ -1279,11 +1281,11 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
               disabled={interactionBusy}
               onClick={() => {
                 setManualPhysicalBackPickerCardId((current) => current === activeCard.id ? null : activeCard.id);
-                setArtworkFilter("all");
+                setArtworkFilter("mpc");
                 setArtworkProblem(null);
               }}
             >{manualPhysicalBackPicker ? "Fechar escolha do verso manual" : activeCard.manualBackArtwork ? "Editar artwork do verso manual" : "Escolher artwork como verso manual"}</button>
-            {manualPhysicalBackPicker && <p className="muted">Escolha Scryfall, MPC ou artwork local para o verso físico. A identidade continua com suas faces originais.</p>}
+            {manualPhysicalBackPicker && <p className="muted">Escolha um cardback MPC validado para o verso físico. Imagens próprias entram pela Back Library.</p>}
           </div>}
 
           {activeCard.faces.length > 1 && <div className="face-tabs" role="group" aria-label="Face da carta">
@@ -1293,16 +1295,16 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           <div className="artwork-section">
             <div className="compact-heading"><div><strong>{manualPhysicalBackPicker ? "Escolher artwork como verso manual" : `Artwork Picker · ${face === "front" ? "Front" : "Back"}`}{!manualPhysicalBackPicker && isDoubleFacedIdentity(activeCard.identity) && <span className="multiface-label" aria-label="Carta dupla-face"> · Carta dupla-face</span>}</strong><span>Seleção atual é preservada durante a atualização do catálogo.</span></div></div>
             {abortableOperation === "artwork" && <button className="button secondary" type="button" aria-label="Cancelar download e seleção da arte" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar download/seleção</button>}
-            <div className="artwork-filter-row" role="group" aria-label="Filtrar origem das artes">
+            {!manualPhysicalBackPicker && <div className="artwork-filter-row" role="group" aria-label="Filtrar origem das artes">
               {([ ["all", "Todas"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"], ["upload", "Meus uploads"] ] as const).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => setArtworkFilter(value)}>{label}</button>)}
-            </div>
-            {artworkFilter === "mpc" && <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => {
+            </div>}
+            {(manualPhysicalBackPicker || artworkFilter === "mpc") && <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => {
               const revision = artworkCatalogRevision + 1;
               setForcedMpcRefreshRevision(revision);
               setArtworkCatalogRevision(revision);
             }}>Atualizar resultados MPC</button>}
-            {artworkFilter === "mpc" && mpcDiagnostic && (mpcDiagnostic.degraded || !mpcDiagnostic.available) && <p className="muted" role="status">MPC está {mpcDiagnostic.available ? "degradado ou em modo de cache" : "offline"}. Scryfall, uploads, o Project e originals locais continuam disponíveis para seleção e exportação.</p>}
-            {artworkFilter === "mpc" && <details className="mpc-advanced-filters">
+            {(manualPhysicalBackPicker || artworkFilter === "mpc") && mpcDiagnostic && (mpcDiagnostic.degraded || !mpcDiagnostic.available) && <p className="muted" role="status">MPC está {mpcDiagnostic.available ? "degradado ou em modo de cache" : "offline"}. Originals já armazenados continuam disponíveis para exportação.</p>}
+            {(manualPhysicalBackPicker || artworkFilter === "mpc") && <details className="mpc-advanced-filters">
               <summary>Filtros e preferências avançados MPC</summary>
               {mpcCatalogProblem && <p className="muted" role="status">Catálogos de filtros indisponíveis; a busca básica MPC continua disponível. {mpcCatalogProblem} <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => { setMpcCatalogs(null); setMpcCatalogRetry((revision) => revision + 1); }}>Tentar novamente</button></p>}
               {!mpcCatalogs && !mpcCatalogProblem && <p className="muted">Carregando catálogos MPC…</p>}

@@ -3,7 +3,7 @@ import { CardExportServiceError, exportWorkingCardsByContentMode, exportWorkingC
 import type { ArtworkCatalogSource } from "../artwork/types";
 import type { ArtworkCandidate, BackLibraryAssetReference, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardBackMode, WorkingCardBackModeSelectionPolicy, WorkingCardMpcReference } from "../core/cards/types";
 import { isSafeArtworkCandidateId } from "../core/cards/ids";
-import { isDoubleFacedIdentity } from "../core/cards/back-selection";
+import { isDoubleFacedIdentity, isEligibleGenericPhysicalBack } from "../core/cards/back-selection";
 import { sanitizeCardIdentityMetadata } from "../core/cards/safe-identity-metadata";
 import type { UniversalImportRequest } from "../import-engine/types";
 import { sanitizeRelativeImportPath } from "../import-engine/source-path";
@@ -220,6 +220,8 @@ export function parseWorkingCards(value: unknown): WorkingCard[] {
     const order = Number(input.order);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999 || !Number.isInteger(order) || order < 0) throw new ApiRequestError(400, "INVALID_REQUEST", `cards[${index}] has an invalid quantity or order.`);
     const source = record(input.importSource) ?? {};
+    const identityHintOrigin = optionalString(source.identityHintOrigin, "importSource.identityHintOrigin", 32);
+    if (identityHintOrigin !== undefined && identityHintOrigin !== "explicit-card-hint") throw new ApiRequestError(400, "INVALID_REQUEST", "importSource.identityHintOrigin is invalid.");
     const hints = record(input.identityHints) ?? {};
     const faceItems = Array.isArray(input.faces) ? input.faces.slice(0, 2) : [];
     const faces = faceItems.map((faceValue): WorkingCard["faces"][number] => {
@@ -270,11 +272,14 @@ export function parseWorkingCards(value: unknown): WorkingCard[] {
     const mpcReferences: WorkingCardMpcReference[] = Array.isArray(input.mpcReferences) ? input.mpcReferences.slice(0, 200).flatMap((item): WorkingCardMpcReference[] => {
       const ref = record(item);
       if (!ref || (ref.faceId !== "front" && ref.faceId !== "back")) return [];
+      const providerCardType = optionalString(ref.providerCardType, "mpc providerCardType", 16);
+      if (providerCardType !== undefined && providerCardType !== "CARD" && providerCardType !== "CARDBACK") throw new ApiRequestError(400, "INVALID_REQUEST", "MPC providerCardType is invalid.");
       return [{
         faceId: ref.faceId,
         importedAssetId: requiredString(ref.importedAssetId, "mpc importedAssetId", 180),
         ...(optionalString(ref.providerAssetId, "mpc providerAssetId", 200) ? { providerAssetId: ref.providerAssetId as string } : {}),
         ...(optionalString(ref.selectedArtworkId, "mpc selectedArtworkId", 200) ? { selectedArtworkId: ref.selectedArtworkId as string } : {}),
+        ...(providerCardType ? { providerCardType: providerCardType as "CARD" | "CARDBACK" } : {}),
         slots: Array.isArray(ref.slots) ? ref.slots.filter((slot): slot is string => typeof slot === "string").slice(0, 100).map((slot) => slot.slice(0, 64)) : [],
         availableLocally: ref.availableLocally === true,
       }];
@@ -314,6 +319,7 @@ export function parseWorkingCards(value: unknown): WorkingCard[] {
         ...(optionalString(source.filename, "importSource.filename", 240) ? { filename: source.filename as string } : {}),
         importKind: requiredString(source.importKind, "importSource.importKind", 60),
         entryKind: requiredString(source.entryKind, "importSource.entryKind", 60),
+        ...(identityHintOrigin ? { identityHintOrigin } : {}),
       },
       identityHints: {
         ...(optionalString(hints.name, "identityHints.name", 200) ? { name: hints.name as string } : {}),
@@ -426,7 +432,7 @@ function respondError(error: unknown): Response {
 function candidateDto(candidate: ArtworkCandidate) {
   const metadata = candidate.metadata ?? {};
   const safeMetadata: Record<string, unknown> = {};
-  for (const key of ["layout", "digital", "promo", "fullArt", "imageStatus", "borderColor", "referenceOnly", "slots", "importedAssetId", "originalFilename", "originalFormat", "contentHash", "provenanceCount", "name", "sourceType", "sourceId", "sourceName", "extension", "declaredSize", "dpi", "language", "tags", "priority", "providerRank", "dateCreated", "dateModified", "remoteMetadataStatus", "metadataFreshness", "metadataCheckedAt", "originalFormatKnown", "originalFormatExportable"]) {
+  for (const key of ["layout", "digital", "promo", "fullArt", "imageStatus", "borderColor", "referenceOnly", "slots", "importedAssetId", "originalFilename", "originalFormat", "contentHash", "provenanceCount", "cardType", "name", "sourceType", "sourceId", "sourceName", "extension", "declaredSize", "dpi", "language", "tags", "priority", "providerRank", "dateCreated", "dateModified", "remoteMetadataStatus", "metadataFreshness", "metadataCheckedAt", "originalFormatKnown", "originalFormatExportable"]) {
     if (metadata[key] === undefined) continue;
     const value = candidate.source === "mpc" ? safeMpcMetadataValue(key, metadata[key]) : metadata[key];
     if (value !== undefined) safeMetadata[key] = value;
@@ -476,6 +482,7 @@ function safeMpcMetadataValue(key: string, value: unknown): unknown {
     return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100_000_000 ? value : undefined;
   }
   if (["sourceType", "layout", "imageStatus", "borderColor"].includes(key)) return safeText(value, 80);
+  if (key === "cardType") return value === "CARD" || value === "CARDBACK" ? value : undefined;
   if (key === "sourceName" || key === "name") return safeText(value, 200);
   if (key === "language") return typeof value === "string" && /^[a-z0-9-]{1,16}$/i.test(value) ? value.toLowerCase() : undefined;
   if (key === "extension" || key === "originalFormat") return typeof value === "string" && /^(png|jpe?g|svg)$/i.test(value) ? value.toLowerCase() : undefined;
@@ -636,6 +643,9 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
         signal: request.signal,
       });
       if (!candidate) throw new ApiRequestError(404, "ARTWORK_CANDIDATE_NOT_FOUND", "Artwork candidate is not available in the local catalog.");
+      if (!isEligibleGenericPhysicalBack(card, candidate)) {
+        throw new ApiRequestError(400, "INVALID_PHYSICAL_BACK_SELECTION", "A simple card's physical back must be a verified MPC cardback.");
+      }
       const updated = workbench.selectManualBackArtwork(card, candidate);
       return Response.json({ workingCards: [updated], providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
     }
@@ -669,13 +679,18 @@ export async function handleArtworkList(request: Request, identityId: string, wo
     const references: WorkingCardMpcReference[] = Array.isArray(body.mpcReferences) ? body.mpcReferences.slice(0, 100).flatMap((value): WorkingCardMpcReference[] => {
       const ref = record(value);
       if (!ref || (ref.faceId !== "front" && ref.faceId !== "back")) return [];
-      return [{ faceId: ref.faceId, importedAssetId: requiredString(ref.importedAssetId, "MPC importedAssetId", 180), ...(optionalString(ref.providerAssetId, "MPC providerAssetId", 200) ? { providerAssetId: ref.providerAssetId as string } : {}), ...(optionalString(ref.selectedArtworkId, "MPC selectedArtworkId", 200) ? { selectedArtworkId: ref.selectedArtworkId as string } : {}), slots: Array.isArray(ref.slots) ? ref.slots.filter((slot): slot is string => typeof slot === "string").slice(0, 100) : [], availableLocally: ref.availableLocally === true }];
+      const providerCardType = optionalString(ref.providerCardType, "MPC providerCardType", 16);
+      if (providerCardType !== undefined && providerCardType !== "CARD" && providerCardType !== "CARDBACK") throw new ApiRequestError(400, "INVALID_REQUEST", "MPC providerCardType is invalid.");
+      return [{ faceId: ref.faceId, importedAssetId: requiredString(ref.importedAssetId, "MPC importedAssetId", 180), ...(optionalString(ref.providerAssetId, "MPC providerAssetId", 200) ? { providerAssetId: ref.providerAssetId as string } : {}), ...(optionalString(ref.selectedArtworkId, "MPC selectedArtworkId", 200) ? { selectedArtworkId: ref.selectedArtworkId as string } : {}), ...(providerCardType ? { providerCardType: providerCardType as "CARD" | "CARDBACK" } : {}), slots: Array.isArray(ref.slots) ? ref.slots.filter((slot): slot is string => typeof slot === "string").slice(0, 100) : [], availableLocally: ref.availableLocally === true }];
     }) : [];
+    if (body.physicalBackArtwork === true) {
+      if (sourceValue !== "all" && sourceValue !== "mpc") throw new ApiRequestError(400, "INVALID_PHYSICAL_BACK_SOURCE", "Generic physical backs are available only from verified MPC cardbacks.");
+      const candidates = await workbench.listMpcCardbackCandidates({ ...(mpcFilters ? { mpcFilters } : {}), ...(body.forceMpcRefresh === true ? { forceMpcRefresh: true } : {}), signal: request.signal });
+      const verified = candidates.filter((candidate) => candidate.source === "mpc" && candidate.faceId === "back" && candidate.metadata?.cardType === "CARDBACK");
+      return Response.json({ candidates: verified.map(candidateDto), providerHealth: safeProviderHealth(workbench.getProviderHealth()), mpcDiagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
+    }
     const candidates = await workbench.listArtworkCandidates(identityId, faceId, sourceValue as ArtworkCatalogSource, { mpcReferences: references, ...(mpcFilters ? { mpcFilters } : {}), ...(body.forceMpcRefresh === true ? { forceMpcRefresh: true } : {}), signal: request.signal });
-    const manualMpcBackCandidates = body.physicalBackArtwork === true && (sourceValue === "all" || sourceValue === "mpc")
-      ? await workbench.listArtworkCandidates(identityId, "back", "mpc", { mpcReferences: references, ...(mpcFilters ? { mpcFilters } : {}), ...(body.forceMpcRefresh === true ? { forceMpcRefresh: true } : {}), signal: request.signal })
-      : [];
-    const uniqueCandidates = [...new Map([...candidates, ...manualMpcBackCandidates].map((candidate) => [candidate.id, candidate])).values()];
+    const uniqueCandidates = [...new Map(candidates.map((candidate) => [candidate.id, candidate])).values()];
     return Response.json({ candidates: uniqueCandidates.map(candidateDto), providerHealth: safeProviderHealth(workbench.getProviderHealth()), mpcDiagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
   } catch (error) { return respondError(error); }
 }

@@ -85,6 +85,7 @@ function testWorkbench(overrides: Record<string, unknown> = {}): CardWorkbench {
     confirmWorkingCardIdentity: vi.fn(async (workingCard: WorkingCard) => workingCard),
     keepWorkingCardCustom: vi.fn((workingCard: WorkingCard) => workingCard),
     listArtworkCandidates: vi.fn(async () => [candidate]),
+    listMpcCardbackCandidates: vi.fn(async () => []),
     getArtworkCandidate: vi.fn(async () => candidate),
     getArtworkPreview: vi.fn(async () => ({ candidateId, source: "upload" as const, bytes: previewBytes, contentType: "image/png", widthPx: 30, heightPx: 42 })),
     getArtworkOriginal: vi.fn(async () => ({ artworkId: "a".repeat(64), contentHash: "a".repeat(64), extension: "png", format: "png", byteLength: originalBytes.byteLength, widthPx: 1500, heightPx: 2100, createdAt: new Date(0).toISOString(), bytes: originalBytes, provenance: [{ provider: "upload", originalFilename: "sol-ring.png" }] } satisfies ArtworkOriginal)),
@@ -406,26 +407,30 @@ describe("card APIs", () => {
     expect(() => parseWorkingCards([{ ...dfc, backMode: "bogus" }])).toThrow(/backMode is invalid/);
   });
 
-  it("accepts and locks a manual physical artwork back on a simple card", async () => {
-    const simpleManual: WorkingCard = {
-      ...card,
-      backMode: "manual",
-      backModeSelectionPolicy: "explicit",
-      manualBackArtwork: { candidateId: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", source: "scryfall", identityId: identity.id, faceId: "front", providerAssetId: "printing", selectionPolicy: "user-selected" },
-    };
-    expect(parseWorkingCards([simpleManual])[0]).toMatchObject({
-      faces: [{ side: "front" }],
-      manualBackArtwork: { candidateId: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", faceId: "front", selectionPolicy: "user-selected" },
-      backMode: "manual",
-      backModeSelectionPolicy: "explicit",
-    });
+  it.each([
+    { label: "Scryfall", candidate: { ...candidate, id: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", source: "scryfall" as const, faceId: "front" } },
+    { label: "upload", candidate },
+  ])("rejects a new $label physical back selection through the API", async ({ candidate: forbidden }) => {
+    const workbench = testWorkbench({ getArtworkCandidate: vi.fn(async () => forbidden), selectManualBackArtwork: vi.fn() });
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "select-manual-back-artwork", card, candidateId: forbidden.id,
+    }), workbench);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_PHYSICAL_BACK_SELECTION" });
+    expect(workbench.selectManualBackArtwork).not.toHaveBeenCalled();
+    expect(card).not.toHaveProperty("manualBackArtwork");
+  });
 
-    const manualCandidate: ArtworkCandidate = { ...candidate, id: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", source: "scryfall", faceId: "front" };
+  it("accepts a hydrated MPC CARDBACK through the API and preserves the explicit lock", async () => {
+    const manualCandidate: ArtworkCandidate = {
+      id: `mpc:${"e".repeat(64)}`, source: "mpc", identityId: null, faceId: "back", providerAssetId: "mpc-cardback-123",
+      originalAvailable: true, metadata: { cardType: "CARDBACK" },
+    };
     const workbench = testWorkbench({
       getArtworkCandidate: vi.fn(async () => manualCandidate),
       selectManualBackArtwork: vi.fn((workingCard: WorkingCard) => ({
         ...workingCard,
-        manualBackArtwork: { candidateId: manualCandidate.id, source: "scryfall", identityId: identity.id, faceId: "front", selectionPolicy: "user-selected" },
+        manualBackArtwork: { candidateId: manualCandidate.id, source: "mpc", identityId: null, faceId: "back", providerAssetId: manualCandidate.providerAssetId, selectionPolicy: "user-selected" },
         backMode: "manual",
         backModeSelectionPolicy: "explicit",
       })),
@@ -434,7 +439,7 @@ describe("card APIs", () => {
       action: "select-manual-back-artwork", card, candidateId: manualCandidate.id,
     }), workbench);
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ workingCards: [{ faces: [{ side: "front" }], backMode: "manual", manualBackArtwork: { source: "scryfall", faceId: "front" } }] });
+    expect(await response.json()).toMatchObject({ workingCards: [{ faces: [{ side: "front" }], backMode: "manual", manualBackArtwork: { source: "mpc", faceId: "back" } }] });
   });
 
   it("keeps the API CardIdentity metadata allowlist and sanitization behavior", () => {
@@ -682,7 +687,7 @@ describe("card APIs", () => {
     expect(catalogs.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("includes MPC source-face back references in a simple card's physical-back catalog", async () => {
+  it("lists only dedicated MPC CARDBACK results for a simple card's physical-back catalog", async () => {
     const mpcBack: ArtworkCandidate = {
       ...candidate,
       id: `mpc:${"c".repeat(64)}`,
@@ -691,9 +696,10 @@ describe("card APIs", () => {
       providerAssetId: "mpc-back-source",
       selectedArtworkId: "selected-back-source",
       originalAvailable: false,
+      metadata: { cardType: "CARDBACK" },
     };
-    const listArtworkCandidates = vi.fn(async (_identityId: string, faceId: "front" | "back") => faceId === "back" ? [mpcBack] : [candidate]);
-    const workbench = testWorkbench({ listArtworkCandidates });
+    const listMpcCardbackCandidates = vi.fn(async () => [mpcBack, { ...mpcBack, id: `mpc:${"f".repeat(64)}`, metadata: { cardType: "CARD" } }]);
+    const workbench = testWorkbench({ listMpcCardbackCandidates });
     const response = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", {
       faceId: "front", source: "all", physicalBackArtwork: true,
       mpcReferences: [{ faceId: "back", importedAssetId: "imported-back", providerAssetId: "mpc-back-source", selectedArtworkId: "selected-back-source", slots: [], availableLocally: false }],
@@ -701,9 +707,19 @@ describe("card APIs", () => {
     const body = await response.json() as { candidates: Array<Record<string, unknown>> };
 
     expect(response.status).toBe(200);
-    expect(listArtworkCandidates).toHaveBeenNthCalledWith(1, identity.id, "front", "all", expect.objectContaining({ mpcReferences: expect.any(Array), signal: expect.anything() }));
-    expect(listArtworkCandidates).toHaveBeenNthCalledWith(2, identity.id, "back", "mpc", expect.objectContaining({ mpcReferences: expect.any(Array), signal: expect.anything() }));
-    expect(body.candidates).toEqual(expect.arrayContaining([expect.objectContaining({ id: mpcBack.id, source: "mpc", faceId: "back" })]));
+    expect(listMpcCardbackCandidates).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.anything() }));
+    expect(body.candidates).toEqual([expect.objectContaining({ id: mpcBack.id, source: "mpc", faceId: "back", metadata: { cardType: "CARDBACK" } })]);
+  });
+
+  it("rejects Scryfall and upload sources from the generic physical-back listing", async () => {
+    const listMpcCardbackCandidates = vi.fn(async () => []);
+    const workbench = testWorkbench({ listMpcCardbackCandidates });
+    for (const source of ["scryfall", "upload"]) {
+      const response = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", { faceId: "front", source, physicalBackArtwork: true }), identity.id, workbench);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ code: "INVALID_PHYSICAL_BACK_SOURCE" });
+    }
+    expect(listMpcCardbackCandidates).not.toHaveBeenCalled();
   });
 
   it("keeps preview and original separate and exposes validated original provenance", async () => {

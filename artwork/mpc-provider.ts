@@ -374,6 +374,21 @@ function referenceMetadata(reference: WorkingCardMpcReference): Readonly<Record<
   };
 }
 
+function cardbackIds(payload: unknown): string[] {
+  const values = record(payload) && Array.isArray(payload.cardbacks)
+    ? payload.cardbacks
+    : record(payload) && record(payload.results) && Array.isArray(payload.results.cardbacks)
+      ? payload.results.cardbacks
+      : undefined;
+  if (!values || values.length > MPC_MAX_BATCH_CANDIDATES) {
+    throw new MpcArtworkProviderError("protocol", "MPC cardback catalog has an invalid response shape.");
+  }
+  if (values.some((value) => !validAssetId(value))) {
+    throw new MpcArtworkProviderError("protocol", "MPC cardback catalog returned an invalid asset identifier.");
+  }
+  return [...new Set(values as string[])].slice(0, MPC_MAX_BATCH_CANDIDATES);
+}
+
 function safeUrl(value: string, hosts: ReadonlySet<string>): URL | undefined {
   try {
     const url = new URL(value);
@@ -678,6 +693,93 @@ export class MpcArtworkProvider implements ArtworkProvider {
     return this.searchArtworkAdvanced(identity, { ...options, filters: {} });
   }
 
+  /** Lists cardbacks from MPC's dedicated endpoint and verifies each hydrated document as CARDBACK. */
+  async searchCardbacks(options: { readonly filters?: MpcArtworkFilterInput; readonly forceRefresh?: boolean; readonly signal?: AbortSignal } = {}): Promise<readonly ArtworkCandidate[]> {
+    const inputFilters = normalizeMpcArtworkFilters(options.filters ?? {});
+    let staleSearch: readonly StoredCandidate[] | undefined;
+    let appliedFilters = inputFilters;
+    try {
+      const sources = await this.sources(options.signal);
+      if (!sources.length) throw new MpcArtworkProviderError("protocol", "MPC returned no verified Google Drive sources.");
+      const verifiedSourceIds = new Set(sources.map(({ pk }) => pk));
+      const catalogs: MpcFilterCatalogs = {
+        sources: sources.map(({ pk, name, sourceType }) => ({ id: pk, name, sourceType })),
+        languages: inputFilters.languages.length || inputFilters.preferredLanguages.length
+          ? await this.loadCatalog("languages", "mpc:catalog:languages", "/2/languages/", verifiedLanguages, options.signal)
+          : [],
+        tags: inputFilters.includeTags.length || inputFilters.excludeTags.length || inputFilters.preferredTags.length
+          ? await this.loadCatalog("tags", "mpc:catalog:tags", "/2/tags/", verifiedTags, options.signal)
+          : [],
+      };
+      const filters = validateMpcArtworkFiltersAgainstCatalogs(inputFilters, catalogs);
+      appliedFilters = filters;
+      const searchKey = buildMpcSearchCacheKey("generic-cardback-catalog-v1", "back", filters, [...verifiedSourceIds]);
+      const cached = this.metadata.getMetadataSnapshot<readonly StoredCandidate[]>(searchKey);
+      if (cached && cached.expiresAt > Date.now() && !options.forceRefresh) {
+        this.searchCacheHits = increment(this.searchCacheHits);
+        const refreshed = await Promise.all(cached.value.map(async ({ candidate }) => await this.getCandidate(candidate.id) ?? candidate));
+        this.operationSucceeded("search");
+        return refreshed.filter((candidate) => candidate.metadata?.cardType === "CARDBACK" && candidateMatchesFilters(candidate, filters));
+      }
+      staleSearch = cached && cached.value.length > 0 ? cached.value : undefined;
+      this.searchCacheMisses = increment(this.searchCacheMisses);
+      const settings = {
+        filterSettings: {
+          minimumDPI: filters.minimumDpi,
+          maximumDPI: filters.maximumDpi,
+          maximumSize: 30,
+          includesTags: [...filters.includeTags],
+          excludesTags: [...filters.excludeTags],
+          languages: [...filters.languages],
+        },
+        searchTypeSettings: { fuzzySearch: false, filterCardbacks: false },
+        sourceSettings: { sources: sources.map(({ pk }) => [pk, filters.sources.length === 0 || filters.sources.includes(pk)]) },
+      };
+      const response = await this.apiJson("/2/cardbacks/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ searchSettings: settings }),
+      }, options.signal);
+      const ids = cardbackIds(response.payload).slice(0, this.searchLimit);
+      this.hasConfirmedSearch = true;
+      this.lastProtocolConfirmed = "v2";
+      const identity: CardIdentity = { id: "mpc:generic-cardback-catalog", provider: "mpc", name: "MPC cardback", resolutionMethod: "custom", confidence: 1 };
+      const hydration = ids.length ? await this.hydrateCards(ids, options.signal) : { byId: new Map<string, Record<string, unknown>>(), omittedIds: [] as string[], failedAssets: new Map<string, string>(), failedErrors: new Map<string, unknown>() };
+      let rejectedCandidate = hydration.omittedIds.length > 0 || hydration.failedAssets.size > 0;
+      const candidates = ids.flatMap((assetId): StoredCandidate[] => {
+        const item = hydration.byId.get(assetId);
+        if (!item) return [];
+        try {
+          const stored = this.candidateFromCard(item, identity, "back", verifiedSourceIds, ids.indexOf(assetId), "CARDBACK");
+          if (!stored || !candidateMatchesFilters(stored.candidate, filters)) return [];
+          return [{ ...stored, candidate: { ...stored.candidate, identityId: null } }];
+        } catch (error) {
+          rejectedCandidate = true;
+          this.degrade(error);
+          return [];
+        }
+      });
+      if (candidates.length === 0 && hydration.failedAssets.size > 0) throw hydration.failedErrors.values().next().value;
+      for (const item of candidates) this.metadata.putMetadata(candidateKey(item.candidate.id), item, Date.now() + CANDIDATE_TTL_MS);
+      if (!rejectedCandidate) this.metadata.putMetadata(searchKey, candidates, Date.now() + (candidates.length ? CACHE_TTL_MS : EMPTY_SEARCH_TTL_MS));
+      this.operationSucceeded("search");
+      return candidates.map(({ candidate }) => candidate);
+    } catch (error) {
+      if (isCancellation(error, options.signal)) throw error;
+      if (error instanceof MpcArtworkFilterValidationError) throw error;
+      this.degrade(error);
+      if (staleSearch) {
+        const staleCandidates: ArtworkCandidate[] = await Promise.all(staleSearch.map(async ({ candidate }) => ({
+          ...(await this.getCandidate(candidate.id) ?? candidate),
+          identityId: null,
+          metadata: { ...candidate.metadata, metadataFreshness: "stale", remoteMetadataStatus: "stale" },
+        })));
+        return staleCandidates.filter((candidate) => candidate.metadata?.cardType === "CARDBACK" && candidateMatchesFilters(candidate, appliedFilters));
+      }
+      throw error;
+    }
+  }
+
   async getFilterCatalogs(signal?: AbortSignal): Promise<MpcFilterCatalogs> {
     const [sources, languages, tags] = await Promise.all([
       this.sources(signal),
@@ -784,7 +886,14 @@ export class MpcArtworkProvider implements ArtworkProvider {
           };
           let updated: StoredCandidate | undefined;
           try {
-            updated = this.candidateFromCard(document, identity, stored.candidate.faceId === "back" ? "back" : "front", verifiedSourceIds);
+            updated = this.candidateFromCard(
+              document,
+              identity,
+              stored.candidate.faceId === "back" ? "back" : "front",
+              verifiedSourceIds,
+              undefined,
+              stored.candidate.metadata?.cardType === "CARDBACK" ? "CARDBACK" : "CARD",
+            );
           } catch (error) {
             this.degrade(error);
             resultById.set(id, { candidateId: id, providerAssetId: assetId, status: "remote-unavailable", localOriginal, failureKind: revalidationFailureKind(error), candidate: stored.candidate });
@@ -1216,11 +1325,13 @@ export class MpcArtworkProvider implements ArtworkProvider {
     if (!reference) return this.getCandidate(id);
     if (signal?.aborted) throw new MpcArtworkProviderError("aborted", "The MPC reference lookup was cancelled.");
     const faceId: CardFaceSide = reference.faceId === "back" ? "back" : "front";
+    const expectedCardType = reference.providerCardType ?? "CARD";
     const assetId = reference.providerAssetId ?? reference.selectedArtworkId;
     const selectedArtworkId = reference.selectedArtworkId;
     if (assetId && !validAssetId(assetId)) throw new MpcArtworkProviderError("unsafe-source", "Imported MPC artwork identifier is invalid.");
     const cached = this.metadata.getMetadata<StoredCandidate>(candidateKey(id));
-    if (cached && cached.candidate.providerAssetId === assetId && cached.candidate.selectedArtworkId === selectedArtworkId) {
+    if (cached && cached.candidate.providerAssetId === assetId && cached.candidate.selectedArtworkId === selectedArtworkId
+      && (cached.candidate.metadata?.cardType ?? "CARD") === expectedCardType) {
       const candidate = await this.getCandidate(id);
       return candidate ? {
         ...candidate,
@@ -1240,7 +1351,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         this.degrade(error);
       }
     }
-    if (localOriginal) {
+    if (localOriginal && expectedCardType === "CARD") {
       const isSvg = canonicalExtension(localOriginal.extension) === "svg";
       const originalFormatExportable = isExportableOriginalExtension(localOriginal.extension);
       const candidate: ArtworkCandidate = {
@@ -1307,7 +1418,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         throw error;
       }
       let online: StoredCandidate | undefined;
-      try { online = this.candidateFromCard(document, identity, faceId, verifiedSourceIds); }
+      try { online = this.candidateFromCard(document, identity, faceId, verifiedSourceIds, undefined, expectedCardType); }
       catch (error) { this.degrade(error); throw error; }
       if (!online) return undefined;
       const candidate: ArtworkCandidate = {
@@ -1491,9 +1602,9 @@ export class MpcArtworkProvider implements ArtworkProvider {
     return original;
   }
 
-  private candidateFromCard(item: Record<string, unknown>, identity: CardIdentity, faceId: CardFaceSide, verifiedSourceIds: ReadonlySet<number>, providerRank?: number): StoredCandidate | undefined {
+  private candidateFromCard(item: Record<string, unknown>, identity: CardIdentity, faceId: CardFaceSide, verifiedSourceIds: ReadonlySet<number>, providerRank?: number, expectedCardType: "CARD" | "CARDBACK" = "CARD"): StoredCandidate | undefined {
     if (!validAssetId(item.identifier)) return undefined;
-    if (item.cardType !== "CARD") throw new MpcArtworkProviderError("protocol", "MPC card hydration omitted or returned an unsupported cardType.");
+    if (item.cardType !== expectedCardType) throw new MpcArtworkProviderError("protocol", `MPC card hydration did not confirm the expected ${expectedCardType} type.`);
     if (item.sourceType !== "Google Drive") {
       throw new MpcArtworkProviderError("unsafe-source", "MPC returned an unsupported artwork source or card type.");
     }
@@ -1532,6 +1643,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
       originalAvailable: declaredSize !== undefined && declaredSize <= this.maximumOriginalBytes,
       originalCached: false,
       metadata: {
+        cardType: expectedCardType,
         ...(name ? { name } : {}),
         sourceType: item.sourceType,
         sourceId,

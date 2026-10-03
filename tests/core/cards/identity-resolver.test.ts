@@ -7,7 +7,6 @@ import { DEFAULT_ARTWORK_POLICY_ID } from "../../../core/cards/identity-policy";
 import type { ArtworkCandidate, CardIdentity } from "../../../core/cards/types";
 import type { ScryfallCard } from "../../../providers/scryfall/types";
 import type { ScryfallClient } from "../../../providers/scryfall/client";
-import type { OcrRecognizer } from "../../../providers/ocr/types";
 
 const sol: ScryfallCard = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", oracleId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Sol Ring", layout: "normal", setCode: "cmm", collectorNumber: "396", lang: "en", releasedAt: "2023-08-04", digital: false, promo: false, fullArt: false, borderColor: "black", imageStatus: "highres_scan", imageUris: { png: "https://cards.scryfall.io/png/sol.png" }, faces: [], relatedCards: [], metadata: {} };
 const island: ScryfallCard = { ...sol, id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", oracleId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", name: "Island", collectorNumber: "265", setCode: "m21" };
@@ -80,10 +79,10 @@ describe("identity resolver", () => {
     expect(helpers.resolveEffectiveCardBack(normal)).toMatchObject({ mode: "project-default", status: "missing", source: "project-default" });
   });
 
-  it("resolves explicit Scryfall ID before set, name, filename, OCR, or fuzzy work", async () => {
+  it("resolves an explicit Scryfall ID before weaker textual identity work", async () => {
     const api = fakeClient();
     const resolver = new IdentityResolver(api);
-    const result = await resolver.resolve(card({ name: "Island", setCode: "m21", collectorNumber: "265", scryfallId: sol.id }, "Sol Ring.png"), { imageBytes: new Uint8Array([1]) });
+    const result = await resolver.resolve(card({ name: "Island", setCode: "m21", collectorNumber: "265", scryfallId: sol.id }, "Sol Ring.png"));
     expect(result.identity).toMatchObject({ name: "Sol Ring", scryfallId: sol.id, oracleId: sol.oracleId, resolutionMethod: "scryfall-id" });
     expect(api.lookupById).toHaveBeenCalledOnce();
     expect(api.lookupBySetCollector).not.toHaveBeenCalled();
@@ -99,35 +98,77 @@ describe("identity resolver", () => {
     expect(api.lookupByName).not.toHaveBeenCalled();
   });
 
-  it("resolves exact explicit names and exact normalized filenames after stronger metadata", async () => {
+  it("resolves exact explicit names", async () => {
     const api = fakeClient();
     const resolver = new IdentityResolver(api);
     const named = await resolver.resolve(card({ name: "Sol Ring" }));
     expect(named.identity).toMatchObject({ id: `scryfall:oracle:${sol.oracleId}`, name: "Sol Ring", resolutionMethod: "name" });
-    const uploaded = card(undefined, "Sol_Ring_custom.png");
-    const filename = await resolver.resolve(uploaded);
-    expect(filename.identity).toMatchObject({ name: "Sol Ring", resolutionMethod: "filename" });
-    expect(filename.identityResolution.status).toBe("resolved");
   });
 
-  it("runs filename before OCR and fuzzy, and keeps uncertain OCR/fuzzy matches as suggestions", async () => {
+  it("uses fuzzy matching for an explicit text hint after exact lookup misses", async () => {
     const api = fakeClient({ lookupByName: async () => Promise.reject(Object.assign(new Error("not found"), { kind: "not-found" })), searchCards: async () => [sol] });
-    const recognizer: OcrRecognizer = { recognizeName: vi.fn(async () => "Sol Ring") };
-    const resolver = new IdentityResolver(api);
-    const result = await resolver.resolve(card(undefined, "unknown upload.png"), { imageBytes: new Uint8Array([1, 2, 3]), recognizer });
-    expect(recognizer.recognizeName).toHaveBeenCalledOnce();
+    const result = await new IdentityResolver(api).resolve(card({ name: "Sol Rin" }, "unrelated-upload.png"));
     expect(result.identity).toBeNull();
-    expect(result.identityResolution).toMatchObject({ status: "suggested", method: "ocr", candidates: [{ identity: { name: "Sol Ring" } }] });
+    expect(result.identityResolution).toMatchObject({ status: "suggested", method: "fuzzy", query: "Sol Rin", candidates: [{ identity: { name: "Sol Ring" } }] });
     expect(api.searchCards).toHaveBeenCalledOnce();
   });
 
-  it("keeps OCR failure isolated and continues to deterministic name suggestions", async () => {
-    const api = fakeClient({ lookupByName: async () => Promise.reject(Object.assign(new Error("not found"), { kind: "not-found" })), searchCards: async () => [sol] });
-    const recognizer: OcrRecognizer = { recognizeName: vi.fn(async () => { throw new Error("local OCR model unavailable"); }) };
-    const result = await new IdentityResolver(api).resolve(card(undefined, "Sol Rng custom.png"), { imageBytes: new Uint8Array([1]), recognizer });
-    expect(result.identity).toBeNull();
-    expect(result.identityResolution.status).toBe("suggested");
-    expect(api.searchCards).toHaveBeenCalledOnce();
+  it("never resolves a custom image from its filename, even when its status is reprocessed", async () => {
+    const api = fakeClient();
+    const entry: ImportedEntry = {
+      id: "island-image", kind: "custom-card", order: 0, quantity: 1, sourceId: "upload",
+      sourceFilename: "Island.png", nameSuggestion: "Island", asset: { id: "island-asset", sourceId: "upload", originalFormat: "png", originalBytes: new Uint8Array([1, 2, 3]) },
+    };
+    const [custom] = createWorkingSet(importResult([entry]));
+    const result = await new IdentityResolver(api).resolve({
+      ...custom,
+      identityResolution: { ...custom.identityResolution, confirmed: false },
+    });
+
+    expect(result).toMatchObject({ identity: null, identityResolution: { status: "custom" } });
+    expect(api.lookupById).not.toHaveBeenCalled();
+    expect(api.lookupBySetCollector).not.toHaveBeenCalled();
+    expect(api.lookupByName).not.toHaveBeenCalled();
+    expect(api.searchCards).not.toHaveBeenCalled();
+  });
+
+  it("uses an explicit cardHint on a custom image and ignores its display label", async () => {
+    const api = fakeClient();
+    const entry: ImportedEntry = {
+      id: "hinted-image", kind: "custom-card", order: 0, quantity: 1, sourceId: "upload",
+      sourceFilename: "Island.png", nameSuggestion: "Island", cardHint: { name: "Sol Ring" },
+      asset: { id: "hinted-asset", sourceId: "upload", originalFormat: "png", originalBytes: new Uint8Array([1]) },
+    };
+    const [custom] = createWorkingSet(importResult([entry]));
+
+    const resolved = await new IdentityResolver(api).resolve(custom);
+
+    expect(resolved.identity).toMatchObject({ name: "Sol Ring", resolutionMethod: "name" });
+    expect(api.lookupByName).toHaveBeenCalledExactlyOnceWith("Sol Ring", "exact", expect.anything());
+  });
+
+  it.each(["filename", "ocr"] as const)("preserves a legacy custom upload resolved by %s without re-running provider lookup", async (method) => {
+    const api = fakeClient();
+    const entry: ImportedEntry = {
+      id: "legacy-image", kind: "custom-card", order: 0, quantity: 1, sourceId: "upload",
+      sourceFilename: "Island.png", nameSuggestion: "Island", asset: { id: "legacy-asset", sourceId: "upload", originalFormat: "png" },
+    };
+    const [custom] = createWorkingSet(importResult([entry]));
+    const legacyIdentity = { id: "scryfall:oracle:legacy-island", provider: "scryfall", name: "Island", resolutionMethod: method, confidence: 0.99 } as const;
+    const legacy = {
+      ...custom,
+      identityHints: { name: "Island" },
+      identity: legacyIdentity,
+      identityResolution: { status: "resolved" as const, method, query: "Island", confirmed: false, candidates: [] },
+    };
+
+    const preserved = await new IdentityResolver(api).resolve(legacy);
+
+    expect(preserved).toEqual(legacy);
+    expect(api.lookupById).not.toHaveBeenCalled();
+    expect(api.lookupBySetCollector).not.toHaveBeenCalled();
+    expect(api.lookupByName).not.toHaveBeenCalled();
+    expect(api.searchCards).not.toHaveBeenCalled();
   });
 
   it("does not overwrite an identity or local selection after user confirmation and supports custom", async () => {

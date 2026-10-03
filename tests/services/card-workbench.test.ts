@@ -2,12 +2,12 @@ import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
+import { PDFDocument } from "@pdfme/pdf-lib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCardWorkbench, type CardWorkbenchOptions, type WorkingSetImportResult } from "../../services/card-workbench";
 import { handleArtworkList, handleCardExport, handleCardImport, handleResolve, parseWorkingCards } from "../../services/card-api";
 import { ArtworkCatalog } from "../../artwork/catalog";
 import { appDataPaths, originalPathForHash } from "../../artwork/storage/paths";
-import { TesseractOcrRecognizer } from "../../providers/ocr/tesseract-recognizer";
 import type { ScryfallClient } from "../../providers/scryfall/client";
 import type { ScryfallCard } from "../../providers/scryfall/types";
 import type { ArtworkCandidate } from "../../core/cards/types";
@@ -37,10 +37,10 @@ const basicLand = {
 };
 const delverCard = JSON.parse(await readFile(new URL("../fixtures/scryfall/dmf-card.json", import.meta.url), "utf8")) as Record<string, unknown>;
 
-async function setup(fetchImpl?: typeof fetch, recognizer?: CardWorkbenchOptions["recognizer"], scryfallClient?: ScryfallClient) {
+async function setup(fetchImpl?: typeof fetch, scryfallClient?: ScryfallClient, mpcFetchImpl?: typeof fetch) {
   const root = await mkdtemp(join(tmpdir(), "tcgprint-workbench-"));
   roots.push(root);
-  const workbench = await createCardWorkbench({ dataDirectory: root, fetchImpl, minIntervalMs: 0, ...(recognizer ? { recognizer } : {}), ...(scryfallClient ? { scryfallClient } : {}) });
+  const workbench = await createCardWorkbench({ dataDirectory: root, fetchImpl, minIntervalMs: 0, ...(mpcFetchImpl ? { mpcFetchImpl } : {}), ...(scryfallClient ? { scryfallClient } : {}) });
   workbenches.push(workbench);
   return { root, workbench };
 }
@@ -127,6 +127,32 @@ describe("card workbench services", () => {
     expect(result.workingCards).toHaveLength(3);
   });
 
+  it("continues to resolve an explicit decklist entry for 1 Island", async () => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    const { workbench } = await setup(undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Island" });
+    const resolved = await workbench.resolveWorkingCards(imported.workingCards);
+
+    expect(resolved.workingCards[0]).toMatchObject({ identity: { name: "Island", resolutionMethod: "name" }, identityResolution: { status: "resolved" } });
+    expect(fake.lookupByName).toHaveBeenCalledWith("Island", "exact", expect.anything());
+  });
+
+  it("keys identity resolution by semantic hints rather than upload filenames or artwork IDs", async () => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    const { workbench } = await setup(undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "Mainboard\n1 Sol Ring\nSideboard\n1 Sol Ring" });
+    const cards = imported.workingCards.map((card, index) => ({
+      ...card,
+      importSource: { ...card.importSource, filename: `display-${index}.png` },
+      localArtworkIds: [`upload:${String(index + 1).repeat(64)}`],
+    }));
+
+    const resolved = await workbench.resolveWorkingCards(cards);
+
+    expect(resolved.workingCards.map((card) => card.identity?.name)).toEqual(["Sol Ring", "Sol Ring"]);
+    expect(fake.lookupByName).toHaveBeenCalledTimes(1);
+  });
+
   it("imports a Scryfall card URL through the Working Set route without calling an artwork provider", async () => {
     const fetchImpl = vi.fn(async () => new Response("unexpected network request", { status: 500 }));
     const { workbench } = await setup(fetchImpl as typeof fetch);
@@ -175,6 +201,65 @@ describe("card workbench services", () => {
     expect(customLibrary.map(({ id }) => id)).toEqual(imported.workingCards[0].localArtworkIds);
   });
 
+  it.each([
+    ["Island.png", "Island"],
+    ["1x Sol Ring [MPC].png", "Sol Ring"],
+  ])("keeps custom image %s printable without making Scryfall requests from its filename or pixels", async (filename) => {
+    const pixelsWithText = new Uint8Array(await sharp(Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="336"><rect width="100%" height="100%" fill="white"/><text x="24" y="170" font-size="36">ISLAND</text></svg>',
+    )).png().toBuffer());
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    const { workbench } = await setup(undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ files: [{ filename, bytes: pixelsWithText }] });
+    const result = await workbench.resolveWorkingCards(imported.workingCards);
+    const card = result.workingCards[0]!;
+
+    expect(card).toMatchObject({ identity: null, identityResolution: { status: "custom", confirmed: true } });
+    expect(card.identityHints).toEqual({});
+    expect(card.selectedArtworkByFace.front).toMatchObject({ source: "upload" });
+    expect(fake.lookupById).not.toHaveBeenCalled();
+    expect(fake.lookupBySetCollector).not.toHaveBeenCalled();
+    expect(fake.lookupByName).not.toHaveBeenCalled();
+    expect(fake.searchCards).not.toHaveBeenCalled();
+    await expect(workbench.getArtworkOriginal(card.selectedArtworkByFace.front!.candidateId)).resolves.toMatchObject({ bytes: pixelsWithText });
+    await expect(workbench.reresolveWorkingCard(card)).resolves.toMatchObject({ identity: null, identityResolution: { status: "custom", confirmed: true } });
+    expect(fake.lookupById).not.toHaveBeenCalled();
+    expect(fake.lookupBySetCollector).not.toHaveBeenCalled();
+    expect(fake.lookupByName).not.toHaveBeenCalled();
+    expect(fake.searchCards).not.toHaveBeenCalled();
+  });
+
+  it("exports a custom upload PDF from the validated original with the standard A4 page dimensions", async () => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    const { workbench } = await setup(undefined, fake.client);
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 300, height: 420, channels: 3, background: "#397" } }).png().toBuffer());
+    const imported = await workbench.importForWorkingSet({ files: [{ filename: "Island.png", bytes: originalBytes }] });
+    const resolved = await workbench.resolveWorkingCards(imported.workingCards);
+    const custom = resolved.workingCards[0]!;
+    const selectionId = custom.selectedArtworkByFace.front!.candidateId;
+    const original = await workbench.getArtworkOriginal(selectionId);
+    const getOriginal = vi.spyOn(workbench, "getArtworkOriginal");
+    const response = await handleCardExport(new Request("http://localhost/api/cards/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cards: [custom], options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES } }),
+    }), workbench);
+
+    expect(custom).toMatchObject({ identity: null, identityResolution: { status: "custom" }, selectedArtworkByFace: { front: { source: "upload", candidateId: selectionId } } });
+    expect(original.bytes).toEqual(originalBytes);
+    expect(original.widthPx).toBe(300);
+    expect(original.heightPx).toBe(420);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/pdf");
+    expect(getOriginal.mock.calls.some(([candidateId]) => candidateId === selectionId)).toBe(true);
+    const pdf = await PDFDocument.load(await response.arrayBuffer());
+    expect(pdf.getPageCount()).toBe(1);
+    expect(pdf.getPage(0).getWidth()).toBeCloseTo(595.28, 1);
+    expect(pdf.getPage(0).getHeight()).toBeCloseTo(841.89, 1);
+    expect(fake.lookupByName).not.toHaveBeenCalled();
+    expect(fake.searchCards).not.toHaveBeenCalled();
+  });
+
   it("retains relative folder paths so front/back pairing reaches the Working Set", async () => {
     const { workbench } = await setup();
     const frontBytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
@@ -220,7 +305,7 @@ describe("card workbench services", () => {
 
   it("re-resolves a confirmed card from its own hints while preserving user artwork and entry metadata", async () => {
     const fake = fakeScryfallClient([resolvedDeckPrintings[0], resolvedDeckPrintings[3]]);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "3 Sol Ring" });
     const automaticallyResolved = (await workbench.resolveWorkingCards(imported.workingCards)).workingCards[0];
     const userArtwork = {
@@ -256,7 +341,7 @@ describe("card workbench services", () => {
 
   it("replaces an incompatible automatic artwork when a manual identity changes", async () => {
     const fake = fakeScryfallClient([resolvedDeckPrintings[0], resolvedDeckPrintings[3]]);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "3 Sol Ring" });
     const automaticallyResolved = (await workbench.resolveWorkingCards(imported.workingCards)).workingCards[0];
     const oldArtwork = automaticallyResolved.selectedArtworkByFace.front;
@@ -284,7 +369,7 @@ describe("card workbench services", () => {
 
   it("confirms a manual identity without changing the entry or its imported asset references", async () => {
     const fake = fakeScryfallClient(resolvedDeckPrintings);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
     const imported = await workbench.importForWorkingSet({ files: [{ filename: "local.png", bytes }] });
     const source = imported.workingCards[0];
@@ -319,7 +404,7 @@ describe("card workbench services", () => {
   it("keeps a confirmed card unchanged when re-resolution hits a real provider failure", async () => {
     const fake = fakeScryfallClient([]);
     fake.lookupByName.mockRejectedValue(new Error("Scryfall network unavailable"));
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
     const identityId = "scryfall:oracle:previous-island";
     const previous = {
@@ -335,40 +420,80 @@ describe("card workbench services", () => {
     expect(previous).toEqual(before);
   });
 
-  it("selects provider artwork as a simple card's locked physical back and preserves source identities", async () => {
+  it("accepts only verified MPC cardbacks as a simple card's locked physical back", async () => {
     const identityCard = resolvedDeckPrintings[0]!;
     const nextIdentity = resolvedDeckPrintings[1]!;
     const fake = fakeScryfallClient([identityCard, nextIdentity]);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
     const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
     const [scryfallFront] = await workbench.listArtworkCandidates(identified.identity!.id, "front", "scryfall");
     if (!scryfallFront) throw new Error("Expected a Scryfall front artwork candidate.");
-    const scryfallBack = workbench.selectManualBackArtwork(identified, scryfallFront);
-    const frontChanged = workbench.selectArtwork(scryfallBack, "front", scryfallFront);
-    const identityChanged = await workbench.confirmWorkingCardIdentity(frontChanged, nextIdentity.id);
+    expect(() => workbench.selectManualBackArtwork(identified, scryfallFront)).toThrow(/verified MPC cardback/);
+    const mpcCard = {
+      id: mpcArtworkCandidateId("provider-manual-card", "back"), source: "mpc" as const, identityId: identified.identity!.id,
+      faceId: "back", providerAssetId: "provider-manual-card", originalAvailable: false, metadata: { cardType: "CARD" },
+    };
+    expect(() => workbench.selectManualBackArtwork(identified, mpcCard)).toThrow(/verified MPC cardback/);
     const mpcCandidate = {
       id: mpcArtworkCandidateId("provider-manual-back", "back"), source: "mpc" as const, identityId: identified.identity!.id,
       faceId: "back", providerAssetId: "provider-manual-back", selectedArtworkId: "selected-manual-back", originalAvailable: false,
+      metadata: { cardType: "CARDBACK" },
     };
     const mpcBack = workbench.selectManualBackArtwork(identified, mpcCandidate);
+    const frontChanged = workbench.selectArtwork(mpcBack, "front", scryfallFront);
+    const identityChanged = await workbench.confirmWorkingCardIdentity(frontChanged, nextIdentity.id);
     const uploadBytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
     const uploaded = await workbench.importForWorkingSet({ files: [{ filename: "manual-back.png", bytes: uploadBytes }] });
     const uploadCandidate = await workbench.getArtworkCandidate(uploaded.workingCards[0]!.localArtworkIds[0]!);
     if (!uploadCandidate) throw new Error("Expected a validated local artwork candidate.");
-    const uploadBack = workbench.selectManualBackArtwork(identified, uploadCandidate);
 
     expect(isDoubleFacedIdentity(identityChanged.identity)).toBe(false);
     expect(identityChanged.faces).toMatchObject([{ id: "front", side: "front" }]);
     expect(identityChanged.faces).toHaveLength(1);
-    expect(identityChanged.manualBackArtwork).toEqual(scryfallBack.manualBackArtwork);
+    expect(identityChanged.manualBackArtwork).toEqual(mpcBack.manualBackArtwork);
     expect(identityChanged.backModeSelectionPolicy).toBe("explicit");
     expect(mpcBack.manualBackArtwork).toMatchObject({ source: "mpc", faceId: "back", providerAssetId: "provider-manual-back", selectedArtworkId: "selected-manual-back", selectionPolicy: "user-selected" });
     expect(mpcBack.faces).toHaveLength(1);
-    expect(mpcBack.mpcReferences).toContainEqual(expect.objectContaining({ faceId: "back", importedAssetId: "provider-manual-back", providerAssetId: "provider-manual-back", selectedArtworkId: "selected-manual-back", referenceOrigin: "gallery-selection" }));
-    expect(uploadBack.manualBackArtwork).toMatchObject({ source: "upload", candidateId: uploadCandidate.id, identityId: identified.identity!.id, selectionPolicy: "user-selected" });
-    expect(uploadBack.localArtworkIds).toContain(uploadCandidate.id);
-    expect(frontChanged.manualBackArtwork).toEqual(scryfallBack.manualBackArtwork);
+    expect(mpcBack.mpcReferences).toContainEqual(expect.objectContaining({ faceId: "back", importedAssetId: "provider-manual-back", providerAssetId: "provider-manual-back", selectedArtworkId: "selected-manual-back", providerCardType: "CARDBACK", referenceOrigin: "gallery-selection" }));
+    expect(() => workbench.selectManualBackArtwork(identified, uploadCandidate)).toThrow(/verified MPC cardback/);
+    expect(frontChanged.manualBackArtwork).toEqual(mpcBack.manualBackArtwork);
+    expect(identityChanged.manualBackArtwork).toEqual(mpcBack.manualBackArtwork);
+  });
+
+  it("lists cardbacks through the dedicated MPC route and persists the verified CARDBACK reference", async () => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    const providerId = "synthetic-cardback-id";
+    const backBytes = new Uint8Array(await sharp({ create: { width: 40, height: 56, channels: 3, background: "#254" } }).png().toBuffer());
+    const mpcFetchImpl: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/2/sources/") return Response.json({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.pathname === "/2/cardbacks/") return Response.json({ cardbacks: [providerId] });
+      if (url.pathname === "/2/cards/") return Response.json({ results: { [providerId]: {
+        identifier: providerId, cardType: "CARDBACK", name: "Synthetic Cardback", sourceId: 41, sourceType: "Google Drive", extension: "png", size: backBytes.byteLength, dpi: 1200,
+      } } });
+      if (url.hostname === "drive.google.com" && url.pathname === "/uc") return new Response(backBytes, { headers: { "Content-Type": "image/png", "Content-Length": String(backBytes.byteLength) } });
+      throw new Error(`Unexpected MPC request: ${url.pathname}`);
+    };
+    const { workbench } = await setup(undefined, fake.client, mpcFetchImpl);
+    const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
+    const identified = (await workbench.resolveWorkingCards(imported.workingCards)).workingCards[0]!;
+    const [candidate] = await workbench.listMpcCardbackCandidates();
+    if (!candidate) throw new Error("Expected one hydrated CARDBACK candidate.");
+
+    const selected = workbench.selectManualBackArtwork(identified, candidate);
+
+    expect(candidate).toMatchObject({ source: "mpc", identityId: null, faceId: "back", metadata: { cardType: "CARDBACK" } });
+    expect(selected.manualBackArtwork).toMatchObject({ source: "mpc", faceId: "back", providerAssetId: providerId, selectionPolicy: "user-selected" });
+    expect(selected.mpcReferences).toContainEqual(expect.objectContaining({ importedAssetId: providerId, providerCardType: "CARDBACK", referenceOrigin: "gallery-selection" }));
+    const response = await handleCardExport(new Request("http://localhost/api/cards/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cards: [selected], options: { exportContentMode: "back-only", missingBackPolicy: "block", bleedMm: 0, cutGuides: NO_CUT_GUIDES } }),
+    }), workbench);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/pdf");
+    expect(await PDFDocument.load(await response.arrayBuffer()).then((pdf) => pdf.getPageCount())).toBe(1);
   });
 
   it("keeps DFC face selections independent across Scryfall, MPC, and upload and applies face-local filters", async () => {
@@ -430,7 +555,7 @@ describe("card workbench services", () => {
   it("restores default artwork independently on each DFC face without replacing the opposite face", async () => {
     const identityCard = mapScryfallCard(delverCard);
     const fake = fakeScryfallClient([identityCard]);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
     const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
     const [frontCandidate] = await workbench.listArtworkCandidates(identified.identity!.id, "front", "scryfall");
@@ -469,7 +594,7 @@ describe("card workbench services", () => {
   it("scopes a DFC default-artwork search to the requested face and retains its paired printing", async () => {
     const identityCard = mapScryfallCard(delverCard);
     const fake = fakeScryfallClient([identityCard]);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
     const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
     const searchSpy = vi.spyOn(ArtworkCatalog.prototype, "search");
@@ -492,7 +617,7 @@ describe("card workbench services", () => {
     const newerPrinting = { ...olderPrinting, id: "91919191-9191-4919-8919-919191919191", setCode: "new", collectorNumber: "2", releasedAt: "2025-01-01" };
     const fake = fakeScryfallClient([olderPrinting]);
     fake.listPrintings.mockResolvedValue([olderPrinting, newerPrinting]);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
     const confirmed = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], olderPrinting.id);
     const candidates = await workbench.listArtworkCandidates(confirmed.identity!.id, "front", "scryfall");
@@ -515,7 +640,7 @@ describe("card workbench services", () => {
     const identityCard = resolvedDeckPrintings[0];
     const fake = fakeScryfallClient([identityCard]);
     fake.listPrintings.mockRejectedValue(new Error("Scryfall network unavailable"));
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
     const confirmed = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
     const before = {
@@ -538,7 +663,7 @@ describe("card workbench services", () => {
   it("reports provider failure when degraded cached candidates cover only the opposite DFC face", async () => {
     const identityCard = mapScryfallCard(delverCard);
     const fake = fakeScryfallClient([identityCard]);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
     const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
     const [frontCandidate] = await workbench.listArtworkCandidates(identified.identity!.id, "front", "scryfall");
@@ -565,7 +690,7 @@ describe("card workbench services", () => {
 
   it("resolves four deck entries without listing printings or expanding quantities", async () => {
     const fake = fakeScryfallClient(resolvedDeckPrintings, 300);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring\n1 Lightning Bolt\n1 Counterspell\n6 Island" });
     const result = await workbench.resolveWorkingCards(imported.workingCards);
 
@@ -580,7 +705,7 @@ describe("card workbench services", () => {
 
   it("lists printing alternatives only when the Artwork Picker endpoint is opened", async () => {
     const fake = fakeScryfallClient(resolvedDeckPrintings);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
     const resolved = await workbench.resolveWorkingCards(imported.workingCards);
     const identity = resolved.workingCards[0].identity!;
@@ -601,7 +726,7 @@ describe("card workbench services", () => {
 
   it("preserves preselected upload and MPC artwork while resolving identity", async () => {
     const fake = fakeScryfallClient(resolvedDeckPrintings);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
     const upload = await workbench.importForWorkingSet({ files: [{ filename: "local.png", bytes }] });
     const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring\n1 Lightning Bolt" });
@@ -669,19 +794,20 @@ describe("card workbench services", () => {
     expect(uploadSelected.identity).toBe(originalCard.identity);
   });
 
-  it("keeps upload usage working with Scryfall degraded and does not call Scryfall for MPC references", async () => {
+  it("keeps direct custom uploads offline and does not call Scryfall for MPC references", async () => {
     const failingFetch = vi.fn(async () => new Response("offline", { status: 503 })) as typeof fetch;
     const { workbench } = await setup(failingFetch);
     const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
     const upload = await workbench.importForWorkingSet({ files: [{ filename: "custom.png", bytes }] });
     expect(await workbench.getArtworkPreview(upload.workingCards[0].localArtworkIds[0])).toMatchObject({ source: "upload" });
-    await expect(workbench.resolveWorkingCards(upload.workingCards)).resolves.toMatchObject({ providerHealth: { scryfall: { degraded: true } } });
+    await expect(workbench.resolveWorkingCards(upload.workingCards)).resolves.toMatchObject({ providerHealth: { scryfall: { degraded: false } } });
+    expect(failingFetch).not.toHaveBeenCalled();
 
     const xml = new TextEncoder().encode("<order><details><quantity>1</quantity></details><fronts><card><id>art-front-9</id><slots>1</slots><name>Custom</name></card></fronts></order>");
     const mpc = await workbench.importForWorkingSet({ files: [{ filename: "order.xml", bytes: xml }] });
     expect(mpc.workingCards[0].selectedArtworkByFace.front).toMatchObject({ source: "mpc", selectedArtworkId: "art-front-9" });
     expect(mpc.workingCards[0].mpcReferences[0].selectedArtworkId).toBe("art-front-9");
-    expect(failingFetch).toHaveBeenCalledTimes(1);
+    expect(failingFetch).not.toHaveBeenCalled();
   });
 
   it("reports unresolved cards and provider degradation instead of a false full-success message", async () => {
@@ -923,26 +1049,6 @@ describe("card workbench services", () => {
     await expect(workbench.resolveWorkingCards(imported.workingCards, { signal: controller.signal })).rejects.toMatchObject({ kind: "aborted" });
   });
 
-  it("disposes the lazily created OCR worker when the workbench closes", async () => {
-    const worker = {
-      recognize: vi.fn(async () => ({ data: { text: "Unknown Card Name" } })),
-      terminate: vi.fn(async () => undefined),
-    };
-    const workerFactory = vi.fn(async () => worker);
-    const recognizer = new TesseractOcrRecognizer({ cachePath: "/tmp/tcgprint-workbench-ocr-test", workerFactory });
-    const offline = vi.fn(async () => new Response("not found", { status: 404 })) as typeof fetch;
-    const { workbench } = await setup(offline, recognizer);
-    const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
-    const imported = await workbench.importForWorkingSet({ files: [{ filename: "mystery-card.png", bytes }] });
-    await workbench.resolveWorkingCards(imported.workingCards);
-
-    expect(workerFactory).toHaveBeenCalledOnce();
-    expect(worker.terminate).not.toHaveBeenCalled();
-    workbenches.splice(workbenches.indexOf(workbench), 1);
-    await workbench.close();
-    expect(worker.terminate).toHaveBeenCalledOnce();
-  });
-
   it("maps a resolved DFC to two faces while preserving a local front and selecting Scryfall for the back", async () => {
     const requestPaths: string[] = [];
     const fakeFetch = vi.fn(async (input: URL | RequestInfo) => {
@@ -982,7 +1088,7 @@ describe("card workbench services", () => {
     const doubleFaced = mapScryfallCard(delverCard);
     const split = { ...doubleFaced, name: "Fire // Ice", layout: "split" };
     const fake = fakeScryfallClient([split]);
-    const { workbench } = await setup(undefined, undefined, fake.client);
+    const { workbench } = await setup(undefined, fake.client);
     const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
     const source = imported.workingCards[0];
     const resolved = await workbench.resolveWorkingCards([{
@@ -1001,7 +1107,7 @@ describe("card workbench services", () => {
   it("supports mixed face providers and keeps a manual DFC back after provider re-resolution", async () => {
     const identityCard = mapScryfallCard(delverCard);
     const initial = fakeScryfallClient([identityCard]);
-    const { workbench } = await setup(undefined, undefined, initial.client);
+    const { workbench } = await setup(undefined, initial.client);
     const imported = await workbench.importForWorkingSet({ text: "1 Delver of Secrets" });
     const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0], identityCard.id);
     const [scryfallBack] = await workbench.listArtworkCandidates(identified.identity!.id, "back", "scryfall");

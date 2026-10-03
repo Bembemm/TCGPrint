@@ -96,6 +96,32 @@ function staticProvider(source: "scryfall" | "upload", id: string): ArtworkProvi
 }
 
 describe("MPC artwork provider", () => {
+  it("lists only MPC endpoint documents hydrated as CARDBACK, never ordinary CARD artwork", async () => {
+    const requests: Array<{ path: string; body?: unknown }> = [];
+    const ids = ["verified-cardback-123", "ordinary-card-asset-456"];
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      const body = typeof init.body === "string" ? JSON.parse(init.body) as unknown : undefined;
+      requests.push({ path: url.pathname, ...(body === undefined ? {} : { body }) });
+      if (url.pathname === "/2/sources/") return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.pathname === "/2/cardbacks/") return jsonResponse({ cardbacks: ids });
+      if (url.pathname === "/2/cards/") return jsonResponse({ results: {
+        [ids[0]!]: { identifier: ids[0], cardType: "CARDBACK", name: "Verified Back", sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000, dpi: 1200 },
+        [ids[1]!]: { identifier: ids[1], cardType: "CARD", name: "Ordinary Card", sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000, dpi: 1200 },
+      } });
+      throw new Error(`Unexpected MPC request: ${url.pathname}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    const candidates = await provider.searchCardbacks();
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ source: "mpc", identityId: null, faceId: "back", providerAssetId: ids[0], metadata: { cardType: "CARDBACK" } });
+    expect(requests.map(({ path }) => path)).toEqual(["/2/sources/", "/2/cardbacks/", "/2/cards/"]);
+    expect(requests[1]?.body).toMatchObject({ searchSettings: { filterSettings: { maximumSize: 30 } } });
+    database.close();
+  });
+
   it("uses the legacy query-array contract only after v3 returns 404", async () => {
     const requests: Array<{ url: string; method: string; body?: unknown }> = [];
     const fetchImpl: typeof fetch = async (input, init = {}) => {

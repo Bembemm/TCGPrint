@@ -74,4 +74,21 @@ describe("Back Library controls", () => {
     expect(projectChoices).toContain(`value="${asset.assetId}"`);
     expect(cardChoices).toContain(`value="${asset.assetId}"`);
   });
+
+  it("does not expose generic per-card back modes or Back Library selection for a DFC", () => {
+    const dfc: WorkingCard = {
+      ...card,
+      identity: { id: "scryfall:oracle:dfc", provider: "scryfall", name: "Front // Back", resolutionMethod: "manual", confidence: 1, metadata: { layout: "transform", faces: [{ name: "Front" }, { name: "Back" }] } },
+      faces: [{ id: "front", side: "front", name: "Front" }, { id: "back", side: "back", name: "Back" }],
+      backMode: "auto",
+    };
+    const markup = renderToStaticMarkup(createElement(BackLibraryControls, {
+      assets: [asset], selectedDefault: { assetId: asset.assetId, sha256: asset.sha256, format: asset.format }, selectedCard: dfc, disabled: false,
+      onAssetsChange: vi.fn(), onDefaultChange: vi.fn(), onCardModeChange: vi.fn(), onManualBackChange: vi.fn(),
+    }));
+
+    expect(markup).toContain("usa sua face traseira DFC como verso físico");
+    expect(markup).not.toContain('aria-label="Modo de verso da carta"');
+    expect(markup).not.toContain('aria-label="Verso manual da Back Library"');
+  });
 });

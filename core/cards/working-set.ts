@@ -130,13 +130,14 @@ export function createWorkingSet(result: ImportResult, options: CreateWorkingSet
     .sort((a, b) => a.entry.order - b.entry.order || a.index - b.index)
     .map(({ entry, index }) => {
       const hint = entry.cardHint;
-      const query = hint?.name ?? entry.nameSuggestion;
+      const query = hint?.name;
       const isCustom = entry.kind === "custom-card" || entry.kind === "asset";
+      const hasSemanticHint = Boolean(hint?.name || hint?.setCode || hint?.collectorNumber || hint?.scryfallId);
       const identityResolution: WorkingCard["identityResolution"] = {
         status: isCustom ? "custom" : "unresolved",
         ...(query ? { query } : {}),
         candidates: [],
-        confirmed: false,
+        confirmed: isCustom && !hasSemanticHint,
       };
       const faces = createFaces(entry);
       const selectedArtworkByFace = getSelectedByFace(entry);
@@ -151,6 +152,7 @@ export function createWorkingSet(result: ImportResult, options: CreateWorkingSet
           ...(entry.sourceFilename ? { filename: entry.sourceFilename } : {}),
           importKind: typeof entry.metadata?.parser === "string" ? entry.metadata.parser : entry.kind,
           entryKind: entry.kind,
+          ...(isCustom && hasSemanticHint ? { identityHintOrigin: "explicit-card-hint" as const } : {}),
         },
         identityHints: {
           ...(hint?.name ? { name: hint.name } : query ? { name: query } : {}),

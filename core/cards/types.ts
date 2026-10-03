@@ -91,6 +91,7 @@ export interface WorkingCardImportSource {
   readonly filename?: string;
   readonly importKind: string;
   readonly entryKind: string;
+  readonly identityHintOrigin?: "explicit-card-hint";
 }
 
 export interface WorkingCardMpcReference {
@@ -99,6 +100,8 @@ export interface WorkingCardMpcReference {
   readonly providerAssetId?: string;
   readonly selectedArtworkId?: string;
   readonly referenceOrigin?: "order-import" | "gallery-selection";
+  /** Provider-validated MPC document type; omitted legacy values mean CARD. */
+  readonly providerCardType?: "CARD" | "CARDBACK";
   readonly slots: readonly string[];
   readonly availableLocally: boolean;
 }

@@ -1,18 +1,13 @@
 import type { ScryfallClient, ScryfallRequestOptions } from "../../providers/scryfall/client";
 import { ScryfallError } from "../../providers/scryfall/errors";
-import type { OcrRecognizer } from "../../providers/ocr/types";
 import type { ScryfallCard } from "../../providers/scryfall/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, IdentityResolutionMethod, SelectedArtwork, WorkingCard } from "./types";
 import { isDoubleFacedIdentity } from "./back-selection";
 import { DEFAULT_ARTWORK_POLICY_ID, IDENTITY_RESOLUTION_POLICY } from "./identity-policy";
-import { normalizeArtworkFilename } from "./filename-resolver";
 import { fuzzyMatchName } from "./fuzzy-matcher";
 
 export interface IdentityResolveOptions {
-  readonly filename?: string;
-  readonly imageBytes?: Uint8Array;
   readonly signal?: AbortSignal;
-  readonly recognizer?: OcrRecognizer;
 }
 
 export interface IdentityResolverResult {
@@ -111,8 +106,19 @@ export class IdentityResolver {
 
   async resolveWithPrinting(workingCard: WorkingCard, options: IdentityResolveOptions = {}): Promise<IdentityResolverResult> {
     if (workingCard.identityResolution.confirmed) return { workingCard };
-    const requestOptions: ScryfallRequestOptions = { signal: options.signal };
     const hints = workingCard.identityHints;
+    const isCustomImport = workingCard.importSource.entryKind === "custom-card" || workingCard.importSource.entryKind === "asset";
+    if (isCustomImport && workingCard.importSource.identityHintOrigin !== "explicit-card-hint") {
+      if (workingCard.identity) return { workingCard };
+      return {
+        workingCard: {
+          ...workingCard,
+          identity: null,
+          identityResolution: { status: "custom", candidates: [], confirmed: true },
+        },
+      };
+    }
+    const requestOptions: ScryfallRequestOptions = { signal: options.signal };
 
     if (hints.scryfallId) {
       try {
@@ -141,26 +147,7 @@ export class IdentityResolver {
       }
     }
 
-    const filenameQuery = normalizeArtworkFilename(options.filename ?? workingCard.importSource.filename ?? "");
-    if (filenameQuery) {
-      try {
-        const card = await this.client.lookupByName(filenameQuery, "exact", requestOptions);
-        return { workingCard: result(workingCard, toIdentity(card, "filename", 0.99), "resolved", "filename", 0.99), printing: card };
-      } catch (error) {
-        if (!isNotFound(error)) throw error;
-      }
-    }
-
-    let ocrQuery: string | undefined;
-    if (options.imageBytes && options.recognizer) {
-      try {
-        ocrQuery = (await options.recognizer.recognizeName(options.imageBytes, { signal: options.signal }))?.trim() || undefined;
-      } catch (error) {
-        if (options.signal?.aborted) throw error;
-        ocrQuery = undefined;
-      }
-    }
-    const query = ocrQuery ?? filenameQuery ?? hints.name;
+    const query = hints.name;
     if (!query || query.length < IDENTITY_RESOLUTION_POLICY.minimumQueryLength) {
       return { workingCard: result(workingCard, null, workingCard.identityResolution.status === "custom" ? "custom" : "unresolved", undefined) };
     }
@@ -174,12 +161,11 @@ export class IdentityResolver {
     }
     const unique = [...new Map(cards.map((item) => [item.oracleId ?? item.id, item])).values()];
     const matching = fuzzyMatchName(query, unique, IDENTITY_RESOLUTION_POLICY);
-    const method: IdentityResolutionMethod = ocrQuery ? "ocr" : filenameQuery ? "fuzzy" : "fuzzy";
+    const method: IdentityResolutionMethod = "fuzzy";
     const resolutions = matching.candidates.map(({ candidate, score }) => candidateResolution(candidate, score, matching.reason));
     if (matching.status === "unresolved" || !matching.candidate) return { workingCard: result(workingCard, null, "unresolved", method) };
-    if (matching.status === "resolved" && !ocrQuery) {
-      const exactMethod: IdentityResolutionMethod = filenameQuery ? "filename" : "name";
-      return { workingCard: result(workingCard, toIdentity(matching.candidate, exactMethod, 1), "resolved", exactMethod, 1), printing: matching.candidate };
+    if (matching.status === "resolved") {
+      return { workingCard: result(workingCard, toIdentity(matching.candidate, "name", 1), "resolved", "name", 1), printing: matching.candidate };
     }
     return { workingCard: result(workingCard, null, matching.status === "ambiguous" ? "ambiguous" : "suggested", method, matching.score, resolutions) };
   }
