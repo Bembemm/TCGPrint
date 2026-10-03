@@ -964,7 +964,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
           refreshed.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate) && candidateMatchesFilters(candidate, filters)), identity, filters,
         ));
       }
-      staleSearch = cached?.value;
+      staleSearch = cached && cached.value.length > 0 ? cached.value : undefined;
       this.searchCacheMisses = increment(this.searchCacheMisses);
       const settings = {
         filterSettings: {

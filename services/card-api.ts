@@ -357,6 +357,11 @@ async function parseJsonRequest(request: Request, maximumBytes = 1_000_000): Pro
   return input;
 }
 
+function noStore(response: Response): Response {
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
 function respondError(error: unknown): Response {
   if (error instanceof ApiRequestError) return Response.json({ code: error.code, message: error.message }, { status: error.status });
   if (error instanceof MpcArtworkFilterValidationError) return Response.json({ code: "INVALID_MPC_FILTERS", message: error.message }, { status: 400 });
@@ -678,17 +683,17 @@ export async function handleArtworkList(request: Request, identityId: string, wo
 export async function handleMpcArtworkCatalogs(request: Request, workbench: CardWorkbench): Promise<Response> {
   try {
     const catalogs = await workbench.getMpcArtworkFilterCatalogs(request.signal);
-    return Response.json({ catalogs, diagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
-  } catch (error) { return respondError(error); }
+    return noStore(Response.json({ catalogs, diagnostic: workbench.getMpcArtworkProviderDiagnostic?.() }));
+  } catch (error) { return noStore(respondError(error)); }
 }
 
 export function handleMpcArtworkDiagnostics(workbench: CardWorkbench): Response {
   const diagnostic = workbench.getMpcArtworkProviderDiagnostic?.();
-  return Response.json({ diagnostic: diagnostic ?? { available: false, degraded: true, lastFailureType: "unavailable" } });
+  return noStore(Response.json({ diagnostic: diagnostic ?? { available: false, degraded: true, lastFailureType: "unavailable" } }));
 }
 
 export function handleMpcArtworkDiagnosticsReport(workbench: CardWorkbench): Response {
-  return Response.json(createMpcDiagnosticReport(workbench.getMpcArtworkProviderDiagnostic?.()));
+  return noStore(Response.json(createMpcDiagnosticReport(workbench.getMpcArtworkProviderDiagnostic?.())));
 }
 
 export async function handleMpcArtworkRefresh(request: Request, candidateId: string, workbench: CardWorkbench): Promise<Response> {

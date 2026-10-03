@@ -148,7 +148,7 @@ describe("advanced MPC artwork provider", () => {
     await database.close();
   });
 
-  it("ranks expired cached search results consistently while MPC is offline", async () => {
+  it("serves positive expired search results as stale while MPC is offline", async () => {
     vi.useFakeTimers();
     const baseTime = Date.now();
     vi.setSystemTime(baseTime);
@@ -172,6 +172,7 @@ describe("advanced MPC artwork provider", () => {
       const offlineCandidates = await provider.searchArtworkAdvanced(identity, { filters });
 
       expect(offlineCandidates.map(({ providerAssetId }) => providerAssetId)).toEqual(["source-b-id-123456", "source-a-id-123456"]);
+      expect(offlineCandidates.every(({ metadata }) => metadata?.metadataFreshness === "stale")).toBe(true);
     } finally {
       vi.useRealTimers();
       await database.close();
@@ -658,9 +659,9 @@ describe("advanced MPC artwork provider", () => {
     let searchCalls = 0;
     const fetcher: typeof fetch = async (input, init = {}) => {
       const path = new URL(String(input)).pathname;
-      if (!online && path === "/3/editorSearch/") throw new Error("offline");
       if (path === "/3/editorSearch/") {
         searchCalls += 1;
+        if (!online) throw new Error("offline");
         if (empty) {
           const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
           return json({ results: { [Object.keys(body.queries)[0]!]: [] } });
@@ -671,15 +672,21 @@ describe("advanced MPC artwork provider", () => {
     const { database, provider } = await setup(fetcher);
     try {
       await expect(provider.searchArtworkAdvanced(identity)).resolves.toEqual([]);
+      vi.setSystemTime(startedAt + 29_999);
       await expect(provider.searchArtworkAdvanced(identity)).resolves.toEqual([]);
       expect(searchCalls).toBe(1);
       vi.setSystemTime(startedAt + 31_000);
       online = false;
-      await expect(provider.searchArtworkAdvanced(identity)).resolves.toEqual([]);
+      await expect(provider.searchArtworkAdvanced(identity)).rejects.toMatchObject({ kind: "network" });
+      expect(searchCalls).toBe(4);
+      expect(provider.getDiagnostic().metrics.negativeSearchCacheWrites).toBe(1);
+      expect(provider.getHealth()).toMatchObject({ degraded: true });
+
       online = true;
       empty = false;
       await expect(provider.searchArtworkAdvanced(identity)).resolves.toHaveLength(1);
-      expect(searchCalls).toBe(2);
+      expect(searchCalls).toBe(5);
+      expect(provider.getDiagnostic().metrics.negativeSearchCacheWrites).toBe(1);
     } finally {
       vi.useRealTimers();
       await database.close();

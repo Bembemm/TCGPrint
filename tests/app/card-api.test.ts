@@ -8,6 +8,8 @@ import {
   handleArtworkPreview,
   handleArtworkPrepare,
   handleMpcArtworkBatchRevalidation,
+  handleMpcArtworkCatalogs,
+  handleMpcArtworkDiagnostics,
   handleMpcArtworkDiagnosticsReport,
   handleMpcArtworkRefresh,
   handleAutocomplete,
@@ -661,9 +663,23 @@ describe("card APIs", () => {
     expect(await mapped.json()).toMatchObject({ code: "MPC_RATE_LIMITED", message: "MPC artwork service is rate limited. Try again shortly." });
     const report = await handleMpcArtworkDiagnosticsReport(workbench);
     const body = await report.json();
+    expect(report.headers.get("cache-control")).toBe("no-store");
     expect(body).toMatchObject({ schemaVersion: 1, provider: "mpc", health: { degraded: true } });
     expect(JSON.stringify(body)).not.toContain("private.example");
     expect(JSON.stringify(body)).not.toContain("secret");
+  });
+
+  it("disables intermediary caching for dynamic MPC diagnostics and catalog responses", async () => {
+    const workbench = testWorkbench({
+      getMpcArtworkProviderDiagnostic: () => undefined,
+      getMpcArtworkFilterCatalogs: vi.fn(async () => ({ sources: [], languages: [], tags: [] })),
+    });
+
+    const diagnostic = handleMpcArtworkDiagnostics(workbench);
+    const catalogs = await handleMpcArtworkCatalogs(new Request("http://localhost/api/cards/artworks/mpc-catalogs"), workbench);
+
+    expect(diagnostic.headers.get("cache-control")).toBe("no-store");
+    expect(catalogs.headers.get("cache-control")).toBe("no-store");
   });
 
   it("includes MPC source-face back references in a simple card's physical-back catalog", async () => {

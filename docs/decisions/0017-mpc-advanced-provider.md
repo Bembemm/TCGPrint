@@ -116,6 +116,11 @@ stale, or revalidated. Search results are marked stale when served from expired
 search cache after a remote failure. Stale metadata never removes a local
 content-addressed original.
 
+Stale-while-offline applies only to expired positive search results. An expired
+negative entry (a valid empty result) is not returned as stale: after its
+30-second TTL the provider must try MPC again, and a transient or protocol
+failure remains a failure/degraded state rather than appearing as no results.
+
 Only a successful, valid empty search is negative-cached, for 30 seconds. A
 positive search cache entry lasts 24 hours. MPC does not expose a distinct,
 verified per-asset not-found route: an omitted `/2/cards/` result is treated as
