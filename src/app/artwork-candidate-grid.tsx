@@ -46,6 +46,7 @@ export interface ArtworkCandidateGridProps {
   readonly candidates: readonly ArtworkCandidateView[];
   readonly windowLimit: number;
   readonly catalogTotal: number;
+  readonly catalogTotalComplete?: boolean;
   readonly filterTotal: number;
   readonly catalogLabel: string;
   readonly cardName: string;
@@ -61,6 +62,7 @@ export function ArtworkCandidateGrid({
   candidates,
   windowLimit,
   catalogTotal,
+  catalogTotalComplete = true,
   filterTotal,
   catalogLabel,
   cardName,
@@ -76,8 +78,8 @@ export function ArtworkCandidateGrid({
 
   return <>
     <p className="artwork-catalog-count" aria-live="polite">
-      {catalogLabel} · {catalogTotal} artworks
-      <span> · {visibleCandidates.length} de {catalogTotal} exibidas · {filterTotal} de {catalogTotal} correspondem ao filtro</span>
+      {catalogLabel} · {catalogTotal} artworks{catalogTotalComplete ? "" : " conhecidas · catálogo parcial"}
+      <span> · {visibleCandidates.length} de {catalogTotal} exibidas · {filterTotal} de {catalogTotal}{catalogTotalComplete ? "" : " conhecidas"} correspondem ao filtro</span>
     </p>
     <div className="artwork-grid">
       {visibleCandidates.map((candidate) => {

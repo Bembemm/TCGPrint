@@ -204,6 +204,90 @@ describe("MPC artwork provider", () => {
     database.close();
   }, 30_000);
 
+  it("reports the complete CARDBACK catalog total while applying filters and preserving CARDBACK validation", async () => {
+    const ids = Array.from({ length: 75 }, (_, index) => `back_asset_${String(index).padStart(3, "0")}`);
+    const matchingIds = ids.slice(0, 15);
+    let cardHydrationBatches = 0;
+    let originalOrPreviewRequests = 0;
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/2/sources/") return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.pathname === "/2/cardbacks/") {
+        const body = JSON.parse(String(init.body)) as { searchSettings: { filterSettings: { minimumDPI: number } } };
+        return jsonResponse({ cardbacks: body.searchSettings.filterSettings.minimumDPI >= 500 ? matchingIds : ids });
+      }
+      if (url.pathname === "/2/cards/") {
+        cardHydrationBatches += 1;
+        const body = JSON.parse(String(init.body)) as { cardIdentifiers: string[] };
+        return jsonResponse({ results: Object.fromEntries(body.cardIdentifiers.map((identifier) => [identifier, {
+          identifier,
+          cardType: "CARDBACK",
+          name: identifier,
+          sourceId: 41,
+          sourceType: "Google Drive",
+          extension: "png",
+          size: 8000,
+          dpi: matchingIds.includes(identifier) ? 800 : 300,
+        }])) });
+      }
+      originalOrPreviewRequests += 1;
+      throw new Error(`Unexpected MPC original/preview request: ${url.pathname}`);
+    };
+    const { database, provider } = await setup(fetchImpl, { timeoutMs: 30_000 });
+
+    const result = await provider.searchCardbacksWithTotal({ filters: { minimumDpi: 500 } });
+
+    expect(result.catalogTotal).toBe(75);
+    expect(result.candidates).toHaveLength(15);
+    expect(result.candidates.every(({ metadata }) => metadata?.cardType === "CARDBACK")).toBe(true);
+    expect(cardHydrationBatches).toBe(5);
+    expect(originalOrPreviewRequests).toBe(0);
+    await database.close();
+  }, 30_000);
+
+  it("aggregates logical provider totals for source=all", async () => {
+    const mpc = {
+      ...staticProvider("upload", "unused-mpc-source"),
+      source: "mpc" as const,
+      searchArtworkAdvanced: vi.fn(async () => []),
+      searchArtworkAdvancedWithTotal: vi.fn(async () => ({
+        candidates: [{ id: "mpc:match", source: "mpc" as const, identityId: identity.id, faceId: "front" as const, originalAvailable: true }],
+        catalogTotal: 1200,
+      })),
+      getFilterCatalogs: async () => ({ sources: [], languages: [], tags: [] }),
+      getDiagnostic: () => ({}),
+      refreshCandidate: async () => undefined,
+    } as unknown as ArtworkProvider;
+    const catalog = new ArtworkCatalog([staticProvider("scryfall", "scryfall:one"), staticProvider("upload", "upload:one"), mpc]);
+
+    const result = await catalog.searchWithTotal(identity, { source: "all", faceId: "front" });
+
+    expect(result.catalogTotal).toBe(1202);
+    expect(result.candidates.map(({ source }) => source).sort()).toEqual(["mpc", "scryfall", "upload"]);
+  });
+
+  it("marks source=all totals partial when one provider cannot supply a catalog", async () => {
+    const mpc = {
+      ...staticProvider("upload", "unused-mpc-source"),
+      source: "mpc" as const,
+      searchArtworkAdvanced: vi.fn(async () => []),
+      searchArtworkAdvancedWithTotal: vi.fn(async () => ({ candidates: [], catalogTotal: 1200 })),
+      getFilterCatalogs: async () => ({ sources: [], languages: [], tags: [] }),
+      getDiagnostic: () => ({}),
+      refreshCandidate: async () => undefined,
+    } as unknown as ArtworkProvider;
+    const unavailableScryfall = {
+      ...staticProvider("scryfall", "scryfall:unavailable"),
+      searchArtwork: async () => { throw new Error("provider offline"); },
+    } as ArtworkProvider;
+    const catalog = new ArtworkCatalog([unavailableScryfall, staticProvider("upload", "upload:one"), mpc]);
+
+    const result = await catalog.searchWithTotal(identity, { source: "all", faceId: "front" });
+
+    expect(result.catalogTotal).toBe(1201);
+    expect(result.catalogTotalComplete).toBe(false);
+  });
+
   it("sends selected filters to the cardback endpoint and retains only matching hydrated results", async () => {
     const requests: Array<{ path: string; body?: unknown }> = [];
     const ids = ["eligible-cardback-123", "low-dpi-cardback-123", "wrong-tag-cardback-123"];

@@ -696,13 +696,21 @@ export async function handleArtworkList(request: Request, identityId: string, wo
     }) : [];
     if (body.physicalBackArtwork === true) {
       if (sourceValue !== "all" && sourceValue !== "mpc") throw new ApiRequestError(400, "INVALID_PHYSICAL_BACK_SOURCE", "Generic physical backs are available only from verified MPC cardbacks.");
-      const candidates = await workbench.listMpcCardbackCandidates({ ...(mpcFilters ? { mpcFilters } : {}), ...(body.forceMpcRefresh === true ? { forceMpcRefresh: true } : {}), signal: request.signal });
+      const catalogOptions = { ...(mpcFilters ? { mpcFilters } : {}), ...(body.forceMpcRefresh === true ? { forceMpcRefresh: true } : {}), signal: request.signal };
+      const catalog = workbench.listMpcCardbackCatalog
+        ? await workbench.listMpcCardbackCatalog(catalogOptions)
+        : await workbench.listMpcCardbackCandidates(catalogOptions).then((candidates) => ({ candidates, catalogTotal: candidates.length, catalogTotalComplete: true }));
+      const candidates = catalog.candidates;
       const verified = candidates.filter((candidate) => candidate.source === "mpc" && candidate.faceId === "back" && candidate.metadata?.cardType === "CARDBACK");
-      return Response.json({ candidates: verified.map(candidateDto), providerHealth: safeProviderHealth(workbench.getProviderHealth()), mpcDiagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
+      return Response.json({ candidates: verified.map(candidateDto), catalogTotal: catalog.catalogTotal, catalogTotalComplete: catalog.catalogTotalComplete !== false, providerHealth: safeProviderHealth(workbench.getProviderHealth()), mpcDiagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
     }
-    const candidates = await workbench.listArtworkCandidates(identityId, faceId, sourceValue as ArtworkCatalogSource, { mpcReferences: references, ...(mpcFilters ? { mpcFilters } : {}), ...(body.forceMpcRefresh === true ? { forceMpcRefresh: true } : {}), signal: request.signal });
+    const catalogOptions = { mpcReferences: references, ...(mpcFilters ? { mpcFilters } : {}), ...(body.forceMpcRefresh === true ? { forceMpcRefresh: true } : {}), signal: request.signal };
+    const catalog = workbench.listArtworkCatalog
+      ? await workbench.listArtworkCatalog(identityId, faceId, sourceValue as ArtworkCatalogSource, catalogOptions)
+      : await workbench.listArtworkCandidates(identityId, faceId, sourceValue as ArtworkCatalogSource, catalogOptions).then((candidates) => ({ candidates, catalogTotal: candidates.length, catalogTotalComplete: true }));
+    const candidates = catalog.candidates;
     const uniqueCandidates = [...new Map(candidates.map((candidate) => [candidate.id, candidate])).values()];
-    return Response.json({ candidates: uniqueCandidates.map(candidateDto), providerHealth: safeProviderHealth(workbench.getProviderHealth()), mpcDiagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
+    return Response.json({ candidates: uniqueCandidates.map(candidateDto), catalogTotal: catalog.catalogTotal, catalogTotalComplete: catalog.catalogTotalComplete !== false, providerHealth: safeProviderHealth(workbench.getProviderHealth()), mpcDiagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
   } catch (error) { return respondError(error); }
 }
 

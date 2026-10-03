@@ -61,7 +61,7 @@ import { createBackValidationSummary, exportModeRequiresFrontArtwork } from "./b
 import { applyTemplateLayoutDefaults } from "./template-layout-defaults";
 import { createProjectRestoreLookupGate, runProjectRestoreProviderLookup } from "./project-restore-provider-gate";
 import { ARTWORK_WINDOW_SIZE, artworkWindowLimitForRequest, ArtworkCandidateGrid, sliceArtworkWindow, type ArtworkCandidateView } from "./artwork-candidate-grid";
-import { ArtworkQualityHydrator } from "./artwork-quality-hydration";
+import { artworkCatalogForRequest, ArtworkQualityHydrator, updateArtworkCatalogCandidate, type KeyedArtworkCatalogResult } from "./artwork-quality-hydration";
 import type { ResolveWorkingCardsResult, SafeImportReport, WorkingSetImportResult } from "../../services/card-workbench";
 
 type ArtworkFilter = "all" | "scryfall" | "mpc" | "upload";
@@ -76,7 +76,7 @@ interface Props {
 interface ApiErrorBody { readonly code?: string; readonly message?: string; }
 interface IdentityDetails extends CardIdentity { readonly layout?: string; readonly relatedCards: readonly { readonly id: string; readonly component: string; readonly name: string; readonly typeLine?: string }[]; }
 type ProviderHealth = Record<string, { available: boolean; degraded: boolean; message?: string }>;
-interface ArtworkCatalogResult { readonly candidates: CandidateDto[]; readonly providerHealth: ProviderHealth; readonly mpcDiagnostic?: MpcArtworkProviderDiagnostic; }
+interface ArtworkCatalogResponse { readonly candidates: CandidateDto[]; readonly catalogTotal: number; readonly catalogTotalComplete?: boolean; readonly providerHealth: ProviderHealth; readonly mpcDiagnostic?: MpcArtworkProviderDiagnostic; }
 interface MpcFilterCatalogResult { readonly catalogs: MpcFilterCatalogs; readonly diagnostic?: MpcArtworkProviderDiagnostic; }
 
 async function jsonResponse<T>(response: Response): Promise<T> {
@@ -538,7 +538,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const workingCards = editorState.cards;
   const selectedCardId = editorState.selectedCardId;
   const face = editorState.face;
-  const [artworkCandidates, setArtworkCandidates] = useState<CandidateDto[]>([]);
+  const [artworkCatalogState, setArtworkCatalogState] = useState<KeyedArtworkCatalogResult<CandidateDto> | null>(null);
   const [artworkWindow, setArtworkWindow] = useState<{ requestKey: string; limit: number }>({ requestKey: "", limit: ARTWORK_WINDOW_SIZE });
   const [qualityChecking, setQualityChecking] = useState<{ requestKey: string; candidateIds: ReadonlySet<string> }>({ requestKey: "", candidateIds: new Set() });
   const [artworkCatalogRevision, setArtworkCatalogRevision] = useState(0);
@@ -599,7 +599,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [artworkProblem, setArtworkProblem] = useState<{ message: string; cardId: string; requestKey: string } | null>(null);
   const [providerHealth, setProviderHealth] = useState<ProviderHealth>({});
   const [identityDetails, setIdentityDetails] = useState<IdentityDetails | null>(null);
-  const artworkCatalogRequests = useRef(createRequestCache<ArtworkCatalogResult>());
+  const artworkCatalogRequests = useRef(createRequestCache<ArtworkCatalogResponse>());
   const artworkRequestKeyRef = useRef("");
   const artworkCatalogKeyRef = useRef("");
   const qualityHydratorRef = useRef<ArtworkQualityHydrator<CandidateDto> | null>(null);
@@ -615,7 +615,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           ...cached,
           candidates: cached.candidates.map((item) => item.id === candidate.id ? candidate : item),
         }));
-        setArtworkCandidates((current) => current.map((item) => item.id === candidate.id ? candidate : item));
+        setArtworkCatalogState((current) => updateArtworkCatalogCandidate(current, requestKey, candidate));
       },
       (requestKey, candidateIds) => setQualityChecking({ requestKey, candidateIds }),
       3,
@@ -704,9 +704,6 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const physicalCardCount = useMemo(() => workingCards.reduce((sum, card) => sum + card.quantity, 0), [workingCards]);
   const backValidation = useMemo(() => createBackValidationSummary(workingCards, projectDefaultBack, missingBackPolicy), [workingCards, projectDefaultBack, missingBackPolicy]);
   const manualPhysicalBackPicker = Boolean(activeCard && manualPhysicalBackPickerCardId === activeCard.id && !isDoubleFacedIdentity(activeCard.identity));
-  const filterCards = useMemo(() => manualPhysicalBackPicker && activeCard
-    ? artworkCandidates.filter((candidate) => isEligibleGenericPhysicalBack(activeCard, candidate))
-    : artworkCandidates.filter((candidate) => artworkFilter === "all" || candidate.source === artworkFilter), [activeCard, artworkCandidates, artworkFilter, manualPhysicalBackPicker]);
   const artworkFace = manualPhysicalBackPicker ? "front" : face;
   const activeFaceExists = Boolean(manualPhysicalBackPicker || activeCard?.faces.some((item) => item.side === face));
   const activeIdentityId = activeCard?.identity?.id ?? null;
@@ -723,6 +720,12 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     : null;
   const currentArtworkCatalogKey = artworkRequest?.cacheKey ?? "";
   const currentArtworkRequestKey = artworkRequest ? JSON.stringify([activeCard?.id, artworkRequest.cacheKey]) : "";
+  const currentArtworkCatalog = artworkCatalogForRequest(artworkCatalogState, currentArtworkRequestKey);
+  const artworkCandidates = currentArtworkCatalog.candidates;
+  const artworkCatalogTotal = currentArtworkCatalog.catalogTotal;
+  const filterCards = useMemo(() => manualPhysicalBackPicker && activeCard
+    ? artworkCandidates.filter((candidate) => isEligibleGenericPhysicalBack(activeCard, candidate))
+    : artworkCandidates.filter((candidate) => artworkFilter === "all" || candidate.source === artworkFilter), [activeCard, artworkCandidates, artworkFilter, manualPhysicalBackPicker]);
   const artworkWindowLimit = artworkWindowLimitForRequest(artworkWindow, currentArtworkRequestKey);
   const windowedArtworkCandidates = sliceArtworkWindow(filterCards, artworkWindowLimit);
   const windowedCandidateKey = windowedArtworkCandidates.map(({ id }) => id).join("\n");
@@ -798,6 +801,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
   useEffect(() => {
     let current = true;
+    const requestKey = currentArtworkRequestKey;
     const request = runProjectRestoreProviderLookup(
       projectRestoreLookupGate.current,
       projectRestoreVersion,
@@ -812,26 +816,26 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ faceId: artworkRequest.faceId, source: artworkRequest.source, physicalBackArtwork: manualPhysicalBackPicker, mpcReferences: artworkRequest.mpcReferences, ...(artworkRequest.mpcFilters ? { mpcFilters: artworkRequest.mpcFilters } : {}), ...(forceMpcRefresh ? { forceMpcRefresh: true } : {}) }),
           });
-          return jsonResponse<ArtworkCatalogResult>(response);
+          return jsonResponse<ArtworkCatalogResponse>(response);
         });
       });
     void request
       .then((outcome) => {
-        if (!current) return;
+        if (!current || artworkRequestKeyRef.current !== requestKey) return;
         if (outcome.skipped || outcome.value === null) {
-          setArtworkCandidates([]);
+          setArtworkCatalogState({ requestKey, candidates: [], catalogTotal: 0, catalogTotalComplete: false });
           setArtworkProblem(null);
           return;
         }
         const result = outcome.value;
         setArtworkProblem(null);
-        setArtworkCandidates(result.candidates);
+        setArtworkCatalogState({ requestKey, candidates: result.candidates, catalogTotal: result.catalogTotal, catalogTotalComplete: result.catalogTotalComplete });
         setProviderHealth((current) => ({ ...current, ...result.providerHealth }));
         setMpcDiagnostic(result.mpcDiagnostic ?? null);
       })
       .catch((error: unknown) => {
-        if (current && activeCard && artworkRequest) {
-          setArtworkCandidates([]);
+        if (current && artworkRequestKeyRef.current === requestKey && activeCard && artworkRequest) {
+          setArtworkCatalogState({ requestKey, candidates: [], catalogTotal: 0, catalogTotalComplete: false });
           setArtworkProblem({
             message: error instanceof Error ? error.message : "Não foi possível abrir o catálogo de artes.",
             cardId: activeCard.id,
@@ -894,7 +898,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       if (projectOpenPendingRef.current) throw new Error("O Project está sendo aberto. Tente adicionar as cartas novamente.");
       clearRequestCache(artworkCatalogRequests.current);
       setArtworkCatalogRevision((revision) => revision + 1);
-      setArtworkCandidates([]);
+      setArtworkCatalogState(null);
       setArtworkProblem(null);
       dispatchEditor({ type: "load-cards", cards: result.workingCards });
       setArtworkFilter("all"); setManualIdentities([]);
@@ -981,7 +985,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           ...cached,
           candidates: cached.candidates.map((item) => item.id === prepared.candidate.id ? prepared.candidate : item),
         }));
-        setArtworkCandidates((current) => current.map((item) => item.id === candidate.id ? prepared.candidate : item));
+        setArtworkCatalogState((current) => updateArtworkCatalogCandidate(current, currentArtworkRequestKey, prepared.candidate));
       }
       const response = manualPhysicalBackPicker
         ? await postManualBackArtworkSelection(activeCard, candidate.id, fetch, controller.signal)
@@ -1013,7 +1017,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     try {
       const response = await fetch(`/api/cards/artworks/${encodeURIComponent(candidate.id)}/refresh`, { method: "POST" });
       const result = await jsonResponse<{ candidate: CandidateDto }>(response);
-      setArtworkCandidates((current) => current.map((item) => item.id === candidate.id ? result.candidate : item));
+      setArtworkCatalogState((current) => updateArtworkCatalogCandidate(current, currentArtworkRequestKey, result.candidate));
       updateResolvedRequestCache(artworkCatalogRequests.current, requestKey, (cached) => ({
         ...cached,
         candidates: cached.candidates.map((item) => item.id === candidate.id ? result.candidate : item),
@@ -1165,7 +1169,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     setTemplateGeometry(settings.layout.templateGeometry);
     setCutSourceSelection(settings.cutSourceSelection);
 
-    setArtworkCandidates([]);
+    setArtworkCatalogState(null);
     setManualPhysicalBackPickerCardId(null);
     setArtworkProblem(null);
     setArtworkFilter("all");
@@ -1438,7 +1442,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
             <ArtworkCandidateGrid
               candidates={filterCards}
               windowLimit={artworkWindowLimit}
-              catalogTotal={artworkCandidates.length}
+              catalogTotal={artworkCatalogTotal}
+              catalogTotalComplete={currentArtworkCatalog.catalogTotalComplete}
               filterTotal={filterCards.length}
               catalogLabel={artworkRequest?.source && artworkRequest.source !== "all" ? labelSource(artworkRequest.source) : "Catálogo de arte"}
               cardName={displayCard(activeCard)}

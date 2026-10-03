@@ -9,11 +9,12 @@ import { ArtworkStorageError, type ArtworkOriginal } from "./storage/types";
 import { validateImageBytes } from "./storage/image-validation";
 import type { ArtworkPreview, ArtworkProvider, ArtworkSearchOptions, ProviderHealth } from "./types";
 import { validateSvgForPdfExport } from "../pdf-engine/document";
-import { MpcArtworkFilterValidationError, normalizeMpcArtworkFilters, validateMpcArtworkFiltersAgainstCatalogs } from "./mpc-contract";
+import { MPC_FILTER_LIMITS, MpcArtworkFilterValidationError, normalizeMpcArtworkFilters, validateMpcArtworkFiltersAgainstCatalogs } from "./mpc-contract";
 import type { MpcArtworkFilterInput, MpcArtworkFilters, MpcFilterCatalogs, MpcLanguageOption, MpcSourceOption, MpcTagOption } from "./mpc-contract";
-import { buildMpcSearchCacheKey } from "./mpc-cache-key";
+import { buildMpcSearchCacheKey, MPC_SEARCH_MAXIMUM_SIZE_MB } from "./mpc-cache-key";
 import { rankMpcCandidates } from "./mpc-ranking";
 import { createBoundedSemaphore, createCoalescedRequestRegistry, mapConcurrent } from "./mpc-request-coalescer";
+import type { ArtworkCatalogSearchResult } from "./types";
 
 const API_BASE_URL = "https://mpcfill.com";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -276,6 +277,15 @@ function candidateMatchesFilters(candidate: ArtworkCandidate, filters: MpcArtwor
     if (filters.excludeTags.some((tag) => tags.has(tag.toLocaleLowerCase("en-US")))) return false;
   }
   return true;
+}
+
+function hasCatalogNarrowingFilters(filters: MpcArtworkFilters): boolean {
+  return filters.minimumDpi > 0
+    || filters.maximumDpi < MPC_FILTER_LIMITS.maximumDpi
+    || filters.sources.length > 0
+    || filters.includeTags.length > 0
+    || filters.excludeTags.length > 0
+    || filters.languages.length > 0;
 }
 
 function safeCanonicalCard(value: unknown): Readonly<Record<string, unknown>> | undefined {
@@ -694,6 +704,75 @@ export class MpcArtworkProvider implements ArtworkProvider {
     return this.searchArtworkAdvanced(identity, { ...options, filters: {} });
   }
 
+  async searchArtworkAdvancedWithTotal(identity: CardIdentity, options: MpcAdvancedArtworkSearchOptions = {}): Promise<ArtworkCatalogSearchResult> {
+    const candidates = await this.searchArtworkAdvanced(identity, options);
+    const filters = normalizeMpcArtworkFilters(options.filters ?? {});
+    const query = identity.id === "custom:artwork-picker" || identity.provider === "local" ? "" : faceQuery(identity, options.faceId);
+    if (!query || !hasCatalogNarrowingFilters(filters)) return { candidates, catalogTotal: candidates.length };
+
+    try {
+      const sources = await this.sources(options.signal);
+      const verifiedSourceIds = sources.map(({ pk }) => pk);
+      const allCatalogFilters = normalizeMpcArtworkFilters({ maximumDpi: MPC_FILTER_LIMITS.maximumDpi });
+      const totalCacheKey = `${buildMpcSearchCacheKey(query, options.faceId ?? "any", allCatalogFilters, verifiedSourceIds)}:logical-total-v1`;
+      const cached = this.metadata.getMetadataSnapshot<readonly string[]>(totalCacheKey);
+      if (cached && cached.expiresAt > Date.now() && !options.forceRefresh && Array.isArray(cached.value) && cached.value.every(validAssetId)) {
+        const catalogIds = new Set(cached.value);
+        for (const reference of options.mpcReferences ?? []) {
+          if ((reference.faceId === "front" || reference.faceId === "back") && (!options.faceId || reference.faceId === options.faceId)) {
+            catalogIds.add(reference.providerAssetId ?? reference.importedAssetId);
+          }
+        }
+        return { candidates, catalogTotal: Math.max(catalogIds.size, candidates.length) };
+      }
+
+      const settings = {
+        filterSettings: {
+          minimumDPI: 0,
+          maximumDPI: MPC_FILTER_LIMITS.maximumDpi,
+          maximumSize: MPC_SEARCH_MAXIMUM_SIZE_MB,
+          includesTags: [],
+          excludesTags: [],
+          languages: [],
+        },
+        searchTypeSettings: { fuzzySearch: false, filterCardbacks: false },
+        sourceSettings: { sources: sources.map(({ pk }) => [pk, true]) },
+      };
+      const ids = await this.searchAssetIds(query, settings, options.signal);
+      this.metadata.putMetadata(totalCacheKey, ids, Date.now() + CACHE_TTL_MS);
+      const catalogIds = new Set(ids);
+      for (const reference of options.mpcReferences ?? []) {
+        if ((reference.faceId === "front" || reference.faceId === "back") && (!options.faceId || reference.faceId === options.faceId)) {
+          catalogIds.add(reference.providerAssetId ?? reference.importedAssetId);
+        }
+      }
+      return { candidates, catalogTotal: Math.max(catalogIds.size, candidates.length) };
+    } catch (error) {
+      if (isCancellation(error, options.signal)) throw error;
+      this.degrade(error);
+      return { candidates, catalogTotal: candidates.length, catalogTotalComplete: false };
+    }
+  }
+
+  async searchCardbacksWithTotal(options: { readonly filters?: MpcArtworkFilterInput; readonly forceRefresh?: boolean; readonly signal?: AbortSignal } = {}): Promise<ArtworkCatalogSearchResult> {
+    const candidates = await this.searchCardbacks(options);
+    const filters = normalizeMpcArtworkFilters(options.filters ?? {});
+    if (!hasCatalogNarrowingFilters(filters)) return { candidates, catalogTotal: candidates.length };
+    try {
+      const allCatalogFilters = normalizeMpcArtworkFilters({ maximumDpi: MPC_FILTER_LIMITS.maximumDpi });
+      const allCandidates = await this.searchCardbacks({
+        filters: allCatalogFilters,
+        ...(options.forceRefresh ? { forceRefresh: true } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+      return { candidates, catalogTotal: Math.max(allCandidates.length, candidates.length) };
+    } catch (error) {
+      if (isCancellation(error, options.signal)) throw error;
+      this.degrade(error);
+      return { candidates, catalogTotal: candidates.length, catalogTotalComplete: false };
+    }
+  }
+
   /** Lists cardbacks from MPC's dedicated endpoint and verifies each hydrated document as CARDBACK. */
   async searchCardbacks(options: { readonly filters?: MpcArtworkFilterInput; readonly forceRefresh?: boolean; readonly signal?: AbortSignal } = {}): Promise<readonly ArtworkCandidate[]> {
     const inputFilters = normalizeMpcArtworkFilters(options.filters ?? {});
@@ -728,7 +807,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         filterSettings: {
           minimumDPI: filters.minimumDpi,
           maximumDPI: filters.maximumDpi,
-          maximumSize: 30,
+          maximumSize: MPC_SEARCH_MAXIMUM_SIZE_MB,
           includesTags: [...filters.includeTags],
           excludesTags: [...filters.excludeTags],
           languages: [...filters.languages],
@@ -1014,6 +1093,35 @@ export class MpcArtworkProvider implements ArtworkProvider {
     return { byId, omittedIds, failedAssets, failedErrors };
   }
 
+  private async searchAssetIds(query: string, searchSettings: Readonly<Record<string, unknown>>, signal?: AbortSignal): Promise<string[]> {
+    const searchQuery = { query, cardType: "CARD" };
+    const hash = requestHash(searchQuery);
+    this.fallbackV2Used = false;
+    const v3 = await this.apiJson("/3/editorSearch/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ searchSettings, queries: { [hash]: searchQuery } }),
+    }, signal, true);
+    let version: "v3" | "v2" = "v3";
+    let payload: unknown = v3.payload;
+    if (v3.status === 404) {
+      this.v3Available = false;
+      version = "v2";
+      const v2 = await this.apiJson("/2/editorSearch/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ searchSettings, queries: [{ query, cardType: "CARD" }] }),
+      }, signal);
+      payload = v2.payload;
+    }
+    const ids = resultIds(payload, query, hash, version);
+    this.hasConfirmedSearch = true;
+    this.lastProtocolConfirmed = version;
+    this.fallbackV2Used = version === "v2";
+    if (version === "v3") this.v3Available = true;
+    return ids;
+  }
+
   async searchArtworkAdvanced(identity: CardIdentity, options: MpcAdvancedArtworkSearchOptions = {}): Promise<readonly ArtworkCandidate[]> {
     const inputFilters = normalizeMpcArtworkFilters(options.filters ?? {});
     const references = (options.mpcReferences ?? []).filter((reference) =>
@@ -1081,7 +1189,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         filterSettings: {
           minimumDPI: filters.minimumDpi,
           maximumDPI: filters.maximumDpi,
-          maximumSize: 30,
+          maximumSize: MPC_SEARCH_MAXIMUM_SIZE_MB,
           includesTags: [...filters.includeTags],
           excludesTags: [...filters.excludeTags],
           languages: [...filters.languages],
@@ -1089,31 +1197,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         searchTypeSettings: { fuzzySearch: false, filterCardbacks: false },
         sourceSettings: { sources: sources.map(({ pk }) => [pk, filters.sources.length === 0 || filters.sources.includes(pk)]) },
       };
-      const searchQuery = { query, cardType: "CARD" };
-      const hash = requestHash(searchQuery);
-      this.fallbackV2Used = false;
-      const v3 = await this.apiJson("/3/editorSearch/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ searchSettings: settings, queries: { [hash]: searchQuery } }),
-      }, options.signal, true);
-      let version: "v3" | "v2" = "v3";
-      let payload: unknown = v3.payload;
-      if (v3.status === 404) {
-        this.v3Available = false;
-        version = "v2";
-        const v2 = await this.apiJson("/2/editorSearch/", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ searchSettings: settings, queries: [{ query, cardType: "CARD" }] }),
-        }, options.signal);
-        payload = v2.payload;
-      }
-      const ids = resultIds(payload, query, hash, version);
-      this.hasConfirmedSearch = true;
-      this.lastProtocolConfirmed = version;
-      this.fallbackV2Used = version === "v2";
-      if (version === "v3") this.v3Available = true;
+      const ids = await this.searchAssetIds(query, settings, options.signal);
       const side = options.faceId ?? "front";
       const hydration = ids.length ? await this.hydrateCards(ids, options.signal) : { byId: new Map<string, Record<string, unknown>>(), omittedIds: [] as string[], failedAssets: new Map<string, string>(), failedErrors: new Map<string, unknown>() };
       let rejectedCandidate = hydration.omittedIds.length > 0 || hydration.failedAssets.size > 0;

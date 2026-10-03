@@ -36,3 +36,11 @@ export interface ArtworkProvider {
 export interface ArtworkCatalogSearchOptions extends ArtworkSearchOptions {
   readonly source: ArtworkCatalogSource;
 }
+
+export interface ArtworkCatalogSearchResult {
+  readonly candidates: readonly ArtworkCandidate[];
+  /** Logical provider result count before MPC artwork filters are applied. */
+  readonly catalogTotal: number;
+  /** False when a provider could not establish its full logical catalog size. */
+  readonly catalogTotalComplete?: boolean;
+}

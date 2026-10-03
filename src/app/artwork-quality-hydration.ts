@@ -2,6 +2,36 @@ import type { ArtworkCandidate } from "../../core/cards/types";
 
 export type PreparedArtworkCandidate<T extends ArtworkCandidate> = T;
 
+export interface KeyedArtworkCatalogResult<T> {
+  readonly requestKey: string;
+  readonly candidates: readonly T[];
+  readonly catalogTotal: number;
+  readonly catalogTotalComplete?: boolean;
+}
+
+/** Returns no candidates while UI state still belongs to a previous request. */
+export function artworkCatalogForRequest<T>(
+  result: KeyedArtworkCatalogResult<T> | null,
+  requestKey: string,
+): KeyedArtworkCatalogResult<T> {
+  return result?.requestKey === requestKey
+    ? result
+    : { requestKey, candidates: [], catalogTotal: 0, catalogTotalComplete: false };
+}
+
+/** A late quality callback cannot modify a different request's catalog. */
+export function updateArtworkCatalogCandidate<T extends { readonly id: string }>(
+  result: KeyedArtworkCatalogResult<T> | null,
+  requestKey: string,
+  candidate: T,
+): KeyedArtworkCatalogResult<T> | null {
+  if (!result || result.requestKey !== requestKey || !result.candidates.some((item) => item.id === candidate.id)) return result;
+  return {
+    ...result,
+    candidates: result.candidates.map((item) => item.id === candidate.id ? candidate : item),
+  };
+}
+
 interface HydrationGeneration<T extends ArtworkCandidate> {
   readonly requestKey: string;
   readonly controller: AbortController;

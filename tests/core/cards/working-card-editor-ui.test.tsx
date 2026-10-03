@@ -63,6 +63,16 @@ describe("working card editor list UI", () => {
     expect([...laterWindow.matchAll(/class="artwork-candidate/g)]).toHaveLength(840);
   });
 
+  it("labels source=all counts partial when a provider could not report its full catalog", () => {
+    const markup = renderToStaticMarkup(createElement(ArtworkCandidateGrid, {
+      candidates: [], windowLimit: 60, catalogTotal: 1200, catalogTotalComplete: false, filterTotal: 247,
+      catalogLabel: "Catálogo de arte", cardName: "Sol Ring", onSelect: vi.fn(), onLoadMore: vi.fn(),
+    }));
+
+    expect(markup).toContain("Catálogo de arte · 1200 artworks conhecidas · catálogo parcial");
+    expect(markup).toContain("247 de 1200 conhecidas correspondem ao filtro");
+  });
+
   it("separates verified, provider-reported, unknown, and unavailable quality labels", () => {
     const base: ArtworkCandidateView = { id: "candidate", source: "mpc", identityId: "identity", faceId: "front", originalAvailable: true };
     const markup = renderToStaticMarkup(createElement(ArtworkCandidateGrid, {

@@ -1,13 +1,14 @@
 import type { CardIdentity } from "../core/cards/types";
 import type { ArtworkCandidate } from "../core/cards/types";
 import { ArtworkStorageError } from "./storage/types";
-import type { ArtworkCatalogSearchOptions, ArtworkProvider, ProviderHealth } from "./types";
+import type { ArtworkCatalogSearchOptions, ArtworkCatalogSearchResult, ArtworkProvider, ProviderHealth } from "./types";
 import type { MpcArtworkFilterInput, MpcFilterCatalogs } from "./mpc-contract";
 import { MpcArtworkFilterValidationError } from "./mpc-contract";
 import type { MpcArtworkProviderDiagnostic, MpcCandidateRevalidationResult } from "./mpc-provider";
 
 interface MpcArtworkProviderExtension extends ArtworkProvider {
   searchArtworkAdvanced(identity: CardIdentity, options: ArtworkCatalogSearchOptions & { readonly filters?: MpcArtworkFilterInput; readonly forceRefresh?: boolean }): Promise<readonly ArtworkCandidate[]>;
+  searchArtworkAdvancedWithTotal?(identity: CardIdentity, options: ArtworkCatalogSearchOptions & { readonly filters?: MpcArtworkFilterInput; readonly forceRefresh?: boolean }): Promise<ArtworkCatalogSearchResult>;
   getFilterCatalogs(signal?: AbortSignal): Promise<MpcFilterCatalogs>;
   getDiagnostic(): MpcArtworkProviderDiagnostic;
   refreshCandidate(id: string, signal?: AbortSignal): Promise<ArtworkCandidate | undefined>;
@@ -86,6 +87,60 @@ export class ArtworkCatalog {
       }
     }));
     return results.flat();
+  }
+
+  async searchWithTotal(identity: CardIdentity, options: AdvancedArtworkCatalogSearchOptions): Promise<ArtworkCatalogSearchResult> {
+    const selectedProviders = options.source === "all"
+      ? [...this.providers.values()]
+      : [this.providers.get(options.source)].filter((provider): provider is ArtworkProvider => provider !== undefined);
+    const results = await Promise.all(selectedProviders.map(async (provider): Promise<ArtworkCatalogSearchResult> => {
+      try {
+        const standardOptions: ArtworkCatalogSearchOptions = {
+          source: options.source,
+          ...(options.faceId ? { faceId: options.faceId } : {}),
+          ...(options.mpcReferences ? { mpcReferences: options.mpcReferences } : {}),
+          ...(options.signal ? { signal: options.signal } : {}),
+        };
+        const extension = mpcExtension(provider);
+        let result: ArtworkCatalogSearchResult;
+        if (extension?.searchArtworkAdvancedWithTotal) {
+          result = await extension.searchArtworkAdvancedWithTotal(identity, {
+            ...standardOptions,
+            filters: options.mpcFilters ?? {},
+            ...(options.forceMpcRefresh ? { forceRefresh: true } : {}),
+          });
+        } else {
+          const candidates = extension
+            ? await extension.searchArtworkAdvanced(identity, {
+              ...standardOptions,
+              filters: options.mpcFilters ?? {},
+              ...(options.forceMpcRefresh ? { forceRefresh: true } : {}),
+            })
+            : await provider.searchArtwork(identity, standardOptions);
+          result = { candidates, catalogTotal: candidates.length };
+        }
+        this.healthOverrides.delete(provider.source);
+        this.providerReportedDegraded.delete(provider.source);
+        this.health.set(provider.source, publicProviderHealth(provider.source, provider.getHealth?.() ?? { available: true, degraded: false }));
+        return { ...result, catalogTotalComplete: result.catalogTotalComplete !== false };
+      } catch (error) {
+        if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError") || (error && typeof error === "object" && (error as { kind?: unknown }).kind === "aborted")) throw error;
+        if (error instanceof MpcArtworkFilterValidationError) throw error;
+        this.healthOverrides.add(provider.source);
+        if (provider.getHealth?.().degraded) this.providerReportedDegraded.add(provider.source);
+        this.health.set(provider.source, {
+          available: false,
+          degraded: true,
+          message: provider.source === "mpc" ? MPC_DEGRADED_MESSAGE : error instanceof Error ? error.message : "Artwork provider failed.",
+        });
+        return { candidates: [], catalogTotal: 0, catalogTotalComplete: false };
+      }
+    }));
+    return {
+      candidates: results.flatMap(({ candidates }) => candidates),
+      catalogTotal: results.reduce((total, result) => total + result.catalogTotal, 0),
+      catalogTotalComplete: results.every((result) => result.catalogTotalComplete !== false),
+    };
   }
 
   getProviderHealth(): Readonly<Record<string, ProviderHealth>> {

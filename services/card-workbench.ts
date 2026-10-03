@@ -16,7 +16,7 @@ import { ArtworkOriginalStore } from "../artwork/storage/original-store";
 import { appDataPaths } from "../artwork/storage/paths";
 import { ArtworkRepository } from "../artwork/storage/repository";
 import { ArtworkThumbnailStore } from "../artwork/storage/thumbnail-store";
-import type { ArtworkCatalogSource, ArtworkPreview, ProviderHealth } from "../artwork/types";
+import type { ArtworkCatalogSearchResult, ArtworkCatalogSource, ArtworkPreview, ProviderHealth } from "../artwork/types";
 import { applyIdentityFacePolicy, confirmIdentity, IdentityResolver, isDoubleFacedIdentity, keepCustom, reconcileArtworkAfterIdentityChange, restoreAutomaticBackSelection, selectDefaultArtworkForFace, selectResolvedPrintingArtwork } from "../core/cards/identity-resolver";
 import { selectArtwork as updateSelectedArtwork, createWorkingSet } from "../core/cards/working-set";
 import { BackSelectionPolicyError, isEligibleGenericPhysicalBack, isEligibleIdentityFaceSelection, selectManualBackArtwork as selectManualBackArtworkCore } from "../core/cards/back-selection";
@@ -93,7 +93,9 @@ export interface CardWorkbench {
   confirmWorkingCardIdentity(card: WorkingCard, scryfallId: string, options?: { signal?: AbortSignal }): Promise<WorkingCard>;
   keepWorkingCardCustom(card: WorkingCard): WorkingCard;
   restoreDefaultArtwork(card: WorkingCard, faceId: CardFaceSide, options?: { signal?: AbortSignal }): Promise<WorkingCard | undefined>;
+  listArtworkCatalog?(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal }): Promise<ArtworkCatalogSearchResult>;
   listArtworkCandidates(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
+  listMpcCardbackCatalog?(options?: { mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal }): Promise<ArtworkCatalogSearchResult>;
   listMpcCardbackCandidates(options?: { mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
   getArtworkCandidate(candidateId: string, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; identity?: CardIdentity; signal?: AbortSignal }): Promise<ArtworkCandidate | undefined>;
   getMpcArtworkFilterCatalogs(signal?: AbortSignal): Promise<MpcFilterCatalogs>;
@@ -361,6 +363,41 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     return selectResolvedPrintingArtwork(next, candidates);
   }
 
+  const listArtworkCatalog = async (
+    identityId: string,
+    faceId: CardFaceSide,
+    source: ArtworkCatalogSource,
+    callOptions: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal } = {},
+  ): Promise<ArtworkCatalogSearchResult> => {
+    const cachedIdentity = getIdentity(metadata, identityId);
+    const oracleId = /^scryfall:oracle:(.+)$/.exec(identityId)?.[1];
+    const scryfallId = /^scryfall:card:(.+)$/.exec(identityId)?.[1];
+    const identity: CardIdentity = cachedIdentity ?? (identityId === "custom:artwork-picker"
+      ? { id: identityId, provider: "local", name: "Local artwork library", resolutionMethod: "custom", confidence: 0 }
+      : {
+        id: identityId,
+        provider: "scryfall",
+        name: identityId,
+        ...(oracleId ? { oracleId } : {}),
+        ...(scryfallId ? { scryfallId } : {}),
+        resolutionMethod: "manual",
+        confidence: 1,
+      });
+    if (identity.provider === "local" && source === "scryfall") return { candidates: [], catalogTotal: 0 };
+    if (identity.id === "custom:artwork-picker" && source === "all") {
+      const [uploads, references] = await Promise.all([
+        catalog.searchWithTotal(identity, { source: "upload", faceId, signal: callOptions.signal }),
+        catalog.searchWithTotal(identity, { source: "mpc", faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), ...(callOptions.forceMpcRefresh ? { forceMpcRefresh: true } : {}), signal: callOptions.signal }),
+      ]);
+      return {
+        candidates: [...uploads.candidates, ...references.candidates],
+        catalogTotal: uploads.catalogTotal + references.catalogTotal,
+        catalogTotalComplete: uploads.catalogTotalComplete !== false && references.catalogTotalComplete !== false,
+      };
+    }
+    return catalog.searchWithTotal(identity, { source, faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), ...(callOptions.forceMpcRefresh ? { forceMpcRefresh: true } : {}), signal: callOptions.signal });
+  };
+
   return {
     async importForWorkingSet(request, callOptions = {}) {
       if ((request.files?.length ?? 0) > MAX_UPLOADS) throw new ImportFailureError(`At most ${MAX_UPLOADS} files may be imported at once.`, "INPUT_TOO_LARGE");
@@ -531,30 +568,18 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
       return selected ?? (faceId === "back" ? resetCard : undefined);
     },
 
+    listArtworkCatalog,
+
     async listArtworkCandidates(identityId, faceId, source, callOptions = {}) {
-      const cachedIdentity = getIdentity(metadata, identityId);
-      const oracleId = /^scryfall:oracle:(.+)$/.exec(identityId)?.[1];
-      const scryfallId = /^scryfall:card:(.+)$/.exec(identityId)?.[1];
-      const identity: CardIdentity = cachedIdentity ?? (identityId === "custom:artwork-picker"
-        ? { id: identityId, provider: "local", name: "Local artwork library", resolutionMethod: "custom", confidence: 0 }
-        : {
-          id: identityId,
-          provider: "scryfall",
-          name: identityId,
-          ...(oracleId ? { oracleId } : {}),
-          ...(scryfallId ? { scryfallId } : {}),
-          resolutionMethod: "manual",
-          confidence: 1,
-        });
-      if (identity.provider === "local" && source === "scryfall") return [];
-      if (identity.id === "custom:artwork-picker" && source === "all") {
-        const [uploads, references] = await Promise.all([
-          catalog.search(identity, { source: "upload", faceId, signal: callOptions.signal }),
-          catalog.search(identity, { source: "mpc", faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), ...(callOptions.forceMpcRefresh ? { forceMpcRefresh: true } : {}), signal: callOptions.signal }),
-        ]);
-        return [...uploads, ...references];
-      }
-      return catalog.search(identity, { source, faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), ...(callOptions.forceMpcRefresh ? { forceMpcRefresh: true } : {}), signal: callOptions.signal });
+      return (await listArtworkCatalog(identityId, faceId, source, callOptions)).candidates;
+    },
+
+    async listMpcCardbackCatalog(callOptions = {}) {
+      return mpc.searchCardbacksWithTotal({
+        ...(callOptions.mpcFilters ? { filters: callOptions.mpcFilters } : {}),
+        ...(callOptions.forceMpcRefresh ? { forceRefresh: true } : {}),
+        signal: callOptions.signal,
+      });
     },
 
     async listMpcCardbackCandidates(callOptions = {}) {
