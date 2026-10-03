@@ -153,17 +153,7 @@ export default function HomePage() {
     }
   }
 
-  return (
-    <main className="workbench">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">TCGPrint · fase 5</p>
-          <h1>Card Identity + Artwork</h1>
-          <p className="subhead">Adicione cartas → escolha artwork → PDF físico A4.</p>
-        </div>
-        <div className="local-badge">Working Set da sessão · Scryfall online</div>
-      </header>
-
+  const inputContent = (
       <section className="panel input-panel" aria-labelledby="inputs-heading">
         <div className="panel-heading">
           <div>
@@ -247,11 +237,13 @@ export default function HomePage() {
         </div>
         {problem && <p className="error-message" role="alert">{problem}</p>}
       </section>
+  );
 
-      <CardIdentityWorkbench files={files} text={text} choices={choices} />
-
-      {preview && (
+  const diagnosticsContent = preview ? (
         <section className="panel report-panel" aria-labelledby="report-heading">
+          <details className="diagnostic-group import-report-group">
+            <summary>ImportReport completo · detecções, mappings, avisos e erros</summary>
+            <div className="report-panel-content">
           <div className="panel-heading">
             <div>
               <h2 id="report-heading">Diagnóstico da importação · ImportReport</h2>
@@ -334,7 +326,11 @@ export default function HomePage() {
               {preview.report.errors.length === 0 ? <p className="muted">Nenhum erro.</p> : <ul className="issue-list errors">{preview.report.errors.map((item, index) => <li key={`${item.code}:${index}`}><strong>{item.code}</strong> · {item.message}</li>)}</ul>}
             </div>
           </div>
+            </div>
+          </details>
 
+          <details className="workspace-advanced-settings legacy-local-pdf">
+            <summary>Legacy / teste local · PDF local de teste</summary>
           <section className="pdf-test" aria-labelledby="pdf-heading">
             <div>
               <h3 id="pdf-heading">PDF local de teste</h3>
@@ -372,8 +368,9 @@ export default function HomePage() {
             {imagePreviewUrl && <img className="local-preview" src={imagePreviewUrl} alt={`Preview local de ${directFile?.name ?? "imagem"}`} />}
             {pdfUrl && <a className="download-link" href={pdfUrl} download="tcgprint-test.pdf">Baixar PDF de teste</a>}
           </section>
+          </details>
         </section>
-      )}
-    </main>
-  );
+  ) : null;
+
+  return <CardIdentityWorkbench files={files} text={text} choices={choices} inputContent={inputContent} diagnosticsContent={diagnosticsContent} />;
 }

@@ -31,6 +31,7 @@ import {
 } from "./project-session";
 
 export interface ProjectsPanelProps {
+  readonly view?: ProjectsPanelView;
   readonly cards: readonly WorkingCard[];
   readonly settings: ProjectSettingsV1;
   readonly onProjectOpen: (project: ProjectDto) => void;
@@ -45,12 +46,15 @@ export interface ProjectsPanelProps {
   readonly disabled?: boolean;
 }
 
+export type ProjectsPanelView = "all" | "project" | "templates" | "cut" | "hidden";
+
 function errorMessage(error: unknown): string {
   if (error instanceof ProjectApiClientError) return error.message;
   return error instanceof Error ? error.message : "A operação de Project falhou.";
 }
 
 export default function ProjectsPanel({
+  view = "all",
   cards,
   settings,
   onProjectOpen,
@@ -473,9 +477,17 @@ export default function ProjectsPanel({
   }
 
   const selectedCutPage = cutPreview?.pages.find(({ pageNumber }) => pageNumber === selectedCutPageNumber) ?? cutPreview?.pages[0];
+  const showProject = view === "all" || view === "project";
+  const showTemplates = view === "all" || view === "templates";
+  const showCut = view === "all" || view === "cut";
 
   return (
-    <section className="panel projects-panel" aria-label="Projects">
+    <section
+      className="panel projects-panel"
+      aria-label={view === "templates" ? "Templates" : view === "cut" ? "Corte" : "Projects"}
+      hidden={view === "hidden"}
+    >
+      <div className="projects-panel-project-view" hidden={!showProject}>
       <div className="panel-heading">
         <div>
           <h2>Projects</h2>
@@ -514,8 +526,9 @@ export default function ProjectsPanel({
           </div>
         </li>)}
       </ul> : <p className="muted">Nenhum Project salvo.</p>}
+      </div>
 
-      <TemplateLibraryPanel selection={templateSelection} cutSourceSelection={settings.cutSourceSelection} onCutSourceSelect={onCutSourceSelectionChange} onRegistrationStatusChange={onTemplateRegistrationStatusChange} onSelect={(selection, defaults) => {
+      <TemplateLibraryPanel view={view === "all" ? "all" : showTemplates ? "library" : showCut ? "cut" : "hidden"} selection={templateSelection} cutSourceSelection={settings.cutSourceSelection} onCutSourceSelect={onCutSourceSelectionChange} onRegistrationStatusChange={onTemplateRegistrationStatusChange} onSelect={(selection, defaults) => {
         const sameTemplateSelection = templateSelection?.templateId === selection?.templateId
           && templateSelection?.version === selection?.version
           && templateSelection?.packageHash === selection?.packageHash;
@@ -525,6 +538,7 @@ export default function ProjectsPanel({
         else if (selection === null) onTemplateDefaults?.(null);
       }} disabled={projectActionsDisabled} />
 
+      <div className="projects-panel-cut-view" hidden={!showCut}>
       <section className="cut-export-panel" aria-label="SVG e DXF Cut Export">
         <div>
           <h3>SVG/DXF Cut Export</h3>
@@ -557,7 +571,9 @@ export default function ProjectsPanel({
                 : <p className="muted">Cut preview indisponível.</p>}
         {cutPreviewError && <p className="error-message" role="alert">{cutPreviewError}</p>}
       </section>
+      </div>
 
+      <div className="projects-panel-project-state" hidden={!showProject}>
       {(session.status === "Conflito" || session.status === "Erro") && session.activeProject && <section className="project-conflict" aria-label={session.status === "Conflito" ? "Conflito de revisão" : "Falha no autosave"}>
         <p role="alert">{session.status === "Conflito"
           ? "A revisão salva mudou em outro lugar. O Working Set local continua aberto e não foi sobrescrito."
@@ -589,6 +605,7 @@ export default function ProjectsPanel({
       </section>}
 
       {session.error && <p className="error-message" role="alert">{session.error}</p>}
+      </div>
     </section>
   );
 }

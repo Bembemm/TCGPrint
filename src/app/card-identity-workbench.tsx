@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { ImportKind } from "../../import-engine/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard, WorkingCardBackMode } from "../../core/cards/types";
 import type { MpcArtworkFilterInput, MpcFilterCatalogs } from "../../artwork/mpc-contract";
@@ -56,6 +57,7 @@ import {
   type TemplateRegistrationStatus,
 } from "./template-registration-compat";
 import RegistrationLayoutPreview from "./registration-layout-preview";
+import WorkspaceShell, { type WorkspaceSection } from "./workspace-shell";
 import BackLibraryControls, { type BackLibraryAssetDto } from "./back-library-controls";
 import { createBackValidationSummary, exportModeRequiresFrontArtwork } from "./back-validation";
 import { applyTemplateLayoutDefaults } from "./template-layout-defaults";
@@ -71,6 +73,8 @@ interface Props {
   readonly files: readonly File[];
   readonly text: string;
   readonly choices: Readonly<Record<string, ImportKind>>;
+  readonly inputContent?: ReactNode;
+  readonly diagnosticsContent?: ReactNode;
 }
 
 interface ApiErrorBody { readonly code?: string; readonly message?: string; }
@@ -524,7 +528,7 @@ export function editorHistoryReducer(state: EditorHistoryUiState, action: Editor
 const initialEditorState: EditorUiState = { ...createWorkingCardEditorState([]), face: "front" };
 const initialEditorHistoryState: EditorHistoryUiState = createEditorHistoryState(initialEditorState);
 
-export default function CardIdentityWorkbench({ files, text, choices }: Props) {
+export default function CardIdentityWorkbench({ files, text, choices, inputContent, diagnosticsContent }: Props) {
   const [editorHistory, dispatchEditorAction] = useReducer(editorHistoryReducer, initialEditorHistoryState);
   const projectOpenPendingRef = useRef(false);
   const dispatchEditor = useCallback((action: EditorAction) => {
@@ -1202,23 +1206,18 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     && cutGeometryPreview.activeGeometry);
   const projectCutSyncReady = previewMatchesActiveProject && selectedCutSourceReady;
 
-  return (
-    <section className="panel card-identity-workbench" aria-labelledby="identity-workbench-heading">
-      <div className="panel-heading">
-        <div>
-          <p className="eyebrow">Fase 7 · Projects e Working Set</p>
-          <h2 id="identity-workbench-heading">Identidade da carta e artwork</h2>
-          <p>Card Details separa origem/hints importados da identidade aplicada; artwork e escolhas permanecem por face nesta sessão.</p>
-        </div>
-        <div className="provider-health" aria-label="Estado dos providers">
-          {(["scryfall", "upload", "mpc"] as const).map((source) => {
-            const health = providerHealth[source];
-            return <span key={source} className={health?.degraded ? "health-degraded" : ""}>{labelSource(source)} · {health?.degraded ? "degradado" : "disponível"}</span>;
-          })}
-        </div>
-      </div>
+  const providerStatus = () => <div className="provider-health compact-provider-health" aria-label="Estado dos providers">
+    {(["scryfall", "upload", "mpc"] as const).map((source) => {
+      const health = providerHealth[source];
+      const state = !health ? "verificando" : !health.available ? "offline" : health.degraded ? "degradado" : "disponível";
+      return <span key={source} className={health?.degraded || health && !health.available ? "health-degraded" : ""}>{labelSource(source)} · {state}</span>;
+    })}
+  </div>;
 
+  const sharedProjectSections: readonly WorkspaceSection[] = ["project", "layout", "pdf", "cut", "templates"];
+  const sharedProjectPanel = (activeSection: WorkspaceSection) => <div className="workspace-project-settings-content">
       <ProjectsPanel
+        view={activeSection === "project" ? "project" : activeSection === "templates" ? "templates" : activeSection === "cut" ? "cut" : "hidden"}
         cards={workingCards}
         settings={projectSettings}
         onProjectOpen={restoreProject}
@@ -1272,21 +1271,75 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         onProjectInteractionLockChange={setProjectInteractionLocked}
         disabled={busy}
       />
-
-      <PrinterCalibrationPanel
-        paperFormat={paperFormat}
-        pageOrientation={pageOrientation}
-        printerProfileSelection={printerProfileSelection}
-        printerDuplexMode={printerDuplexMode}
-        exportContentMode={exportContentMode}
-        duplexFlipMode={duplexFlipMode}
-        disabled={interactionBusy}
-        onProjectSelectionChange={(selection, mode) => updateProjectSetting(() => {
-          setPrinterProfileSelection(selection);
-          setPrinterDuplexMode(mode);
-        })}
+    <div className="workspace-settings-view" hidden={activeSection !== "layout" && activeSection !== "pdf" && activeSection !== "cut"}>
+          <ProjectSettingsControls
+            paperFormat={paperFormat}
+            cardFormat={cardFormat}
+            section={activeSection === "layout" || activeSection === "pdf" || activeSection === "cut" ? activeSection : "layout"}
+            bleedMm={bleedMm}
+            roundedCorners={roundedCorners}
+            trimGuideEnabled={trimGuideEnabled}
+            trimGuideExtentMm={trimGuideExtentMm}
+            trimGuideColor={trimGuideColor}
+            externalGuideEnabled={externalGuideEnabled}
+            externalGuideStrokeWidthPt={externalGuideStrokeWidthPt}
+            externalGuideColor={externalGuideColor}
+            pageOrientation={pageOrientation}
+            cardOrientation={cardOrientation}
+            marginsMm={marginsMm}
+            horizontalGapMm={horizontalGapMm}
+            verticalGapMm={verticalGapMm}
+            registration={registration}
+            layoutRows={layoutRows}
+            layoutColumns={layoutColumns}
+            templateGeometryActive={Boolean(templateGeometry)}
+            skippedSlotIndices={skippedSlotIndices}
+            exportContentMode={exportContentMode}
+            missingBackPolicy={missingBackPolicy}
+            duplexFlipMode={duplexFlipMode}
+            disabled={interactionBusy}
+            onBleedMmChange={(value) => updateProjectSetting(() => setBleedMm(value))}
+            onRoundedCornersChange={(value) => updateProjectSetting(() => setRoundedCorners(value))}
+            onTrimGuideEnabledChange={(value) => updateProjectSetting(() => setTrimGuideEnabled(value))}
+            onTrimGuideExtentMmChange={(value) => updateProjectSetting(() => setTrimGuideExtentMm(value))}
+            onTrimGuideColorChange={(value) => updateProjectSetting(() => setTrimGuideColor(value))}
+            onExternalGuideEnabledChange={(value) => updateProjectSetting(() => setExternalGuideEnabled(value))}
+            onExternalGuideStrokeWidthPtChange={(value) => updateProjectSetting(() => setExternalGuideStrokeWidthPt(value))}
+            onExternalGuideColorChange={(value) => updateProjectSetting(() => setExternalGuideColor(value))}
+            onPageOrientationChange={(value) => updateProjectSetting(() => setPageOrientation(value))}
+            onCardOrientationChange={(value) => updateProjectSetting(() => setCardOrientation(value))}
+            onMarginChange={(side, value) => updateProjectSetting(() => setMarginsMm((current) => ({ ...current, [side]: value })))}
+            onHorizontalGapChange={(value) => updateProjectSetting(() => setHorizontalGapMm(value))}
+            onVerticalGapChange={(value) => updateProjectSetting(() => setVerticalGapMm(value))}
+            onRegistrationChange={(value) => updateProjectSetting(() => {
+              setRegistrationOverride(true);
+              setRegistration(value);
+              setTemplateRegistrationStatus((current) => applyProjectRegistrationOverride(current, true));
+            })}
+            onLayoutRowsChange={(value) => updateProjectSetting(() => setLayoutRows(value))}
+            onLayoutColumnsChange={(value) => updateProjectSetting(() => setLayoutColumns(value))}
+            onExportContentModeChange={(value) => updateProjectSetting(() => setExportContentMode(value))}
+            onMissingBackPolicyChange={(value) => updateProjectSetting(() => setMissingBackPolicy(value))}
+            onDuplexFlipModeChange={(value) => updateProjectSetting(() => setDuplexFlipMode(value))}
+          />
+    </div>
+    <div className="workspace-back-library-view" hidden={activeSection !== "pdf"}>
+      <BackLibraryControls
+            assets={backLibraryAssets}
+            selectedDefault={projectDefaultBack}
+            selectedCard={activeCard ?? null}
+            disabled={interactionBusy}
+            onAssetsChange={setBackLibraryAssets}
+            onDefaultChange={(asset) => updateProjectSetting(() => setProjectDefaultBack(asset))}
+            onCardModeChange={(mode) => { if (activeCard) updateCardBackMode(activeCard, mode); }}
+            onManualBackChange={(asset) => { if (activeCard) dispatchEditor({ type: "replace-card", cardId: activeCard.id, card: selectManualBackLibraryAsset(activeCard, asset) }); }}
       />
+    </div>
+  </div>;
 
+  const cardsSection = <div className="workspace-section-content workspace-cards-content">
+    {inputContent}
+    <section className="panel card-actions-panel" aria-label="Working Set actions">
       <div className="action-row phase5-actions">
         <button className="button primary" type="button" onClick={addCards} disabled={interactionBusy}>{abortableOperation === "add-cards" ? "Adicionando…" : "Adicionar cartas"}</button>
         {abortableOperation === "add-cards" && <button className="button secondary" type="button" aria-label="Cancelar adição" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar adição</button>}
@@ -1297,22 +1350,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         <span className="status" aria-live="polite">{status}</span>
       </div>
       {(visibleProblem || editorState.error) && <p className="error-message" role="alert">{visibleProblem || editorState.error}</p>}
-
-      {lastImportReport && <details className="import-diagnostic">
-        <summary>Diagnóstico da última adição</summary>
-        <dl className="summary-grid">
-          {Object.entries(lastImportReport.summary).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}
-        </dl>
-        <h3>Fontes e importers</h3>
-        <ul>{lastImportReport.sources.map((source) => {
-          const selected = lastImportReport.selectedImporters.find((item) => item.sourceId === source.id);
-          return <li key={source.id}>{source.filename ?? source.id} · {source.kind}{selected ? ` · ${selected.kind}` : ""}</li>;
-        })}</ul>
-        {lastImportReport.warnings.length > 0 && <><h3>Warnings</h3><ul>{lastImportReport.warnings.map((item, index) => <li key={`${item.code}:${index}`}><strong>{item.code}</strong> · {item.message}</li>)}</ul></>}
-        {lastImportReport.errors.length > 0 && <><h3>Errors</h3><ul className="issue-list errors">{lastImportReport.errors.map((item, index) => <li key={`${item.code}:${index}`}><strong>{item.code}</strong> · {item.message}</li>)}</ul></>}
-        {lastImportReport.pairings.length > 0 && <><h3>Sugestões de pareamento Front/Back</h3><ul>{lastImportReport.pairings.map((pairing, index) => <li key={`${pairing.frontAssetId}:${pairing.backAssetId}:${index}`}>{pairing.reason} · {(pairing.confidence * 100).toFixed(0)}% · requer confirmação</li>)}</ul></>}
-      </details>}
-
+    </section>
       {workingCards.length > 0 && <div className="card-workbench-layout">
         <WorkingCardList
           cards={workingCards}
@@ -1370,7 +1408,15 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           </div>
 
           {(identityDetails?.relatedCards.length || relatedCardNames(activeCard).length) > 0 && <div className="related-card-list"><strong>Related cards / tokens:</strong> {(identityDetails?.relatedCards ?? relatedCardNames(activeCard)).map((item) => `${item.name}${item.component === "token" ? " (token; não adicionado)" : ""}`).join(" · ")}</div>}
+        </div>}
+      </div>}
+  </div>;
 
+  const artworkSection = <div className="workspace-section-content workspace-artwork-content">
+    {providerStatus()}
+    {activeCard ? <>
+      <p className="muted">Carta ativa: <strong>{displayCard(activeCard)}</strong>. Selecione outra carta em Cartas.</p>
+      <div className="working-card-detail">
           {!isDoubleFacedIdentity(activeCard.identity) && <div className="manual-physical-back-picker-control">
             <button
               className={`button ${manualPhysicalBackPicker ? "primary" : "secondary"}`}
@@ -1458,69 +1504,23 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
               }))}
             />
           </div>
-        </div>}
-      </div>}
+      </div>
+    </> : <section className="panel"><h3>Nenhuma carta selecionada</h3><p>Adicione e selecione uma carta na seção Cartas para escolher artwork.</p></section>}
+  </div>;
 
-      {workingCards.length > 0 && <div className="phase5-export">
+  const exportSection = <div className="workspace-section-content workspace-export-content">
+    <p className="status" aria-live="polite">{status}</p>
+    {problem && <p className="error-message" role="alert">{problem}</p>}
+      {workingCards.length > 0 ? <div className="phase5-export">
         <div className="panel-heading"><div><h3>Export PDF</h3><p>PDF {paperFormat.name} · {cardFormat.name} {cardFormat.widthMm} × {cardFormat.heightMm} mm · quantities expandidas somente na composição.</p></div></div>
+        <section className="export-sync-status" aria-label="Estado de sincronização do export">
+          <h4>Pré-validação</h4>
+          <p>Project: {activeProjectSync ? `${activeProjectSync.projectId} · revisão ${activeProjectSync.revision} · ${activeProjectSync.saved ? "salvo" : "autosave pendente"}` : "sem Project aberto · Working Set local"}</p>
+          <p>Template: {templateRegistrationStatus} · corte: {cutGeometryPreview ? `preview da revisão ${cutGeometryPreview.projectRevision}` : "sem preview de Project"} · sincronizado {projectCutSyncReady ? "sim" : "não"}.</p>
+        </section>
         <div className="pdf-controls">
-          <ProjectSettingsControls
-            bleedMm={bleedMm}
-            roundedCorners={roundedCorners}
-            trimGuideEnabled={trimGuideEnabled}
-            trimGuideExtentMm={trimGuideExtentMm}
-            trimGuideColor={trimGuideColor}
-            externalGuideEnabled={externalGuideEnabled}
-            externalGuideStrokeWidthPt={externalGuideStrokeWidthPt}
-            externalGuideColor={externalGuideColor}
-            pageOrientation={pageOrientation}
-            cardOrientation={cardOrientation}
-            marginsMm={marginsMm}
-            horizontalGapMm={horizontalGapMm}
-            verticalGapMm={verticalGapMm}
-            registration={registration}
-            layoutRows={layoutRows}
-            layoutColumns={layoutColumns}
-            templateGeometryActive={Boolean(templateGeometry)}
-            skippedSlotIndices={skippedSlotIndices}
-            exportContentMode={exportContentMode}
-            missingBackPolicy={missingBackPolicy}
-            duplexFlipMode={duplexFlipMode}
-            disabled={interactionBusy}
-            onBleedMmChange={(value) => updateProjectSetting(() => setBleedMm(value))}
-            onRoundedCornersChange={(value) => updateProjectSetting(() => setRoundedCorners(value))}
-            onTrimGuideEnabledChange={(value) => updateProjectSetting(() => setTrimGuideEnabled(value))}
-            onTrimGuideExtentMmChange={(value) => updateProjectSetting(() => setTrimGuideExtentMm(value))}
-            onTrimGuideColorChange={(value) => updateProjectSetting(() => setTrimGuideColor(value))}
-            onExternalGuideEnabledChange={(value) => updateProjectSetting(() => setExternalGuideEnabled(value))}
-            onExternalGuideStrokeWidthPtChange={(value) => updateProjectSetting(() => setExternalGuideStrokeWidthPt(value))}
-            onExternalGuideColorChange={(value) => updateProjectSetting(() => setExternalGuideColor(value))}
-            onPageOrientationChange={(value) => updateProjectSetting(() => setPageOrientation(value))}
-            onCardOrientationChange={(value) => updateProjectSetting(() => setCardOrientation(value))}
-            onMarginChange={(side, value) => updateProjectSetting(() => setMarginsMm((current) => ({ ...current, [side]: value })))}
-            onHorizontalGapChange={(value) => updateProjectSetting(() => setHorizontalGapMm(value))}
-            onVerticalGapChange={(value) => updateProjectSetting(() => setVerticalGapMm(value))}
-            onRegistrationChange={(value) => updateProjectSetting(() => {
-              setRegistrationOverride(true);
-              setRegistration(value);
-              setTemplateRegistrationStatus((current) => applyProjectRegistrationOverride(current, true));
-            })}
-            onLayoutRowsChange={(value) => updateProjectSetting(() => setLayoutRows(value))}
-            onLayoutColumnsChange={(value) => updateProjectSetting(() => setLayoutColumns(value))}
-            onExportContentModeChange={(value) => updateProjectSetting(() => setExportContentMode(value))}
-            onMissingBackPolicyChange={(value) => updateProjectSetting(() => setMissingBackPolicy(value))}
-            onDuplexFlipModeChange={(value) => updateProjectSetting(() => setDuplexFlipMode(value))}
-          />
-          <BackLibraryControls
-            assets={backLibraryAssets}
-            selectedDefault={projectDefaultBack}
-            selectedCard={activeCard ?? null}
-            disabled={interactionBusy}
-            onAssetsChange={setBackLibraryAssets}
-            onDefaultChange={(asset) => updateProjectSetting(() => setProjectDefaultBack(asset))}
-            onCardModeChange={(mode) => { if (activeCard) updateCardBackMode(activeCard, mode); }}
-            onManualBackChange={(asset) => { if (activeCard) dispatchEditor({ type: "replace-card", cardId: activeCard.id, card: selectManualBackLibraryAsset(activeCard, asset) }); }}
-          />
+
+
           {exportContentMode !== "front-only" && <section className="back-preflight" aria-label="Validação de versos antes do export">
             <h4>Validação de versos</h4>
             <p>{physicalCardCount} cartas físicas · {backValidation.dfcPhysicalCards} DFC · {backValidation.simplePhysicalCards} simples</p>
@@ -1534,7 +1534,6 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
               </li>)}</ul>
             </div>}
           </section>}
-          <RegistrationLayoutPreview settings={projectSettings} cardCount={physicalCardCount} cards={workingCards} cutPreview={cutGeometryPreview} selectedPageNumber={cutPageNumber} onSelectPage={setCutPageNumber} onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))} />
           {templateRegistrationStatus === "legacy-custom-unconfigured" && <p className="error-message" role="alert">O template selecionado declara registration custom, mas a versão não contém geometria física. O PDF usará somente a configuração independente do Project após escolha explícita.</p>}
           {templateRegistrationStatus === "legacy-physical-format-unconfigured" && <p className="error-message" role="alert">A versão legada do template declara papel ou carta custom sem dimensões físicas. Os formatos atuais do Working Set não foram substituídos; exportação bloqueada até selecionar uma versão com geometria explícita.</p>}
           {templateRegistrationStatus === "unavailable" && <p className="error-message" role="alert">A versão exata do template não está disponível para validar registration. Revise ou desassocie o template.</p>}
@@ -1543,6 +1542,42 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           {pdfUrl && <a className="download-link" href={pdfUrl} download={exportDownloadName}>Baixar {exportDownloadName}</a>}
         </div>
         <p className="muted">Bleed estende somente os pixels da borda imediata de cada lado. Moldura preta continua preta; full-art continua a própria arte. O trim da carta permanece intacto. Cantos arredondados são uma opção separada.</p>
+
+      </div>: <p className="muted">Adicione cartas em Cartas para validar e gerar o PDF.</p>}
+  </div>;
+
+  const diagnosticsSection = <div className="workspace-section-content workspace-diagnostics-content">
+    <section className="panel">
+      <h2>Diagnóstico</h2>
+      <h3>Providers</h3>
+      {providerStatus()}
+      {mpcDiagnostic && <details className="diagnostic-group">
+        <summary>Diagnóstico MPC</summary>
+        <p>{mpcDiagnostic.available ? "Disponível" : "Offline"}{mpcDiagnostic.degraded ? " · degradado ou em cache" : ""} · protocolo {mpcDiagnostic.lastProtocolConfirmed ?? "ainda não confirmado"}{mpcDiagnostic.fallbackV2Used ? " · fallback v2 usado" : ""}</p>
+        <p>Filtros: DPI {mpcDiagnostic.capabilities.filters.dpi ? "sim" : "não"} · fontes {mpcDiagnostic.capabilities.filters.sources ? "sim" : "não"} · languages {mpcDiagnostic.capabilities.filters.languages ? "sim" : "não"} · tags {mpcDiagnostic.capabilities.filters.tags ? "sim" : "não"}</p>
+      </details>}
+      {lastImportReport && <details className="diagnostic-group">
+        <summary>ImportReport da adição de cartas</summary>
+        <dl className="summary-grid">
+          {Object.entries(lastImportReport.summary).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}
+        </dl>
+        <h4>Fontes e importers</h4>
+        <ul>{lastImportReport.sources.map((source) => {
+          const selected = lastImportReport.selectedImporters.find((item) => item.sourceId === source.id);
+          return <li key={source.id}>{source.filename ?? source.id} · {source.kind}{selected ? ` · ${selected.kind}` : ""}</li>;
+        })}</ul>
+        {lastImportReport.warnings.length > 0 && <><h4>Warnings</h4><ul>{lastImportReport.warnings.map((item, index) => <li key={`${item.code}:${index}`}><strong>{item.code}</strong> · {item.message}</li>)}</ul></>}
+        {lastImportReport.errors.length > 0 && <><h4>Errors</h4><ul className="issue-list errors">{lastImportReport.errors.map((item, index) => <li key={`${item.code}:${index}`}><strong>{item.code}</strong> · {item.message}</li>)}</ul></>}
+        {lastImportReport.pairings.length > 0 && <><h4>Sugestões de pareamento Front/Back</h4><ul>{lastImportReport.pairings.map((pairing, index) => <li key={`${pairing.frontAssetId}:${pairing.backAssetId}:${index}`}>{pairing.reason} · {(pairing.confidence * 100).toFixed(0)}% · requer confirmação</li>)}</ul></>}
+      </details>}
+    </section>
+    {diagnosticsContent}
+    <section className="panel">
+      <h3>Layout, slots e sincronização</h3>
+      <p>Grade: {layoutRows} × {layoutColumns} · slots ignorados: {skippedSlotIndices.length ? skippedSlotIndices.join(", ") : "nenhum"}.</p>
+      <p>Template: {templateRegistrationStatus} · preview de corte {cutGeometryPreview ? `revision ${cutGeometryPreview.projectRevision}` : "indisponível"} · export sincronizado {projectCutSyncReady ? "sim" : "não"}.</p>
+      {cutGeometryPreview && <details><summary>Estado técnico do preview de corte</summary><pre className="diagnostic-code">{JSON.stringify(cutGeometryPreview, null, 2)}</pre></details>}
+    </section>
         {bleedDiagnostics && <details className="bleed-diagnostics">
           <summary>Diagnóstico aplicado pelo BleedEngine ({bleedDiagnostics.mode === "summary" ? "resumo" : `${bleedDiagnostics.diagnostics?.length ?? 0} carta(s)`})</summary>
           {bleedDiagnostics.diagnostics?.map((diagnostic) => <article key={diagnostic.workingCardId}>
@@ -1557,7 +1592,42 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           {bleedDiagnostics.truncated && <p className="muted">Relatório detalhado excedeu o limite do cabeçalho; resumo de {bleedDiagnostics.count ?? 0} carta(s).</p>}
           {Object.entries(bleedDiagnostics.effectiveModeCounts ?? {}).map(([mode, count]) => <p key={`mode-${mode}`}>Modo efetivo {mode}: {count}</p>)}
         </details>}
-      </div>}
-    </section>
-  );
+  </div>;
+
+  const preview = <RegistrationLayoutPreview
+    settings={projectSettings}
+    cardCount={physicalCardCount}
+    cards={workingCards}
+    cutPreview={cutGeometryPreview}
+    selectedPageNumber={cutPageNumber}
+    onSelectPage={setCutPageNumber}
+    onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))}
+  />;
+
+  return <WorkspaceShell
+    preview={preview}
+    hasCards={workingCards.length > 0}
+    sharedPanel={{ id: "workspace-project-settings-panel", sections: sharedProjectSections, content: sharedProjectPanel }}
+    sections={{
+      cards: cardsSection,
+      artwork: artworkSection,
+      calibration: <div className="workspace-section-content">
+        <PrinterCalibrationPanel
+        paperFormat={paperFormat}
+        pageOrientation={pageOrientation}
+        printerProfileSelection={printerProfileSelection}
+        printerDuplexMode={printerDuplexMode}
+        exportContentMode={exportContentMode}
+        duplexFlipMode={duplexFlipMode}
+        disabled={interactionBusy}
+        onProjectSelectionChange={(selection, mode) => updateProjectSetting(() => {
+          setPrinterProfileSelection(selection);
+          setPrinterDuplexMode(mode);
+        })}
+        />
+      </div>,
+      export: exportSection,
+      diagnostics: diagnosticsSection,
+    }}
+  />;
 }

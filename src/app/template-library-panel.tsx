@@ -17,6 +17,7 @@ export type { TemplateRegistrationDefaults } from "./template-registration-compa
 
 interface TemplateLibraryPanelProps {
   readonly selection: TemplateSelection | null;
+  readonly view?: "all" | "library" | "cut" | "hidden";
   readonly cutSourceSelection: CutSourceSelection | null;
   readonly onCutSourceSelect?: (selection: CutSourceSelection | null) => void;
   readonly onSelect: (selection: TemplateSelection | null, defaults?: TemplateRegistrationDefaults) => void;
@@ -58,7 +59,7 @@ function integrityLabel(status: TemplateSelectionInspection["status"]): string {
   }
 }
 
-export default function TemplateLibraryPanel({ selection, cutSourceSelection, onCutSourceSelect, onSelect, onRegistrationStatusChange, disabled = false }: TemplateLibraryPanelProps) {
+export default function TemplateLibraryPanel({ selection, view = "all", cutSourceSelection, onCutSourceSelect, onSelect, onRegistrationStatusChange, disabled = false }: TemplateLibraryPanelProps) {
   const [templates, setTemplates] = useState<readonly TemplateRecord[]>([]);
   const [metadata, setMetadata] = useState(DEFAULT_METADATA);
   const [files, setFiles] = useState<readonly File[]>([]);
@@ -97,6 +98,8 @@ export default function TemplateLibraryPanel({ selection, cutSourceSelection, on
 
   const selectedId = useMemo(() => selection ? `${selection.templateId}:${selection.version}` : "", [selection]);
   const registrationStatus = resolveTemplateRegistrationStatus(selection, inspection);
+  const showLibrary = view === "all" || view === "library";
+  const showCutSource = view === "all" || view === "cut";
   const cutFiles = inspection?.files.filter((file) => file.extension === "svg" || file.extension === "dxf") ?? [];
   const selectedCutFile = cutFiles.find((file) => file.fileId === cutSourceSelection?.fileId);
 
@@ -154,7 +157,8 @@ export default function TemplateLibraryPanel({ selection, cutSourceSelection, on
   }
 
   return (
-    <section className="template-library" aria-label="Template Library">
+    <section className="template-library" aria-label={view === "cut" ? "Origem de geometria de corte" : "Template Library"} hidden={view === "hidden"}>
+      <div hidden={!showLibrary}>
       <div className="template-library-heading">
         <div>
           <h3>Silhouette Template Library</h3>
@@ -215,6 +219,37 @@ export default function TemplateLibraryPanel({ selection, cutSourceSelection, on
         {inspection?.files.filter((file) => file.status !== "available").map((file) => <span key={file.fileId} role="alert">{file.relativePath}: {file.status === "missing" ? "ausente" : "corrompido"}</span>)}
       </div>}
 
+      {templates.length === 0 ? <p className="muted">Biblioteca vazia.</p> : <ul className="template-list">
+        {templates.map((template) => <li key={template.id} className="template-list-item">
+          <div className="template-title-row">
+            <div><strong>{template.name}</strong><span>{template.source} · atualizado {template.updatedAt}</span></div>
+            <button className="button secondary" type="button" disabled={disabled || busy} onClick={() => void removeTemplate(template)}>Remover</button>
+          </div>
+          {template.versions.map((version) => {
+            const versionKey = `${template.id}:${version.version}`;
+            return <div className="template-version-row" key={versionKey}>
+              <div className="template-version-meta">
+                <strong>v{version.version} · {version.paper.toUpperCase()} · {version.cardFormat} · {version.orientation}</strong>
+                <code>SHA-256 {version.packageHash}</code>
+                <span>{templateRegistrationLabel(version)}{version.recommendedBleedMm === undefined ? "" : ` · bleed ${version.recommendedBleedMm} mm`} · {version.files.length} arquivo(s)</span>
+                <ul>{version.files.map((file) => <li key={file.fileId}>
+                  <a href={`/api/templates/files/${encodeURIComponent(file.fileId)}`}>{file.relativePath}</a>
+                  <span>{file.byteLength.toLocaleString()} bytes · SHA-256 {file.contentHash}</span>
+                </li>)}</ul>
+              </div>
+              <button className={`button ${selectedVersion(selection, template, version) ? "primary" : "secondary"}`} type="button" disabled={disabled || busy} aria-pressed={selectedId === versionKey} onClick={() => onSelect(
+                { templateId: template.id, version: version.version, packageHash: version.packageHash },
+                registrationDefaultsForTemplate(version),
+              )}>
+                {selectedVersion(selection, template, version) ? "Associado" : "Associar ao Project"}
+              </button>
+            </div>;
+          })}
+        </li>)}
+      </ul>}
+      {error && <p className="error-message" role="alert">{error}</p>}
+      </div>
+      <div hidden={!showCutSource}>
       {selection && <section className="template-cut-source" aria-label="Geometria de corte">
         <h4>Fonte de geometria de corte</h4>
         <p>Selecione explicitamente um SVG ou DXF desta versão. Se houver vários, nenhum será escolhido automaticamente. Sem arquivo selecionado, exports de corte usam somente retângulos de trim do layout.</p>
@@ -254,36 +289,8 @@ export default function TemplateLibraryPanel({ selection, cutSourceSelection, on
         {selectedCutFile && selectedCutFile.status !== "available" && <span role="alert">O original selecionado não está íntegro; preview e export ficam bloqueados.</span>}
         {cutFiles.length > 1 && <span>Esta versão contém {cutFiles.length} fontes vetoriais; a geometria exportada fica vinculada somente ao arquivo escolhido.</span>}
       </section>}
-
-      {templates.length === 0 ? <p className="muted">Biblioteca vazia.</p> : <ul className="template-list">
-        {templates.map((template) => <li key={template.id} className="template-list-item">
-          <div className="template-title-row">
-            <div><strong>{template.name}</strong><span>{template.source} · atualizado {template.updatedAt}</span></div>
-            <button className="button secondary" type="button" disabled={disabled || busy} onClick={() => void removeTemplate(template)}>Remover</button>
-          </div>
-          {template.versions.map((version) => {
-            const versionKey = `${template.id}:${version.version}`;
-            return <div className="template-version-row" key={versionKey}>
-              <div className="template-version-meta">
-                <strong>v{version.version} · {version.paper.toUpperCase()} · {version.cardFormat} · {version.orientation}</strong>
-                <code>SHA-256 {version.packageHash}</code>
-                <span>{templateRegistrationLabel(version)}{version.recommendedBleedMm === undefined ? "" : ` · bleed ${version.recommendedBleedMm} mm`} · {version.files.length} arquivo(s)</span>
-                <ul>{version.files.map((file) => <li key={file.fileId}>
-                  <a href={`/api/templates/files/${encodeURIComponent(file.fileId)}`}>{file.relativePath}</a>
-                  <span>{file.byteLength.toLocaleString()} bytes · SHA-256 {file.contentHash}</span>
-                </li>)}</ul>
-              </div>
-              <button className={`button ${selectedVersion(selection, template, version) ? "primary" : "secondary"}`} type="button" disabled={disabled || busy} aria-pressed={selectedId === versionKey} onClick={() => onSelect(
-                { templateId: template.id, version: version.version, packageHash: version.packageHash },
-                registrationDefaultsForTemplate(version),
-              )}>
-                {selectedVersion(selection, template, version) ? "Associado" : "Associar ao Project"}
-              </button>
-            </div>;
-          })}
-        </li>)}
-      </ul>}
-      {error && <p className="error-message" role="alert">{error}</p>}
+      {!selection && <section className="template-cut-source"><h4>Fonte de geometria de corte</h4><p>Associe um template em Templates para selecionar um SVG ou DXF original. Sem fonte associada, o corte usa somente retângulos de trim do layout.</p></section>}
+      </div>
     </section>
   );
 }

@@ -16,17 +16,18 @@ describe("import workbench page", () => {
     expect(markup).not.toContain("Criar preview");
     expect(markup).toMatch(/type=\"file\" multiple=\"\"[^>]*>/);
     expect(markup).toContain("webkitdirectory=\"\"");
-    expect(markup).toContain("Fase 7 · Projects e Working Set");
-    expect(markup).toContain("Card Details separa origem/hints importados da identidade aplicada");
+    expect(markup).toContain('aria-label="Seções de trabalho"');
+    expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain("Entradas");
     expect(markup).toContain("Adicionar cartas");
     expect(markup).not.toContain("Resolver identidades");
     expect(markup).not.toContain("Universal Import → Working Set");
-    expect(markup).toContain("Scryfall online");
+    expect(markup).toContain("Scryfall · verificando");
   });
 
   it("renders the session workbench with automatic Project saves and manual retry controls", () => {
     const markup = renderToStaticMarkup(createElement(CardIdentityWorkbench, { files: [], text: "", choices: {} }));
-    expect(markup).toContain("Projects e Working Set");
+    expect(markup).toContain("Projects");
     expect(markup).toContain("Criar Project vazio");
     expect(markup).toContain("Salvar agora");
     expect(markup).toMatch(/autosave/i);

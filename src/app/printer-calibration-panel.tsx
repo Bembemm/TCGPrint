@@ -478,7 +478,7 @@ export default function PrinterCalibrationPanel({
       setPhysicalMeasurementAttested(false);
     }
     setStatus(`${verification ? "Verification PDF" : "Calibration PDF"}${automaticDuplex ? " duplex de 2 páginas (Front → Back)" : ` · ${side}`} da sessão ${sessionId} baixado. Isso não marca verificação física.`);
-    setStep(verification ? 4 : 2);
+    setStep(verification ? 4 : 3);
   });
 
   const exportProfile = () => {
@@ -539,26 +539,21 @@ export default function PrinterCalibrationPanel({
   return <section className="printer-calibration-panel" aria-labelledby="printer-calibration-heading">
     <div className="panel-heading">
       <div>
-        <p className="eyebrow">Fase 13 · Precision Print Calibration</p>
         <h3 id="printer-calibration-heading">Calibração física da impressora</h3>
         <p>A correção final move o conteúdo impresso da página. Trim, layout, artwork original, registration reservado e arquivos de corte continuam nominais.</p>
       </div>
       <span className="calibration-status-badge">{printerProfileSelection ? `Profile v${printerProfileSelection.version}` : "Sem calibração"}</span>
     </div>
 
-    <div className="calibration-axis-convention" aria-label="Convenção dos eixos de calibração">
-      <strong>+X → direita</strong><strong>-X → esquerda</strong><strong>+Y → cima</strong><strong>-Y → baixo</strong>
-    </div>
-
-    <nav className="calibration-wizard-steps" aria-label="Etapas do Calibration Wizard">
-      {([1, 2, 3, 4] as const).map((item) => <button key={item} type="button" className={step === item ? "button primary" : "button secondary"} aria-current={step === item ? "step" : undefined} onClick={() => setStep(item)}>
-        {item}. {(["Profile", "Folha", "Medições", "Verificação"] as const)[item - 1]}
+    <nav className="calibration-wizard-steps" aria-label="Etapas do Calibration Wizard" role="tablist">
+      {([1, 2, 3, 4] as const).map((item) => <button key={item} id={`calibration-stage-tab-${item}`} type="button" role="tab" aria-selected={step === item} aria-controls="calibration-stage-panel" tabIndex={step === item ? 0 : -1} className={step === item ? "button primary" : "button secondary"} onClick={() => setStep(item)}>
+        {(["Profile", "Ajuste", "Medições", "Verificação"] as const)[item - 1]}
       </button>)}
     </nav>
 
-    <div className="calibration-layout">
+    <div className="calibration-layout" role="tabpanel" id="calibration-stage-panel" aria-labelledby={`calibration-stage-tab-${step}`} tabIndex={0} data-stage={step}>
       <div className="calibration-controls">
-        <div className="calibration-profile-fields">
+        <div className="calibration-profile-fields" hidden={step !== 1}>
           <label>Printer profile<select aria-label="Printer profile" value={printerProfileSelection?.id ?? ""} disabled={disabled || busy} onChange={(event) => {
             const next = profiles.find(({ id }) => id === event.currentTarget.value);
             if (next) applySelection(next);
@@ -596,6 +591,10 @@ export default function PrinterCalibrationPanel({
           </p>}
         </div>
 
+        <div className="calibration-adjust-controls" hidden={step !== 2}>
+        <div className="calibration-axis-convention" aria-label="Convenção dos eixos de calibração">
+          <strong>+X → direita</strong><strong>-X → esquerda</strong><strong>+Y → cima</strong><strong>-Y → baixo</strong>
+        </div>
         <div className="calibration-mode-switch" role="group" aria-label="Modo de calibração">
           <button type="button" className={mode === "simple" ? "button primary" : "button secondary"} aria-pressed={mode === "simple"} onClick={() => setMode("simple")}>Simple · X/Y/Rotation</button>
           <button type="button" className={mode === "advanced" ? "button primary" : "button secondary"} aria-pressed={mode === "advanced"} onClick={() => setMode("advanced")}>Advanced · Scale/Skew</button>
@@ -653,8 +652,9 @@ export default function PrinterCalibrationPanel({
             <button type="button" className="button secondary" aria-label="Rotation +0.001°" disabled={disabled || busy || !printerProfileSelection} onClick={() => setRotationNudge(0.001)}>+</button>
           </div>
         </div>
+        </div>
 
-        {mode === "advanced" && <div className="calibration-measurements">
+        <div className="calibration-measurements" hidden={step !== 3}>
           <h4>Erro observado por target (mm)</h4>
           <p>Delta = coordenada impressa observada − alvo nominal. X positivo é direita; Y positivo é fisicamente para cima. Informe medições reais da folha desta sessão.</p>
           {CALIBRATION_POINT_IDS.map((pointId) => <div className="calibration-measurement-row" key={pointId}>
@@ -664,9 +664,20 @@ export default function PrinterCalibrationPanel({
           </div>)}
           <button className="button secondary" type="button" disabled={disabled || busy || !printerProfileSelection} onClick={solveMeasurements}>Calcular transformação Advanced</button>
           {residualSummary && <p role="status">Resíduo após a correção: média {residualSummary.mean.toFixed(4)} mm · min {residualSummary.min.toFixed(4)} mm · max {residualSummary.max.toFixed(4)} mm. Sem critério universal de aprovação.</p>}
-        </div>}
+        </div>
 
-        {step === 4 && <div className="calibration-measurements physical-verification-measurements">
+        <div className="calibration-measurements physical-verification-measurements" hidden={step !== 4}>
+          <p>Profile {printerProfileSelection?.name ?? "não selecionado"} · revisão {printerProfileSelection ? `v${printerProfileSelection.version}` : "—"} · lado {side} · sessão {sessionId}</p>
+          {printerProfileSelection?.physicalVerification
+            ? <div className="calibration-accuracy-summary" role="status">
+                <strong>Verificação física registrada · {printerProfileSelection.physicalValidationStatus}</strong>
+                <span>Média {printerProfileSelection.physicalVerification.residualSummaryMm.mean.toFixed(3)} mm · min {printerProfileSelection.physicalVerification.residualSummaryMm.minimum.toFixed(3)} mm · max {printerProfileSelection.physicalVerification.residualSummaryMm.maximum.toFixed(3)} mm</span>
+                <ul>{printerProfileSelection.physicalVerification.measurements.map((item) => <li key={item.pointId}>{item.pointId}: X {millimeters(item.residualXUm)} mm · Y {millimeters(item.residualYUm)} mm</li>)}</ul>
+              </div>
+            : <p className="muted">Status atual: {printerProfileSelection?.physicalValidationStatus ?? "sem profile"}. Ainda não há uma medição física registrada para esta revisão.</p>}
+          <button type="button" className="button secondary" disabled={disabled || busy || !printerProfileSelection} onClick={() => void downloadSheet(true)}>
+            {printerDuplexMode.startsWith("automatic-") ? "Gerar Verification PDF duplex (2 páginas)" : `Gerar Verification PDF · ${side}`}
+          </button>
           <h4>Residual medido após correção (mm)</h4>
           <p>Informe diferença observada − nominal no Verification PDF desta sessão. Estes valores são evidência informada pelo usuário; o software não recebe dados da impressora nem define aprovação universal.</p>
           {CALIBRATION_POINT_IDS.map((pointId) => <div className="calibration-measurement-row" key={`verify-${pointId}`}>
@@ -676,10 +687,10 @@ export default function PrinterCalibrationPanel({
           </div>)}
           <label className="calibration-attestation"><input type="checkbox" checked={physicalMeasurementAttested} disabled={disabled || busy || !verificationSheetKey} onChange={(event) => setPhysicalMeasurementAttested(event.currentTarget.checked)} />Confirmo que medi estes residuals fisicamente no Verification PDF desta sessão, profile, versão e lado.</label>
           <button className="button primary" type="button" disabled={disabled || busy || !physicalMeasurementAttested || !verificationSheetKey || !printerProfileSelection} onClick={() => void recordPhysicalVerification()}>Registrar medição física e criar revisão</button>
-        </div>}
+        </div>
       </div>
 
-      <div className="calibration-preview-column">
+      <div className="calibration-preview-column" hidden={step !== 2}>
         <div className="calibration-preview-controls" role="group" aria-label="Preview nominal e calibrado">
           <button type="button" className={previewMode === "nominal" ? "button primary" : "button secondary"} aria-pressed={previewMode === "nominal"} onClick={() => setPreviewMode("nominal")}>Nominal</button>
           <button type="button" className={previewMode === "calibrated" ? "button primary" : "button secondary"} aria-pressed={previewMode === "calibrated"} onClick={() => setPreviewMode("calibrated")}>Calibrated</button>
@@ -691,18 +702,15 @@ export default function PrinterCalibrationPanel({
           {matrixGroups}
         </svg>
         <p className="muted">Azul = Front; laranja = Back. O overlay usa a matriz canônica do export, em coordenadas SVG Y-down. O tamanho físico da página não muda.</p>
-        <div className="calibration-wizard-actions">
+      </div>
+      <div className="calibration-wizard-actions" hidden={step !== 3}>
           <label>Fixture session ID<input type="text" value={sessionId} readOnly /></label>
           <button type="button" className="button secondary" onClick={() => { invalidateVerificationSheet(); setSessionId(freshId("calibration-session")); }}>Nova sessão</button>
           {printerDuplexMode.startsWith("automatic-") && <p className="muted calibration-duplex-job-instruction">Imprima este PDF de 2 páginas usando duplex automático e o binding selecionado. Não faça reinserção manual.</p>}
           <button type="button" className="button secondary" disabled={disabled || busy || !printerProfileSelection} onClick={() => void downloadSheet(false)}>
             {printerDuplexMode.startsWith("automatic-") ? "Gerar Calibration PDF duplex (2 páginas)" : `Gerar Calibration PDF · ${side}`}
           </button>
-          <button type="button" className="button secondary" disabled={disabled || busy || !printerProfileSelection} onClick={() => void downloadSheet(true)}>
-            {printerDuplexMode.startsWith("automatic-") ? "Gerar Verification PDF duplex (2 páginas)" : `Gerar Verification PDF · ${side}`}
-          </button>
           <button type="button" className="button primary" disabled={disabled || busy || !printerProfileSelection} onClick={() => void saveRecalibration()}>Salvar nova revisão do profile</button>
-        </div>
       </div>
     </div>
     {status && <p className="status-message" role="status">{status}</p>}

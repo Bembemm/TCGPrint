@@ -2,12 +2,15 @@
 
 import { useEffect, useState } from "react";
 import CutGuideControls from "./cut-guide-controls";
-import type { GuideColor, PageMarginsMm, PageOrientation } from "../../core/geometry";
+import type { CardFormat, GuideColor, PageMarginsMm, PageOrientation, PaperFormat } from "../../core/geometry";
 import { createDefaultRegistrationConfig, parseRegistrationConfig, type RegistrationConfig } from "../../core/registration";
 import type { ExportContentMode, MissingBackPolicy } from "../../persistence/projects/serializer";
 import type { DuplexFlipMode } from "../../core/duplex";
 
 export interface ProjectSettingsControlsProps {
+  readonly section?: "all" | "layout" | "pdf" | "cut";
+  readonly paperFormat: PaperFormat;
+  readonly cardFormat: CardFormat;
   readonly bleedMm: string;
   readonly roundedCorners: boolean;
   readonly trimGuideEnabled: boolean;
@@ -52,6 +55,9 @@ export interface ProjectSettingsControlsProps {
 }
 
 export default function ProjectSettingsControls({
+  section = "all",
+  paperFormat,
+  cardFormat,
   bleedMm,
   roundedCorners,
   trimGuideEnabled,
@@ -137,6 +143,8 @@ export default function ProjectSettingsControls({
   };
   return <>
     <div className="registration-layout-controls">
+      <section className="settings-subsection pdf-settings" aria-labelledby="pdf-settings-heading" hidden={section !== "all" && section !== "pdf"}>
+      <h3 id="pdf-settings-heading">PDF</h3>
       <label>Conteúdo do PDF<select aria-label="Modo de exportação" value={exportContentMode} disabled={disabled} onChange={(event) => onExportContentModeChange(event.currentTarget.value as ExportContentMode)}>
         <option value="front-only">Somente frente</option><option value="back-only">Somente verso</option><option value="front-back-separated">Frente e verso separados (2 PDFs)</option><option value="duplex">Duplex intercalado</option>
       </select></label>
@@ -149,15 +157,27 @@ export default function ProjectSettingsControls({
         </select></label>
         <p className="muted">Separated gera `front.pdf` e `back.pdf` independentes dentro de um ZIP com manifest pareado. Back-only e front-only continuam disponíveis em separado.</p>
       </>}
+      </section>
+
+      <section className="settings-subsection layout-settings" aria-labelledby="layout-settings-heading" hidden={section !== "all" && section !== "layout"}>
+      <h3 id="layout-settings-heading">Layout</h3>
+      <p className="muted">Papel: {paperFormat.name} · {paperFormat.widthMm} × {paperFormat.heightMm} mm. Carta: {cardFormat.name} · {cardFormat.widthMm} × {cardFormat.heightMm} mm.</p>
       <label>Orientação da página<select value={pageOrientation} disabled={disabled} onChange={(event) => onPageOrientationChange(event.currentTarget.value as PageOrientation)}>
         <option value="portrait">Portrait</option><option value="landscape">Landscape</option>
       </select></label>
       <label>Orientação das cartas<select value={cardOrientation} disabled={disabled} onChange={(event) => onCardOrientationChange(event.currentTarget.value as PageOrientation)}>
         <option value="portrait">Portrait</option><option value="landscape">Landscape</option>
       </select></label>
+
+      </section>
+
+      <section className="settings-subsection cut-settings" aria-labelledby="cut-settings-heading" hidden={section !== "all" && section !== "cut"}>
+      <h3 id="cut-settings-heading">Corte</h3>
       <label>Registration type<select value={registration.type} disabled={disabled} onChange={(event) => setRegistrationType(event.currentTarget.value)}>
         <option value="none">None</option><option value="three-point">Three-point</option><option value="four-point">Four-point</option><option value="custom">Custom</option>
       </select></label>
+      <details className="workspace-advanced-settings">
+        <summary>Registration e geometria custom</summary>
       <label>Orientação do registration<select value={registration.orientation} disabled={disabled} onChange={(event) => setRegistrationOrientation(event.currentTarget.value as PageOrientation)}>
         <option value="portrait">Portrait</option><option value="landscape">Landscape</option>
       </select></label>
@@ -173,6 +193,12 @@ export default function ProjectSettingsControls({
         <textarea rows={5} disabled={disabled} value={customGeometryJson} onChange={(event) => setCustomGeometry(event.currentTarget.value)} />
         {customGeometryError && <span role="alert">Custom geometry inválida: {customGeometryError}</span>}
       </label>}
+      </details>
+      </section>
+
+      <section className="settings-subsection layout-settings-advanced" hidden={section !== "all" && section !== "layout"}>
+      <details className="workspace-advanced-settings">
+      <summary>Grade, slots e margens avançados</summary>
       <label>Linhas da grade (opcional)<input type="number" min="1" max="1128" step="1" value={layoutRows} disabled={disabled || templateGeometryActive} onChange={(event) => onLayoutRowsChange(event.currentTarget.value)} /></label>
       <label>Colunas da grade (opcional)<input type="number" min="1" max="1128" step="1" value={layoutColumns} disabled={disabled || templateGeometryActive} onChange={(event) => onLayoutColumnsChange(event.currentTarget.value)} /></label>
       <label>Gap horizontal (mm)<input type="number" min="0" max="2000" step="0.1" value={horizontalGapMm} disabled={disabled} onChange={(event) => setPhysicalValue(event.currentTarget.value, onHorizontalGapChange)} /></label>
@@ -186,7 +212,13 @@ export default function ProjectSettingsControls({
         : layoutRows.trim() && layoutColumns.trim()
           ? `Slots desativados: ${skippedSlotIndices.length ? skippedSlotIndices.map((index) => index + 1).join(", ") : "nenhum"}. Clique em uma posição no preview para alternar.`
           : "Defina linhas e colunas antes de desativar slots."}</p>
+      </details>
+      {templateGeometryActive && <p className="template-geometry-status" role="status">Geometria física do template ativa; a grade manual permanece bloqueada.</p>}
+      </section>
     </div>
+    <section className="settings-subsection pdf-settings-advanced" hidden={section !== "all" && section !== "pdf"}>
+    <details className="workspace-advanced-settings">
+    <summary>Bleed, cantos e guias</summary>
     <label className="narrow-field">Bleed externo (mm)
       <input type="number" min="0" max="3" step="0.125" value={bleedMm} disabled={disabled} onChange={(event) => onBleedMmChange(event.currentTarget.value)} />
     </label>
@@ -209,5 +241,7 @@ export default function ProjectSettingsControls({
       onExternalStrokeWidthPtChange={onExternalGuideStrokeWidthPtChange}
       onExternalColorChange={onExternalGuideColorChange}
     />
+    </details>
+    </section>
   </>;
 }

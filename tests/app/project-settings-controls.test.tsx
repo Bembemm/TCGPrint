@@ -3,11 +3,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import ProjectSettingsControls from "../../src/app/project-settings-controls";
 import { createDefaultRegistrationConfig } from "../../core/registration";
+import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 
 describe("ProjectSettingsControls", () => {
   it("disables every persisted setting while a Project recovery decision is pending", () => {
     const inert = vi.fn();
     const markup = renderToStaticMarkup(createElement(ProjectSettingsControls, {
+      paperFormat: DEFAULT_PROJECT_SETTINGS.paperFormat,
+      cardFormat: DEFAULT_PROJECT_SETTINGS.cardFormat,
       bleedMm: "0.625",
       roundedCorners: false,
       trimGuideEnabled: true,
@@ -68,6 +71,8 @@ describe("ProjectSettingsControls", () => {
   it("locks manual grid dimensions when an immutable template geometry is active", () => {
     const inert = vi.fn();
     const markup = renderToStaticMarkup(createElement(ProjectSettingsControls, {
+      paperFormat: DEFAULT_PROJECT_SETTINGS.paperFormat,
+      cardFormat: DEFAULT_PROJECT_SETTINGS.cardFormat,
       bleedMm: "0.625",
       roundedCorners: false,
       trimGuideEnabled: false,
