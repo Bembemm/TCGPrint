@@ -20,6 +20,7 @@ describe("import workbench page", () => {
     expect(markup).toContain("Card Details separa origem/hints importados da identidade aplicada");
     expect(markup).toContain("Adicionar cartas");
     expect(markup).not.toContain("Resolver identidades");
+    expect(markup).not.toContain("Universal Import → Working Set");
     expect(markup).toContain("Scryfall online");
   });
 
