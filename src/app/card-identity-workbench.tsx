@@ -61,6 +61,7 @@ import BackLibraryControls, { type BackLibraryAssetDto } from "./back-library-co
 import { createBackValidationSummary, exportModeRequiresFrontArtwork } from "./back-validation";
 import { applyTemplateLayoutDefaults } from "./template-layout-defaults";
 import { createProjectRestoreLookupGate, runProjectRestoreProviderLookup } from "./project-restore-provider-gate";
+import type { ResolveWorkingCardsResult, SafeImportReport, WorkingSetImportResult } from "../../services/card-workbench";
 
 type ArtworkFilter = "all" | "scryfall" | "mpc" | "upload";
 type CandidateDto = Omit<ArtworkCandidate, "originalUri" | "localOriginalPath" | "previewUri"> & {
@@ -85,6 +86,50 @@ async function jsonResponse<T>(response: Response): Promise<T> {
   try { body = await response.json(); } catch { throw new Error(`Server response was not JSON (HTTP ${response.status}).`); }
   if (!response.ok) throw new Error((body as ApiErrorBody)?.message ?? `Request failed (${response.status}).`);
   return body as T;
+}
+
+export type AddCardsFlowPhase = "import" | "resolve";
+
+export interface AddCardsFlowResult extends ResolveWorkingCardsResult {
+  readonly report: SafeImportReport;
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (!signal.aborted) return;
+  const error = new Error("A adição de cartas foi cancelada.");
+  error.name = "AbortError";
+  throw error;
+}
+
+export async function runAddCardsFlow(
+  form: FormData,
+  signal: AbortSignal,
+  fetcher: typeof fetch = fetch,
+  onPhase: (phase: AddCardsFlowPhase) => void = () => undefined,
+): Promise<AddCardsFlowResult> {
+  throwIfAborted(signal);
+  onPhase("import");
+  const importResponse = await fetcher("/api/cards/import", { method: "POST", body: form, signal });
+  const imported = await jsonResponse<WorkingSetImportResult>(importResponse);
+  throwIfAborted(signal);
+
+  onPhase("resolve");
+  const resolveResponse = await fetcher("/api/cards/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "resolve", cards: imported.workingCards }),
+    signal,
+  });
+  const resolved = await jsonResponse<ResolveWorkingCardsResult>(resolveResponse);
+  throwIfAborted(signal);
+
+  return { ...resolved, report: imported.report };
+}
+
+export function tryAcquireAddCardsOperation(inFlight: { current: boolean }): boolean {
+  if (inFlight.current) return false;
+  inFlight.current = true;
+  return true;
 }
 
 function labelSource(source: string): string {
@@ -552,7 +597,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [templateGeometry, setTemplateGeometry] = useState<TemplateLayoutGeometryMm | undefined>();
   const [cutSourceSelection, setCutSourceSelection] = useState<CutSourceSelection | null>(null);
   const [busy, setBusy] = useState(false);
-  const [abortableOperation, setAbortableOperation] = useState<"resolve" | "artwork" | "export" | null>(null);
+  const [abortableOperation, setAbortableOperation] = useState<"add-cards" | "artwork" | "export" | null>(null);
   const [projectOpenPending, setProjectOpenPending] = useState(false);
   const [projectRestoreVersion, setProjectRestoreVersion] = useState(0);
   const [activeProjectSync, setActiveProjectSync] = useState<{ readonly projectId: string; readonly revision: number; readonly saved: boolean } | null>(null);
@@ -568,6 +613,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [pdfUrl, setPdfUrl] = useState("");
   const [exportDownloadName, setExportDownloadName] = useState("tcgprint-cards.pdf");
   const activeOperationAbortController = useRef<AbortController | null>(null);
+  const addCardsInFlight = useRef(false);
+  const [lastImportReport, setLastImportReport] = useState<SafeImportReport | null>(null);
   const [cutGeometryPreview, setCutGeometryPreview] = useState<CutPreviewDto | null>(null);
   const [cutPageNumber, setCutPageNumber] = useState(1);
   const [bleedDiagnostics, setBleedDiagnostics] = useState<BleedDiagnosticsReport | null>(null);
@@ -626,7 +673,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     setProblemCardId(cardId);
   }
 
-  function beginAbortableOperation(operation: "resolve" | "artwork" | "export"): AbortController {
+  function beginAbortableOperation(operation: "add-cards" | "artwork" | "export"): AbortController {
     const controller = new AbortController();
     activeOperationAbortController.current = controller;
     setAbortableOperation(operation);
@@ -797,17 +844,23 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     return () => { current = false; };
   }, [activeIdentityId, projectRestoreVersion]);
 
-  async function importToWorkingSet() {
-    if (!files.length && !text.trim()) { clearProblem(); setProblem("Adicione arquivos ou cole uma decklist antes de importar."); return; }
-    setBusy(true); clearProblem(); setStatus("Universal Import → Working Set…"); setPdfUrl("");
+  async function addCards() {
+    if (projectOpenPendingRef.current) return;
+    if (!files.length && !text.trim()) { clearProblem(); setProblem("Adicione arquivos ou cole uma decklist antes de adicionar."); return; }
+    if (!tryAcquireAddCardsOperation(addCardsInFlight)) return;
+    const controller = beginAbortableOperation("add-cards");
+    setBusy(true); clearProblem(); setStatus("Lendo entradas / preparando cartas…"); setPdfUrl("");
     try {
       const form = new FormData();
       files.forEach((file) => form.append("files", file, file.name));
       form.set("filePaths", JSON.stringify(files.map((file) => file.webkitRelativePath || "")));
       if (text.trim()) form.set("text", text);
       form.set("selections", JSON.stringify(choices));
-      const response = await fetch("/api/cards/import", { method: "POST", body: form });
-      const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth: typeof providerHealth }>(response);
+      const result = await runAddCardsFlow(form, controller.signal, fetch, (phase) => {
+        setStatus(phase === "import" ? "Lendo entradas / preparando cartas…" : "Resolvendo identidades…");
+      });
+      throwIfAborted(controller.signal);
+      if (projectOpenPendingRef.current) throw new Error("O Project está sendo aberto. Tente adicionar as cartas novamente.");
       clearRequestCache(artworkCatalogRequests.current);
       setArtworkCatalogRevision((revision) => revision + 1);
       setArtworkCandidates([]);
@@ -815,26 +868,22 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       dispatchEditor({ type: "load-cards", cards: result.workingCards });
       setArtworkFilter("all"); setManualIdentities([]);
       setProviderHealth(result.providerHealth);
-      setStatus(`${result.workingCards.length} entradas no Working Set. Quantidades permanecem compactas.`);
+      setLastImportReport(result.report);
+      const attentionCount = result.workingCards.filter((card) => ["suggested", "ambiguous", "unresolved"].includes(card.identityResolution.status)).length;
+      const attentionSummary = attentionCount === 1 ? "1 entrada precisa de atenção." : `${attentionCount} entradas precisam de atenção.`;
+      const resolutionSummary = formatResolutionSummary(result.workingCards, result.providerHealth).replace(/^Resolução: /, "");
+      setStatus(`Pronto · ${resolutionSummary} · ${attentionSummary}`);
     } catch (error) {
-      setProblem(error instanceof Error ? error.message : "Não foi possível importar para o Working Set."); setStatus("");
-    } finally { setBusy(false); }
-  }
-
-  async function resolveAll() {
-    if (!workingCards.length) return;
-    const controller = beginAbortableOperation("resolve");
-    setBusy(true); clearProblem(); setStatus("Resolvendo identidades pelo Scryfall…");
-    try {
-      const response = await fetch("/api/cards/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resolve", cards: workingCards }), signal: controller.signal });
-      const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth: typeof providerHealth }>(response);
-      dispatchEditor({ type: "apply-resolve-all-result", cards: result.workingCards }); setProviderHealth(result.providerHealth);
-      setStatus(formatResolutionSummary(result.workingCards, result.providerHealth));
-    } catch (error) {
-      if (controller.signal.aborted) { setProblem(""); setStatus("Resolução cancelada."); }
-      else { setProblem(error instanceof Error ? error.message : "A resolução falhou."); setStatus(""); }
+      if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
+        setProblem(""); setStatus("Adição cancelada.");
+      } else {
+        setProblem(error instanceof Error ? error.message : "Não foi possível adicionar as cartas."); setStatus("");
+      }
+    } finally {
+      finishAbortableOperation(controller);
+      addCardsInFlight.current = false;
+      setBusy(false);
     }
-    finally { finishAbortableOperation(controller); setBusy(false); }
   }
 
   async function reresolveCard(card: WorkingCard) {
@@ -1204,9 +1253,8 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       />
 
       <div className="action-row phase5-actions">
-        <button className="button primary" type="button" onClick={importToWorkingSet} disabled={interactionBusy}>{busy ? "Processando…" : "Universal Import → Working Set"}</button>
-        <button className="button secondary" type="button" onClick={resolveAll} disabled={interactionBusy || !workingCards.length}>Resolver identidades</button>
-        {abortableOperation === "resolve" && <button className="button secondary" type="button" aria-label="Cancelar resolução" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar resolução</button>}
+        <button className="button primary" type="button" onClick={addCards} disabled={interactionBusy}>{abortableOperation === "add-cards" ? "Adicionando…" : "Adicionar cartas"}</button>
+        {abortableOperation === "add-cards" && <button className="button secondary" type="button" aria-label="Cancelar adição" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar adição</button>}
         <div className="editor-history-controls" role="group" aria-label="Histórico do editor">
           <button className="button secondary" type="button" aria-label="Desfazer" aria-keyshortcuts="Control+Z Meta+Z" disabled={interactionBusy || editorHistory.past.length === 0} onClick={() => dispatchEditor({ type: "undo" })}>Desfazer</button>
           <button className="button secondary" type="button" aria-label="Refazer" aria-keyshortcuts="Control+Y Meta+Y Control+Shift+Z Meta+Shift+Z" disabled={interactionBusy || editorHistory.future.length === 0} onClick={() => dispatchEditor({ type: "redo" })}>Refazer</button>
@@ -1214,6 +1262,21 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         <span className="status" aria-live="polite">{status}</span>
       </div>
       {(visibleProblem || editorState.error) && <p className="error-message" role="alert">{visibleProblem || editorState.error}</p>}
+
+      {lastImportReport && <details className="import-diagnostic">
+        <summary>Diagnóstico da última adição</summary>
+        <dl className="summary-grid">
+          {Object.entries(lastImportReport.summary).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}
+        </dl>
+        <h3>Fontes e importers</h3>
+        <ul>{lastImportReport.sources.map((source) => {
+          const selected = lastImportReport.selectedImporters.find((item) => item.sourceId === source.id);
+          return <li key={source.id}>{source.filename ?? source.id} · {source.kind}{selected ? ` · ${selected.kind}` : ""}</li>;
+        })}</ul>
+        {lastImportReport.warnings.length > 0 && <><h3>Warnings</h3><ul>{lastImportReport.warnings.map((item, index) => <li key={`${item.code}:${index}`}><strong>{item.code}</strong> · {item.message}</li>)}</ul></>}
+        {lastImportReport.errors.length > 0 && <><h3>Errors</h3><ul className="issue-list errors">{lastImportReport.errors.map((item, index) => <li key={`${item.code}:${index}`}><strong>{item.code}</strong> · {item.message}</li>)}</ul></>}
+        {lastImportReport.pairings.length > 0 && <><h3>Sugestões de pareamento Front/Back</h3><ul>{lastImportReport.pairings.map((pairing, index) => <li key={`${pairing.frontAssetId}:${pairing.backAssetId}:${index}`}>{pairing.reason} · {(pairing.confidence * 100).toFixed(0)}% · requer confirmação</li>)}</ul></>}
+      </details>}
 
       {workingCards.length > 0 && <div className="card-workbench-layout">
         <WorkingCardList

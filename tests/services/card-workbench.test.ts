@@ -9,13 +9,17 @@ import { handleArtworkList, handleCardExport, handleCardImport, handleResolve, p
 import { ArtworkCatalog } from "../../artwork/catalog";
 import { appDataPaths, originalPathForHash } from "../../artwork/storage/paths";
 import type { ScryfallClient } from "../../providers/scryfall/client";
+import type { CardWorkbench } from "../../services/card-workbench";
 import type { ScryfallCard } from "../../providers/scryfall/types";
 import type { ArtworkCandidate } from "../../core/cards/types";
 import { mapScryfallCard } from "../../providers/scryfall/mapper";
+import { ScryfallError } from "../../providers/scryfall/errors";
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
 import { mpcArtworkCandidateId } from "../../core/cards/ids";
 import { BackSelectionPolicyError, isDoubleFacedIdentity } from "../../core/cards/back-selection";
 import { NO_CUT_GUIDES } from "../helpers/cut-guides";
+import { runAddCardsFlow } from "../../src/app/card-identity-workbench";
+import { deserializeProjectSnapshot, serializeProjectSnapshot, DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 
 const roots: string[] = [];
 const workbenches: Array<{ close(): Promise<void> }> = [];
@@ -114,6 +118,16 @@ function collectKeys(value: unknown, output: string[] = []): string[] {
   return output;
 }
 
+function cardApiFetcher(workbench: CardWorkbench) {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), "http://localhost");
+    const request = new Request(input instanceof Request ? input : url, init);
+    if (url.pathname === "/api/cards/import") return handleCardImport(request, workbench);
+    if (url.pathname === "/api/cards/resolve") return handleResolve(request, workbench);
+    throw new Error(`Unexpected add-cards request: ${url.pathname}`);
+  });
+}
+
 describe("card workbench services", () => {
   it("keeps deck quantities, sections and order in one session WorkingCard per entry", async () => {
     const { workbench } = await setup();
@@ -135,6 +149,110 @@ describe("card workbench services", () => {
 
     expect(resolved.workingCards[0]).toMatchObject({ identity: { name: "Island", resolutionMethod: "name" }, identityResolution: { status: "resolved" } });
     expect(fake.lookupByName).toHaveBeenCalledWith("Island", "exact", expect.anything());
+  });
+
+  it("adds a full decklist in one operation with order, sections, quantities, DFC faces, and Project round-trip intact", async () => {
+    const delver = mapScryfallCard(delverCard);
+    const fake = fakeScryfallClient([...resolvedDeckPrintings, delver]);
+    fake.lookupByName.mockImplementation(async (name) => name === "Delver of Secrets"
+      ? delver
+      : resolvedDeckPrintings.find((item) => item.name === name) ?? Promise.reject(Object.assign(new Error("not found"), { kind: "not-found" })));
+    const { workbench } = await setup(undefined, fake.client);
+    const fetcher = cardApiFetcher(workbench);
+    const form = new FormData();
+    form.set("text", "Mainboard\n4 Island\n2 Sol Ring\nSideboard\n1 Delver of Secrets");
+    const phases: string[] = [];
+
+    const result = await runAddCardsFlow(form, new AbortController().signal, fetcher, (phase) => phases.push(phase));
+
+    expect(fetcher.mock.calls.map(([input]) => String(input))).toEqual(["/api/cards/import", "/api/cards/resolve"]);
+    expect(phases).toEqual(["import", "resolve"]);
+    expect(result.workingCards.map(({ quantity, order, section, identity, identityResolution }) => ({
+      quantity, order, section, name: identity?.name, status: identityResolution.status,
+    }))).toEqual([
+      { quantity: 4, order: 0, section: "Mainboard", name: "Island", status: "resolved" },
+      { quantity: 2, order: 1, section: "Mainboard", name: "Sol Ring", status: "resolved" },
+      { quantity: 1, order: 2, section: "Sideboard", name: "Delver of Secrets // Insectile Aberration", status: "resolved" },
+    ]);
+    expect(result.workingCards[2]).toMatchObject({
+      identity: { metadata: { layout: "transform" } },
+      faces: [{ side: "front", name: "Delver of Secrets" }, { side: "back", name: "Insectile Aberration" }],
+      selectedArtworkByFace: {
+        front: { source: "scryfall", faceId: "front" },
+        back: { source: "scryfall", faceId: "back" },
+      },
+    });
+    expect(result.workingCards[0]?.selectedArtworkByFace.front).toMatchObject({ source: "scryfall", faceId: "front" });
+    expect(result.report.sources).toHaveLength(1);
+    expect(fake.lookupByName).toHaveBeenCalledTimes(3);
+    expect(deserializeProjectSnapshot(serializeProjectSnapshot(result.workingCards, DEFAULT_PROJECT_SETTINGS)).cards).toEqual(result.workingCards);
+  });
+
+  it("keeps valid siblings when one imported decklist entry is unresolved", async () => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    const { workbench } = await setup(undefined, fake.client);
+    const form = new FormData();
+    form.set("text", "1 Island\n1 Not A Real Card Name 98341\n1 Lightning Bolt");
+
+    const result = await runAddCardsFlow(form, new AbortController().signal, cardApiFetcher(workbench));
+
+    expect(result.workingCards.map((card) => card.identity?.name ?? card.identityHints.name)).toEqual([
+      "Island", "Not A Real Card Name 98341", "Lightning Bolt",
+    ]);
+    expect(result.workingCards.map((card) => card.identityResolution.status)).toEqual(["resolved", "unresolved", "resolved"]);
+  });
+
+  it("keeps decklist cards when a sibling file has a real importer ambiguity", async () => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    const { workbench } = await setup(undefined, fake.client);
+    const form = new FormData();
+    form.set("text", "1 Island\n1 Lightning Bolt");
+    const ambiguousFile = "name, set\tquantity\nA, ABC\t1\nB, XYZ\t2\n";
+    form.append("files", new File([ambiguousFile], "mixed.csv"));
+    form.set("filePaths", JSON.stringify([""]));
+
+    const result = await runAddCardsFlow(form, new AbortController().signal, cardApiFetcher(workbench));
+
+    expect(result.workingCards.map((card) => card.identity?.name)).toEqual(["Island", "Lightning Bolt"]);
+    expect(result.report.summary.ambiguousDetections).toBe(1);
+    expect(result.report.errors).toEqual([]);
+  });
+
+  it("keeps valid siblings when Scryfall fails for one entry and reports provider degradation", async () => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    fake.lookupByName.mockImplementation(async (name) => {
+      if (name === "Sol Ring") throw new ScryfallError("network", "Scryfall network unavailable");
+      const card = resolvedDeckPrintings.find((item) => item.name === name);
+      if (!card) throw Object.assign(new Error("not found"), { kind: "not-found" });
+      return card;
+    });
+    const { workbench } = await setup(undefined, fake.client);
+    const form = new FormData();
+    form.set("text", "1 Island\n1 Sol Ring\n1 Lightning Bolt");
+
+    const result = await runAddCardsFlow(form, new AbortController().signal, cardApiFetcher(workbench));
+
+    expect(result.workingCards.map((card) => card.identity?.name ?? card.identityHints.name)).toEqual(["Island", "Sol Ring", "Lightning Bolt"]);
+    expect(result.workingCards.map((card) => card.identityResolution.status)).toEqual(["resolved", "unresolved", "resolved"]);
+    expect(result.providerHealth.scryfall).toMatchObject({ degraded: true });
+  });
+
+  it.each(["Island.png", "1x Sol Ring [MPC].png"])("does not call Scryfall during one-click addition of custom %s", async (filename) => {
+    const fake = fakeScryfallClient(resolvedDeckPrintings);
+    const { workbench } = await setup(undefined, fake.client);
+    const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
+    const form = new FormData();
+    form.append("files", new File([bytes], filename, { type: "image/png" }));
+    form.set("filePaths", JSON.stringify([""]));
+
+    const result = await runAddCardsFlow(form, new AbortController().signal, cardApiFetcher(workbench));
+
+    expect(result.workingCards[0]).toMatchObject({ identity: null, identityResolution: { status: "custom", confirmed: true } });
+    expect(result.workingCards[0]?.selectedArtworkByFace.front).toMatchObject({ source: "upload" });
+    expect(fake.lookupById).not.toHaveBeenCalled();
+    expect(fake.lookupBySetCollector).not.toHaveBeenCalled();
+    expect(fake.lookupByName).not.toHaveBeenCalled();
+    expect(fake.searchCards).not.toHaveBeenCalled();
   });
 
   it("keys identity resolution by semantic hints rather than upload filenames or artwork IDs", async () => {

@@ -159,7 +159,7 @@ export default function HomePage() {
         <div>
           <p className="eyebrow">TCGPrint · fase 5</p>
           <h1>Card Identity + Artwork</h1>
-          <p className="subhead">Universal Import → CardIdentity → catálogo de artes → PDF físico A4.</p>
+          <p className="subhead">Adicione cartas → escolha artwork → PDF físico A4.</p>
         </div>
         <div className="local-badge">Working Set da sessão · Scryfall online</div>
       </header>
@@ -240,8 +240,8 @@ export default function HomePage() {
           </div>
         )}
         <div className="action-row">
-          <button className="button primary" type="button" onClick={runPreview} disabled={busy}>
-            {busy ? "Processando…" : "Criar preview"}
+          <button className="button secondary" type="button" onClick={runPreview} disabled={busy}>
+            {busy ? "Analisando…" : "Diagnóstico da importação"}
           </button>
           <span className="status" aria-live="polite">{status}</span>
         </div>
@@ -254,8 +254,8 @@ export default function HomePage() {
         <section className="panel report-panel" aria-labelledby="report-heading">
           <div className="panel-heading">
             <div>
-              <h2 id="report-heading">ImportReport</h2>
-              <p>Preview somente leitura; confirme as entradas na etapa seguinte do produto.</p>
+              <h2 id="report-heading">Diagnóstico da importação · ImportReport</h2>
+              <p>Inspeção opcional de detecções, mappings, warnings e erros. Adicione cartas pelo fluxo principal abaixo.</p>
             </div>
           </div>
 

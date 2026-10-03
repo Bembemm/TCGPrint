@@ -47,6 +47,13 @@ describe("working card editor list UI", () => {
     expect([...markup.matchAll(/aria-label="(?:Diminuir quantidade|Aumentar quantidade|Quantidade|Mover|Duplicar|Excluir)[^"]*"[^>]*disabled=""/g)]).toHaveLength(14);
   });
 
+  it("shows one primary Add cards action without a global identity-resolution button", () => {
+    const markup = renderToStaticMarkup(createElement(workbenchModule.default, { files: [], text: "", choices: {} }));
+
+    expect(markup).toContain(">Adicionar cartas<");
+    expect(markup).not.toContain(">Resolver identidades<");
+  });
+
   it("announces semantic DFC identity in the main card list", () => {
     const dfc: WorkingCard = {
       ...card,
