@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "baseSha": "18bcad3916b2ff2137ca3f1bfa747236e69c4072",
   "policy": {
-    "pdfRasterResources": "Per PDFDocument only; key includes format, byte length, raster dimensions, PNG bit depth/color type or JPEG precision/components and SHA-256; exact byte equality confirms reuse. SHA bucket collisions remain distinct resources.",
+    "pdfRasterResources": "Per PDFDocument only; reuse is enabled only when preflight counts more than one exact byte identity in a SHA-256 bucket. Key includes format, byte length, raster dimensions, PNG bit depth/color type or JPEG precision/components and SHA-256; cache hits still require exact byte equality against the private embedded snapshot. Unique rasters use direct embeds and create no snapshot entry; SHA bucket collisions remain distinct resources.",
     "bleed": "Export scoped BleedEngine/MemoryBleedCache, complete key covers algorithm version, original content hash, bleed, trim dimensions, rounded-corner flag and radius/version as applicable; validate metadata and digest before cache lookup; decode only on a miss.",
     "repeatedInputs": "Within one export, exact repeated source bytes share the candidate/original lookup when the candidate/context repeats and share bleed work by derivative key plus byte equality. Large unique originals are not stored in the candidate/original memo.",
     "artworkStores": "ArtworkOriginalStore remains content-addressed and immutable; ArtworkThumbnailStore and ArtworkMetadataCache retain their existing storage/validation/expiry semantics. No original GC or new persistent cache was added.",
@@ -10,15 +10,15 @@
   },
   "measured": {
     "bleedCold": {
-      "baselineMs": 118.1501229999999,
-      "optimizedMs": 113.42195600000014,
+      "baselineMs": 122.2100730000002,
+      "optimizedMs": 110.83514399999967,
       "baselineBytes": 283012,
       "optimizedBytes": 283012,
       "outputBytesIdentical": true
     },
     "bleedWarm": {
-      "baselineMs": 10.963344000000234,
-      "optimizedMs": 2.22272699999985,
+      "baselineMs": 13.115232000000105,
+      "optimizedMs": 1.746382999999696,
       "baselineBytes": 283012,
       "optimizedBytes": 283012,
       "outputBytesIdentical": true,
@@ -35,7 +35,24 @@
       "baselineImageEmbeds": 500,
       "optimizedImageEmbeds": 1,
       "baselinePdfBytes": 19632382,
-      "optimizedPdfBytes": 59466
+      "optimizedPdfBytes": 59469
+    },
+    "uniqueFullSizeBleedRasterResources": {
+      "scenario": "pdf-bleed-resource-cache-unique-fullsize-16",
+      "derivativeBytes": 4451613,
+      "sourceRasterBytes": 817020,
+      "xObjectsBefore": 32,
+      "xObjectsAfter": 32,
+      "pdfBytesBefore": 5125155,
+      "pdfBytesAfter": 5125155,
+      "cacheEntriesBefore": 32,
+      "cacheEntriesAfter": 0,
+      "snapshotBytesBefore": 5268633,
+      "snapshotBytesAfter": 0,
+      "cacheHitsBefore": 0,
+      "cacheHitsAfter": 0,
+      "cacheMissesBefore": 32,
+      "cacheMissesAfter": 0
     }
   },
   "existingCacheOwners": [

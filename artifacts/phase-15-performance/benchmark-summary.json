@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "baseSha": "18bcad3916b2ff2137ca3f1bfa747236e69c4072",
   "branch": "feature/fase-15-performance",
-  "baselineRecordedAt": "2026-10-03T03:51:32.621Z",
-  "optimizedRecordedAt": "2026-10-03T04:33:30.988Z",
+  "baselineRecordedAt": "2026-10-03T05:34:08.173Z",
+  "optimizedRecordedAt": "2026-10-03T05:44:12.996Z",
   "runtime": {
     "node": "v22.23.3",
     "platform": "linux",
@@ -28,29 +28,29 @@
         "name": "import-decklist-9",
         "count": 9,
         "wallTimeMs": {
-          "baseline": 7.301285000000007,
-          "optimized": 7.556101000000126,
-          "deltaPercent": 3.49
+          "baseline": 8.402446999999938,
+          "optimized": 6.744026000000076,
+          "deltaPercent": -19.74
         },
         "cpuUserMs": {
-          "baseline": 6.265,
-          "optimized": 7.615,
-          "deltaPercent": 21.55
+          "baseline": 8.373,
+          "optimized": 6.781,
+          "deltaPercent": -19.01
         },
         "cpuSystemMs": {
-          "baseline": 0.994,
+          "baseline": 0.081,
           "optimized": 0,
           "deltaPercent": -100
         },
         "rssPeakSampledBytes": {
-          "baseline": 127201280,
-          "optimized": 124764160,
-          "deltaPercent": -1.92
+          "baseline": 129155072,
+          "optimized": 130433024,
+          "deltaPercent": 0.99
         },
         "heapPeakSampledBytes": {
-          "baseline": 35587472,
-          "optimized": 35114704,
-          "deltaPercent": -1.33
+          "baseline": 35044976,
+          "optimized": 35194456,
+          "deltaPercent": 0.43
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -72,29 +72,29 @@
         "name": "working-set-build-9",
         "count": 9,
         "wallTimeMs": {
-          "baseline": 2.113943000000063,
-          "optimized": 1.890378999999939,
-          "deltaPercent": -10.58
+          "baseline": 1.8409780000001774,
+          "optimized": 1.7897040000000288,
+          "deltaPercent": -2.79
         },
         "cpuUserMs": {
-          "baseline": 1.875,
-          "optimized": 1.904,
-          "deltaPercent": 1.55
+          "baseline": 0.96,
+          "optimized": 1.805,
+          "deltaPercent": 88.02
         },
         "cpuSystemMs": {
-          "baseline": 0,
+          "baseline": 0.856,
           "optimized": 0,
-          "deltaPercent": null
+          "deltaPercent": -100
         },
         "rssPeakSampledBytes": {
-          "baseline": 127201280,
-          "optimized": 124895232,
-          "deltaPercent": -1.81
+          "baseline": 129155072,
+          "optimized": 130564096,
+          "deltaPercent": 1.09
         },
         "heapPeakSampledBytes": {
-          "baseline": 35720056,
-          "optimized": 35247280,
-          "deltaPercent": -1.32
+          "baseline": 35177552,
+          "optimized": 35327032,
+          "deltaPercent": 0.42
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -114,29 +114,29 @@
         "name": "working-set-server-render-9",
         "count": 9,
         "wallTimeMs": {
-          "baseline": 19.318346999999903,
-          "optimized": 19.067775999999867,
-          "deltaPercent": -1.3
+          "baseline": 19.868132999999943,
+          "optimized": 18.289642000000185,
+          "deltaPercent": -7.94
         },
         "cpuUserMs": {
-          "baseline": 18.566,
-          "optimized": 19.127,
-          "deltaPercent": 3.02
+          "baseline": 17.69,
+          "optimized": 18.334,
+          "deltaPercent": 3.64
         },
         "cpuSystemMs": {
-          "baseline": 0.902,
-          "optimized": 0.893,
-          "deltaPercent": -1
+          "baseline": 0.8,
+          "optimized": 0,
+          "deltaPercent": -100
         },
         "rssPeakSampledBytes": {
-          "baseline": 128643072,
-          "optimized": 125419520,
-          "deltaPercent": -2.51
+          "baseline": 129679360,
+          "optimized": 131088384,
+          "deltaPercent": 1.09
         },
         "heapPeakSampledBytes": {
-          "baseline": 37442320,
-          "optimized": 36952728,
-          "deltaPercent": -1.31
+          "baseline": 36883224,
+          "optimized": 37032472,
+          "deltaPercent": 0.4
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -158,29 +158,29 @@
         "name": "artwork-gallery-server-render-9",
         "count": 9,
         "wallTimeMs": {
-          "baseline": 34.45908300000019,
-          "optimized": 36.16745800000035,
-          "deltaPercent": 4.96
+          "baseline": 35.80756500000007,
+          "optimized": 37.498727000000144,
+          "deltaPercent": 4.72
         },
         "cpuUserMs": {
-          "baseline": 35.632,
-          "optimized": 36.309,
-          "deltaPercent": 1.9
+          "baseline": 36.52,
+          "optimized": 42.147,
+          "deltaPercent": 15.41
         },
         "cpuSystemMs": {
-          "baseline": 0,
-          "optimized": 2.638,
-          "deltaPercent": null
+          "baseline": 0.828,
+          "optimized": 0.905,
+          "deltaPercent": 9.3
         },
         "rssPeakSampledBytes": {
-          "baseline": 168071168,
-          "optimized": 168300544,
-          "deltaPercent": 0.14
+          "baseline": 169050112,
+          "optimized": 170635264,
+          "deltaPercent": 0.94
         },
         "heapPeakSampledBytes": {
-          "baseline": 64775896,
-          "optimized": 63449968,
-          "deltaPercent": -2.05
+          "baseline": 63132184,
+          "optimized": 63781792,
+          "deltaPercent": 1.03
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -204,29 +204,29 @@
         "name": "projects-list-server-render-9",
         "count": 9,
         "wallTimeMs": {
-          "baseline": 11.326545000000124,
-          "optimized": 11.448639000000185,
-          "deltaPercent": 1.08
+          "baseline": 10.878621000000294,
+          "optimized": 10.331638000000112,
+          "deltaPercent": -5.03
         },
         "cpuUserMs": {
-          "baseline": 9.705,
-          "optimized": 11.48,
-          "deltaPercent": 18.29
+          "baseline": 9.947,
+          "optimized": 9.677,
+          "deltaPercent": -2.71
         },
         "cpuSystemMs": {
-          "baseline": 0.936,
-          "optimized": 0.778,
-          "deltaPercent": -16.88
+          "baseline": 0.973,
+          "optimized": 0.749,
+          "deltaPercent": -23.02
         },
         "rssPeakSampledBytes": {
-          "baseline": 129429504,
-          "optimized": 125681664,
-          "deltaPercent": -2.9
+          "baseline": 129941504,
+          "optimized": 131350528,
+          "deltaPercent": 1.08
         },
         "heapPeakSampledBytes": {
-          "baseline": 38195400,
-          "optimized": 37705120,
-          "deltaPercent": -1.28
+          "baseline": 37635712,
+          "optimized": 37784864,
+          "deltaPercent": 0.4
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -248,29 +248,29 @@
         "name": "pdf-export-9-repeated-artwork",
         "count": 9,
         "wallTimeMs": {
-          "baseline": 4.264031999999133,
-          "optimized": 4.630224000000453,
-          "deltaPercent": 8.59
+          "baseline": 4.918988000001264,
+          "optimized": 5.145376000000397,
+          "deltaPercent": 4.6
         },
         "cpuUserMs": {
-          "baseline": 4.673,
-          "optimized": 4.593,
-          "deltaPercent": -1.71
+          "baseline": 4.939,
+          "optimized": 4.155,
+          "deltaPercent": -15.87
         },
         "cpuSystemMs": {
           "baseline": 0,
-          "optimized": 0,
+          "optimized": 0.032,
           "deltaPercent": null
         },
         "rssPeakSampledBytes": {
-          "baseline": 339881984,
-          "optimized": 322207744,
-          "deltaPercent": -5.2
+          "baseline": 371044352,
+          "optimized": 388608000,
+          "deltaPercent": 4.73
         },
         "heapPeakSampledBytes": {
-          "baseline": 48865568,
-          "optimized": 49554184,
-          "deltaPercent": 1.41
+          "baseline": 35423616,
+          "optimized": 35833608,
+          "deltaPercent": 1.16
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -302,29 +302,29 @@
         "name": "pdf-export-9-unique-artwork",
         "count": 9,
         "wallTimeMs": {
-          "baseline": 4.322120000000723,
-          "optimized": 4.518436999998812,
-          "deltaPercent": 4.54
+          "baseline": 4.4584540000032575,
+          "optimized": 4.75926199999958,
+          "deltaPercent": 6.75
         },
         "cpuUserMs": {
-          "baseline": 8.773,
-          "optimized": 6.869,
-          "deltaPercent": -21.7
+          "baseline": 4.481,
+          "optimized": 4.74,
+          "deltaPercent": 5.78
         },
         "cpuSystemMs": {
-          "baseline": 0.027,
-          "optimized": 0.059,
-          "deltaPercent": 118.52
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
         },
         "rssPeakSampledBytes": {
-          "baseline": 340013056,
-          "optimized": 322207744,
-          "deltaPercent": -5.24
+          "baseline": 371044352,
+          "optimized": 388608000,
+          "deltaPercent": 4.73
         },
         "heapPeakSampledBytes": {
-          "baseline": 49774240,
-          "optimized": 50346512,
-          "deltaPercent": 1.15
+          "baseline": 36130280,
+          "optimized": 36460616,
+          "deltaPercent": 0.91
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -356,34 +356,34 @@
         "name": "bleed-export-repeated-9",
         "count": 9,
         "wallTimeMs": {
-          "baseline": 1147.6916499999998,
-          "optimized": 370.69261599999936,
-          "deltaPercent": -67.7
+          "baseline": 1257.1723569999995,
+          "optimized": 384.2406140000003,
+          "deltaPercent": -69.44
         },
         "cpuUserMs": {
-          "baseline": 1410.95,
-          "optimized": 490.807,
-          "deltaPercent": -65.21
+          "baseline": 1513.024,
+          "optimized": 523.104,
+          "deltaPercent": -65.43
         },
         "cpuSystemMs": {
-          "baseline": 48.098,
-          "optimized": 13.977,
-          "deltaPercent": -70.94
+          "baseline": 69.749,
+          "optimized": 4.097,
+          "deltaPercent": -94.13
         },
         "rssPeakSampledBytes": {
-          "baseline": 287125504,
-          "optimized": 247881728,
-          "deltaPercent": -13.67
+          "baseline": 291237888,
+          "optimized": 256798720,
+          "deltaPercent": -11.83
         },
         "heapPeakSampledBytes": {
-          "baseline": 42856392,
-          "optimized": 44916656,
-          "deltaPercent": 4.81
+          "baseline": 42938736,
+          "optimized": 43278608,
+          "deltaPercent": 0.79
         },
         "peakEventLoopDelayMs": {
-          "baseline": 66.5388780000003,
-          "optimized": 72.98910700000033,
-          "deltaPercent": 9.69
+          "baseline": 73.68607200000042,
+          "optimized": 70.0250530000003,
+          "deltaPercent": -4.97
         },
         "baselineDetails": {
           "derivedResults": 9,
@@ -418,34 +418,34 @@
         "name": "bleed-export-unique-9",
         "count": 9,
         "wallTimeMs": {
-          "baseline": 2017.8030200000003,
-          "optimized": 1790.444214,
-          "deltaPercent": -11.27
+          "baseline": 1843.2676709999996,
+          "optimized": 1899.085943,
+          "deltaPercent": 3.03
         },
         "cpuUserMs": {
-          "baseline": 2361.092,
-          "optimized": 2295.034,
-          "deltaPercent": -2.8
+          "baseline": 2196.498,
+          "optimized": 2422.643,
+          "deltaPercent": 10.3
         },
         "cpuSystemMs": {
-          "baseline": 116.117,
-          "optimized": 82.802,
-          "deltaPercent": -28.69
+          "baseline": 59.711,
+          "optimized": 99.735,
+          "deltaPercent": 67.03
         },
         "rssPeakSampledBytes": {
-          "baseline": 290271232,
-          "optimized": 287010816,
-          "deltaPercent": -1.12
+          "baseline": 291237888,
+          "optimized": 297684992,
+          "deltaPercent": 2.21
         },
         "heapPeakSampledBytes": {
-          "baseline": 44682360,
-          "optimized": 45160344,
-          "deltaPercent": 1.07
+          "baseline": 44788912,
+          "optimized": 43906416,
+          "deltaPercent": -1.97
         },
         "peakEventLoopDelayMs": {
-          "baseline": 92.50473099999999,
-          "optimized": 99.03973299999961,
-          "deltaPercent": 7.06
+          "baseline": 95.8202110000002,
+          "optimized": 147.59740299999976,
+          "deltaPercent": 54.04
         },
         "baselineDetails": {
           "derivedResults": 9,
@@ -483,29 +483,29 @@
         "name": "import-decklist-100",
         "count": 100,
         "wallTimeMs": {
-          "baseline": 2.9893039999999473,
-          "optimized": 2.954330000000027,
-          "deltaPercent": -1.17
+          "baseline": 2.798250999999709,
+          "optimized": 2.684418999999707,
+          "deltaPercent": -4.07
         },
         "cpuUserMs": {
-          "baseline": 3.805,
-          "optimized": 4.611,
-          "deltaPercent": 21.18
+          "baseline": 4.236,
+          "optimized": 4.893,
+          "deltaPercent": 15.51
         },
         "cpuSystemMs": {
-          "baseline": 0.935,
-          "optimized": 0.127,
-          "deltaPercent": -86.42
+          "baseline": 1.017,
+          "optimized": 0,
+          "deltaPercent": -100
         },
         "rssPeakSampledBytes": {
-          "baseline": 129822720,
-          "optimized": 125943808,
-          "deltaPercent": -2.99
+          "baseline": 130072576,
+          "optimized": 131612672,
+          "deltaPercent": 1.18
         },
         "heapPeakSampledBytes": {
-          "baseline": 38464544,
-          "optimized": 37969456,
-          "deltaPercent": -1.29
+          "baseline": 37900080,
+          "optimized": 38049200,
+          "deltaPercent": 0.39
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -527,29 +527,29 @@
         "name": "working-set-build-100",
         "count": 100,
         "wallTimeMs": {
-          "baseline": 1.4803499999998166,
-          "optimized": 1.8266920000000937,
-          "deltaPercent": 23.4
+          "baseline": 2.244775000000118,
+          "optimized": 1.5410820000001877,
+          "deltaPercent": -31.35
         },
         "cpuUserMs": {
-          "baseline": 0.782,
-          "optimized": 1.555,
-          "deltaPercent": 98.85
+          "baseline": 0.811,
+          "optimized": 1.325,
+          "deltaPercent": 63.38
         },
         "cpuSystemMs": {
-          "baseline": 0.942,
-          "optimized": 0.984,
-          "deltaPercent": 4.46
+          "baseline": 1.2,
+          "optimized": 0,
+          "deltaPercent": -100
         },
         "rssPeakSampledBytes": {
-          "baseline": 130347008,
-          "optimized": 126468096,
-          "deltaPercent": -2.98
+          "baseline": 130596864,
+          "optimized": 132005888,
+          "deltaPercent": 1.08
         },
         "heapPeakSampledBytes": {
-          "baseline": 39036784,
-          "optimized": 38514680,
-          "deltaPercent": -1.34
+          "baseline": 38445328,
+          "optimized": 38594424,
+          "deltaPercent": 0.39
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -569,29 +569,29 @@
         "name": "working-set-server-render-100",
         "count": 100,
         "wallTimeMs": {
-          "baseline": 56.74003399999992,
-          "optimized": 63.089268000000175,
-          "deltaPercent": 11.19
+          "baseline": 61.71788699999979,
+          "optimized": 63.12694399999964,
+          "deltaPercent": 2.28
         },
         "cpuUserMs": {
-          "baseline": 91.559,
-          "optimized": 95.158,
-          "deltaPercent": 3.93
+          "baseline": 93.84,
+          "optimized": 93.14,
+          "deltaPercent": -0.75
         },
         "cpuSystemMs": {
-          "baseline": 6.8,
-          "optimized": 13.65,
-          "deltaPercent": 100.74
+          "baseline": 12.709,
+          "optimized": 13.456,
+          "deltaPercent": 5.88
         },
         "rssPeakSampledBytes": {
-          "baseline": 140931072,
-          "optimized": 137654272,
-          "deltaPercent": -2.33
+          "baseline": 142262272,
+          "optimized": 144064512,
+          "deltaPercent": 1.27
         },
         "heapPeakSampledBytes": {
-          "baseline": 43377512,
-          "optimized": 43501168,
-          "deltaPercent": 0.29
+          "baseline": 43431400,
+          "optimized": 43585448,
+          "deltaPercent": 0.35
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -613,29 +613,29 @@
         "name": "artwork-gallery-server-render-100",
         "count": 100,
         "wallTimeMs": {
-          "baseline": 34.78334300000006,
-          "optimized": 32.552374999999756,
-          "deltaPercent": -6.41
+          "baseline": 33.15184899999986,
+          "optimized": 34.475990000000365,
+          "deltaPercent": 3.99
         },
         "cpuUserMs": {
-          "baseline": 58.564,
-          "optimized": 56.557,
-          "deltaPercent": -3.43
+          "baseline": 59.465,
+          "optimized": 60.549,
+          "deltaPercent": 1.82
         },
         "cpuSystemMs": {
-          "baseline": 2.637,
-          "optimized": 5.022,
-          "deltaPercent": 90.44
+          "baseline": 1.859,
+          "optimized": 5.3,
+          "deltaPercent": 185.1
         },
         "rssPeakSampledBytes": {
-          "baseline": 168988672,
-          "optimized": 168824832,
-          "deltaPercent": -0.1
+          "baseline": 169836544,
+          "optimized": 171421696,
+          "deltaPercent": 0.93
         },
         "heapPeakSampledBytes": {
-          "baseline": 64808216,
-          "optimized": 63482288,
-          "deltaPercent": -2.05
+          "baseline": 63164504,
+          "optimized": 63814112,
+          "deltaPercent": 1.03
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -659,29 +659,29 @@
         "name": "projects-list-server-render-100",
         "count": 100,
         "wallTimeMs": {
-          "baseline": 23.953407999999854,
-          "optimized": 24.856846000000132,
-          "deltaPercent": 3.77
+          "baseline": 25.22741700000006,
+          "optimized": 26.413342000000284,
+          "deltaPercent": 4.7
         },
         "cpuUserMs": {
-          "baseline": 22.307,
-          "optimized": 28.891,
-          "deltaPercent": 29.52
+          "baseline": 27.236,
+          "optimized": 28.884,
+          "deltaPercent": 6.05
         },
         "cpuSystemMs": {
-          "baseline": 2.795,
-          "optimized": 0.022,
-          "deltaPercent": -99.21
+          "baseline": 2.013,
+          "optimized": 1.627,
+          "deltaPercent": -19.18
         },
         "rssPeakSampledBytes": {
-          "baseline": 142798848,
-          "optimized": 138309632,
-          "deltaPercent": -3.14
+          "baseline": 142786560,
+          "optimized": 144719872,
+          "deltaPercent": 1.35
         },
         "heapPeakSampledBytes": {
-          "baseline": 41799064,
-          "optimized": 41706200,
-          "deltaPercent": -0.22
+          "baseline": 41892416,
+          "optimized": 41961920,
+          "deltaPercent": 0.17
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -703,32 +703,32 @@
         "name": "pdf-export-100-repeated-artwork",
         "count": 100,
         "wallTimeMs": {
-          "baseline": 29.78123499999856,
-          "optimized": 20.85021599999891,
-          "deltaPercent": -29.99
+          "baseline": 36.39006299999892,
+          "optimized": 17.335786999999982,
+          "deltaPercent": -52.36
         },
         "cpuUserMs": {
-          "baseline": 29.056,
-          "optimized": 24.138,
-          "deltaPercent": -16.93
+          "baseline": 81.185,
+          "optimized": 24.352,
+          "deltaPercent": -70
         },
         "cpuSystemMs": {
-          "baseline": 3.056,
-          "optimized": 0.019,
-          "deltaPercent": -99.38
+          "baseline": 1.165,
+          "optimized": 0,
+          "deltaPercent": -100
         },
         "rssPeakSampledBytes": {
-          "baseline": 338305024,
-          "optimized": 326135808,
-          "deltaPercent": -3.6
+          "baseline": 377466880,
+          "optimized": 395423744,
+          "deltaPercent": 4.76
         },
         "heapPeakSampledBytes": {
-          "baseline": 48021832,
-          "optimized": 47865000,
-          "deltaPercent": -0.33
+          "baseline": 41681184,
+          "optimized": 38971536,
+          "deltaPercent": -6.5
         },
         "peakEventLoopDelayMs": {
-          "baseline": 10.10529900000256,
+          "baseline": 10.613346999998612,
           "optimized": 0,
           "deltaPercent": -100
         },
@@ -757,34 +757,34 @@
         "name": "pdf-export-100-unique-artwork",
         "count": 100,
         "wallTimeMs": {
-          "baseline": 42.277296000000206,
-          "optimized": 50.017744000000675,
-          "deltaPercent": 18.31
+          "baseline": 40.98963899999944,
+          "optimized": 35.93184499999916,
+          "deltaPercent": -12.34
         },
         "cpuUserMs": {
-          "baseline": 40.547,
-          "optimized": 47.528,
-          "deltaPercent": 17.22
+          "baseline": 89.201,
+          "optimized": 83.625,
+          "deltaPercent": -6.25
         },
         "cpuSystemMs": {
-          "baseline": 3.027,
-          "optimized": 9.09,
-          "deltaPercent": 200.3
+          "baseline": 1.969,
+          "optimized": 1.668,
+          "deltaPercent": -15.29
         },
         "rssPeakSampledBytes": {
-          "baseline": 347086848,
-          "optimized": 331247616,
-          "deltaPercent": -4.56
+          "baseline": 377597952,
+          "optimized": 395423744,
+          "deltaPercent": 4.72
         },
         "heapPeakSampledBytes": {
-          "baseline": 41953352,
-          "optimized": 48783192,
-          "deltaPercent": 16.28
+          "baseline": 40070912,
+          "optimized": 43460192,
+          "deltaPercent": 8.46
         },
         "peakEventLoopDelayMs": {
-          "baseline": 13.038980000001175,
-          "optimized": 16.08350900000005,
-          "deltaPercent": 23.35
+          "baseline": 12.551876000001357,
+          "optimized": 12.556233999999677,
+          "deltaPercent": 0.03
         },
         "baselineDetails": {
           "pdfBytes": 5171710,
@@ -811,34 +811,34 @@
         "name": "bleed-export-repeated-100",
         "count": 100,
         "wallTimeMs": {
-          "baseline": 407.2411240000001,
-          "optimized": 75.84035899999981,
-          "deltaPercent": -81.38
+          "baseline": 432.1524499999996,
+          "optimized": 72.66183799999999,
+          "deltaPercent": -83.19
         },
         "cpuUserMs": {
-          "baseline": 575.002,
-          "optimized": 130.777,
-          "deltaPercent": -77.26
+          "baseline": 591.062,
+          "optimized": 129.482,
+          "deltaPercent": -78.09
         },
         "cpuSystemMs": {
-          "baseline": 11.71,
-          "optimized": 4.84,
+          "baseline": 4.626,
+          "optimized": 1.912,
           "deltaPercent": -58.67
         },
         "rssPeakSampledBytes": {
-          "baseline": 273817600,
-          "optimized": 270536704,
-          "deltaPercent": -1.2
+          "baseline": 272986112,
+          "optimized": 267104256,
+          "deltaPercent": -2.15
         },
         "heapPeakSampledBytes": {
-          "baseline": 36111960,
-          "optimized": 44776080,
-          "deltaPercent": 23.99
+          "baseline": 36952496,
+          "optimized": 44950976,
+          "deltaPercent": 21.65
         },
         "peakEventLoopDelayMs": {
-          "baseline": 361.834331,
-          "optimized": 0.044411000000764034,
-          "deltaPercent": -99.99
+          "baseline": 396.1553010000007,
+          "optimized": 0.43706700000075216,
+          "deltaPercent": -99.89
         },
         "baselineDetails": {
           "derivedResults": 100,
@@ -873,34 +873,34 @@
         "name": "bleed-export-unique-100",
         "count": 100,
         "wallTimeMs": {
-          "baseline": 1147.9889170000006,
-          "optimized": 812.9988589999994,
-          "deltaPercent": -29.18
+          "baseline": 1256.8775910000004,
+          "optimized": 930.8184229999988,
+          "deltaPercent": -25.94
         },
         "cpuUserMs": {
-          "baseline": 1315.087,
-          "optimized": 1224.119,
-          "deltaPercent": -6.92
+          "baseline": 1428.695,
+          "optimized": 1374.969,
+          "deltaPercent": -3.76
         },
         "cpuSystemMs": {
-          "baseline": 68.41,
-          "optimized": 82.412,
-          "deltaPercent": 20.47
+          "baseline": 77.62,
+          "optimized": 81.614,
+          "deltaPercent": 5.15
         },
         "rssPeakSampledBytes": {
-          "baseline": 269209600,
-          "optimized": 271323136,
-          "deltaPercent": 0.79
+          "baseline": 277704704,
+          "optimized": 269684736,
+          "deltaPercent": -2.89
         },
         "heapPeakSampledBytes": {
-          "baseline": 47467152,
-          "optimized": 47091296,
-          "deltaPercent": -0.79
+          "baseline": 47709112,
+          "optimized": 47148680,
+          "deltaPercent": -1.17
         },
         "peakEventLoopDelayMs": {
-          "baseline": 427.45732899999894,
-          "optimized": 362.6182399999998,
-          "deltaPercent": -15.17
+          "baseline": 438.1161979999997,
+          "optimized": 454.99765300000035,
+          "deltaPercent": 3.85
         },
         "baselineDetails": {
           "derivedResults": 100,
@@ -924,7 +924,7 @@
           "candidateLookups": 100,
           "originalLookups": 100,
           "peakBleedConcurrency": 2,
-          "pdfBytes": 2120864,
+          "pdfBytes": 2120863,
           "sourceRasterSize": {
             "width": 96,
             "height": 134
@@ -938,29 +938,29 @@
         "name": "import-decklist-500",
         "count": 500,
         "wallTimeMs": {
-          "baseline": 3.95302700000002,
-          "optimized": 4.5323419999999714,
-          "deltaPercent": 14.65
+          "baseline": 5.169181000000208,
+          "optimized": 4.546678000000156,
+          "deltaPercent": -12.04
         },
         "cpuUserMs": {
-          "baseline": 5.032,
-          "optimized": 5.926,
-          "deltaPercent": 17.77
+          "baseline": 6.245,
+          "optimized": 5.706,
+          "deltaPercent": -8.63
         },
         "cpuSystemMs": {
-          "baseline": 1.186,
-          "optimized": 1.001,
-          "deltaPercent": -15.6
+          "baseline": 2.066,
+          "optimized": 1.973,
+          "deltaPercent": -4.5
         },
         "rssPeakSampledBytes": {
-          "baseline": 143847424,
-          "optimized": 139358208,
-          "deltaPercent": -3.12
+          "baseline": 143835136,
+          "optimized": 145768448,
+          "deltaPercent": 1.34
         },
         "heapPeakSampledBytes": {
-          "baseline": 42862856,
-          "optimized": 42766456,
-          "deltaPercent": -0.22
+          "baseline": 42953192,
+          "optimized": 43022136,
+          "deltaPercent": 0.16
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -982,29 +982,29 @@
         "name": "working-set-build-500",
         "count": 500,
         "wallTimeMs": {
-          "baseline": 7.069295000000238,
-          "optimized": 7.326206000000184,
-          "deltaPercent": 3.63
+          "baseline": 10.217055000000073,
+          "optimized": 7.572881000000052,
+          "deltaPercent": -25.88
         },
         "cpuUserMs": {
-          "baseline": 5.867,
-          "optimized": 7.23,
-          "deltaPercent": 23.23
+          "baseline": 7.324,
+          "optimized": 6.462,
+          "deltaPercent": -11.77
         },
         "cpuSystemMs": {
-          "baseline": 1.877,
-          "optimized": 1.706,
-          "deltaPercent": -9.11
+          "baseline": 4.999,
+          "optimized": 2.845,
+          "deltaPercent": -43.09
         },
         "rssPeakSampledBytes": {
-          "baseline": 146468864,
-          "optimized": 141979648,
-          "deltaPercent": -3.06
+          "baseline": 146456576,
+          "optimized": 148389888,
+          "deltaPercent": 1.32
         },
         "heapPeakSampledBytes": {
-          "baseline": 45509856,
-          "optimized": 45419416,
-          "deltaPercent": -0.2
+          "baseline": 45594496,
+          "optimized": 45674648,
+          "deltaPercent": 0.18
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -1024,29 +1024,29 @@
         "name": "working-set-server-render-500",
         "count": 500,
         "wallTimeMs": {
-          "baseline": 188.68990500000018,
-          "optimized": 190.2082760000003,
-          "deltaPercent": 0.8
+          "baseline": 195.46054200000026,
+          "optimized": 202.70875100000012,
+          "deltaPercent": 3.71
         },
         "cpuUserMs": {
-          "baseline": 274.141,
-          "optimized": 271.04,
-          "deltaPercent": -1.13
+          "baseline": 264.555,
+          "optimized": 278.609,
+          "deltaPercent": 5.31
         },
         "cpuSystemMs": {
-          "baseline": 11.429,
-          "optimized": 16.32,
-          "deltaPercent": 42.79
+          "baseline": 12.802,
+          "optimized": 7.324,
+          "deltaPercent": -42.79
         },
         "rssPeakSampledBytes": {
-          "baseline": 157024256,
-          "optimized": 154578944,
-          "deltaPercent": -1.56
+          "baseline": 155246592,
+          "optimized": 157323264,
+          "deltaPercent": 1.34
         },
         "heapPeakSampledBytes": {
-          "baseline": 43690640,
-          "optimized": 56256984,
-          "deltaPercent": 28.76
+          "baseline": 38000816,
+          "optimized": 56855872,
+          "deltaPercent": 49.62
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -1068,29 +1068,29 @@
         "name": "artwork-gallery-server-render-500",
         "count": 500,
         "wallTimeMs": {
-          "baseline": 77.98111300000028,
-          "optimized": 88.18949500000008,
-          "deltaPercent": 13.09
+          "baseline": 77.90437499999962,
+          "optimized": 89.71449099999973,
+          "deltaPercent": 15.16
         },
         "cpuUserMs": {
-          "baseline": 147.363,
-          "optimized": 161.959,
-          "deltaPercent": 9.9
+          "baseline": 148.189,
+          "optimized": 162.921,
+          "deltaPercent": 9.94
         },
         "cpuSystemMs": {
-          "baseline": 5.856,
-          "optimized": 12.591,
-          "deltaPercent": 115.01
+          "baseline": 11.805,
+          "optimized": 7.308,
+          "deltaPercent": -38.09
         },
         "rssPeakSampledBytes": {
-          "baseline": 170876928,
-          "optimized": 169975808,
-          "deltaPercent": -0.53
+          "baseline": 175071232,
+          "optimized": 173359104,
+          "deltaPercent": -0.98
         },
         "heapPeakSampledBytes": {
-          "baseline": 55908520,
-          "optimized": 69052248,
-          "deltaPercent": 23.51
+          "baseline": 68780048,
+          "optimized": 69344304,
+          "deltaPercent": 0.82
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -1114,29 +1114,29 @@
         "name": "projects-list-server-render-500",
         "count": 500,
         "wallTimeMs": {
-          "baseline": 28.188454999999976,
-          "optimized": 30.077802999999676,
-          "deltaPercent": 6.7
+          "baseline": 28.34709299999986,
+          "optimized": 33.51947900000005,
+          "deltaPercent": 18.25
         },
         "cpuUserMs": {
-          "baseline": 30.926,
-          "optimized": 33.386,
-          "deltaPercent": 7.95
+          "baseline": 32.533,
+          "optimized": 36.928,
+          "deltaPercent": 13.51
         },
         "cpuSystemMs": {
-          "baseline": 1.986,
-          "optimized": 1.879,
-          "deltaPercent": -5.39
+          "baseline": 0.923,
+          "optimized": 1.073,
+          "deltaPercent": 16.25
         },
         "rssPeakSampledBytes": {
-          "baseline": 155742208,
-          "optimized": 155680768,
-          "deltaPercent": -0.04
+          "baseline": 156557312,
+          "optimized": 158060544,
+          "deltaPercent": 0.96
         },
         "heapPeakSampledBytes": {
-          "baseline": 52493696,
-          "optimized": 47289536,
-          "deltaPercent": -9.91
+          "baseline": 47314408,
+          "optimized": 47167272,
+          "deltaPercent": -0.31
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -1158,34 +1158,34 @@
         "name": "pdf-export-500-repeated-artwork",
         "count": 500,
         "wallTimeMs": {
-          "baseline": 197.76765499999965,
-          "optimized": 131.70154200000252,
-          "deltaPercent": -33.41
+          "baseline": 179.9779469999994,
+          "optimized": 89.93300399999862,
+          "deltaPercent": -50.03
         },
         "cpuUserMs": {
-          "baseline": 366.487,
-          "optimized": 236.01,
-          "deltaPercent": -35.6
+          "baseline": 300.1,
+          "optimized": 186.407,
+          "deltaPercent": -37.89
         },
         "cpuSystemMs": {
-          "baseline": 23.525,
-          "optimized": 1.934,
-          "deltaPercent": -91.78
+          "baseline": 10.789,
+          "optimized": 1.323,
+          "deltaPercent": -87.74
         },
         "rssPeakSampledBytes": {
-          "baseline": 375267328,
-          "optimized": 342163456,
-          "deltaPercent": -8.82
+          "baseline": 401252352,
+          "optimized": 400404480,
+          "deltaPercent": -0.21
         },
         "heapPeakSampledBytes": {
-          "baseline": 40000432,
-          "optimized": 38998776,
-          "deltaPercent": -2.5
+          "baseline": 41606520,
+          "optimized": 39793832,
+          "deltaPercent": -4.36
         },
         "peakEventLoopDelayMs": {
-          "baseline": 78.67516199999955,
-          "optimized": 116.24707399999897,
-          "deltaPercent": 47.76
+          "baseline": 67.33574500000395,
+          "optimized": 79.68547899999976,
+          "deltaPercent": 18.34
         },
         "baselineDetails": {
           "pdfBytes": 19632382,
@@ -1198,7 +1198,7 @@
           "pngEmbedCalls": 0
         },
         "optimizedDetails": {
-          "pdfBytes": 59466,
+          "pdfBytes": 59469,
           "uniqueArtworkHashes": 1,
           "candidateLookups": 1,
           "originalLookups": 1,
@@ -1212,34 +1212,34 @@
         "name": "pdf-export-500-unique-artwork",
         "count": 500,
         "wallTimeMs": {
-          "baseline": 225.87295000000086,
-          "optimized": 278.8097620000008,
-          "deltaPercent": 23.44
+          "baseline": 240.1936910000004,
+          "optimized": 231.12496100000135,
+          "deltaPercent": -3.78
         },
         "cpuUserMs": {
-          "baseline": 373.368,
-          "optimized": 306.819,
-          "deltaPercent": -17.82
+          "baseline": 362.048,
+          "optimized": 299.131,
+          "deltaPercent": -17.38
         },
         "cpuSystemMs": {
-          "baseline": 28.015,
-          "optimized": 58.935,
-          "deltaPercent": 110.37
+          "baseline": 50.365,
+          "optimized": 32.606,
+          "deltaPercent": -35.26
         },
         "rssPeakSampledBytes": {
-          "baseline": 392290304,
-          "optimized": 362672128,
-          "deltaPercent": -7.55
+          "baseline": 427405312,
+          "optimized": 417079296,
+          "deltaPercent": -2.42
         },
         "heapPeakSampledBytes": {
-          "baseline": 50400152,
-          "optimized": 40227536,
-          "deltaPercent": -20.18
+          "baseline": 41897752,
+          "optimized": 44897864,
+          "deltaPercent": 7.16
         },
         "peakEventLoopDelayMs": {
-          "baseline": 82.13420599999881,
-          "optimized": 81.32447999999931,
-          "deltaPercent": -0.99
+          "baseline": 75.47816999999486,
+          "optimized": 75.1241549999977,
+          "deltaPercent": -0.47
         },
         "baselineDetails": {
           "pdfBytes": 25530919,
@@ -1266,34 +1266,34 @@
         "name": "bleed-export-repeated-500",
         "count": 500,
         "wallTimeMs": {
-          "baseline": 1946.161572000001,
-          "optimized": 247.01770699999906,
-          "deltaPercent": -87.31
+          "baseline": 2158.601688999999,
+          "optimized": 247.7688959999996,
+          "deltaPercent": -88.52
         },
         "cpuUserMs": {
-          "baseline": 2355.044,
-          "optimized": 432,
-          "deltaPercent": -81.66
+          "baseline": 2569.407,
+          "optimized": 426.264,
+          "deltaPercent": -83.41
         },
         "cpuSystemMs": {
-          "baseline": 52.62,
-          "optimized": 2.268,
-          "deltaPercent": -95.69
+          "baseline": 87.667,
+          "optimized": 3.406,
+          "deltaPercent": -96.11
         },
         "rssPeakSampledBytes": {
-          "baseline": 300429312,
-          "optimized": 271978496,
-          "deltaPercent": -9.47
+          "baseline": 304242688,
+          "optimized": 270077952,
+          "deltaPercent": -11.23
         },
         "heapPeakSampledBytes": {
-          "baseline": 48882896,
-          "optimized": 48340424,
-          "deltaPercent": -1.11
+          "baseline": 47873952,
+          "optimized": 48815000,
+          "deltaPercent": 1.97
         },
         "peakEventLoopDelayMs": {
-          "baseline": 1802.255169,
-          "optimized": 207.56362699999954,
-          "deltaPercent": -88.48
+          "baseline": 1996.969806000001,
+          "optimized": 210.61019599999963,
+          "deltaPercent": -89.45
         },
         "baselineDetails": {
           "derivedResults": 500,
@@ -1303,7 +1303,7 @@
           "candidateLookups": 500,
           "originalLookups": 500,
           "peakBleedConcurrency": 1,
-          "pdfBytes": 11536046,
+          "pdfBytes": 11536043,
           "sourceRasterSize": {
             "width": 96,
             "height": 134
@@ -1317,7 +1317,7 @@
           "candidateLookups": 1,
           "originalLookups": 1,
           "peakBleedConcurrency": 1,
-          "pdfBytes": 90539,
+          "pdfBytes": 90537,
           "sourceRasterSize": {
             "width": 96,
             "height": 134
@@ -1328,34 +1328,34 @@
         "name": "bleed-export-unique-500",
         "count": 500,
         "wallTimeMs": {
-          "baseline": 5325.443889,
-          "optimized": 4134.119597000001,
-          "deltaPercent": -22.37
+          "baseline": 5528.694701,
+          "optimized": 4370.953168,
+          "deltaPercent": -20.94
         },
         "cpuUserMs": {
-          "baseline": 5407.435,
-          "optimized": 5683.727,
-          "deltaPercent": 5.11
+          "baseline": 5580.972,
+          "optimized": 5904.61,
+          "deltaPercent": 5.8
         },
         "cpuSystemMs": {
-          "baseline": 371.47,
-          "optimized": 434.628,
-          "deltaPercent": 17
+          "baseline": 377.829,
+          "optimized": 516.134,
+          "deltaPercent": 36.61
         },
         "rssPeakSampledBytes": {
-          "baseline": 331100160,
-          "optimized": 310673408,
-          "deltaPercent": -6.17
+          "baseline": 325234688,
+          "optimized": 320802816,
+          "deltaPercent": -1.36
         },
         "heapPeakSampledBytes": {
-          "baseline": 55986056,
-          "optimized": 56490080,
-          "deltaPercent": 0.9
+          "baseline": 56453232,
+          "optimized": 55964408,
+          "deltaPercent": -0.87
         },
         "peakEventLoopDelayMs": {
-          "baseline": 1685.4298559999988,
-          "optimized": 1986.712176000001,
-          "deltaPercent": 17.88
+          "baseline": 1795.1168990000006,
+          "optimized": 1843.143537,
+          "deltaPercent": 2.68
         },
         "baselineDetails": {
           "derivedResults": 500,
@@ -1393,29 +1393,29 @@
         "name": "import-decklist-1000",
         "count": 1000,
         "wallTimeMs": {
-          "baseline": 4.405594999999721,
-          "optimized": 4.690745000000334,
-          "deltaPercent": 6.47
+          "baseline": 4.503186999999798,
+          "optimized": 4.786440999999741,
+          "deltaPercent": 6.29
         },
         "cpuUserMs": {
-          "baseline": 4.399,
-          "optimized": 4.711,
-          "deltaPercent": 7.09
+          "baseline": 4.071,
+          "optimized": 4.514,
+          "deltaPercent": 10.88
         },
         "cpuSystemMs": {
-          "baseline": 0,
+          "baseline": 0.01,
           "optimized": 0,
-          "deltaPercent": null
+          "deltaPercent": -100
         },
         "rssPeakSampledBytes": {
-          "baseline": 155742208,
-          "optimized": 155680768,
-          "deltaPercent": -0.04
+          "baseline": 156557312,
+          "optimized": 158060544,
+          "deltaPercent": 0.96
         },
         "heapPeakSampledBytes": {
-          "baseline": 54559216,
-          "optimized": 49336256,
-          "deltaPercent": -9.57
+          "baseline": 49370120,
+          "optimized": 49213992,
+          "deltaPercent": -0.32
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -1437,29 +1437,29 @@
         "name": "working-set-build-1000",
         "count": 1000,
         "wallTimeMs": {
-          "baseline": 11.40905900000007,
-          "optimized": 8.66979399999991,
-          "deltaPercent": -24.01
+          "baseline": 9.7313979999999,
+          "optimized": 10.327119999999923,
+          "deltaPercent": 6.12
         },
         "cpuUserMs": {
-          "baseline": 13.116,
-          "optimized": 9.303,
-          "deltaPercent": -29.07
+          "baseline": 9.635,
+          "optimized": 10.309,
+          "deltaPercent": 7
         },
         "cpuSystemMs": {
-          "baseline": 0.059,
-          "optimized": 0,
-          "deltaPercent": -100
+          "baseline": 0,
+          "optimized": 0.004,
+          "deltaPercent": null
         },
         "rssPeakSampledBytes": {
-          "baseline": 156004352,
-          "optimized": 155942912,
-          "deltaPercent": -0.04
+          "baseline": 156819456,
+          "optimized": 158322688,
+          "deltaPercent": 0.96
         },
         "heapPeakSampledBytes": {
-          "baseline": 55319368,
-          "optimized": 54333392,
-          "deltaPercent": -1.78
+          "baseline": 54367296,
+          "optimized": 54211128,
+          "deltaPercent": -0.29
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -1479,29 +1479,29 @@
         "name": "working-set-server-render-1000",
         "count": 1000,
         "wallTimeMs": {
-          "baseline": 143.92022700000007,
-          "optimized": 143.8078989999999,
-          "deltaPercent": -0.08
+          "baseline": 143.96783700000015,
+          "optimized": 143.32074899999998,
+          "deltaPercent": -0.45
         },
         "cpuUserMs": {
-          "baseline": 155.149,
-          "optimized": 163.781,
-          "deltaPercent": 5.56
+          "baseline": 165.54,
+          "optimized": 171.14,
+          "deltaPercent": 3.38
         },
         "cpuSystemMs": {
-          "baseline": 21.343,
-          "optimized": 19.829,
-          "deltaPercent": -7.09
+          "baseline": 20.184,
+          "optimized": 18.161,
+          "deltaPercent": -10.02
         },
         "rssPeakSampledBytes": {
-          "baseline": 167415808,
-          "optimized": 167514112,
-          "deltaPercent": 0.06
+          "baseline": 168132608,
+          "optimized": 169848832,
+          "deltaPercent": 1.02
         },
         "heapPeakSampledBytes": {
-          "baseline": 62239944,
-          "optimized": 60971752,
-          "deltaPercent": -2.04
+          "baseline": 60654840,
+          "optimized": 61298240,
+          "deltaPercent": 1.06
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -1523,29 +1523,29 @@
         "name": "artwork-gallery-server-render-1000",
         "count": 1000,
         "wallTimeMs": {
-          "baseline": 110.51699400000007,
-          "optimized": 126.74132800000007,
-          "deltaPercent": 14.68
+          "baseline": 129.85644000000002,
+          "optimized": 146.3250210000001,
+          "deltaPercent": 12.68
         },
         "cpuUserMs": {
-          "baseline": 149.514,
-          "optimized": 174.408,
-          "deltaPercent": 16.65
+          "baseline": 176.349,
+          "optimized": 203.849,
+          "deltaPercent": 15.59
         },
         "cpuSystemMs": {
-          "baseline": 8.096,
-          "optimized": 7.259,
-          "deltaPercent": -10.34
+          "baseline": 12.426,
+          "optimized": 9.738,
+          "deltaPercent": -21.63
         },
         "rssPeakSampledBytes": {
-          "baseline": 173981696,
-          "optimized": 173903872,
-          "deltaPercent": -0.04
+          "baseline": 176603136,
+          "optimized": 176373760,
+          "deltaPercent": -0.13
         },
         "heapPeakSampledBytes": {
-          "baseline": 72611064,
-          "optimized": 69373184,
-          "deltaPercent": -4.46
+          "baseline": 69099896,
+          "optimized": 69671840,
+          "deltaPercent": 0.83
         },
         "peakEventLoopDelayMs": {
           "baseline": 0,
@@ -1585,8 +1585,8 @@
         "pagesAfter": 1,
         "pdfBytesBefore": 474793,
         "pdfBytesAfter": 53646,
-        "wallTimeMsBefore": 4.264031999999133,
-        "wallTimeMsAfter": 4.630224000000453,
+        "wallTimeMsBefore": 4.918988000001264,
+        "wallTimeMsAfter": 5.145376000000397,
         "drawsAfter": 9,
         "drawInvariantEvidence": "tests/pdf-engine/pdf-engine.test.ts: repeated JPEG resource keeps all physical draw placements"
       },
@@ -1595,8 +1595,8 @@
         "uniqueImagesAfter": 9,
         "pdfBytesBefore": 482722,
         "pdfBytesAfter": 482722,
-        "wallTimeMsBefore": 4.322120000000723,
-        "wallTimeMsAfter": 4.518436999998812
+        "wallTimeMsBefore": 4.4584540000032575,
+        "wallTimeMsAfter": 4.75926199999958
       }
     },
     {
@@ -1611,8 +1611,8 @@
         "pagesAfter": 12,
         "pdfBytesBefore": 4371352,
         "pdfBytesAfter": 48334,
-        "wallTimeMsBefore": 29.78123499999856,
-        "wallTimeMsAfter": 20.85021599999891,
+        "wallTimeMsBefore": 36.39006299999892,
+        "wallTimeMsAfter": 17.335786999999982,
         "drawsAfter": 100,
         "drawInvariantEvidence": "tests/pdf-engine/pdf-engine.test.ts: repeated JPEG resource keeps all physical draw placements"
       },
@@ -1621,8 +1621,8 @@
         "uniqueImagesAfter": 100,
         "pdfBytesBefore": 5171710,
         "pdfBytesAfter": 5171710,
-        "wallTimeMsBefore": 42.277296000000206,
-        "wallTimeMsAfter": 50.017744000000675
+        "wallTimeMsBefore": 40.98963899999944,
+        "wallTimeMsAfter": 35.93184499999916
       }
     },
     {
@@ -1636,9 +1636,9 @@
         "pagesBefore": 56,
         "pagesAfter": 56,
         "pdfBytesBefore": 19632382,
-        "pdfBytesAfter": 59466,
-        "wallTimeMsBefore": 197.76765499999965,
-        "wallTimeMsAfter": 131.70154200000252,
+        "pdfBytesAfter": 59469,
+        "wallTimeMsBefore": 179.9779469999994,
+        "wallTimeMsAfter": 89.93300399999862,
         "drawsAfter": 500,
         "drawInvariantEvidence": "tests/pdf-engine/pdf-engine.test.ts: repeated JPEG resource keeps all physical draw placements"
       },
@@ -1647,8 +1647,8 @@
         "uniqueImagesAfter": 500,
         "pdfBytesBefore": 25530919,
         "pdfBytesAfter": 25530919,
-        "wallTimeMsBefore": 225.87295000000086,
-        "wallTimeMsAfter": 278.8097620000008
+        "wallTimeMsBefore": 240.1936910000004,
+        "wallTimeMsAfter": 231.12496100000135
       }
     }
   ],
@@ -1657,34 +1657,34 @@
       "name": "bleed-export-repeated-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 1147.6916499999998,
-        "optimized": 370.69261599999936,
-        "deltaPercent": -67.7
+        "baseline": 1257.1723569999995,
+        "optimized": 384.2406140000003,
+        "deltaPercent": -69.44
       },
       "cpuUserMs": {
-        "baseline": 1410.95,
-        "optimized": 490.807,
-        "deltaPercent": -65.21
+        "baseline": 1513.024,
+        "optimized": 523.104,
+        "deltaPercent": -65.43
       },
       "cpuSystemMs": {
-        "baseline": 48.098,
-        "optimized": 13.977,
-        "deltaPercent": -70.94
+        "baseline": 69.749,
+        "optimized": 4.097,
+        "deltaPercent": -94.13
       },
       "rssPeakSampledBytes": {
-        "baseline": 287125504,
-        "optimized": 247881728,
-        "deltaPercent": -13.67
+        "baseline": 291237888,
+        "optimized": 256798720,
+        "deltaPercent": -11.83
       },
       "heapPeakSampledBytes": {
-        "baseline": 42856392,
-        "optimized": 44916656,
-        "deltaPercent": 4.81
+        "baseline": 42938736,
+        "optimized": 43278608,
+        "deltaPercent": 0.79
       },
       "peakEventLoopDelayMs": {
-        "baseline": 66.5388780000003,
-        "optimized": 72.98910700000033,
-        "deltaPercent": 9.69
+        "baseline": 73.68607200000042,
+        "optimized": 70.0250530000003,
+        "deltaPercent": -4.97
       },
       "baselineDetails": {
         "derivedResults": 9,
@@ -1719,34 +1719,34 @@
       "name": "bleed-export-unique-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 2017.8030200000003,
-        "optimized": 1790.444214,
-        "deltaPercent": -11.27
+        "baseline": 1843.2676709999996,
+        "optimized": 1899.085943,
+        "deltaPercent": 3.03
       },
       "cpuUserMs": {
-        "baseline": 2361.092,
-        "optimized": 2295.034,
-        "deltaPercent": -2.8
+        "baseline": 2196.498,
+        "optimized": 2422.643,
+        "deltaPercent": 10.3
       },
       "cpuSystemMs": {
-        "baseline": 116.117,
-        "optimized": 82.802,
-        "deltaPercent": -28.69
+        "baseline": 59.711,
+        "optimized": 99.735,
+        "deltaPercent": 67.03
       },
       "rssPeakSampledBytes": {
-        "baseline": 290271232,
-        "optimized": 287010816,
-        "deltaPercent": -1.12
+        "baseline": 291237888,
+        "optimized": 297684992,
+        "deltaPercent": 2.21
       },
       "heapPeakSampledBytes": {
-        "baseline": 44682360,
-        "optimized": 45160344,
-        "deltaPercent": 1.07
+        "baseline": 44788912,
+        "optimized": 43906416,
+        "deltaPercent": -1.97
       },
       "peakEventLoopDelayMs": {
-        "baseline": 92.50473099999999,
-        "optimized": 99.03973299999961,
-        "deltaPercent": 7.06
+        "baseline": 95.8202110000002,
+        "optimized": 147.59740299999976,
+        "deltaPercent": 54.04
       },
       "baselineDetails": {
         "derivedResults": 9,
@@ -1781,34 +1781,34 @@
       "name": "bleed-export-repeated-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 407.2411240000001,
-        "optimized": 75.84035899999981,
-        "deltaPercent": -81.38
+        "baseline": 432.1524499999996,
+        "optimized": 72.66183799999999,
+        "deltaPercent": -83.19
       },
       "cpuUserMs": {
-        "baseline": 575.002,
-        "optimized": 130.777,
-        "deltaPercent": -77.26
+        "baseline": 591.062,
+        "optimized": 129.482,
+        "deltaPercent": -78.09
       },
       "cpuSystemMs": {
-        "baseline": 11.71,
-        "optimized": 4.84,
+        "baseline": 4.626,
+        "optimized": 1.912,
         "deltaPercent": -58.67
       },
       "rssPeakSampledBytes": {
-        "baseline": 273817600,
-        "optimized": 270536704,
-        "deltaPercent": -1.2
+        "baseline": 272986112,
+        "optimized": 267104256,
+        "deltaPercent": -2.15
       },
       "heapPeakSampledBytes": {
-        "baseline": 36111960,
-        "optimized": 44776080,
-        "deltaPercent": 23.99
+        "baseline": 36952496,
+        "optimized": 44950976,
+        "deltaPercent": 21.65
       },
       "peakEventLoopDelayMs": {
-        "baseline": 361.834331,
-        "optimized": 0.044411000000764034,
-        "deltaPercent": -99.99
+        "baseline": 396.1553010000007,
+        "optimized": 0.43706700000075216,
+        "deltaPercent": -99.89
       },
       "baselineDetails": {
         "derivedResults": 100,
@@ -1843,34 +1843,34 @@
       "name": "bleed-export-unique-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 1147.9889170000006,
-        "optimized": 812.9988589999994,
-        "deltaPercent": -29.18
+        "baseline": 1256.8775910000004,
+        "optimized": 930.8184229999988,
+        "deltaPercent": -25.94
       },
       "cpuUserMs": {
-        "baseline": 1315.087,
-        "optimized": 1224.119,
-        "deltaPercent": -6.92
+        "baseline": 1428.695,
+        "optimized": 1374.969,
+        "deltaPercent": -3.76
       },
       "cpuSystemMs": {
-        "baseline": 68.41,
-        "optimized": 82.412,
-        "deltaPercent": 20.47
+        "baseline": 77.62,
+        "optimized": 81.614,
+        "deltaPercent": 5.15
       },
       "rssPeakSampledBytes": {
-        "baseline": 269209600,
-        "optimized": 271323136,
-        "deltaPercent": 0.79
+        "baseline": 277704704,
+        "optimized": 269684736,
+        "deltaPercent": -2.89
       },
       "heapPeakSampledBytes": {
-        "baseline": 47467152,
-        "optimized": 47091296,
-        "deltaPercent": -0.79
+        "baseline": 47709112,
+        "optimized": 47148680,
+        "deltaPercent": -1.17
       },
       "peakEventLoopDelayMs": {
-        "baseline": 427.45732899999894,
-        "optimized": 362.6182399999998,
-        "deltaPercent": -15.17
+        "baseline": 438.1161979999997,
+        "optimized": 454.99765300000035,
+        "deltaPercent": 3.85
       },
       "baselineDetails": {
         "derivedResults": 100,
@@ -1894,7 +1894,7 @@
         "candidateLookups": 100,
         "originalLookups": 100,
         "peakBleedConcurrency": 2,
-        "pdfBytes": 2120864,
+        "pdfBytes": 2120863,
         "sourceRasterSize": {
           "width": 96,
           "height": 134
@@ -1905,34 +1905,34 @@
       "name": "bleed-export-repeated-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 1946.161572000001,
-        "optimized": 247.01770699999906,
-        "deltaPercent": -87.31
+        "baseline": 2158.601688999999,
+        "optimized": 247.7688959999996,
+        "deltaPercent": -88.52
       },
       "cpuUserMs": {
-        "baseline": 2355.044,
-        "optimized": 432,
-        "deltaPercent": -81.66
+        "baseline": 2569.407,
+        "optimized": 426.264,
+        "deltaPercent": -83.41
       },
       "cpuSystemMs": {
-        "baseline": 52.62,
-        "optimized": 2.268,
-        "deltaPercent": -95.69
+        "baseline": 87.667,
+        "optimized": 3.406,
+        "deltaPercent": -96.11
       },
       "rssPeakSampledBytes": {
-        "baseline": 300429312,
-        "optimized": 271978496,
-        "deltaPercent": -9.47
+        "baseline": 304242688,
+        "optimized": 270077952,
+        "deltaPercent": -11.23
       },
       "heapPeakSampledBytes": {
-        "baseline": 48882896,
-        "optimized": 48340424,
-        "deltaPercent": -1.11
+        "baseline": 47873952,
+        "optimized": 48815000,
+        "deltaPercent": 1.97
       },
       "peakEventLoopDelayMs": {
-        "baseline": 1802.255169,
-        "optimized": 207.56362699999954,
-        "deltaPercent": -88.48
+        "baseline": 1996.969806000001,
+        "optimized": 210.61019599999963,
+        "deltaPercent": -89.45
       },
       "baselineDetails": {
         "derivedResults": 500,
@@ -1942,7 +1942,7 @@
         "candidateLookups": 500,
         "originalLookups": 500,
         "peakBleedConcurrency": 1,
-        "pdfBytes": 11536046,
+        "pdfBytes": 11536043,
         "sourceRasterSize": {
           "width": 96,
           "height": 134
@@ -1956,7 +1956,7 @@
         "candidateLookups": 1,
         "originalLookups": 1,
         "peakBleedConcurrency": 1,
-        "pdfBytes": 90539,
+        "pdfBytes": 90537,
         "sourceRasterSize": {
           "width": 96,
           "height": 134
@@ -1967,34 +1967,34 @@
       "name": "bleed-export-unique-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 5325.443889,
-        "optimized": 4134.119597000001,
-        "deltaPercent": -22.37
+        "baseline": 5528.694701,
+        "optimized": 4370.953168,
+        "deltaPercent": -20.94
       },
       "cpuUserMs": {
-        "baseline": 5407.435,
-        "optimized": 5683.727,
-        "deltaPercent": 5.11
+        "baseline": 5580.972,
+        "optimized": 5904.61,
+        "deltaPercent": 5.8
       },
       "cpuSystemMs": {
-        "baseline": 371.47,
-        "optimized": 434.628,
-        "deltaPercent": 17
+        "baseline": 377.829,
+        "optimized": 516.134,
+        "deltaPercent": 36.61
       },
       "rssPeakSampledBytes": {
-        "baseline": 331100160,
-        "optimized": 310673408,
-        "deltaPercent": -6.17
+        "baseline": 325234688,
+        "optimized": 320802816,
+        "deltaPercent": -1.36
       },
       "heapPeakSampledBytes": {
-        "baseline": 55986056,
-        "optimized": 56490080,
-        "deltaPercent": 0.9
+        "baseline": 56453232,
+        "optimized": 55964408,
+        "deltaPercent": -0.87
       },
       "peakEventLoopDelayMs": {
-        "baseline": 1685.4298559999988,
-        "optimized": 1986.712176000001,
-        "deltaPercent": 17.88
+        "baseline": 1795.1168990000006,
+        "optimized": 1843.143537,
+        "deltaPercent": 2.68
       },
       "baselineDetails": {
         "derivedResults": 500,
@@ -2031,34 +2031,34 @@
       "name": "bleed-cache-cold",
       "count": 1,
       "wallTimeMs": {
-        "baseline": 118.1501229999999,
-        "optimized": 113.42195600000014,
-        "deltaPercent": -4
+        "baseline": 122.2100730000002,
+        "optimized": 110.83514399999967,
+        "deltaPercent": -9.31
       },
       "cpuUserMs": {
-        "baseline": 119.112,
-        "optimized": 119.729,
-        "deltaPercent": 0.52
+        "baseline": 123.467,
+        "optimized": 112.745,
+        "deltaPercent": -8.68
       },
       "cpuSystemMs": {
-        "baseline": 12.679,
-        "optimized": 11.011,
-        "deltaPercent": -13.16
+        "baseline": 16.263,
+        "optimized": 11.034,
+        "deltaPercent": -32.15
       },
       "rssPeakSampledBytes": {
-        "baseline": 184791040,
-        "optimized": 181477376,
-        "deltaPercent": -1.79
+        "baseline": 182239232,
+        "optimized": 184455168,
+        "deltaPercent": 1.22
       },
       "heapPeakSampledBytes": {
-        "baseline": 46409256,
-        "optimized": 46537584,
-        "deltaPercent": 0.28
+        "baseline": 46328168,
+        "optimized": 46548784,
+        "deltaPercent": 0.48
       },
       "peakEventLoopDelayMs": {
-        "baseline": 84.7500570000002,
-        "optimized": 82.73644599999989,
-        "deltaPercent": -2.38
+        "baseline": 89.76137400000016,
+        "optimized": 79.28817400000025,
+        "deltaPercent": -11.67
       },
       "baselineDetails": {
         "cacheStatus": "miss",
@@ -2073,32 +2073,32 @@
       "name": "bleed-cache-warm",
       "count": 1,
       "wallTimeMs": {
-        "baseline": 10.963344000000234,
-        "optimized": 2.22272699999985,
-        "deltaPercent": -79.73
+        "baseline": 13.115232000000105,
+        "optimized": 1.746382999999696,
+        "deltaPercent": -86.68
       },
       "cpuUserMs": {
-        "baseline": 4.805,
-        "optimized": 2.379,
-        "deltaPercent": -50.49
+        "baseline": 11.213,
+        "optimized": 1.758,
+        "deltaPercent": -84.32
       },
       "cpuSystemMs": {
-        "baseline": 4.929,
+        "baseline": 4.909,
         "optimized": 0,
         "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 184680448,
-        "optimized": 181739520,
-        "deltaPercent": -1.59
+        "baseline": 184991744,
+        "optimized": 184717312,
+        "deltaPercent": -0.15
       },
       "heapPeakSampledBytes": {
-        "baseline": 46485408,
-        "optimized": 46594216,
-        "deltaPercent": 0.23
+        "baseline": 46417016,
+        "optimized": 46604664,
+        "deltaPercent": 0.4
       },
       "peakEventLoopDelayMs": {
-        "baseline": 0.9358569999999418,
+        "baseline": 0.6481380000000172,
         "optimized": 0,
         "deltaPercent": -100
       },
@@ -2125,8 +2125,8 @@
         "peakConcurrency": 1,
         "sharpConcurrency": 1
       },
-      "baselineWallTimeMs": 926.4983380000003,
-      "optimizedWallTimeMs": 969.272172,
+      "baselineWallTimeMs": 992.1957300000004,
+      "optimizedWallTimeMs": 977.1591999999996,
       "productionQueueMaximum": 2
     },
     {
@@ -2141,8 +2141,8 @@
         "peakConcurrency": 2,
         "sharpConcurrency": 1
       },
-      "baselineWallTimeMs": 840.8619960000001,
-      "optimizedWallTimeMs": 907.5945790000001,
+      "baselineWallTimeMs": 836.8471949999994,
+      "optimizedWallTimeMs": 826.0892140000005,
       "productionQueueMaximum": 2
     },
     {
@@ -2157,8 +2157,8 @@
         "peakConcurrency": 4,
         "sharpConcurrency": 1
       },
-      "baselineWallTimeMs": 792.0379419999999,
-      "optimizedWallTimeMs": 779.3105590000005,
+      "baselineWallTimeMs": 804.1096319999997,
+      "optimizedWallTimeMs": 838.4999029999999,
       "productionQueueMaximum": 2
     }
   ],
@@ -2166,34 +2166,34 @@
     "name": "pdf-export-sequential-500-unique-three-times",
     "count": 1500,
     "wallTimeMs": {
-      "baseline": 634.1132110000035,
-      "optimized": 622.0079459999979,
-      "deltaPercent": -1.91
+      "baseline": 627.980402000001,
+      "optimized": 732.5992359999946,
+      "deltaPercent": 16.66
     },
     "cpuUserMs": {
-      "baseline": 1002.252,
-      "optimized": 1018.839,
-      "deltaPercent": 1.65
+      "baseline": 985.711,
+      "optimized": 1121.56,
+      "deltaPercent": 13.78
     },
     "cpuSystemMs": {
-      "baseline": 161.518,
-      "optimized": 126.144,
-      "deltaPercent": -21.9
+      "baseline": 135.767,
+      "optimized": 164.94,
+      "deltaPercent": 21.49
     },
     "rssPeakSampledBytes": {
-      "baseline": 459083776,
-      "optimized": 433958912,
-      "deltaPercent": -5.47
+      "baseline": 493858816,
+      "optimized": 479510528,
+      "deltaPercent": -2.91
     },
     "heapPeakSampledBytes": {
-      "baseline": 49322624,
-      "optimized": 50579912,
-      "deltaPercent": 2.55
+      "baseline": 49624144,
+      "optimized": 51201136,
+      "deltaPercent": 3.18
     },
     "peakEventLoopDelayMs": {
-      "baseline": 82.82438399999955,
-      "optimized": 86.15931399999681,
-      "deltaPercent": 4.03
+      "baseline": 70.924629000001,
+      "optimized": 90.9094000000041,
+      "deltaPercent": 28.18
     },
     "baselineDetails": {
       "exports": 3,
@@ -2205,16 +2205,16 @@
       ],
       "memoryAfterExport": [
         {
-          "rssBytes": 431263744,
-          "heapUsedBytes": 37825896
+          "rssBytes": 468037632,
+          "heapUsedBytes": 38006408
         },
         {
-          "rssBytes": 458919936,
-          "heapUsedBytes": 39709448
+          "rssBytes": 493858816,
+          "heapUsedBytes": 38212640
         },
         {
-          "rssBytes": 459083776,
-          "heapUsedBytes": 37891536
+          "rssBytes": 474042368,
+          "heapUsedBytes": 38082560
         }
       ],
       "candidateLookups": 1500,
@@ -2231,16 +2231,16 @@
       ],
       "memoryAfterExport": [
         {
-          "rssBytes": 402632704,
-          "heapUsedBytes": 37957840
+          "rssBytes": 453820416,
+          "heapUsedBytes": 38231200
         },
         {
-          "rssBytes": 428322816,
-          "heapUsedBytes": 38472000
+          "rssBytes": 479510528,
+          "heapUsedBytes": 38328240
         },
         {
-          "rssBytes": 433958912,
-          "heapUsedBytes": 38080704
+          "rssBytes": 459841536,
+          "heapUsedBytes": 38345384
         }
       ],
       "candidateLookups": 1500,
@@ -2252,29 +2252,29 @@
     "name": "project-snapshot-single-card-change-500",
     "count": 500,
     "wallTimeMs": {
-      "baseline": 32.63297499999999,
-      "optimized": 36.94126099999994,
-      "deltaPercent": 13.2
+      "baseline": 38.516671999999744,
+      "optimized": 42.14015999999992,
+      "deltaPercent": 9.41
     },
     "cpuUserMs": {
-      "baseline": 32.452,
-      "optimized": 39.753,
-      "deltaPercent": 22.5
+      "baseline": 37.959,
+      "optimized": 44.785,
+      "deltaPercent": 17.98
     },
     "cpuSystemMs": {
-      "baseline": 2.096,
-      "optimized": 3.711,
-      "deltaPercent": 77.05
+      "baseline": 4.759,
+      "optimized": 2.387,
+      "deltaPercent": -49.84
     },
     "rssPeakSampledBytes": {
-      "baseline": 152092672,
-      "optimized": 148635648,
-      "deltaPercent": -2.27
+      "baseline": 153092096,
+      "optimized": 155054080,
+      "deltaPercent": 1.28
     },
     "heapPeakSampledBytes": {
-      "baseline": 42405568,
-      "optimized": 50373008,
-      "deltaPercent": 18.79
+      "baseline": 50583208,
+      "optimized": 50563528,
+      "deltaPercent": -0.04
     },
     "peakEventLoopDelayMs": {
       "baseline": 0,
@@ -2297,29 +2297,29 @@
       "name": "import-cancellation-after-first-root",
       "count": 2,
       "wallTimeMs": {
-        "baseline": 1.9693849999998747,
-        "optimized": 1.8486830000001646,
-        "deltaPercent": -6.13
+        "baseline": 1.6894279999996797,
+        "optimized": 2.040697999999793,
+        "deltaPercent": 20.79
       },
       "cpuUserMs": {
-        "baseline": 1.979,
-        "optimized": 1.649,
-        "deltaPercent": -16.68
+        "baseline": 1.699,
+        "optimized": 1.849,
+        "deltaPercent": 8.83
       },
       "cpuSystemMs": {
-        "baseline": 0,
-        "optimized": 0.043,
-        "deltaPercent": null
+        "baseline": 0.009,
+        "optimized": 0.007,
+        "deltaPercent": -22.22
       },
       "rssPeakSampledBytes": {
-        "baseline": 167415808,
-        "optimized": 167514112,
-        "deltaPercent": 0.06
+        "baseline": 168263680,
+        "optimized": 169848832,
+        "deltaPercent": 0.94
       },
       "heapPeakSampledBytes": {
-        "baseline": 62295320,
-        "optimized": 61028104,
-        "deltaPercent": -2.03
+        "baseline": 60711192,
+        "optimized": 61354592,
+        "deltaPercent": 1.06
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2343,29 +2343,29 @@
       "name": "pdf-export-cancellation-after-first-card",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 1.0312689999991562,
-        "optimized": 2.212546000002476,
-        "deltaPercent": 114.55
+        "baseline": 1.1711780000041472,
+        "optimized": 2.681034000001091,
+        "deltaPercent": 128.92
       },
       "cpuUserMs": {
-        "baseline": 1.041,
-        "optimized": 2.214,
-        "deltaPercent": 112.68
+        "baseline": 1.185,
+        "optimized": 2.698,
+        "deltaPercent": 127.68
       },
       "cpuSystemMs": {
-        "baseline": 0.001,
+        "baseline": 0,
         "optimized": 0,
-        "deltaPercent": -100
+        "deltaPercent": null
       },
       "rssPeakSampledBytes": {
-        "baseline": 459214848,
-        "optimized": 433958912,
-        "deltaPercent": -5.5
+        "baseline": 492593152,
+        "optimized": 464166912,
+        "deltaPercent": -5.77
       },
       "heapPeakSampledBytes": {
-        "baseline": 37959872,
-        "optimized": 38230736,
-        "deltaPercent": 0.71
+        "baseline": 38150848,
+        "optimized": 38456736,
+        "deltaPercent": 0.8
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2400,29 +2400,29 @@
       "name": "import-decklist-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 7.301285000000007,
-        "optimized": 7.556101000000126,
-        "deltaPercent": 3.49
+        "baseline": 8.402446999999938,
+        "optimized": 6.744026000000076,
+        "deltaPercent": -19.74
       },
       "cpuUserMs": {
-        "baseline": 6.265,
-        "optimized": 7.615,
-        "deltaPercent": 21.55
+        "baseline": 8.373,
+        "optimized": 6.781,
+        "deltaPercent": -19.01
       },
       "cpuSystemMs": {
-        "baseline": 0.994,
+        "baseline": 0.081,
         "optimized": 0,
         "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 127201280,
-        "optimized": 124764160,
-        "deltaPercent": -1.92
+        "baseline": 129155072,
+        "optimized": 130433024,
+        "deltaPercent": 0.99
       },
       "heapPeakSampledBytes": {
-        "baseline": 35587472,
-        "optimized": 35114704,
-        "deltaPercent": -1.33
+        "baseline": 35044976,
+        "optimized": 35194456,
+        "deltaPercent": 0.43
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2444,29 +2444,29 @@
       "name": "preview-json-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 0.24516399999993155,
-        "optimized": 0.24663799999962066,
-        "deltaPercent": 0.6
+        "baseline": 0.2570460000001731,
+        "optimized": 0.22091899999986708,
+        "deltaPercent": -14.05
       },
       "cpuUserMs": {
-        "baseline": 0.257,
-        "optimized": 0.227,
-        "deltaPercent": -11.67
+        "baseline": 0.283,
+        "optimized": 0.23,
+        "deltaPercent": -18.73
       },
       "cpuSystemMs": {
         "baseline": 0,
-        "optimized": 0.031,
+        "optimized": 0,
         "deltaPercent": null
       },
       "rssPeakSampledBytes": {
-        "baseline": 127201280,
-        "optimized": 124764160,
-        "deltaPercent": -1.92
+        "baseline": 129155072,
+        "optimized": 130433024,
+        "deltaPercent": 0.99
       },
       "heapPeakSampledBytes": {
-        "baseline": 35607728,
-        "optimized": 35134960,
-        "deltaPercent": -1.33
+        "baseline": 35065232,
+        "optimized": 35214712,
+        "deltaPercent": 0.43
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2486,29 +2486,29 @@
       "name": "working-set-build-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 2.113943000000063,
-        "optimized": 1.890378999999939,
-        "deltaPercent": -10.58
+        "baseline": 1.8409780000001774,
+        "optimized": 1.7897040000000288,
+        "deltaPercent": -2.79
       },
       "cpuUserMs": {
-        "baseline": 1.875,
-        "optimized": 1.904,
-        "deltaPercent": 1.55
+        "baseline": 0.96,
+        "optimized": 1.805,
+        "deltaPercent": 88.02
       },
       "cpuSystemMs": {
-        "baseline": 0,
+        "baseline": 0.856,
         "optimized": 0,
-        "deltaPercent": null
+        "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 127201280,
-        "optimized": 124895232,
-        "deltaPercent": -1.81
+        "baseline": 129155072,
+        "optimized": 130564096,
+        "deltaPercent": 1.09
       },
       "heapPeakSampledBytes": {
-        "baseline": 35720056,
-        "optimized": 35247280,
-        "deltaPercent": -1.32
+        "baseline": 35177552,
+        "optimized": 35327032,
+        "deltaPercent": 0.42
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2528,29 +2528,29 @@
       "name": "project-snapshot-key-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 7.071889999999939,
-        "optimized": 6.073014999999941,
-        "deltaPercent": -14.12
+        "baseline": 6.297508999999991,
+        "optimized": 5.610537999999906,
+        "deltaPercent": -10.91
       },
       "cpuUserMs": {
-        "baseline": 6.146,
-        "optimized": 6.071,
-        "deltaPercent": -1.22
+        "baseline": 5.449,
+        "optimized": 5.248,
+        "deltaPercent": -3.69
       },
       "cpuSystemMs": {
-        "baseline": 0.038,
+        "baseline": 0.938,
         "optimized": 0,
         "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 127594496,
-        "optimized": 124895232,
-        "deltaPercent": -2.12
+        "baseline": 129286144,
+        "optimized": 130695168,
+        "deltaPercent": 1.09
       },
       "heapPeakSampledBytes": {
-        "baseline": 36387408,
-        "optimized": 35902312,
-        "deltaPercent": -1.33
+        "baseline": 35834600,
+        "optimized": 35982048,
+        "deltaPercent": 0.41
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2570,29 +2570,29 @@
       "name": "working-set-server-render-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 19.318346999999903,
-        "optimized": 19.067775999999867,
-        "deltaPercent": -1.3
+        "baseline": 19.868132999999943,
+        "optimized": 18.289642000000185,
+        "deltaPercent": -7.94
       },
       "cpuUserMs": {
-        "baseline": 18.566,
-        "optimized": 19.127,
-        "deltaPercent": 3.02
+        "baseline": 17.69,
+        "optimized": 18.334,
+        "deltaPercent": 3.64
       },
       "cpuSystemMs": {
-        "baseline": 0.902,
-        "optimized": 0.893,
-        "deltaPercent": -1
+        "baseline": 0.8,
+        "optimized": 0,
+        "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 128643072,
-        "optimized": 125419520,
-        "deltaPercent": -2.51
+        "baseline": 129679360,
+        "optimized": 131088384,
+        "deltaPercent": 1.09
       },
       "heapPeakSampledBytes": {
-        "baseline": 37442320,
-        "optimized": 36952728,
-        "deltaPercent": -1.31
+        "baseline": 36883224,
+        "optimized": 37032472,
+        "deltaPercent": 0.4
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2614,29 +2614,29 @@
       "name": "projects-list-server-render-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 11.326545000000124,
-        "optimized": 11.448639000000185,
-        "deltaPercent": 1.08
+        "baseline": 10.878621000000294,
+        "optimized": 10.331638000000112,
+        "deltaPercent": -5.03
       },
       "cpuUserMs": {
-        "baseline": 9.705,
-        "optimized": 11.48,
-        "deltaPercent": 18.29
+        "baseline": 9.947,
+        "optimized": 9.677,
+        "deltaPercent": -2.71
       },
       "cpuSystemMs": {
-        "baseline": 0.936,
-        "optimized": 0.778,
-        "deltaPercent": -16.88
+        "baseline": 0.973,
+        "optimized": 0.749,
+        "deltaPercent": -23.02
       },
       "rssPeakSampledBytes": {
-        "baseline": 129429504,
-        "optimized": 125681664,
-        "deltaPercent": -2.9
+        "baseline": 129941504,
+        "optimized": 131350528,
+        "deltaPercent": 1.08
       },
       "heapPeakSampledBytes": {
-        "baseline": 38195400,
-        "optimized": 37705120,
-        "deltaPercent": -1.28
+        "baseline": 37635712,
+        "optimized": 37784864,
+        "deltaPercent": 0.4
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2658,29 +2658,29 @@
       "name": "import-decklist-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 2.9893039999999473,
-        "optimized": 2.954330000000027,
-        "deltaPercent": -1.17
+        "baseline": 2.798250999999709,
+        "optimized": 2.684418999999707,
+        "deltaPercent": -4.07
       },
       "cpuUserMs": {
-        "baseline": 3.805,
-        "optimized": 4.611,
-        "deltaPercent": 21.18
+        "baseline": 4.236,
+        "optimized": 4.893,
+        "deltaPercent": 15.51
       },
       "cpuSystemMs": {
-        "baseline": 0.935,
-        "optimized": 0.127,
-        "deltaPercent": -86.42
+        "baseline": 1.017,
+        "optimized": 0,
+        "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 129822720,
-        "optimized": 125943808,
-        "deltaPercent": -2.99
+        "baseline": 130072576,
+        "optimized": 131612672,
+        "deltaPercent": 1.18
       },
       "heapPeakSampledBytes": {
-        "baseline": 38464544,
-        "optimized": 37969456,
-        "deltaPercent": -1.29
+        "baseline": 37900080,
+        "optimized": 38049200,
+        "deltaPercent": 0.39
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2702,29 +2702,29 @@
       "name": "preview-json-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 0.2855380000000878,
-        "optimized": 0.30232999999998356,
-        "deltaPercent": 5.88
+        "baseline": 0.2629970000002686,
+        "optimized": 0.20715299999983472,
+        "deltaPercent": -21.23
       },
       "cpuUserMs": {
-        "baseline": 0.401,
-        "optimized": 0.946,
-        "deltaPercent": 135.91
+        "baseline": 0.21,
+        "optimized": 0.203,
+        "deltaPercent": -3.33
       },
       "cpuSystemMs": {
-        "baseline": 0.038,
-        "optimized": 0.068,
-        "deltaPercent": 78.95
+        "baseline": 0.056,
+        "optimized": 0,
+        "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 129822720,
-        "optimized": 125943808,
-        "deltaPercent": -2.99
+        "baseline": 130072576,
+        "optimized": 131612672,
+        "deltaPercent": 1.18
       },
       "heapPeakSampledBytes": {
-        "baseline": 38575768,
-        "optimized": 38053664,
-        "deltaPercent": -1.35
+        "baseline": 37984288,
+        "optimized": 38129888,
+        "deltaPercent": 0.38
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2744,29 +2744,29 @@
       "name": "working-set-build-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 1.4803499999998166,
-        "optimized": 1.8266920000000937,
-        "deltaPercent": 23.4
+        "baseline": 2.244775000000118,
+        "optimized": 1.5410820000001877,
+        "deltaPercent": -31.35
       },
       "cpuUserMs": {
-        "baseline": 0.782,
-        "optimized": 1.555,
-        "deltaPercent": 98.85
+        "baseline": 0.811,
+        "optimized": 1.325,
+        "deltaPercent": 63.38
       },
       "cpuSystemMs": {
-        "baseline": 0.942,
-        "optimized": 0.984,
-        "deltaPercent": 4.46
+        "baseline": 1.2,
+        "optimized": 0,
+        "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 130347008,
-        "optimized": 126468096,
-        "deltaPercent": -2.98
+        "baseline": 130596864,
+        "optimized": 132005888,
+        "deltaPercent": 1.08
       },
       "heapPeakSampledBytes": {
-        "baseline": 39036784,
-        "optimized": 38514680,
-        "deltaPercent": -1.34
+        "baseline": 38445328,
+        "optimized": 38594424,
+        "deltaPercent": 0.39
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2786,29 +2786,29 @@
       "name": "project-snapshot-key-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 17.935568000000103,
-        "optimized": 17.6409749999998,
-        "deltaPercent": -1.64
+        "baseline": 22.912701000000197,
+        "optimized": 18.02907899999991,
+        "deltaPercent": -21.31
       },
       "cpuUserMs": {
-        "baseline": 24.647,
-        "optimized": 22.88,
-        "deltaPercent": -7.17
+        "baseline": 22.4,
+        "optimized": 25.831,
+        "deltaPercent": 15.32
       },
       "cpuSystemMs": {
-        "baseline": 4.084,
-        "optimized": 5.748,
-        "deltaPercent": 40.74
+        "baseline": 9.124,
+        "optimized": 1.797,
+        "deltaPercent": -80.3
       },
       "rssPeakSampledBytes": {
-        "baseline": 135196672,
-        "optimized": 130818048,
-        "deltaPercent": -3.24
+        "baseline": 135446528,
+        "optimized": 136855552,
+        "deltaPercent": 1.04
       },
       "heapPeakSampledBytes": {
-        "baseline": 43376272,
-        "optimized": 43499928,
-        "deltaPercent": 0.29
+        "baseline": 43430160,
+        "optimized": 43584208,
+        "deltaPercent": 0.35
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2828,29 +2828,29 @@
       "name": "working-set-server-render-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 56.74003399999992,
-        "optimized": 63.089268000000175,
-        "deltaPercent": 11.19
+        "baseline": 61.71788699999979,
+        "optimized": 63.12694399999964,
+        "deltaPercent": 2.28
       },
       "cpuUserMs": {
-        "baseline": 91.559,
-        "optimized": 95.158,
-        "deltaPercent": 3.93
+        "baseline": 93.84,
+        "optimized": 93.14,
+        "deltaPercent": -0.75
       },
       "cpuSystemMs": {
-        "baseline": 6.8,
-        "optimized": 13.65,
-        "deltaPercent": 100.74
+        "baseline": 12.709,
+        "optimized": 13.456,
+        "deltaPercent": 5.88
       },
       "rssPeakSampledBytes": {
-        "baseline": 140931072,
-        "optimized": 137654272,
-        "deltaPercent": -2.33
+        "baseline": 142262272,
+        "optimized": 144064512,
+        "deltaPercent": 1.27
       },
       "heapPeakSampledBytes": {
-        "baseline": 43377512,
-        "optimized": 43501168,
-        "deltaPercent": 0.29
+        "baseline": 43431400,
+        "optimized": 43585448,
+        "deltaPercent": 0.35
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2872,29 +2872,29 @@
       "name": "projects-list-server-render-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 23.953407999999854,
-        "optimized": 24.856846000000132,
-        "deltaPercent": 3.77
+        "baseline": 25.22741700000006,
+        "optimized": 26.413342000000284,
+        "deltaPercent": 4.7
       },
       "cpuUserMs": {
-        "baseline": 22.307,
-        "optimized": 28.891,
-        "deltaPercent": 29.52
+        "baseline": 27.236,
+        "optimized": 28.884,
+        "deltaPercent": 6.05
       },
       "cpuSystemMs": {
-        "baseline": 2.795,
-        "optimized": 0.022,
-        "deltaPercent": -99.21
+        "baseline": 2.013,
+        "optimized": 1.627,
+        "deltaPercent": -19.18
       },
       "rssPeakSampledBytes": {
-        "baseline": 142798848,
-        "optimized": 138309632,
-        "deltaPercent": -3.14
+        "baseline": 142786560,
+        "optimized": 144719872,
+        "deltaPercent": 1.35
       },
       "heapPeakSampledBytes": {
-        "baseline": 41799064,
-        "optimized": 41706200,
-        "deltaPercent": -0.22
+        "baseline": 41892416,
+        "optimized": 41961920,
+        "deltaPercent": 0.17
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2916,29 +2916,29 @@
       "name": "import-decklist-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 3.95302700000002,
-        "optimized": 4.5323419999999714,
-        "deltaPercent": 14.65
+        "baseline": 5.169181000000208,
+        "optimized": 4.546678000000156,
+        "deltaPercent": -12.04
       },
       "cpuUserMs": {
-        "baseline": 5.032,
-        "optimized": 5.926,
-        "deltaPercent": 17.77
+        "baseline": 6.245,
+        "optimized": 5.706,
+        "deltaPercent": -8.63
       },
       "cpuSystemMs": {
-        "baseline": 1.186,
-        "optimized": 1.001,
-        "deltaPercent": -15.6
+        "baseline": 2.066,
+        "optimized": 1.973,
+        "deltaPercent": -4.5
       },
       "rssPeakSampledBytes": {
-        "baseline": 143847424,
-        "optimized": 139358208,
-        "deltaPercent": -3.12
+        "baseline": 143835136,
+        "optimized": 145768448,
+        "deltaPercent": 1.34
       },
       "heapPeakSampledBytes": {
-        "baseline": 42862856,
-        "optimized": 42766456,
-        "deltaPercent": -0.22
+        "baseline": 42953192,
+        "optimized": 43022136,
+        "deltaPercent": 0.16
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -2960,29 +2960,29 @@
       "name": "preview-json-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 1.2227619999998751,
-        "optimized": 1.2120149999996102,
-        "deltaPercent": -0.88
+        "baseline": 1.5623719999998684,
+        "optimized": 1.2246070000001055,
+        "deltaPercent": -21.62
       },
       "cpuUserMs": {
-        "baseline": 1.052,
-        "optimized": 0.474,
-        "deltaPercent": -54.94
+        "baseline": 0.642,
+        "optimized": 1.196,
+        "deltaPercent": 86.29
       },
       "cpuSystemMs": {
-        "baseline": 0.03,
-        "optimized": 0.748,
-        "deltaPercent": 2393.33
+        "baseline": 0.922,
+        "optimized": 0.037,
+        "deltaPercent": -95.99
       },
       "rssPeakSampledBytes": {
-        "baseline": 144240640,
-        "optimized": 139751424,
-        "deltaPercent": -3.11
+        "baseline": 144228352,
+        "optimized": 146161664,
+        "deltaPercent": 1.34
       },
       "heapPeakSampledBytes": {
-        "baseline": 43244928,
-        "optimized": 43148528,
-        "deltaPercent": -0.22
+        "baseline": 43335304,
+        "optimized": 43404296,
+        "deltaPercent": 0.16
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3002,29 +3002,29 @@
       "name": "working-set-build-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 7.069295000000238,
-        "optimized": 7.326206000000184,
-        "deltaPercent": 3.63
+        "baseline": 10.217055000000073,
+        "optimized": 7.572881000000052,
+        "deltaPercent": -25.88
       },
       "cpuUserMs": {
-        "baseline": 5.867,
-        "optimized": 7.23,
-        "deltaPercent": 23.23
+        "baseline": 7.324,
+        "optimized": 6.462,
+        "deltaPercent": -11.77
       },
       "cpuSystemMs": {
-        "baseline": 1.877,
-        "optimized": 1.706,
-        "deltaPercent": -9.11
+        "baseline": 4.999,
+        "optimized": 2.845,
+        "deltaPercent": -43.09
       },
       "rssPeakSampledBytes": {
-        "baseline": 146468864,
-        "optimized": 141979648,
-        "deltaPercent": -3.06
+        "baseline": 146456576,
+        "optimized": 148389888,
+        "deltaPercent": 1.32
       },
       "heapPeakSampledBytes": {
-        "baseline": 45509856,
-        "optimized": 45419416,
-        "deltaPercent": -0.2
+        "baseline": 45594496,
+        "optimized": 45674648,
+        "deltaPercent": 0.18
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3044,29 +3044,29 @@
       "name": "project-snapshot-key-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 39.77415999999994,
-        "optimized": 49.33604100000002,
-        "deltaPercent": 24.04
+        "baseline": 48.97727799999984,
+        "optimized": 48.67099999999982,
+        "deltaPercent": -0.63
       },
       "cpuUserMs": {
-        "baseline": 44.851,
-        "optimized": 49.305,
-        "deltaPercent": 9.93
+        "baseline": 48.763,
+        "optimized": 52.799,
+        "deltaPercent": 8.28
       },
       "cpuSystemMs": {
-        "baseline": 9.818,
-        "optimized": 9.378,
-        "deltaPercent": -4.48
+        "baseline": 11.963,
+        "optimized": 6.954,
+        "deltaPercent": -41.87
       },
       "rssPeakSampledBytes": {
-        "baseline": 151814144,
-        "optimized": 148635648,
-        "deltaPercent": -2.09
+        "baseline": 152895488,
+        "optimized": 155054080,
+        "deltaPercent": 1.41
       },
       "heapPeakSampledBytes": {
-        "baseline": 47920352,
-        "optimized": 50362224,
-        "deltaPercent": 5.1
+        "baseline": 50572424,
+        "optimized": 50552744,
+        "deltaPercent": -0.04
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3086,29 +3086,29 @@
       "name": "project-snapshot-single-card-change-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 32.63297499999999,
-        "optimized": 36.94126099999994,
-        "deltaPercent": 13.2
+        "baseline": 38.516671999999744,
+        "optimized": 42.14015999999992,
+        "deltaPercent": 9.41
       },
       "cpuUserMs": {
-        "baseline": 32.452,
-        "optimized": 39.753,
-        "deltaPercent": 22.5
+        "baseline": 37.959,
+        "optimized": 44.785,
+        "deltaPercent": 17.98
       },
       "cpuSystemMs": {
-        "baseline": 2.096,
-        "optimized": 3.711,
-        "deltaPercent": 77.05
+        "baseline": 4.759,
+        "optimized": 2.387,
+        "deltaPercent": -49.84
       },
       "rssPeakSampledBytes": {
-        "baseline": 152092672,
-        "optimized": 148635648,
-        "deltaPercent": -2.27
+        "baseline": 153092096,
+        "optimized": 155054080,
+        "deltaPercent": 1.28
       },
       "heapPeakSampledBytes": {
-        "baseline": 42405568,
-        "optimized": 50373008,
-        "deltaPercent": 18.79
+        "baseline": 50583208,
+        "optimized": 50563528,
+        "deltaPercent": -0.04
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3130,29 +3130,29 @@
       "name": "working-set-server-render-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 188.68990500000018,
-        "optimized": 190.2082760000003,
-        "deltaPercent": 0.8
+        "baseline": 195.46054200000026,
+        "optimized": 202.70875100000012,
+        "deltaPercent": 3.71
       },
       "cpuUserMs": {
-        "baseline": 274.141,
-        "optimized": 271.04,
-        "deltaPercent": -1.13
+        "baseline": 264.555,
+        "optimized": 278.609,
+        "deltaPercent": 5.31
       },
       "cpuSystemMs": {
-        "baseline": 11.429,
-        "optimized": 16.32,
-        "deltaPercent": 42.79
+        "baseline": 12.802,
+        "optimized": 7.324,
+        "deltaPercent": -42.79
       },
       "rssPeakSampledBytes": {
-        "baseline": 157024256,
-        "optimized": 154578944,
-        "deltaPercent": -1.56
+        "baseline": 155246592,
+        "optimized": 157323264,
+        "deltaPercent": 1.34
       },
       "heapPeakSampledBytes": {
-        "baseline": 43690640,
-        "optimized": 56256984,
-        "deltaPercent": 28.76
+        "baseline": 38000816,
+        "optimized": 56855872,
+        "deltaPercent": 49.62
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3174,29 +3174,29 @@
       "name": "projects-list-server-render-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 28.188454999999976,
-        "optimized": 30.077802999999676,
-        "deltaPercent": 6.7
+        "baseline": 28.34709299999986,
+        "optimized": 33.51947900000005,
+        "deltaPercent": 18.25
       },
       "cpuUserMs": {
-        "baseline": 30.926,
-        "optimized": 33.386,
-        "deltaPercent": 7.95
+        "baseline": 32.533,
+        "optimized": 36.928,
+        "deltaPercent": 13.51
       },
       "cpuSystemMs": {
-        "baseline": 1.986,
-        "optimized": 1.879,
-        "deltaPercent": -5.39
+        "baseline": 0.923,
+        "optimized": 1.073,
+        "deltaPercent": 16.25
       },
       "rssPeakSampledBytes": {
-        "baseline": 155742208,
-        "optimized": 155680768,
-        "deltaPercent": -0.04
+        "baseline": 156557312,
+        "optimized": 158060544,
+        "deltaPercent": 0.96
       },
       "heapPeakSampledBytes": {
-        "baseline": 52493696,
-        "optimized": 47289536,
-        "deltaPercent": -9.91
+        "baseline": 47314408,
+        "optimized": 47167272,
+        "deltaPercent": -0.31
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3218,29 +3218,29 @@
       "name": "import-decklist-1000",
       "count": 1000,
       "wallTimeMs": {
-        "baseline": 4.405594999999721,
-        "optimized": 4.690745000000334,
-        "deltaPercent": 6.47
+        "baseline": 4.503186999999798,
+        "optimized": 4.786440999999741,
+        "deltaPercent": 6.29
       },
       "cpuUserMs": {
-        "baseline": 4.399,
-        "optimized": 4.711,
-        "deltaPercent": 7.09
+        "baseline": 4.071,
+        "optimized": 4.514,
+        "deltaPercent": 10.88
       },
       "cpuSystemMs": {
-        "baseline": 0,
+        "baseline": 0.01,
         "optimized": 0,
-        "deltaPercent": null
+        "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 155742208,
-        "optimized": 155680768,
-        "deltaPercent": -0.04
+        "baseline": 156557312,
+        "optimized": 158060544,
+        "deltaPercent": 0.96
       },
       "heapPeakSampledBytes": {
-        "baseline": 54559216,
-        "optimized": 49336256,
-        "deltaPercent": -9.57
+        "baseline": 49370120,
+        "optimized": 49213992,
+        "deltaPercent": -0.32
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3262,29 +3262,29 @@
       "name": "preview-json-1000",
       "count": 1000,
       "wallTimeMs": {
-        "baseline": 2.0544629999999415,
-        "optimized": 1.8158229999999094,
-        "deltaPercent": -11.62
+        "baseline": 1.7623029999999744,
+        "optimized": 2.105858999999782,
+        "deltaPercent": 19.49
       },
       "cpuUserMs": {
-        "baseline": 2.069,
-        "optimized": 1.826,
-        "deltaPercent": -11.74
+        "baseline": 1.571,
+        "optimized": 1.609,
+        "deltaPercent": 2.42
       },
       "cpuSystemMs": {
-        "baseline": 0,
-        "optimized": 0,
-        "deltaPercent": null
+        "baseline": 0.119,
+        "optimized": 1.012,
+        "deltaPercent": 750.42
       },
       "rssPeakSampledBytes": {
-        "baseline": 156004352,
-        "optimized": 155942912,
-        "deltaPercent": -0.04
+        "baseline": 156819456,
+        "optimized": 158322688,
+        "deltaPercent": 0.96
       },
       "heapPeakSampledBytes": {
-        "baseline": 55318064,
-        "optimized": 50095080,
-        "deltaPercent": -9.44
+        "baseline": 50128968,
+        "optimized": 49972816,
+        "deltaPercent": -0.31
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3304,29 +3304,29 @@
       "name": "working-set-build-1000",
       "count": 1000,
       "wallTimeMs": {
-        "baseline": 11.40905900000007,
-        "optimized": 8.66979399999991,
-        "deltaPercent": -24.01
+        "baseline": 9.7313979999999,
+        "optimized": 10.327119999999923,
+        "deltaPercent": 6.12
       },
       "cpuUserMs": {
-        "baseline": 13.116,
-        "optimized": 9.303,
-        "deltaPercent": -29.07
+        "baseline": 9.635,
+        "optimized": 10.309,
+        "deltaPercent": 7
       },
       "cpuSystemMs": {
-        "baseline": 0.059,
-        "optimized": 0,
-        "deltaPercent": -100
+        "baseline": 0,
+        "optimized": 0.004,
+        "deltaPercent": null
       },
       "rssPeakSampledBytes": {
-        "baseline": 156004352,
-        "optimized": 155942912,
-        "deltaPercent": -0.04
+        "baseline": 156819456,
+        "optimized": 158322688,
+        "deltaPercent": 0.96
       },
       "heapPeakSampledBytes": {
-        "baseline": 55319368,
-        "optimized": 54333392,
-        "deltaPercent": -1.78
+        "baseline": 54367296,
+        "optimized": 54211128,
+        "deltaPercent": -0.29
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3346,29 +3346,29 @@
       "name": "working-set-server-render-1000",
       "count": 1000,
       "wallTimeMs": {
-        "baseline": 143.92022700000007,
-        "optimized": 143.8078989999999,
-        "deltaPercent": -0.08
+        "baseline": 143.96783700000015,
+        "optimized": 143.32074899999998,
+        "deltaPercent": -0.45
       },
       "cpuUserMs": {
-        "baseline": 155.149,
-        "optimized": 163.781,
-        "deltaPercent": 5.56
+        "baseline": 165.54,
+        "optimized": 171.14,
+        "deltaPercent": 3.38
       },
       "cpuSystemMs": {
-        "baseline": 21.343,
-        "optimized": 19.829,
-        "deltaPercent": -7.09
+        "baseline": 20.184,
+        "optimized": 18.161,
+        "deltaPercent": -10.02
       },
       "rssPeakSampledBytes": {
-        "baseline": 167415808,
-        "optimized": 167514112,
-        "deltaPercent": 0.06
+        "baseline": 168132608,
+        "optimized": 169848832,
+        "deltaPercent": 1.02
       },
       "heapPeakSampledBytes": {
-        "baseline": 62239944,
-        "optimized": 60971752,
-        "deltaPercent": -2.04
+        "baseline": 60654840,
+        "optimized": 61298240,
+        "deltaPercent": 1.06
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3390,29 +3390,29 @@
       "name": "import-cancellation-after-first-root",
       "count": 2,
       "wallTimeMs": {
-        "baseline": 1.9693849999998747,
-        "optimized": 1.8486830000001646,
-        "deltaPercent": -6.13
+        "baseline": 1.6894279999996797,
+        "optimized": 2.040697999999793,
+        "deltaPercent": 20.79
       },
       "cpuUserMs": {
-        "baseline": 1.979,
-        "optimized": 1.649,
-        "deltaPercent": -16.68
+        "baseline": 1.699,
+        "optimized": 1.849,
+        "deltaPercent": 8.83
       },
       "cpuSystemMs": {
-        "baseline": 0,
-        "optimized": 0.043,
-        "deltaPercent": null
+        "baseline": 0.009,
+        "optimized": 0.007,
+        "deltaPercent": -22.22
       },
       "rssPeakSampledBytes": {
-        "baseline": 167415808,
-        "optimized": 167514112,
-        "deltaPercent": 0.06
+        "baseline": 168263680,
+        "optimized": 169848832,
+        "deltaPercent": 0.94
       },
       "heapPeakSampledBytes": {
-        "baseline": 62295320,
-        "optimized": 61028104,
-        "deltaPercent": -2.03
+        "baseline": 60711192,
+        "optimized": 61354592,
+        "deltaPercent": 1.06
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3436,29 +3436,29 @@
       "name": "artwork-catalog-lookup-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 0.3480139999996936,
-        "optimized": 0.32722599999988233,
-        "deltaPercent": -5.97
+        "baseline": 0.42379499999969994,
+        "optimized": 0.34241400000018984,
+        "deltaPercent": -19.2
       },
       "cpuUserMs": {
-        "baseline": 0.322,
-        "optimized": 0.335,
-        "deltaPercent": 4.04
+        "baseline": 0.431,
+        "optimized": 0.349,
+        "deltaPercent": -19.03
       },
       "cpuSystemMs": {
         "baseline": 0,
-        "optimized": 0.008,
+        "optimized": 0,
         "deltaPercent": null
       },
       "rssPeakSampledBytes": {
-        "baseline": 167415808,
-        "optimized": 167514112,
-        "deltaPercent": 0.06
+        "baseline": 168263680,
+        "optimized": 169848832,
+        "deltaPercent": 0.94
       },
       "heapPeakSampledBytes": {
-        "baseline": 62317720,
-        "optimized": 61050504,
-        "deltaPercent": -2.03
+        "baseline": 60733592,
+        "optimized": 61376992,
+        "deltaPercent": 1.06
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3478,29 +3478,29 @@
       "name": "artwork-gallery-server-render-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 34.45908300000019,
-        "optimized": 36.16745800000035,
-        "deltaPercent": 4.96
+        "baseline": 35.80756500000007,
+        "optimized": 37.498727000000144,
+        "deltaPercent": 4.72
       },
       "cpuUserMs": {
-        "baseline": 35.632,
-        "optimized": 36.309,
-        "deltaPercent": 1.9
+        "baseline": 36.52,
+        "optimized": 42.147,
+        "deltaPercent": 15.41
       },
       "cpuSystemMs": {
-        "baseline": 0,
-        "optimized": 2.638,
-        "deltaPercent": null
+        "baseline": 0.828,
+        "optimized": 0.905,
+        "deltaPercent": 9.3
       },
       "rssPeakSampledBytes": {
-        "baseline": 168071168,
-        "optimized": 168300544,
-        "deltaPercent": 0.14
+        "baseline": 169050112,
+        "optimized": 170635264,
+        "deltaPercent": 0.94
       },
       "heapPeakSampledBytes": {
-        "baseline": 64775896,
-        "optimized": 63449968,
-        "deltaPercent": -2.05
+        "baseline": 63132184,
+        "optimized": 63781792,
+        "deltaPercent": 1.03
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3524,29 +3524,29 @@
       "name": "artwork-catalog-lookup-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 0.04641600000013568,
-        "optimized": 0.05556299999989278,
-        "deltaPercent": 19.71
+        "baseline": 0.03012699999999313,
+        "optimized": 0.03625700000020515,
+        "deltaPercent": 20.35
       },
       "cpuUserMs": {
-        "baseline": 0.039,
-        "optimized": 0.065,
-        "deltaPercent": 66.67
+        "baseline": 0.028,
+        "optimized": 0,
+        "deltaPercent": -100
       },
       "cpuSystemMs": {
-        "baseline": 0,
-        "optimized": 0,
-        "deltaPercent": null
+        "baseline": 0.005,
+        "optimized": 0.041,
+        "deltaPercent": 720
       },
       "rssPeakSampledBytes": {
-        "baseline": 168071168,
-        "optimized": 168300544,
-        "deltaPercent": 0.14
+        "baseline": 169050112,
+        "optimized": 170635264,
+        "deltaPercent": 0.94
       },
       "heapPeakSampledBytes": {
-        "baseline": 64805128,
-        "optimized": 63479200,
-        "deltaPercent": -2.05
+        "baseline": 63161416,
+        "optimized": 63811024,
+        "deltaPercent": 1.03
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3566,29 +3566,29 @@
       "name": "artwork-gallery-server-render-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 34.78334300000006,
-        "optimized": 32.552374999999756,
-        "deltaPercent": -6.41
+        "baseline": 33.15184899999986,
+        "optimized": 34.475990000000365,
+        "deltaPercent": 3.99
       },
       "cpuUserMs": {
-        "baseline": 58.564,
-        "optimized": 56.557,
-        "deltaPercent": -3.43
+        "baseline": 59.465,
+        "optimized": 60.549,
+        "deltaPercent": 1.82
       },
       "cpuSystemMs": {
-        "baseline": 2.637,
-        "optimized": 5.022,
-        "deltaPercent": 90.44
+        "baseline": 1.859,
+        "optimized": 5.3,
+        "deltaPercent": 185.1
       },
       "rssPeakSampledBytes": {
-        "baseline": 168988672,
-        "optimized": 168824832,
-        "deltaPercent": -0.1
+        "baseline": 169836544,
+        "optimized": 171421696,
+        "deltaPercent": 0.93
       },
       "heapPeakSampledBytes": {
-        "baseline": 64808216,
-        "optimized": 63482288,
-        "deltaPercent": -2.05
+        "baseline": 63164504,
+        "optimized": 63814112,
+        "deltaPercent": 1.03
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3612,29 +3612,29 @@
       "name": "artwork-catalog-lookup-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 0.04933099999971091,
-        "optimized": 0.043660999999701744,
-        "deltaPercent": -11.49
+        "baseline": 0.04772800000000643,
+        "optimized": 0.06575100000009115,
+        "deltaPercent": 37.76
       },
       "cpuUserMs": {
-        "baseline": 0.049,
-        "optimized": 0.041,
-        "deltaPercent": -16.33
+        "baseline": 0.046,
+        "optimized": 0.073,
+        "deltaPercent": 58.7
       },
       "cpuSystemMs": {
-        "baseline": 0.007,
-        "optimized": 0.008,
-        "deltaPercent": 14.29
+        "baseline": 0.006,
+        "optimized": 0,
+        "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 168988672,
-        "optimized": 168824832,
-        "deltaPercent": -0.1
+        "baseline": 169836544,
+        "optimized": 171421696,
+        "deltaPercent": 0.93
       },
       "heapPeakSampledBytes": {
-        "baseline": 54489584,
-        "optimized": 52780272,
-        "deltaPercent": -3.14
+        "baseline": 52482928,
+        "optimized": 53080816,
+        "deltaPercent": 1.14
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3654,29 +3654,29 @@
       "name": "artwork-gallery-server-render-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 77.98111300000028,
-        "optimized": 88.18949500000008,
-        "deltaPercent": 13.09
+        "baseline": 77.90437499999962,
+        "optimized": 89.71449099999973,
+        "deltaPercent": 15.16
       },
       "cpuUserMs": {
-        "baseline": 147.363,
-        "optimized": 161.959,
-        "deltaPercent": 9.9
+        "baseline": 148.189,
+        "optimized": 162.921,
+        "deltaPercent": 9.94
       },
       "cpuSystemMs": {
-        "baseline": 5.856,
-        "optimized": 12.591,
-        "deltaPercent": 115.01
+        "baseline": 11.805,
+        "optimized": 7.308,
+        "deltaPercent": -38.09
       },
       "rssPeakSampledBytes": {
-        "baseline": 170876928,
-        "optimized": 169975808,
-        "deltaPercent": -0.53
+        "baseline": 175071232,
+        "optimized": 173359104,
+        "deltaPercent": -0.98
       },
       "heapPeakSampledBytes": {
-        "baseline": 55908520,
-        "optimized": 69052248,
-        "deltaPercent": 23.51
+        "baseline": 68780048,
+        "optimized": 69344304,
+        "deltaPercent": 0.82
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3700,14 +3700,14 @@
       "name": "artwork-catalog-lookup-1000",
       "count": 1000,
       "wallTimeMs": {
-        "baseline": 0.06815700000015568,
-        "optimized": 0.06991999999991094,
-        "deltaPercent": 2.59
+        "baseline": 0.06788499999993292,
+        "optimized": 0.08027799999990748,
+        "deltaPercent": 18.26
       },
       "cpuUserMs": {
-        "baseline": 0.075,
-        "optimized": 0.062,
-        "deltaPercent": -17.33
+        "baseline": 0.074,
+        "optimized": 0.091,
+        "deltaPercent": 22.97
       },
       "cpuSystemMs": {
         "baseline": 0,
@@ -3715,14 +3715,14 @@
         "deltaPercent": null
       },
       "rssPeakSampledBytes": {
-        "baseline": 170876928,
-        "optimized": 169975808,
-        "deltaPercent": -0.53
+        "baseline": 175071232,
+        "optimized": 173359104,
+        "deltaPercent": -0.98
       },
       "heapPeakSampledBytes": {
-        "baseline": 56136736,
-        "optimized": 69280544,
-        "deltaPercent": 23.41
+        "baseline": 69008264,
+        "optimized": 69574440,
+        "deltaPercent": 0.82
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3742,29 +3742,29 @@
       "name": "artwork-gallery-server-render-1000",
       "count": 1000,
       "wallTimeMs": {
-        "baseline": 110.51699400000007,
-        "optimized": 126.74132800000007,
-        "deltaPercent": 14.68
+        "baseline": 129.85644000000002,
+        "optimized": 146.3250210000001,
+        "deltaPercent": 12.68
       },
       "cpuUserMs": {
-        "baseline": 149.514,
-        "optimized": 174.408,
-        "deltaPercent": 16.65
+        "baseline": 176.349,
+        "optimized": 203.849,
+        "deltaPercent": 15.59
       },
       "cpuSystemMs": {
-        "baseline": 8.096,
-        "optimized": 7.259,
-        "deltaPercent": -10.34
+        "baseline": 12.426,
+        "optimized": 9.738,
+        "deltaPercent": -21.63
       },
       "rssPeakSampledBytes": {
-        "baseline": 173981696,
-        "optimized": 173903872,
-        "deltaPercent": -0.04
+        "baseline": 176603136,
+        "optimized": 176373760,
+        "deltaPercent": -0.13
       },
       "heapPeakSampledBytes": {
-        "baseline": 72611064,
-        "optimized": 69373184,
-        "deltaPercent": -4.46
+        "baseline": 69099896,
+        "optimized": 69671840,
+        "deltaPercent": 0.83
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -3788,34 +3788,34 @@
       "name": "bleed-cache-cold",
       "count": 1,
       "wallTimeMs": {
-        "baseline": 118.1501229999999,
-        "optimized": 113.42195600000014,
-        "deltaPercent": -4
+        "baseline": 122.2100730000002,
+        "optimized": 110.83514399999967,
+        "deltaPercent": -9.31
       },
       "cpuUserMs": {
-        "baseline": 119.112,
-        "optimized": 119.729,
-        "deltaPercent": 0.52
+        "baseline": 123.467,
+        "optimized": 112.745,
+        "deltaPercent": -8.68
       },
       "cpuSystemMs": {
-        "baseline": 12.679,
-        "optimized": 11.011,
-        "deltaPercent": -13.16
+        "baseline": 16.263,
+        "optimized": 11.034,
+        "deltaPercent": -32.15
       },
       "rssPeakSampledBytes": {
-        "baseline": 184791040,
-        "optimized": 181477376,
-        "deltaPercent": -1.79
+        "baseline": 182239232,
+        "optimized": 184455168,
+        "deltaPercent": 1.22
       },
       "heapPeakSampledBytes": {
-        "baseline": 46409256,
-        "optimized": 46537584,
-        "deltaPercent": 0.28
+        "baseline": 46328168,
+        "optimized": 46548784,
+        "deltaPercent": 0.48
       },
       "peakEventLoopDelayMs": {
-        "baseline": 84.7500570000002,
-        "optimized": 82.73644599999989,
-        "deltaPercent": -2.38
+        "baseline": 89.76137400000016,
+        "optimized": 79.28817400000025,
+        "deltaPercent": -11.67
       },
       "baselineDetails": {
         "cacheStatus": "miss",
@@ -3830,32 +3830,32 @@
       "name": "bleed-cache-warm",
       "count": 1,
       "wallTimeMs": {
-        "baseline": 10.963344000000234,
-        "optimized": 2.22272699999985,
-        "deltaPercent": -79.73
+        "baseline": 13.115232000000105,
+        "optimized": 1.746382999999696,
+        "deltaPercent": -86.68
       },
       "cpuUserMs": {
-        "baseline": 4.805,
-        "optimized": 2.379,
-        "deltaPercent": -50.49
+        "baseline": 11.213,
+        "optimized": 1.758,
+        "deltaPercent": -84.32
       },
       "cpuSystemMs": {
-        "baseline": 4.929,
+        "baseline": 4.909,
         "optimized": 0,
         "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 184680448,
-        "optimized": 181739520,
-        "deltaPercent": -1.59
+        "baseline": 184991744,
+        "optimized": 184717312,
+        "deltaPercent": -0.15
       },
       "heapPeakSampledBytes": {
-        "baseline": 46485408,
-        "optimized": 46594216,
-        "deltaPercent": 0.23
+        "baseline": 46417016,
+        "optimized": 46604664,
+        "deltaPercent": 0.4
       },
       "peakEventLoopDelayMs": {
-        "baseline": 0.9358569999999418,
+        "baseline": 0.6481380000000172,
         "optimized": 0,
         "deltaPercent": -100
       },
@@ -3872,34 +3872,34 @@
       "name": "bleed-batch-native-concurrency-1",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 926.4983380000003,
-        "optimized": 969.272172,
-        "deltaPercent": 4.62
+        "baseline": 992.1957300000004,
+        "optimized": 977.1591999999996,
+        "deltaPercent": -1.52
       },
       "cpuUserMs": {
-        "baseline": 1102.069,
-        "optimized": 1146.163,
-        "deltaPercent": 4
+        "baseline": 1117.55,
+        "optimized": 1132.428,
+        "deltaPercent": 1.33
       },
       "cpuSystemMs": {
-        "baseline": 45.477,
-        "optimized": 60.265,
-        "deltaPercent": 32.52
+        "baseline": 48.786,
+        "optimized": 37.555,
+        "deltaPercent": -23.02
       },
       "rssPeakSampledBytes": {
-        "baseline": 262311936,
-        "optimized": 251473920,
-        "deltaPercent": -4.13
+        "baseline": 261271552,
+        "optimized": 256503808,
+        "deltaPercent": -1.82
       },
       "heapPeakSampledBytes": {
-        "baseline": 45328536,
-        "optimized": 45513872,
-        "deltaPercent": 0.41
+        "baseline": 46299792,
+        "optimized": 45570728,
+        "deltaPercent": -1.57
       },
       "peakEventLoopDelayMs": {
-        "baseline": 83.36941099999967,
-        "optimized": 96.41049500000008,
-        "deltaPercent": 15.64
+        "baseline": 103.69560199999978,
+        "optimized": 90.31750399999964,
+        "deltaPercent": -12.9
       },
       "baselineDetails": {
         "configuredConcurrency": 1,
@@ -3916,34 +3916,34 @@
       "name": "bleed-batch-native-concurrency-2",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 840.8619960000001,
-        "optimized": 907.5945790000001,
-        "deltaPercent": 7.94
+        "baseline": 836.8471949999994,
+        "optimized": 826.0892140000005,
+        "deltaPercent": -1.29
       },
       "cpuUserMs": {
-        "baseline": 1065.807,
-        "optimized": 1136.23,
-        "deltaPercent": 6.61
+        "baseline": 1056.885,
+        "optimized": 1088.506,
+        "deltaPercent": 2.99
       },
       "cpuSystemMs": {
-        "baseline": 42.534,
-        "optimized": 48.57,
-        "deltaPercent": 14.19
+        "baseline": 43.318,
+        "optimized": 59.858,
+        "deltaPercent": 38.18
       },
       "rssPeakSampledBytes": {
-        "baseline": 251711488,
-        "optimized": 246272000,
-        "deltaPercent": -2.16
+        "baseline": 259366912,
+        "optimized": 249966592,
+        "deltaPercent": -3.62
       },
       "heapPeakSampledBytes": {
-        "baseline": 45328352,
-        "optimized": 45510312,
-        "deltaPercent": 0.4
+        "baseline": 45433848,
+        "optimized": 45583280,
+        "deltaPercent": 0.33
       },
       "peakEventLoopDelayMs": {
-        "baseline": 98.65981399999964,
-        "optimized": 104.96714999999995,
-        "deltaPercent": 6.39
+        "baseline": 93.46970899999997,
+        "optimized": 89.34544299999925,
+        "deltaPercent": -4.41
       },
       "baselineDetails": {
         "configuredConcurrency": 2,
@@ -3960,34 +3960,34 @@
       "name": "bleed-batch-native-concurrency-4",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 792.0379419999999,
-        "optimized": 779.3105590000005,
-        "deltaPercent": -1.61
+        "baseline": 804.1096319999997,
+        "optimized": 838.4999029999999,
+        "deltaPercent": 4.28
       },
       "cpuUserMs": {
-        "baseline": 1021.181,
-        "optimized": 986.397,
-        "deltaPercent": -3.41
+        "baseline": 1107.038,
+        "optimized": 1096.614,
+        "deltaPercent": -0.94
       },
       "cpuSystemMs": {
-        "baseline": 60.192,
-        "optimized": 60.138,
-        "deltaPercent": -0.09
+        "baseline": 90.492,
+        "optimized": 61.837,
+        "deltaPercent": -31.67
       },
       "rssPeakSampledBytes": {
-        "baseline": 272400384,
-        "optimized": 263778304,
-        "deltaPercent": -3.17
+        "baseline": 261697536,
+        "optimized": 256798720,
+        "deltaPercent": -1.87
       },
       "heapPeakSampledBytes": {
-        "baseline": 43355224,
-        "optimized": 45537904,
-        "deltaPercent": 5.03
+        "baseline": 45538848,
+        "optimized": 44813096,
+        "deltaPercent": -1.59
       },
       "peakEventLoopDelayMs": {
-        "baseline": 229.67725699999983,
-        "optimized": 228.27088999999978,
-        "deltaPercent": -0.61
+        "baseline": 234.04870200000005,
+        "optimized": 224.6206859999993,
+        "deltaPercent": -4.03
       },
       "baselineDetails": {
         "configuredConcurrency": 4,
@@ -4004,34 +4004,34 @@
       "name": "bleed-export-repeated-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 1147.6916499999998,
-        "optimized": 370.69261599999936,
-        "deltaPercent": -67.7
+        "baseline": 1257.1723569999995,
+        "optimized": 384.2406140000003,
+        "deltaPercent": -69.44
       },
       "cpuUserMs": {
-        "baseline": 1410.95,
-        "optimized": 490.807,
-        "deltaPercent": -65.21
+        "baseline": 1513.024,
+        "optimized": 523.104,
+        "deltaPercent": -65.43
       },
       "cpuSystemMs": {
-        "baseline": 48.098,
-        "optimized": 13.977,
-        "deltaPercent": -70.94
+        "baseline": 69.749,
+        "optimized": 4.097,
+        "deltaPercent": -94.13
       },
       "rssPeakSampledBytes": {
-        "baseline": 287125504,
-        "optimized": 247881728,
-        "deltaPercent": -13.67
+        "baseline": 291237888,
+        "optimized": 256798720,
+        "deltaPercent": -11.83
       },
       "heapPeakSampledBytes": {
-        "baseline": 42856392,
-        "optimized": 44916656,
-        "deltaPercent": 4.81
+        "baseline": 42938736,
+        "optimized": 43278608,
+        "deltaPercent": 0.79
       },
       "peakEventLoopDelayMs": {
-        "baseline": 66.5388780000003,
-        "optimized": 72.98910700000033,
-        "deltaPercent": 9.69
+        "baseline": 73.68607200000042,
+        "optimized": 70.0250530000003,
+        "deltaPercent": -4.97
       },
       "baselineDetails": {
         "derivedResults": 9,
@@ -4066,34 +4066,34 @@
       "name": "bleed-export-unique-9",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 2017.8030200000003,
-        "optimized": 1790.444214,
-        "deltaPercent": -11.27
+        "baseline": 1843.2676709999996,
+        "optimized": 1899.085943,
+        "deltaPercent": 3.03
       },
       "cpuUserMs": {
-        "baseline": 2361.092,
-        "optimized": 2295.034,
-        "deltaPercent": -2.8
+        "baseline": 2196.498,
+        "optimized": 2422.643,
+        "deltaPercent": 10.3
       },
       "cpuSystemMs": {
-        "baseline": 116.117,
-        "optimized": 82.802,
-        "deltaPercent": -28.69
+        "baseline": 59.711,
+        "optimized": 99.735,
+        "deltaPercent": 67.03
       },
       "rssPeakSampledBytes": {
-        "baseline": 290271232,
-        "optimized": 287010816,
-        "deltaPercent": -1.12
+        "baseline": 291237888,
+        "optimized": 297684992,
+        "deltaPercent": 2.21
       },
       "heapPeakSampledBytes": {
-        "baseline": 44682360,
-        "optimized": 45160344,
-        "deltaPercent": 1.07
+        "baseline": 44788912,
+        "optimized": 43906416,
+        "deltaPercent": -1.97
       },
       "peakEventLoopDelayMs": {
-        "baseline": 92.50473099999999,
-        "optimized": 99.03973299999961,
-        "deltaPercent": 7.06
+        "baseline": 95.8202110000002,
+        "optimized": 147.59740299999976,
+        "deltaPercent": 54.04
       },
       "baselineDetails": {
         "derivedResults": 9,
@@ -4128,34 +4128,34 @@
       "name": "bleed-export-repeated-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 407.2411240000001,
-        "optimized": 75.84035899999981,
-        "deltaPercent": -81.38
+        "baseline": 432.1524499999996,
+        "optimized": 72.66183799999999,
+        "deltaPercent": -83.19
       },
       "cpuUserMs": {
-        "baseline": 575.002,
-        "optimized": 130.777,
-        "deltaPercent": -77.26
+        "baseline": 591.062,
+        "optimized": 129.482,
+        "deltaPercent": -78.09
       },
       "cpuSystemMs": {
-        "baseline": 11.71,
-        "optimized": 4.84,
+        "baseline": 4.626,
+        "optimized": 1.912,
         "deltaPercent": -58.67
       },
       "rssPeakSampledBytes": {
-        "baseline": 273817600,
-        "optimized": 270536704,
-        "deltaPercent": -1.2
+        "baseline": 272986112,
+        "optimized": 267104256,
+        "deltaPercent": -2.15
       },
       "heapPeakSampledBytes": {
-        "baseline": 36111960,
-        "optimized": 44776080,
-        "deltaPercent": 23.99
+        "baseline": 36952496,
+        "optimized": 44950976,
+        "deltaPercent": 21.65
       },
       "peakEventLoopDelayMs": {
-        "baseline": 361.834331,
-        "optimized": 0.044411000000764034,
-        "deltaPercent": -99.99
+        "baseline": 396.1553010000007,
+        "optimized": 0.43706700000075216,
+        "deltaPercent": -99.89
       },
       "baselineDetails": {
         "derivedResults": 100,
@@ -4190,34 +4190,34 @@
       "name": "bleed-export-unique-100",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 1147.9889170000006,
-        "optimized": 812.9988589999994,
-        "deltaPercent": -29.18
+        "baseline": 1256.8775910000004,
+        "optimized": 930.8184229999988,
+        "deltaPercent": -25.94
       },
       "cpuUserMs": {
-        "baseline": 1315.087,
-        "optimized": 1224.119,
-        "deltaPercent": -6.92
+        "baseline": 1428.695,
+        "optimized": 1374.969,
+        "deltaPercent": -3.76
       },
       "cpuSystemMs": {
-        "baseline": 68.41,
-        "optimized": 82.412,
-        "deltaPercent": 20.47
+        "baseline": 77.62,
+        "optimized": 81.614,
+        "deltaPercent": 5.15
       },
       "rssPeakSampledBytes": {
-        "baseline": 269209600,
-        "optimized": 271323136,
-        "deltaPercent": 0.79
+        "baseline": 277704704,
+        "optimized": 269684736,
+        "deltaPercent": -2.89
       },
       "heapPeakSampledBytes": {
-        "baseline": 47467152,
-        "optimized": 47091296,
-        "deltaPercent": -0.79
+        "baseline": 47709112,
+        "optimized": 47148680,
+        "deltaPercent": -1.17
       },
       "peakEventLoopDelayMs": {
-        "baseline": 427.45732899999894,
-        "optimized": 362.6182399999998,
-        "deltaPercent": -15.17
+        "baseline": 438.1161979999997,
+        "optimized": 454.99765300000035,
+        "deltaPercent": 3.85
       },
       "baselineDetails": {
         "derivedResults": 100,
@@ -4241,7 +4241,7 @@
         "candidateLookups": 100,
         "originalLookups": 100,
         "peakBleedConcurrency": 2,
-        "pdfBytes": 2120864,
+        "pdfBytes": 2120863,
         "sourceRasterSize": {
           "width": 96,
           "height": 134
@@ -4252,34 +4252,34 @@
       "name": "bleed-export-repeated-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 1946.161572000001,
-        "optimized": 247.01770699999906,
-        "deltaPercent": -87.31
+        "baseline": 2158.601688999999,
+        "optimized": 247.7688959999996,
+        "deltaPercent": -88.52
       },
       "cpuUserMs": {
-        "baseline": 2355.044,
-        "optimized": 432,
-        "deltaPercent": -81.66
+        "baseline": 2569.407,
+        "optimized": 426.264,
+        "deltaPercent": -83.41
       },
       "cpuSystemMs": {
-        "baseline": 52.62,
-        "optimized": 2.268,
-        "deltaPercent": -95.69
+        "baseline": 87.667,
+        "optimized": 3.406,
+        "deltaPercent": -96.11
       },
       "rssPeakSampledBytes": {
-        "baseline": 300429312,
-        "optimized": 271978496,
-        "deltaPercent": -9.47
+        "baseline": 304242688,
+        "optimized": 270077952,
+        "deltaPercent": -11.23
       },
       "heapPeakSampledBytes": {
-        "baseline": 48882896,
-        "optimized": 48340424,
-        "deltaPercent": -1.11
+        "baseline": 47873952,
+        "optimized": 48815000,
+        "deltaPercent": 1.97
       },
       "peakEventLoopDelayMs": {
-        "baseline": 1802.255169,
-        "optimized": 207.56362699999954,
-        "deltaPercent": -88.48
+        "baseline": 1996.969806000001,
+        "optimized": 210.61019599999963,
+        "deltaPercent": -89.45
       },
       "baselineDetails": {
         "derivedResults": 500,
@@ -4289,7 +4289,7 @@
         "candidateLookups": 500,
         "originalLookups": 500,
         "peakBleedConcurrency": 1,
-        "pdfBytes": 11536046,
+        "pdfBytes": 11536043,
         "sourceRasterSize": {
           "width": 96,
           "height": 134
@@ -4303,7 +4303,7 @@
         "candidateLookups": 1,
         "originalLookups": 1,
         "peakBleedConcurrency": 1,
-        "pdfBytes": 90539,
+        "pdfBytes": 90537,
         "sourceRasterSize": {
           "width": 96,
           "height": 134
@@ -4314,34 +4314,34 @@
       "name": "bleed-export-unique-500",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 5325.443889,
-        "optimized": 4134.119597000001,
-        "deltaPercent": -22.37
+        "baseline": 5528.694701,
+        "optimized": 4370.953168,
+        "deltaPercent": -20.94
       },
       "cpuUserMs": {
-        "baseline": 5407.435,
-        "optimized": 5683.727,
-        "deltaPercent": 5.11
+        "baseline": 5580.972,
+        "optimized": 5904.61,
+        "deltaPercent": 5.8
       },
       "cpuSystemMs": {
-        "baseline": 371.47,
-        "optimized": 434.628,
-        "deltaPercent": 17
+        "baseline": 377.829,
+        "optimized": 516.134,
+        "deltaPercent": 36.61
       },
       "rssPeakSampledBytes": {
-        "baseline": 331100160,
-        "optimized": 310673408,
-        "deltaPercent": -6.17
+        "baseline": 325234688,
+        "optimized": 320802816,
+        "deltaPercent": -1.36
       },
       "heapPeakSampledBytes": {
-        "baseline": 55986056,
-        "optimized": 56490080,
-        "deltaPercent": 0.9
+        "baseline": 56453232,
+        "optimized": 55964408,
+        "deltaPercent": -0.87
       },
       "peakEventLoopDelayMs": {
-        "baseline": 1685.4298559999988,
-        "optimized": 1986.712176000001,
-        "deltaPercent": 17.88
+        "baseline": 1795.1168990000006,
+        "optimized": 1843.143537,
+        "deltaPercent": 2.68
       },
       "baselineDetails": {
         "derivedResults": 500,
@@ -4373,32 +4373,106 @@
       }
     },
     {
+      "name": "pdf-bleed-resource-cache-unique-fullsize-16",
+      "count": 16,
+      "wallTimeMs": {
+        "baseline": 1771.3140340000027,
+        "optimized": 1699.2421360000008,
+        "deltaPercent": -4.07
+      },
+      "cpuUserMs": {
+        "baseline": 1959.445,
+        "optimized": 1873.929,
+        "deltaPercent": -4.36
+      },
+      "cpuSystemMs": {
+        "baseline": 34.1,
+        "optimized": 68.134,
+        "deltaPercent": 99.81
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 358854656,
+        "optimized": 380772352,
+        "deltaPercent": 6.11
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 45298792,
+        "optimized": 35269576,
+        "deltaPercent": -22.14
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 1732.6242289999973,
+        "optimized": 1660.8757009999972,
+        "deltaPercent": -4.14
+      },
+      "baselineDetails": {
+        "pdfBytes": 5125155,
+        "pagesGenerated": 2,
+        "xObjects": 32,
+        "sourceRasterBytes": 817020,
+        "derivativeBytes": 4451613,
+        "derivativeDimensions": {
+          "width": 761,
+          "height": 1056
+        },
+        "derivativeUses": 16,
+        "uniqueDerivatives": 16,
+        "rasterEmbeds": 32,
+        "cacheableResources": 32,
+        "resourceCacheLookups": 32,
+        "resourceCacheHits": 0,
+        "resourceCacheMisses": 32,
+        "resourceCacheSnapshotBytes": 5268633,
+        "cacheDiagnosticsSource": "reconstructed from baseline embed path and unique fixture identities"
+      },
+      "optimizedDetails": {
+        "pdfBytes": 5125155,
+        "pagesGenerated": 2,
+        "xObjects": 32,
+        "sourceRasterBytes": 817020,
+        "derivativeBytes": 4451613,
+        "derivativeDimensions": {
+          "width": 761,
+          "height": 1056
+        },
+        "derivativeUses": 16,
+        "uniqueDerivatives": 16,
+        "rasterEmbeds": 32,
+        "cacheableResources": 0,
+        "resourceCacheLookups": 0,
+        "resourceCacheHits": 0,
+        "resourceCacheMisses": 0,
+        "resourceCacheSnapshotBytes": 0,
+        "cacheDiagnosticsSource": "runtime"
+      }
+    },
+    {
       "name": "pdf-export-9-repeated-artwork",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 4.264031999999133,
-        "optimized": 4.630224000000453,
-        "deltaPercent": 8.59
+        "baseline": 4.918988000001264,
+        "optimized": 5.145376000000397,
+        "deltaPercent": 4.6
       },
       "cpuUserMs": {
-        "baseline": 4.673,
-        "optimized": 4.593,
-        "deltaPercent": -1.71
+        "baseline": 4.939,
+        "optimized": 4.155,
+        "deltaPercent": -15.87
       },
       "cpuSystemMs": {
         "baseline": 0,
-        "optimized": 0,
+        "optimized": 0.032,
         "deltaPercent": null
       },
       "rssPeakSampledBytes": {
-        "baseline": 339881984,
-        "optimized": 322207744,
-        "deltaPercent": -5.2
+        "baseline": 371044352,
+        "optimized": 388608000,
+        "deltaPercent": 4.73
       },
       "heapPeakSampledBytes": {
-        "baseline": 48865568,
-        "optimized": 49554184,
-        "deltaPercent": 1.41
+        "baseline": 35423616,
+        "optimized": 35833608,
+        "deltaPercent": 1.16
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -4430,29 +4504,29 @@
       "name": "pdf-export-9-unique-artwork",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 4.322120000000723,
-        "optimized": 4.518436999998812,
-        "deltaPercent": 4.54
+        "baseline": 4.4584540000032575,
+        "optimized": 4.75926199999958,
+        "deltaPercent": 6.75
       },
       "cpuUserMs": {
-        "baseline": 8.773,
-        "optimized": 6.869,
-        "deltaPercent": -21.7
+        "baseline": 4.481,
+        "optimized": 4.74,
+        "deltaPercent": 5.78
       },
       "cpuSystemMs": {
-        "baseline": 0.027,
-        "optimized": 0.059,
-        "deltaPercent": 118.52
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
       },
       "rssPeakSampledBytes": {
-        "baseline": 340013056,
-        "optimized": 322207744,
-        "deltaPercent": -5.24
+        "baseline": 371044352,
+        "optimized": 388608000,
+        "deltaPercent": 4.73
       },
       "heapPeakSampledBytes": {
-        "baseline": 49774240,
-        "optimized": 50346512,
-        "deltaPercent": 1.15
+        "baseline": 36130280,
+        "optimized": 36460616,
+        "deltaPercent": 0.91
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,
@@ -4484,32 +4558,32 @@
       "name": "pdf-export-100-repeated-artwork",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 29.78123499999856,
-        "optimized": 20.85021599999891,
-        "deltaPercent": -29.99
+        "baseline": 36.39006299999892,
+        "optimized": 17.335786999999982,
+        "deltaPercent": -52.36
       },
       "cpuUserMs": {
-        "baseline": 29.056,
-        "optimized": 24.138,
-        "deltaPercent": -16.93
+        "baseline": 81.185,
+        "optimized": 24.352,
+        "deltaPercent": -70
       },
       "cpuSystemMs": {
-        "baseline": 3.056,
-        "optimized": 0.019,
-        "deltaPercent": -99.38
+        "baseline": 1.165,
+        "optimized": 0,
+        "deltaPercent": -100
       },
       "rssPeakSampledBytes": {
-        "baseline": 338305024,
-        "optimized": 326135808,
-        "deltaPercent": -3.6
+        "baseline": 377466880,
+        "optimized": 395423744,
+        "deltaPercent": 4.76
       },
       "heapPeakSampledBytes": {
-        "baseline": 48021832,
-        "optimized": 47865000,
-        "deltaPercent": -0.33
+        "baseline": 41681184,
+        "optimized": 38971536,
+        "deltaPercent": -6.5
       },
       "peakEventLoopDelayMs": {
-        "baseline": 10.10529900000256,
+        "baseline": 10.613346999998612,
         "optimized": 0,
         "deltaPercent": -100
       },
@@ -4538,34 +4612,34 @@
       "name": "pdf-export-100-unique-artwork",
       "count": 100,
       "wallTimeMs": {
-        "baseline": 42.277296000000206,
-        "optimized": 50.017744000000675,
-        "deltaPercent": 18.31
+        "baseline": 40.98963899999944,
+        "optimized": 35.93184499999916,
+        "deltaPercent": -12.34
       },
       "cpuUserMs": {
-        "baseline": 40.547,
-        "optimized": 47.528,
-        "deltaPercent": 17.22
+        "baseline": 89.201,
+        "optimized": 83.625,
+        "deltaPercent": -6.25
       },
       "cpuSystemMs": {
-        "baseline": 3.027,
-        "optimized": 9.09,
-        "deltaPercent": 200.3
+        "baseline": 1.969,
+        "optimized": 1.668,
+        "deltaPercent": -15.29
       },
       "rssPeakSampledBytes": {
-        "baseline": 347086848,
-        "optimized": 331247616,
-        "deltaPercent": -4.56
+        "baseline": 377597952,
+        "optimized": 395423744,
+        "deltaPercent": 4.72
       },
       "heapPeakSampledBytes": {
-        "baseline": 41953352,
-        "optimized": 48783192,
-        "deltaPercent": 16.28
+        "baseline": 40070912,
+        "optimized": 43460192,
+        "deltaPercent": 8.46
       },
       "peakEventLoopDelayMs": {
-        "baseline": 13.038980000001175,
-        "optimized": 16.08350900000005,
-        "deltaPercent": 23.35
+        "baseline": 12.551876000001357,
+        "optimized": 12.556233999999677,
+        "deltaPercent": 0.03
       },
       "baselineDetails": {
         "pdfBytes": 5171710,
@@ -4592,34 +4666,34 @@
       "name": "pdf-export-500-repeated-artwork",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 197.76765499999965,
-        "optimized": 131.70154200000252,
-        "deltaPercent": -33.41
+        "baseline": 179.9779469999994,
+        "optimized": 89.93300399999862,
+        "deltaPercent": -50.03
       },
       "cpuUserMs": {
-        "baseline": 366.487,
-        "optimized": 236.01,
-        "deltaPercent": -35.6
+        "baseline": 300.1,
+        "optimized": 186.407,
+        "deltaPercent": -37.89
       },
       "cpuSystemMs": {
-        "baseline": 23.525,
-        "optimized": 1.934,
-        "deltaPercent": -91.78
+        "baseline": 10.789,
+        "optimized": 1.323,
+        "deltaPercent": -87.74
       },
       "rssPeakSampledBytes": {
-        "baseline": 375267328,
-        "optimized": 342163456,
-        "deltaPercent": -8.82
+        "baseline": 401252352,
+        "optimized": 400404480,
+        "deltaPercent": -0.21
       },
       "heapPeakSampledBytes": {
-        "baseline": 40000432,
-        "optimized": 38998776,
-        "deltaPercent": -2.5
+        "baseline": 41606520,
+        "optimized": 39793832,
+        "deltaPercent": -4.36
       },
       "peakEventLoopDelayMs": {
-        "baseline": 78.67516199999955,
-        "optimized": 116.24707399999897,
-        "deltaPercent": 47.76
+        "baseline": 67.33574500000395,
+        "optimized": 79.68547899999976,
+        "deltaPercent": 18.34
       },
       "baselineDetails": {
         "pdfBytes": 19632382,
@@ -4632,7 +4706,7 @@
         "pngEmbedCalls": 0
       },
       "optimizedDetails": {
-        "pdfBytes": 59466,
+        "pdfBytes": 59469,
         "uniqueArtworkHashes": 1,
         "candidateLookups": 1,
         "originalLookups": 1,
@@ -4646,34 +4720,34 @@
       "name": "pdf-export-500-unique-artwork",
       "count": 500,
       "wallTimeMs": {
-        "baseline": 225.87295000000086,
-        "optimized": 278.8097620000008,
-        "deltaPercent": 23.44
+        "baseline": 240.1936910000004,
+        "optimized": 231.12496100000135,
+        "deltaPercent": -3.78
       },
       "cpuUserMs": {
-        "baseline": 373.368,
-        "optimized": 306.819,
-        "deltaPercent": -17.82
+        "baseline": 362.048,
+        "optimized": 299.131,
+        "deltaPercent": -17.38
       },
       "cpuSystemMs": {
-        "baseline": 28.015,
-        "optimized": 58.935,
-        "deltaPercent": 110.37
+        "baseline": 50.365,
+        "optimized": 32.606,
+        "deltaPercent": -35.26
       },
       "rssPeakSampledBytes": {
-        "baseline": 392290304,
-        "optimized": 362672128,
-        "deltaPercent": -7.55
+        "baseline": 427405312,
+        "optimized": 417079296,
+        "deltaPercent": -2.42
       },
       "heapPeakSampledBytes": {
-        "baseline": 50400152,
-        "optimized": 40227536,
-        "deltaPercent": -20.18
+        "baseline": 41897752,
+        "optimized": 44897864,
+        "deltaPercent": 7.16
       },
       "peakEventLoopDelayMs": {
-        "baseline": 82.13420599999881,
-        "optimized": 81.32447999999931,
-        "deltaPercent": -0.99
+        "baseline": 75.47816999999486,
+        "optimized": 75.1241549999977,
+        "deltaPercent": -0.47
       },
       "baselineDetails": {
         "pdfBytes": 25530919,
@@ -4700,34 +4774,34 @@
       "name": "pdf-export-sequential-500-unique-three-times",
       "count": 1500,
       "wallTimeMs": {
-        "baseline": 634.1132110000035,
-        "optimized": 622.0079459999979,
-        "deltaPercent": -1.91
+        "baseline": 627.980402000001,
+        "optimized": 732.5992359999946,
+        "deltaPercent": 16.66
       },
       "cpuUserMs": {
-        "baseline": 1002.252,
-        "optimized": 1018.839,
-        "deltaPercent": 1.65
+        "baseline": 985.711,
+        "optimized": 1121.56,
+        "deltaPercent": 13.78
       },
       "cpuSystemMs": {
-        "baseline": 161.518,
-        "optimized": 126.144,
-        "deltaPercent": -21.9
+        "baseline": 135.767,
+        "optimized": 164.94,
+        "deltaPercent": 21.49
       },
       "rssPeakSampledBytes": {
-        "baseline": 459083776,
-        "optimized": 433958912,
-        "deltaPercent": -5.47
+        "baseline": 493858816,
+        "optimized": 479510528,
+        "deltaPercent": -2.91
       },
       "heapPeakSampledBytes": {
-        "baseline": 49322624,
-        "optimized": 50579912,
-        "deltaPercent": 2.55
+        "baseline": 49624144,
+        "optimized": 51201136,
+        "deltaPercent": 3.18
       },
       "peakEventLoopDelayMs": {
-        "baseline": 82.82438399999955,
-        "optimized": 86.15931399999681,
-        "deltaPercent": 4.03
+        "baseline": 70.924629000001,
+        "optimized": 90.9094000000041,
+        "deltaPercent": 28.18
       },
       "baselineDetails": {
         "exports": 3,
@@ -4739,16 +4813,16 @@
         ],
         "memoryAfterExport": [
           {
-            "rssBytes": 431263744,
-            "heapUsedBytes": 37825896
+            "rssBytes": 468037632,
+            "heapUsedBytes": 38006408
           },
           {
-            "rssBytes": 458919936,
-            "heapUsedBytes": 39709448
+            "rssBytes": 493858816,
+            "heapUsedBytes": 38212640
           },
           {
-            "rssBytes": 459083776,
-            "heapUsedBytes": 37891536
+            "rssBytes": 474042368,
+            "heapUsedBytes": 38082560
           }
         ],
         "candidateLookups": 1500,
@@ -4765,16 +4839,16 @@
         ],
         "memoryAfterExport": [
           {
-            "rssBytes": 402632704,
-            "heapUsedBytes": 37957840
+            "rssBytes": 453820416,
+            "heapUsedBytes": 38231200
           },
           {
-            "rssBytes": 428322816,
-            "heapUsedBytes": 38472000
+            "rssBytes": 479510528,
+            "heapUsedBytes": 38328240
           },
           {
-            "rssBytes": 433958912,
-            "heapUsedBytes": 38080704
+            "rssBytes": 459841536,
+            "heapUsedBytes": 38345384
           }
         ],
         "candidateLookups": 1500,
@@ -4786,29 +4860,29 @@
       "name": "pdf-export-cancellation-after-first-card",
       "count": 9,
       "wallTimeMs": {
-        "baseline": 1.0312689999991562,
-        "optimized": 2.212546000002476,
-        "deltaPercent": 114.55
+        "baseline": 1.1711780000041472,
+        "optimized": 2.681034000001091,
+        "deltaPercent": 128.92
       },
       "cpuUserMs": {
-        "baseline": 1.041,
-        "optimized": 2.214,
-        "deltaPercent": 112.68
+        "baseline": 1.185,
+        "optimized": 2.698,
+        "deltaPercent": 127.68
       },
       "cpuSystemMs": {
-        "baseline": 0.001,
+        "baseline": 0,
         "optimized": 0,
-        "deltaPercent": -100
+        "deltaPercent": null
       },
       "rssPeakSampledBytes": {
-        "baseline": 459214848,
-        "optimized": 433958912,
-        "deltaPercent": -5.5
+        "baseline": 492593152,
+        "optimized": 464166912,
+        "deltaPercent": -5.77
       },
       "heapPeakSampledBytes": {
-        "baseline": 37959872,
-        "optimized": 38230736,
-        "deltaPercent": 0.71
+        "baseline": 38150848,
+        "optimized": 38456736,
+        "deltaPercent": 0.8
       },
       "peakEventLoopDelayMs": {
         "baseline": 0,

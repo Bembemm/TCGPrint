@@ -46,6 +46,7 @@ import { transformRegistrationGeometry } from "../../core/registration";
 import { getCutGuideStrokeBoundsMm } from "../../core/geometry/cut-guides";
 import type { DuplexBackPageTransform } from "../../core/duplex";
 import { CalibrationError, createPrintCalibrationTransform, getCalibrationPageOverflowMm, parseSideCalibration, type CalibrationSide, type SideCalibration } from "../../core/calibration";
+import { associatePdfRasterCacheDiagnostics, countRasterReuseOccurrences, type PdfRasterCacheDiagnostics } from "./raster-resource-policy";
 
 export interface LosslessPdfRequest {
   /** Image bytes read from local files. Repeated entries produce repeated cards. */
@@ -593,6 +594,12 @@ function copyBytes(bytes: Uint8Array): Uint8Array {
   return copy;
 }
 
+function getPdfRasterFormat(bytes: Uint8Array): "jpeg" | "png" | undefined {
+  if (PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)) return "png";
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) return "jpeg";
+  return undefined;
+}
+
 function detectFormat(bytes: Uint8Array): SupportedImageFormat {
   if (
     bytes.length >= 8
@@ -647,6 +654,14 @@ interface PdfRasterCacheEntry {
 interface PdfRasterResourceCache {
   readonly entries: Map<string, PdfRasterCacheEntry[]>;
   nextPng16ResourceId: number;
+  readonly diagnostics: {
+    rasterEmbeds: number;
+    cacheLookups: number;
+    cacheHits: number;
+    cacheMisses: number;
+    cacheEntries: number;
+    snapshotBytes: number;
+  };
 }
 
 function readUint32BigEndian(bytes: Uint8Array, offset: number): number {
@@ -724,6 +739,7 @@ function pdfRasterResourceKey(
 }
 
 function haveSameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left === right) return true;
   if (left.byteLength !== right.byteLength) return false;
   for (let index = 0; index < left.byteLength; index += 1) {
     if (left[index] !== right[index]) return false;
@@ -741,6 +757,7 @@ async function embedPdfRaster(
   allowReuse = true,
 ): Promise<PdfRasterResource> {
   if (!allowReuse) {
+    cache.diagnostics.rasterEmbeds += 1;
     if (format === "jpeg") {
       const image = await pdf.embedJpg(exactBytes);
       return { type: "image", image, width: image.width, height: image.height };
@@ -757,9 +774,15 @@ async function embedPdfRaster(
   const metadata = getPdfRasterMetadata(exactBytes, format);
   const cacheKey = metadata ? pdfRasterResourceKey(format, exactBytes, metadata, knownSha256) : undefined;
   const existing = cacheKey ? cache.entries.get(cacheKey) : undefined;
+  if (cacheKey) cache.diagnostics.cacheLookups += 1;
   const cached = existing?.find((entry) => haveSameBytes(entry.byteSnapshot, sourceBytes));
-  if (cached) return cached.resource;
+  if (cached) {
+    cache.diagnostics.cacheHits += 1;
+    return cached.resource;
+  }
+  if (cacheKey) cache.diagnostics.cacheMisses += 1;
 
+  cache.diagnostics.rasterEmbeds += 1;
   let resource: PdfRasterResource;
   if (format === "png" && (!metadata || metadata.bitDepth === 16)) {
     const png16 = parsePng16(exactBytes);
@@ -785,6 +808,8 @@ async function embedPdfRaster(
     // equal to different bytes under a repeated or colliding digest.
     entries.push({ byteSnapshot: exactBytes, resource });
     cache.entries.set(cacheKey, entries);
+    cache.diagnostics.cacheEntries += 1;
+    cache.diagnostics.snapshotBytes += exactBytes.byteLength;
   }
   return resource;
 }
@@ -811,6 +836,8 @@ async function drawClippedBleedRaster(
   expectedWidthPx: number,
   expectedHeightPx: number,
   cache: PdfRasterResourceCache,
+  knownSha256: string,
+  allowReuse: boolean,
   x: number,
   y: number,
   width: number,
@@ -824,7 +851,7 @@ async function drawClippedBleedRaster(
     throw new PdfExportError("Bleed derivatives must be lossless raster PNG images.");
   }
 
-  const image = await embedPdfRaster(pdf, bytes, exactBytes, format, cache);
+  const image = await embedPdfRaster(pdf, bytes, exactBytes, format, cache, knownSha256, allowReuse);
   if (image.width !== expectedWidthPx || image.height !== expectedHeightPx) {
     throw new PdfExportError("Bleed preview dimensions do not match its PNG pixels.");
   }
@@ -1010,10 +1037,21 @@ export class LosslessPdfEngine {
     if (request.imageSha256?.some((sha256) => sha256 !== undefined && !/^[a-f0-9]{64}$/.test(sha256))) {
       throw new PdfExportError("PDF image SHA-256 values must use 64 lowercase hexadecimal characters.");
     }
-    const imageSha256Counts = new Map<string, number>();
-    for (const sha256 of request.imageSha256 ?? []) {
-      if (sha256 !== undefined) imageSha256Counts.set(sha256, (imageSha256Counts.get(sha256) ?? 0) + 1);
-    }
+    const rasterDigestsByBytes = new WeakMap<Uint8Array, string>();
+    const getRasterDigest = (bytes: Uint8Array): string => {
+      const cached = rasterDigestsByBytes.get(bytes);
+      if (cached) return cached;
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      rasterDigestsByBytes.set(bytes, digest);
+      return digest;
+    };
+    const imageRasterIdentities = request.images.map((bytes, index) => {
+      if (!getPdfRasterFormat(bytes)) return undefined;
+      const sha256 = request.imageSha256?.[index] ?? getRasterDigest(bytes);
+      return { bytes, sha256 };
+    });
+    const imageRasterUseCounts = countRasterReuseOccurrences(imageRasterIdentities);
+    const imageRasterSha256 = imageRasterIdentities.map((identity) => identity?.sha256);
 
     const paper = request.paperFormat ?? PAPER_FORMATS.A4;
     const card = request.cardFormat ?? MAGIC_STANDARD_CARD;
@@ -1076,11 +1114,25 @@ export class LosslessPdfEngine {
     if (request.skipImageIndexes && [...request.skipImageIndexes].some((index) => !Number.isSafeInteger(index) || index < 0 || index >= request.images.length)) {
       throw new PdfExportError("Skipped PDF image indexes must refer to a physical slot in the supplied page plan.");
     }
+    const bleedRasterIdentities = request.bleedResults?.map((bleed, index) => {
+      if (bleed?.status !== "derived" || request.skipImageIndexes?.has(index)) return undefined;
+      const bytes = bleed.preview.bytes;
+      return { bytes, sha256: getRasterDigest(bytes) };
+    }) ?? [];
+    const bleedRasterUseCounts = countRasterReuseOccurrences(bleedRasterIdentities);
 
     const pdf = await PDFDocument.create();
     const rasterResourceCache: PdfRasterResourceCache = {
       entries: new Map(),
       nextPng16ResourceId: 0,
+      diagnostics: {
+        rasterEmbeds: 0,
+        cacheLookups: 0,
+        cacheHits: 0,
+        cacheMisses: 0,
+        cacheEntries: 0,
+        snapshotBytes: 0,
+      },
     };
     const sourceWidthPoints = mmToPoints(card.widthMm);
     const sourceHeightPoints = mmToPoints(card.heightMm);
@@ -1279,6 +1331,8 @@ export class LosslessPdfEngine {
               previewWidthPx,
               previewHeightPx,
               rasterResourceCache,
+              bleedRasterIdentities[imageIndex]!.sha256,
+              bleedRasterUseCounts[imageIndex]! > 1,
               imageXPoints,
               imageYPoints,
               expandedWidthPoints,
@@ -1290,16 +1344,16 @@ export class LosslessPdfEngine {
         }
 
         if (format === "jpeg") {
-          const imageSha256 = request.imageSha256?.[imageIndex];
-          const allowReuse = imageSha256 === undefined || (imageSha256Counts.get(imageSha256) ?? 0) > 1;
+          const imageSha256 = imageRasterSha256[imageIndex];
+          const allowReuse = imageSha256 !== undefined && imageRasterUseCounts[imageIndex]! > 1;
           const image = await embedPdfRaster(pdf, imageBytes, exactBytes, format, rasterResourceCache, imageSha256, allowReuse);
           drawPdfRaster(page, image, artworkXPoints, artworkYPoints, sourceWidthPoints, sourceHeightPoints);
           continue;
         }
 
         if (format === "png") {
-          const imageSha256 = request.imageSha256?.[imageIndex];
-          const allowReuse = imageSha256 === undefined || (imageSha256Counts.get(imageSha256) ?? 0) > 1;
+          const imageSha256 = imageRasterSha256[imageIndex];
+          const allowReuse = imageSha256 !== undefined && imageRasterUseCounts[imageIndex]! > 1;
           const image = await embedPdfRaster(pdf, imageBytes, exactBytes, format, rasterResourceCache, imageSha256, allowReuse);
           drawPdfRaster(page, image, artworkXPoints, artworkYPoints, sourceWidthPoints, sourceHeightPoints);
           continue;
@@ -1340,7 +1394,9 @@ export class LosslessPdfEngine {
       if (pageCalibrationApplied) page.pushOperators(popGraphicsState());
     }
 
-    return pdf.save();
+    const pdfBytes = await pdf.save();
+    associatePdfRasterCacheDiagnostics(pdfBytes, rasterResourceCache.diagnostics satisfies PdfRasterCacheDiagnostics);
+    return pdfBytes;
   }
 
   async generateFromFiles(request: LosslessPdfFileRequest): Promise<Uint8Array> {

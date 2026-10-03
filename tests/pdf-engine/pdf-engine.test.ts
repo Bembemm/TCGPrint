@@ -11,6 +11,7 @@ import { mmToPoints, pointsToMm } from "../../core/units";
 import { BleedEngine } from "../../image-engine/bleed";
 import type { CutGuideConfig, GuideColor } from "../../core/geometry/cut-guides";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
+import { countRasterReuseOccurrences, readPdfRasterCacheDiagnostics } from "../../pdf-engine/document/raster-resource-policy";
 import { createDefaultRegistrationConfig, generateRegistrationGeometry } from "../../core/registration";
 import { resolveCutLayout, resolveCutLayoutPages } from "../../services/cut-geometry/layout-sync";
 import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
@@ -1533,13 +1534,22 @@ describe("LosslessPdfEngine", () => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const embedJpg = vi.spyOn(PDFDocument.prototype, "embedJpg");
     try {
-      const parsed = await parsePdf(await engine.generate({ images: Array.from({ length: 500 }, () => original) }));
+      const pdfBytes = await engine.generate({ images: Array.from({ length: 500 }, () => original) });
+      const parsed = await parsePdf(pdfBytes);
       const jpegImages = parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"));
 
       expect(embedJpg).toHaveBeenCalledTimes(1);
       expect(jpegImages).toHaveLength(1);
       expect(getImageDrawsWithClips(parsed.content)).toHaveLength(500);
       expect(getPdfStreamBytes(jpegImages[0]!)).toEqual(Buffer.from(original));
+      expect(readPdfRasterCacheDiagnostics(pdfBytes)).toMatchObject({
+        rasterEmbeds: 1,
+        cacheLookups: 500,
+        cacheHits: 499,
+        cacheMisses: 1,
+        cacheEntries: 1,
+        snapshotBytes: original.byteLength,
+      });
     } finally {
       embedJpg.mockRestore();
     }
@@ -1550,10 +1560,29 @@ describe("LosslessPdfEngine", () => {
     const second = new Uint8Array(await sharp({
       create: { width: 8, height: 6, channels: 3, background: { r: 28, g: 160, b: 91 } },
     }).jpeg({ quality: 93 }).toBuffer());
-    const parsed = await parsePdf(await engine.generate({ images: [first, second] }));
+    const embedJpg = vi.spyOn(PDFDocument.prototype, "embedJpg");
+    try {
+      const pdfBytes = await engine.generate({ images: [first, second] });
+      const parsed = await parsePdf(pdfBytes);
 
-    expect(parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"))).toHaveLength(2);
-    expect(getImageDrawsWithClips(parsed.content)).toHaveLength(2);
+      expect(embedJpg).toHaveBeenCalledTimes(2);
+      expect(parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"))).toHaveLength(2);
+      expect(getImageDrawsWithClips(parsed.content)).toHaveLength(2);
+      expect(countRasterReuseOccurrences([
+        { bytes: first, sha256: createHash("sha256").update(first).digest("hex") },
+        { bytes: second, sha256: createHash("sha256").update(second).digest("hex") },
+      ])).toEqual([1, 1]);
+      expect(readPdfRasterCacheDiagnostics(pdfBytes)).toMatchObject({
+        rasterEmbeds: 2,
+        cacheLookups: 0,
+        cacheHits: 0,
+        cacheMisses: 0,
+        cacheEntries: 0,
+        snapshotBytes: 0,
+      });
+    } finally {
+      embedJpg.mockRestore();
+    }
   });
 
   it("confirms byte equality when a supplied SHA-256 key collides", async () => {
@@ -1561,16 +1590,22 @@ describe("LosslessPdfEngine", () => {
     const second = first.slice();
     second[7] = second[7] === 1 ? 2 : second[7]! - 1;
     const collidingDigest = "a".repeat(64);
-    const parsed = await parsePdf(await engine.generate({
+    const pdfBytes = await engine.generate({
       images: [first, second],
       imageSha256: [collidingDigest, collidingDigest],
-    }));
+    });
+    const parsed = await parsePdf(pdfBytes);
     const jpegImages = parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"));
 
     expect(second).toHaveLength(first.length);
     expect(jpegImages).toHaveLength(2);
     expect(getPdfStreamBytes(jpegImages[0]!)).toEqual(Buffer.from(first));
     expect(getPdfStreamBytes(jpegImages[1]!)).toEqual(Buffer.from(second));
+    expect(countRasterReuseOccurrences([
+      { bytes: first, sha256: collidingDigest },
+      { bytes: second, sha256: collidingDigest },
+    ])).toEqual([1, 1]);
+    expect(readPdfRasterCacheDiagnostics(pdfBytes)).toMatchObject({ cacheEntries: 0, snapshotBytes: 0 });
   });
 
   it("compares reused resources with the embedded byte snapshot if caller input mutates", async () => {
@@ -1591,16 +1626,18 @@ describe("LosslessPdfEngine", () => {
     });
     try {
       const forcedDigest = "b".repeat(64);
-      const parsed = await parsePdf(await engine.generate({
+      const pdfBytes = await engine.generate({
         images: [first, first],
         imageSha256: [forcedDigest, forcedDigest],
-      }));
+      });
+      const parsed = await parsePdf(pdfBytes);
       const jpegImages = parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"));
 
       expect(embedJpg).toHaveBeenCalledTimes(2);
       expect(jpegImages).toHaveLength(2);
       expect(getPdfStreamBytes(jpegImages[0]!)).toEqual(Buffer.from(firstBytes));
       expect(getPdfStreamBytes(jpegImages[1]!)).toEqual(Buffer.from(first));
+      expect(readPdfRasterCacheDiagnostics(pdfBytes)).toMatchObject({ cacheHits: 0, cacheMisses: 2, cacheEntries: 2 });
     } finally {
       embedJpg.mockRestore();
     }
@@ -1608,7 +1645,8 @@ describe("LosslessPdfEngine", () => {
 
   it("shares 16-bit PNG color and alpha resources without reducing precision", async () => {
     const png16 = new Uint8Array(await readFile(join(FIXTURES, "synthetic-rgba16.png")));
-    const parsed = await parsePdf(await engine.generate({ images: [png16, png16] }));
+    const pdfBytes = await engine.generate({ images: [png16, png16] });
+    const parsed = await parsePdf(pdfBytes);
     const colorImages = parsed.images.filter((image) => image.dictionary.includes("/SMask"));
     const alphaImages = parsed.images.filter((image) => image.dictionary.includes("/BitsPerComponent 16")
       && image.dictionary.includes("/DeviceGray")
@@ -1623,6 +1661,13 @@ describe("LosslessPdfEngine", () => {
       0x12, 0xff, 0x56, 0xff, 0x9a, 0xff,
     ]));
     expect(inflateSync(getPdfStreamBytes(alphaImages[0]!))).toEqual(Buffer.from([0x00, 0xaa, 0xff, 0x01]));
+    expect(readPdfRasterCacheDiagnostics(pdfBytes)).toMatchObject({
+      cacheLookups: 2,
+      cacheHits: 1,
+      cacheMisses: 1,
+      cacheEntries: 1,
+      snapshotBytes: png16.byteLength,
+    });
   });
 
   it("shares repeated lossless bleed resources while retaining every clipped draw", async () => {
@@ -1632,15 +1677,69 @@ describe("LosslessPdfEngine", () => {
       bleedMm: 0.625,
       trimSizeMm: MAGIC_STANDARD_CARD,
     });
-    const parsed = await parsePdf(await engine.generate({
+    if (bleed.status !== "derived") throw new Error("The bleed fixture must produce a derivative.");
+    const equalBleedCopy = {
+      ...bleed,
+      preview: { ...bleed.preview, bytes: bleed.preview.bytes.slice() },
+    };
+    const pdfBytes = await engine.generate({
       images: [original, original],
-      bleedResults: [bleed, bleed],
-    }));
+      bleedResults: [bleed, equalBleedCopy],
+    });
+    const parsed = await parsePdf(pdfBytes);
 
     expect(parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"))).toHaveLength(1);
     expect(parsed.images.filter((image) => image.dictionary.includes("/FlateDecode"))).toHaveLength(1);
     expect(getImageDrawsWithClips(parsed.content)).toHaveLength(10);
     expect(getImageDrawsWithClips(parsed.content).filter((draw) => draw.clip)).toHaveLength(8);
+    expect(countRasterReuseOccurrences([bleed.preview.bytes, bleed.preview.bytes].map((bytes) => ({
+      bytes,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    })))).toEqual([2, 2]);
+    expect(readPdfRasterCacheDiagnostics(pdfBytes)).toMatchObject({
+      cacheHits: 2,
+      cacheMisses: 2,
+      cacheEntries: 2,
+      snapshotBytes: original.byteLength + bleed.preview.bytes.byteLength,
+    });
+  });
+
+  it("keeps unique bleed derivatives distinct and marks them non-cacheable", async () => {
+    const first = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const second = new Uint8Array(await sharp({
+      create: { width: 8, height: 6, channels: 3, background: { r: 165, g: 44, b: 137 } },
+    }).jpeg({ quality: 91 }).toBuffer());
+    const bleeds = await Promise.all([first, second].map((imageBytes) => new BleedEngine().generate({
+      imageBytes,
+      bleedMm: 0.625,
+      trimSizeMm: MAGIC_STANDARD_CARD,
+    })));
+    const embedPng = vi.spyOn(PDFDocument.prototype, "embedPng");
+    try {
+      const pdfBytes = await engine.generate({
+        images: [first, second],
+        bleedResults: bleeds,
+      });
+      const parsed = await parsePdf(pdfBytes);
+      const derivatives = parsed.images.filter((image) => image.dictionary.includes("/FlateDecode"));
+
+      expect(embedPng).toHaveBeenCalledTimes(2);
+      expect(derivatives).toHaveLength(2);
+      expect(getImageDrawsWithClips(parsed.content)).toHaveLength(10);
+      expect(countRasterReuseOccurrences(bleeds.map((bleed) => ({
+        bytes: bleed.preview.bytes,
+        sha256: createHash("sha256").update(bleed.preview.bytes).digest("hex"),
+      })))).toEqual([1, 1]);
+      expect(readPdfRasterCacheDiagnostics(pdfBytes)).toMatchObject({
+        cacheLookups: 0,
+        cacheHits: 0,
+        cacheMisses: 0,
+        cacheEntries: 0,
+        snapshotBytes: 0,
+      });
+    } finally {
+      embedPng.mockRestore();
+    }
   });
 
   it("applies one page-scoped calibration CTM to JPEG and registration vectors without changing paper boxes", async () => {

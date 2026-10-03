@@ -20,11 +20,13 @@ import { createWorkingSet } from "../../core/cards/working-set";
 import { MAGIC_STANDARD_CARD, PAPER_FORMATS } from "../../core/geometry";
 import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 import { importFiles } from "../../import-engine";
-import { BleedEngine, MemoryBleedCache } from "../../image-engine/bleed";
+import { BleedEngine, MemoryBleedCache, type BleedResult } from "../../image-engine/bleed";
 import { toImportPreview } from "../../import-engine/preview";
 import { ArtworkCatalog } from "../../artwork/catalog";
 import type { ArtworkProvider } from "../../artwork/types";
 import { exportWorkingCardsWithDiagnostics } from "../../services/card-export";
+import { LosslessPdfEngine } from "../../pdf-engine/document";
+import { readPdfRasterCacheDiagnostics } from "../../pdf-engine/document/raster-resource-policy";
 import CardIdentityWorkbench, { editorHistoryReducer, WorkingCardList } from "../../src/app/card-identity-workbench";
 import ProjectsPanel from "../../src/app/projects-panel";
 import { createEditorHistoryState } from "../../core/cards/editor-history";
@@ -484,6 +486,65 @@ describe.skipIf(!profileEnabled)("Phase 15 baseline/optimized benchmark", () => 
       }
     }
 
+    const fullSizeUniqueBleedCount = 16;
+    const fullSizeUniqueImages: Uint8Array[] = [];
+    const fullSizeUniqueBleeds: BleedResult[] = [];
+    for (let index = 0; index < fullSizeUniqueBleedCount; index += 1) {
+      const original = await syntheticJpeg(20_000 + index);
+      fullSizeUniqueImages.push(original);
+      fullSizeUniqueBleeds.push(await new BleedEngine().generate({
+        imageBytes: original,
+        bleedMm: 0.625,
+        trimSizeMm: MAGIC_STANDARD_CARD,
+      }));
+    }
+    const fullSizeDerivativeBytes = fullSizeUniqueBleeds.reduce((total, bleed) => total + bleed.preview.bytes.byteLength, 0);
+    const fullSizeUniqueDerivativeHashes = new Set(fullSizeUniqueBleeds.map((bleed) => createHash("sha256").update(bleed.preview.bytes).digest("hex")));
+    const uniqueBleedJpegEmbeds = vi.spyOn(PDFDocument.prototype, "embedJpg");
+    const uniqueBleedPngEmbeds = vi.spyOn(PDFDocument.prototype, "embedPng");
+    try {
+      const result = await measure("pdf-bleed-resource-cache-unique-fullsize-16", fullSizeUniqueBleedCount, async () => {
+        const pdfBytes = await new LosslessPdfEngine().generate({
+          images: fullSizeUniqueImages,
+          bleedResults: fullSizeUniqueBleeds,
+          cutGuides: noCutGuides,
+        });
+        const diagnostics = readPdfRasterCacheDiagnostics(pdfBytes);
+        const rasterEmbeds = uniqueBleedJpegEmbeds.mock.calls.length + uniqueBleedPngEmbeds.mock.calls.length;
+        const cacheStats = diagnostics ?? {
+          rasterEmbeds,
+          cacheLookups: rasterEmbeds,
+          cacheHits: 0,
+          cacheMisses: rasterEmbeds,
+          cacheEntries: rasterEmbeds,
+          snapshotBytes: fullSizeUniqueImages.reduce((total, image) => total + image.byteLength, 0) + fullSizeDerivativeBytes,
+        };
+        return { value: pdfBytes, details: {
+          pdfBytes: pdfBytes.byteLength,
+          pagesGenerated: (await PDFDocument.load(pdfBytes)).getPageCount(),
+          xObjects: await imageObjectCount(pdfBytes),
+          sourceRasterBytes: fullSizeUniqueImages.reduce((total, image) => total + image.byteLength, 0),
+          derivativeBytes: fullSizeDerivativeBytes,
+          derivativeDimensions: fullSizeUniqueBleeds[0]?.preview.widthPx && fullSizeUniqueBleeds[0]?.preview.heightPx
+            ? { width: fullSizeUniqueBleeds[0].preview.widthPx, height: fullSizeUniqueBleeds[0].preview.heightPx }
+            : null,
+          derivativeUses: fullSizeUniqueBleeds.length,
+          uniqueDerivatives: fullSizeUniqueDerivativeHashes.size,
+          rasterEmbeds: cacheStats.rasterEmbeds,
+          cacheableResources: cacheStats.cacheEntries,
+          resourceCacheLookups: cacheStats.cacheLookups,
+          resourceCacheHits: cacheStats.cacheHits,
+          resourceCacheMisses: cacheStats.cacheMisses,
+          resourceCacheSnapshotBytes: cacheStats.snapshotBytes,
+          cacheDiagnosticsSource: diagnostics ? "runtime" : "reconstructed from baseline embed path and unique fixture identities",
+        } };
+      });
+      scenarios.push(result.metric);
+    } finally {
+      uniqueBleedJpegEmbeds.mockRestore();
+      uniqueBleedPngEmbeds.mockRestore();
+    }
+
     for (const count of [9, 100, 500] as const) {
       const sharedBytes = await syntheticJpeg(1000 + count);
       const uniqueBytes: Uint8Array[] = [];
@@ -622,7 +683,7 @@ describe.skipIf(!profileEnabled)("Phase 15 baseline/optimized benchmark", () => 
         memory: "process.memoryUsage sampled every 5 ms during each async operation; event-loop delay is sampled at the same interval.",
         import: "Universal Import synthetic decklist → ImportPreview JSON → Working Set → Project snapshot serialization/key → actual WorkingCardList React server render. Projects allow at most 500 entries.",
         artworkLookup: "ArtworkCatalog with a local synthetic provider; no HTTP requests. Artwork gallery/Projects list are their actual components server-rendered with synthetic state/results.",
-        export: "exportWorkingCardsWithDiagnostics with synthetic JPEGs and no external cut guides; repeated and unique bleed are measured at 9/100/500 cards, with 745x1040 assets at 9 and compact 96x134 synthetic assets at 100/500 to bound fixture-generation and native-raster memory; PDF page count/XObjects inspected after timed export.",
+        export: "exportWorkingCardsWithDiagnostics with synthetic JPEGs and no external cut guides; repeated and unique bleed are measured at 9/100/500 cards, with 745x1040 assets at 9 and compact 96x134 synthetic assets at 100/500. A separate 16-item 745x1040 LosslessPdfEngine scenario retains real unique BleedEngine outputs while measuring PDF resource-cache retention; PDF bytes/pages/XObjects and cache diagnostics are recorded.",
       },
       scenarios,
     }, null, 2)}\n`, "utf8");

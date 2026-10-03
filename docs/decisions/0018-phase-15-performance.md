@@ -1,4 +1,4 @@
-# ADR 0015: Phase 15 performance boundaries
+# ADR 0018: Phase 15 performance boundaries
 
 - Status: accepted
 - Date: 2026-10-03
@@ -13,6 +13,10 @@ Profiling identified repeated PDF image embedding, repeated candidate/original r
 ### PDF raster resources
 
 Share raster resources only inside one `PDFDocument`. The key includes format, byte length, raster dimensions, PNG bit depth/color type or JPEG precision/component count, and SHA-256. A candidate cache hit is confirmed with byte equality against the private byte snapshot passed to `embedJpg`/`embedPng`, not a mutable caller view. A collision or caller-buffer mutation therefore creates a distinct resource.
+
+Retain a resource snapshot only after a preflight count proves that the exact bytes occur more than once in that document. A supplied source digest is reused; otherwise a digest is computed once per raster index. Bleed derivatives use their own per-document digest counts. Digest buckets are split by exact byte equality before enabling reuse, and the cache still confirms equality against the private embedded snapshot. Single-use resources are embedded directly and never enter the reuse map.
+
+The 16-item full-size unique-bleed benchmark reduced resource-cache snapshots from 5,268,633 bytes to zero while preserving all 32 XObjects and the exact 5,125,155-byte PDF. The sampled process RSS/heap did not decrease in that run, so no total-process memory reduction is claimed; the retained implementation is justified by removing cache entries with no possible hit while preserving resource reuse for repeated rasters.
 
 Every physical position still emits its own draw and transform. JPEG resources use `embedJpg` with the exact source JPEG bytes. PNG stays lossless. The PNG16 path reuses its 16-bit color and alpha PDF references without changing samples. SVG continues through the existing validation and vector drawing path and is not rasterized or resource-deduplicated.
 
@@ -49,4 +53,4 @@ No new progress protocol was added. Current import timings are short at tested l
 
 ## Verification
 
-See [`artifacts/phase-15-performance/README.md`](../../artifacts/phase-15-performance/README.md) and the baseline/optimized JSON for the reproducible harness, measured results, resource counts, bytes, timings, and memory samples. Fidelity tests assert JPEG stream passthrough, exact PNG16 color/alpha samples, repeated-resource draw counts, bleed trim/edge pixels, and existing SVG/geometry/duplex/calibration behavior.
+See [`artifacts/phase-15-performance/README.md`](../../artifacts/phase-15-performance/README.md) and the baseline/optimized JSON for the reproducible harness, measured results, resource counts, bytes, timings, and memory samples. The full-size unique-bleed scenario records source/derivative cache snapshots and verifies that unique inputs retain zero snapshot bytes. Fidelity tests assert JPEG stream passthrough, exact PNG16 color/alpha samples, repeated-resource draw counts, bleed trim/edge pixels, and existing SVG/geometry/duplex/calibration behavior.

@@ -10,13 +10,14 @@ Os números são medianas de três processos Node/Vitest independentes. Cada JSO
 
 ## Reproduzir
 
-O modo `baseline` só aceita a base exata, para impedir que alterações da feature contaminem essa medição. Em um worktree temporário na base, copie os dois arquivos do harness abaixo e instale/ligue as dependências do projeto:
+O modo `baseline` só aceita a base exata, para impedir que alterações da feature contaminem essa medição. Em um worktree temporário na base, copie o harness, a rotina de cache-diagnostics interna (que é neutra na base) e os scripts:
 
 ```sh
 git worktree add --detach /tmp/tcgprint-phase15-baseline 18bcad3916b2ff2137ca3f1bfa747236e69c4072
-mkdir -p /tmp/tcgprint-phase15-baseline/tests/performance /tmp/tcgprint-phase15-baseline/scripts
+mkdir -p /tmp/tcgprint-phase15-baseline/tests/performance /tmp/tcgprint-phase15-baseline/scripts /tmp/tcgprint-phase15-baseline/pdf-engine/document
 cp tests/performance/phase-15-performance.test.ts /tmp/tcgprint-phase15-baseline/tests/performance/
 cp scripts/phase-15-benchmark.mjs /tmp/tcgprint-phase15-baseline/scripts/
+cp pdf-engine/document/raster-resource-policy.ts /tmp/tcgprint-phase15-baseline/pdf-engine/document/
 ln -s "$PWD/node_modules" /tmp/tcgprint-phase15-baseline/node_modules
 cd /tmp/tcgprint-phase15-baseline
 node scripts/phase-15-benchmark.mjs baseline
@@ -29,7 +30,7 @@ npm run benchmark:phase15 -- optimized
 npm run summarize:phase15
 ```
 
-O modo otimizado executa 51 cenários três vezes e substitui `optimized.json`, os resumos e o manifest. `benchmark:phase15` não é teste de unidade nem gate absoluto de tempo.
+O modo otimizado executa 52 cenários três vezes e substitui `optimized.json`, os resumos e o manifest. `benchmark:phase15` não é teste de unidade nem gate absoluto de tempo.
 
 ## Matriz de baseline → resultado
 
@@ -37,6 +38,7 @@ O modo otimizado executa 51 cenários três vezes e substitui `optimized.json`, 
 | --- | --- | --- | --- | --- |
 | PDF, 500 usos de um JPEG | 500 chamadas de embed, 500 XObjects, 19.632.382 bytes, 197,8 ms | O mesmo recurso de imagem era embutido por posição | Deduplicação collision-safe por conteúdo dentro de cada PDFDocument; cada slot ainda desenha sua própria posição | 1 embed/XObject, 500 draws, 59.466 bytes, 131,7 ms; −33,4% de wall time |
 | PDF, 500 artes únicas | 500 recursos, 25.530.919 bytes, 225,9 ms | Custo normal de serializar recursos distintos | Sem compartilhamento entre conteúdos distintos; embed usa caminho sem cache para hashes que ocorrem uma vez | 500 recursos e exatamente 25.530.919 bytes. Mediana wall time recente 278,8 ms vs 225,9 ms, sem ganho de tempo demonstrado; amostras têm ampla sobreposição e CPU medido foi menor. Pico RSS: 374,1 → 345,9 MiB. Não alegamos aceleração para arte única |
+| Cache de raster de bleed, 16 artes únicas 745×1040 | 32 snapshots/5.268.633 bytes; RSS início/pico/fim 323,19/342,23/342,23 MiB, heap 43,20/43,20/33,24 MiB | O cache retinha cada cópia de raster único até salvar o PDF | Pré-contagem por digest e igualdade exata; raster de uso único faz embed direto | 0 entradas/0 bytes de snapshot; 32 XObjects e 5.125.155 bytes de PDF, idênticos à baseline. RSS início/pico/fim 330,23/363,13/363,13 MiB, heap 32,59/33,64/33,60 MiB; RSS/heap totais não diminuíram nesta amostra, então o ganho demonstrado é a remoção determinística de 5,27 MB do cache, sem alegar redução do pico total |
 | Candidate/original repetidos | Em 500 slots: 500 lookups de candidate e 500 de original | Releitura/revalidação da mesma seleção na exportação | Memo scoped à exportação para candidatos/contextos e originais repetidos; buffers grandes únicos não entram na memoização | 1 lookup de cada em 500 slots repetidos; artes únicas continuam em 500/500 |
 | Bleed, cache warm | 11,0 ms para 283.012 bytes | Decode de pixels era feito antes de descobrir cache hit | Validação, metadata e hash completos permanecem; decode/máscara só após cache miss | 2,2 ms, os mesmos 283.012 bytes; teste confirma que warm hit não chama decode |
 | Bleed, 500 artes repetidas | 1.946,2 ms, 500 lookups, 1 derivado | Lookup/export repetido por slot e embed repetido no PDF | Deduplicação de candidate, original, derivado e XObject; fila bounded | 247,0 ms; lookups 500→1; PDF 11.536.046→90.539 bytes |
@@ -48,13 +50,14 @@ O modo otimizado executa 51 cenários três vezes e substitui `optimized.json`, 
 
 Métricas detalhadas para todos os cenários, incluindo 9/100/500/1000, CPU, heap/RSS, páginas, bytes, lookups, cache hit/miss e amostras brutas estão em `benchmark-summary.json`, `memory-summary.json`, `cache-summary.json`, `baseline.json` e `optimized.json`.
 
-PDF 1000 não foi medido: o produto limita exportações a 500 cartas físicas por PDF. Import, parser, Working Set, artwork list e SSR foram medidos até 1000. Bleed 100/500 usa raster sintético compacto de 96 × 134 para permitir comparação repetível rápida; o cenário bleed 9 usa 745 × 1040. PDF sem bleed usa JPEG sintético 745 × 1040 em todas as escalas 9/100/500.
+PDF 1000 não foi medido: o produto limita exportações a 500 cartas físicas por PDF. Import, parser, Working Set, artwork list e SSR foram medidos até 1000. Bleed 100/500 usa raster sintético compacto de 96 × 134 para permitir comparação repetível rápida; o cenário bleed 9 usa 745 × 1040. O cenário de retenção usa 16 originais 745 × 1040 e mantém 16 derivatives reais 761 × 1056 (4.451.613 bytes) durante o export; isso deixa mensurável o tamanho dos snapshots sem tornar 500 derivatives full-size impraticáveis. RSS/heap são medianas de três processos independentes, e `memory-summary.json` inclui antes/pico/final e pico acima do RSS/heap inicial. A amostra total de RSS não caiu; a instrumentação determinística confirma que os snapshots atribuíveis ao cache caíram de 5.268.633 para zero bytes.
 
 Uma medição preliminar anterior reportou cerca de 434 MiB ao gerar 500 imagens únicas junto com fixtures produzidas em `Promise.all`. A comparação reproduzível atual cria fixtures sequencialmente: export único de 500 artes tem pico base 374,1 MiB e otimizado 345,9 MiB; três exports sequenciais têm pico 437,8 MiB na base e 413,9 MiB otimizado. O primeiro número mistura construção de fixtures com export; o segundo inclui a retenção/arena nativa do mesmo processo ao longo das três exportações.
 
 ## Política de cache e memória
 
-- PDF raster: cache criado dentro de `LosslessPdfEngine.generate()` e destruído com esse PDFDocument. A key cobre formato, comprimento, dimensões, bit depth/color type ou precisão/componentes JPEG e SHA-256. Reuso ainda exige igualdade byte a byte contra o snapshot privado embutido; mutation do buffer chamador não pode validar um recurso stale. Collision buckets mantêm conteúdos diferentes separados.
+- PDF raster: cache criado dentro de `LosslessPdfEngine.generate()` e destruído com esse PDFDocument. A key cobre formato, comprimento, dimensões, bit depth/color type ou precisão/componentes JPEG e SHA-256. Contagens usam digest mais igualdade exata antes de habilitar reuso; rasters com uma única ocorrência não entram no cache. Reuso ainda exige igualdade byte a byte contra o snapshot privado embutido; mutation do buffer chamador não pode validar um recurso stale. Collision buckets mantêm conteúdos diferentes separados.
+- Resource snapshots: multiplicidade é contada por digest e igualdade exata. Digest de source fornecido pelo caller continua sendo usado; source sem digest e cada bleed derivative recebem digest por índice. Uso único faz embed sem cache; recurso repetido retém snapshot privado somente enquanto o PDFDocument da exportação vive. Diagnósticos por PDF contam entradas, hits, misses e bytes de snapshots em uma WeakMap não-retentiva.
 - Bleed: `MemoryBleedCache` fica no escopo da exportação/request. A key conserva versão do algoritmo, hash dos bytes originais, bleed, dimensões de trim, rounded corners e raio/versão da máscara quando aplicável. O cache de PNG derivado é rebuildable; nenhum original é elegível a GC.
 - Candidate/original: memoização somente na exportação atual e apenas para candidatos realmente repetidos. Dados de originais são os mesmos buffers usados pelos slots, não cópias extras para 500 IDs únicos. Mapas desaparecem ao concluir, falhar ou cancelar a operação.
 - Artwork stores existentes permanecem: originals content-addressed e imutáveis; thumbnails validados por hash/comprimento; metadata com a expiração atual. Nenhum cache persistente ou GC destrutivo novo foi criado.
@@ -88,4 +91,4 @@ Não executado: `chromium`, `chromium-browser`, `google-chrome`, Playwright, `@p
 
 ## ADR
 
-`docs/adr/0015-phase-15-performance.md` registra decisões de resource sharing no PDF, escopo de caches, memória, concorrência bounded, invalidação considerada e otimizações rejeitadas.
+`docs/decisions/0018-phase-15-performance.md` registra decisões de resource sharing no PDF, escopo de caches, memória, concorrência bounded, invalidação considerada e otimizações rejeitadas.

@@ -12,8 +12,8 @@ if (baseline.baseSha !== baseSha || optimized.baseSha !== baseSha) {
 
 const scenarios = new Map(optimized.scenarios.map((scenario) => [scenario.name, scenario]));
 const baselineScenarios = new Map(baseline.scenarios.map((scenario) => [scenario.name, scenario]));
-if (scenarios.size !== 51 || baselineScenarios.size !== scenarios.size) {
-  throw new Error("Expected 51 paired Phase 15 benchmark scenarios.");
+if (scenarios.size !== 52 || baselineScenarios.size !== scenarios.size) {
+  throw new Error("Expected 52 paired Phase 15 benchmark scenarios.");
 }
 
 const comparison = (name) => {
@@ -101,6 +101,7 @@ const nativeConcurrency = [1, 2, 4].map((concurrency) => ({
 const memoryScenarioNames = [
   "pdf-export-500-unique-artwork",
   "pdf-export-sequential-500-unique-three-times",
+  "pdf-bleed-resource-cache-unique-fullsize-16",
   ...bleedNames,
 ];
 const memoryScenario = (which, name) => {
@@ -110,9 +111,11 @@ const memoryScenario = (which, name) => {
     wallTimeMs: scenario.wallTimeMs,
     rssBeforeBytes: scenario.rssBeforeBytes,
     rssPeakSampledBytes: scenario.rssPeakSampledBytes,
+    rssPeakAboveStartBytes: scenario.rssPeakSampledBytes - scenario.rssBeforeBytes,
     rssAfterBytes: scenario.rssAfterBytes,
     heapBeforeBytes: scenario.heapBeforeBytes,
     heapPeakSampledBytes: scenario.heapPeakSampledBytes,
+    heapPeakAboveStartBytes: scenario.heapPeakSampledBytes - scenario.heapBeforeBytes,
     heapAfterBytes: scenario.heapAfterBytes,
     peakEventLoopDelayMs: scenario.peakEventLoopDelayMs,
     details: scenario.details,
@@ -135,6 +138,13 @@ const memorySummary = {
     optimized: memoryScenario("optimized", "pdf-export-sequential-500-unique-three-times"),
     interpretation: "Three consecutive exports in one process show startup/native allocator growth between exports one and two and only a small change between two and three; heap after each export returns to a similar ~38–40 MB range. This is a three-export observation, not a claim about unbounded runs.",
   },
+  uniqueFullSizeBleedResourceCache: {
+    baseline: memoryScenario("baseline", "pdf-bleed-resource-cache-unique-fullsize-16"),
+    optimized: memoryScenario("optimized", "pdf-bleed-resource-cache-unique-fullsize-16"),
+    comparison: comparison("pdf-bleed-resource-cache-unique-fullsize-16"),
+    scale: "16 unique 745x1040 source JPEGs with real BleedEngine 761x1056 PNG derivatives; derivatives remain live during LosslessPdfEngine generation; no manual GC. RSS/heap before, sampled peak, and after are medians across three independent processes; peak-above-start is included to account for different process baselines.",
+    interpretation: "Baseline snapshot bytes equal unique source plus derivative input bytes. Optimized runtime diagnostics report zero resource-cache entries and zero snapshot bytes when every exact raster occurs once. PDF byte length and XObject count are compared alongside RSS/heap samples.",
+  },
   earlierBaselineContext: "An earlier preliminary 500-unique run reported about 434 MiB RSS while synthetic fixtures were generated with unbounded Promise.all in the same process. The comparable artifacts here generate fixtures sequentially and report the isolated export scenario separately from the 3-export scenario; do not compare the preliminary fixture-inclusive peak as if it were the isolated-export peak.",
 };
 
@@ -142,11 +152,12 @@ const bleedCache = comparison("bleed-cache-warm");
 const bleedCold = comparison("bleed-cache-cold");
 const repeatedPdf500 = comparison("pdf-export-500-repeated-artwork");
 const repeatedBleed500 = comparison("bleed-export-repeated-500");
+const uniqueFullSizeBleedCache = comparison("pdf-bleed-resource-cache-unique-fullsize-16");
 const cacheSummary = {
   schemaVersion: 1,
   baseSha,
   policy: {
-    pdfRasterResources: "Per PDFDocument only; key includes format, byte length, raster dimensions, PNG bit depth/color type or JPEG precision/components and SHA-256; exact byte equality confirms reuse. SHA bucket collisions remain distinct resources.",
+    pdfRasterResources: "Per PDFDocument only; reuse is enabled only when preflight counts more than one exact byte identity in a SHA-256 bucket. Key includes format, byte length, raster dimensions, PNG bit depth/color type or JPEG precision/components and SHA-256; cache hits still require exact byte equality against the private embedded snapshot. Unique rasters use direct embeds and create no snapshot entry; SHA bucket collisions remain distinct resources.",
     bleed: "Export scoped BleedEngine/MemoryBleedCache, complete key covers algorithm version, original content hash, bleed, trim dimensions, rounded-corner flag and radius/version as applicable; validate metadata and digest before cache lookup; decode only on a miss.",
     repeatedInputs: "Within one export, exact repeated source bytes share the candidate/original lookup when the candidate/context repeats and share bleed work by derivative key plus byte equality. Large unique originals are not stored in the candidate/original memo.",
     artworkStores: "ArtworkOriginalStore remains content-addressed and immutable; ArtworkThumbnailStore and ArtworkMetadataCache retain their existing storage/validation/expiry semantics. No original GC or new persistent cache was added.",
@@ -157,6 +168,23 @@ const cacheSummary = {
     bleedWarm: { baselineMs: bleedCache.wallTimeMs.baseline, optimizedMs: bleedCache.wallTimeMs.optimized, baselineBytes: bleedCache.baselineDetails.outputBytes, optimizedBytes: bleedCache.optimizedDetails.outputBytes, outputBytesIdentical: bleedCache.baselineDetails.outputBytes === bleedCache.optimizedDetails.outputBytes, cacheHit: bleedCache.optimizedDetails.cacheStatus, unitEvidence: "tests/image-engine/bleed-engine.test.ts asserts the warm hit bypasses decode and returns identical cached PNG bytes" },
     candidateAndOriginal500Repeated: { baselineLookups: repeatedBleed500.baselineDetails.candidateLookups, optimizedLookups: repeatedBleed500.optimizedDetails.candidateLookups, baselineOriginalReads: repeatedBleed500.baselineDetails.originalLookups, optimizedOriginalReads: repeatedBleed500.optimizedDetails.originalLookups },
     pdf500Repeated: { baselineImageEmbeds: repeatedPdf500.baselineDetails.embeddedImageObjects, optimizedImageEmbeds: repeatedPdf500.optimizedDetails.embeddedImageObjects, baselinePdfBytes: repeatedPdf500.baselineDetails.pdfBytes, optimizedPdfBytes: repeatedPdf500.optimizedDetails.pdfBytes },
+    uniqueFullSizeBleedRasterResources: {
+      scenario: uniqueFullSizeBleedCache.name,
+      derivativeBytes: uniqueFullSizeBleedCache.optimizedDetails.derivativeBytes,
+      sourceRasterBytes: uniqueFullSizeBleedCache.optimizedDetails.sourceRasterBytes,
+      xObjectsBefore: uniqueFullSizeBleedCache.baselineDetails.xObjects,
+      xObjectsAfter: uniqueFullSizeBleedCache.optimizedDetails.xObjects,
+      pdfBytesBefore: uniqueFullSizeBleedCache.baselineDetails.pdfBytes,
+      pdfBytesAfter: uniqueFullSizeBleedCache.optimizedDetails.pdfBytes,
+      cacheEntriesBefore: uniqueFullSizeBleedCache.baselineDetails.cacheableResources,
+      cacheEntriesAfter: uniqueFullSizeBleedCache.optimizedDetails.cacheableResources,
+      snapshotBytesBefore: uniqueFullSizeBleedCache.baselineDetails.resourceCacheSnapshotBytes,
+      snapshotBytesAfter: uniqueFullSizeBleedCache.optimizedDetails.resourceCacheSnapshotBytes,
+      cacheHitsBefore: uniqueFullSizeBleedCache.baselineDetails.resourceCacheHits,
+      cacheHitsAfter: uniqueFullSizeBleedCache.optimizedDetails.resourceCacheHits,
+      cacheMissesBefore: uniqueFullSizeBleedCache.baselineDetails.resourceCacheMisses,
+      cacheMissesAfter: uniqueFullSizeBleedCache.optimizedDetails.resourceCacheMisses,
+    },
   },
   existingCacheOwners: [
     { name: "MemoryBleedCache", module: "image-engine/bleed/cache.ts", phase15Change: "scope at the one-image import PDF route and export operation; no global LRU" },
@@ -212,12 +240,13 @@ const sourceNames = [
   "tests/app/card-api.test.ts",
   "services/card-export.ts",
   "pdf-engine/document/index.ts",
+  "pdf-engine/document/raster-resource-policy.ts",
   "image-engine/bleed/index.ts",
   "src/app/api/import/pdf/route.ts",
   "src/app/artwork-selection-request.ts",
   "src/app/card-identity-workbench.tsx",
   "package.json",
-  "docs/adr/0015-phase-15-performance.md",
+  "docs/decisions/0018-phase-15-performance.md",
 ];
 const trackedFiles = {};
 for (const path of [...artifactNames.map((name) => join(directory, name)), ...sourceNames]) trackedFiles[path] = await sha256File(path);
