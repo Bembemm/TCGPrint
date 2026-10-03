@@ -374,19 +374,24 @@ function referenceMetadata(reference: WorkingCardMpcReference): Readonly<Record<
   };
 }
 
-function cardbackIds(payload: unknown): string[] {
+function cardbackIds(payload: unknown, candidateLimit: number): string[] {
   const values = record(payload) && Array.isArray(payload.cardbacks)
     ? payload.cardbacks
     : record(payload) && record(payload.results) && Array.isArray(payload.results.cardbacks)
       ? payload.results.cardbacks
       : undefined;
-  if (!values || values.length > MPC_MAX_BATCH_CANDIDATES) {
+  if (!values) {
     throw new MpcArtworkProviderError("protocol", "MPC cardback catalog has an invalid response shape.");
   }
-  if (values.some((value) => !validAssetId(value))) {
-    throw new MpcArtworkProviderError("protocol", "MPC cardback catalog returned an invalid asset identifier.");
+  const selected: string[] = [];
+  const selectedSet = new Set<string>();
+  for (const value of values) {
+    if (!validAssetId(value)) throw new MpcArtworkProviderError("protocol", "MPC cardback catalog returned an invalid asset identifier.");
+    if (selected.length >= candidateLimit || selectedSet.has(value)) continue;
+    selectedSet.add(value);
+    selected.push(value);
   }
-  return [...new Set(values as string[])].slice(0, MPC_MAX_BATCH_CANDIDATES);
+  return selected;
 }
 
 function safeUrl(value: string, hosts: ReadonlySet<string>): URL | undefined {
@@ -732,7 +737,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
           excludesTags: [...filters.excludeTags],
           languages: [...filters.languages],
         },
-        searchTypeSettings: { fuzzySearch: false, filterCardbacks: false },
+        searchTypeSettings: { fuzzySearch: false, filterCardbacks: true },
         sourceSettings: { sources: sources.map(({ pk }) => [pk, filters.sources.length === 0 || filters.sources.includes(pk)]) },
       };
       const response = await this.apiJson("/2/cardbacks/", {
@@ -740,7 +745,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ searchSettings: settings }),
       }, options.signal);
-      const ids = cardbackIds(response.payload).slice(0, this.searchLimit);
+      const ids = cardbackIds(response.payload, this.searchLimit);
       this.hasConfirmedSearch = true;
       this.lastProtocolConfirmed = "v2";
       const identity: CardIdentity = { id: "mpc:generic-cardback-catalog", provider: "mpc", name: "MPC cardback", resolutionMethod: "custom", confidence: 1 };

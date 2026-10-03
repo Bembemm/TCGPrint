@@ -3,7 +3,7 @@ import { CardExportServiceError, exportWorkingCardsByContentMode, exportWorkingC
 import type { ArtworkCatalogSource } from "../artwork/types";
 import type { ArtworkCandidate, BackLibraryAssetReference, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardBackMode, WorkingCardBackModeSelectionPolicy, WorkingCardMpcReference } from "../core/cards/types";
 import { isSafeArtworkCandidateId } from "../core/cards/ids";
-import { isDoubleFacedIdentity, isEligibleGenericPhysicalBack, isEligibleIdentityFaceSelection } from "../core/cards/back-selection";
+import { BackSelectionPolicyError, isDoubleFacedIdentity, isEligibleGenericPhysicalBack, isEligibleIdentityFaceSelection } from "../core/cards/back-selection";
 import { sanitizeCardIdentityMetadata } from "../core/cards/safe-identity-metadata";
 import type { UniversalImportRequest } from "../import-engine/types";
 import { sanitizeRelativeImportPath } from "../import-engine/source-path";
@@ -370,6 +370,7 @@ function noStore(response: Response): Response {
 
 function respondError(error: unknown): Response {
   if (error instanceof ApiRequestError) return Response.json({ code: error.code, message: error.message }, { status: error.status });
+  if (error instanceof BackSelectionPolicyError) return Response.json({ code: "INVALID_PHYSICAL_BACK_SELECTION", message: error.message }, { status: 400 });
   if (error instanceof MpcArtworkFilterValidationError) return Response.json({ code: "INVALID_MPC_FILTERS", message: error.message }, { status: 400 });
   if (error instanceof CalibrationError) {
     const status = error.code === "PROFILE_NOT_FOUND" ? 404
@@ -601,6 +602,9 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
       if (!card.identity) throw new ApiRequestError(409, "NO_RESOLVED_IDENTITY", "Não há identidade resolvida para determinar uma artwork padrão.");
       const faceId = body.faceId === "back" ? "back" : body.faceId === "front" ? "front" : undefined;
       if (!faceId) throw new ApiRequestError(400, "INVALID_FACE", "Face must be front or back.");
+      if (!isEligibleIdentityFaceSelection(card, faceId)) {
+        throw new ApiRequestError(400, "INVALID_PHYSICAL_BACK_SELECTION", "A simple card's back artwork must use Back Library or a verified MPC cardback.");
+      }
       if (!card.faces.some((face) => face.side === faceId)) throw new ApiRequestError(409, "FACE_NOT_AVAILABLE", "A face solicitada não existe nesta carta.");
       let updated: WorkingCard | undefined;
       try {

@@ -2,7 +2,7 @@ import type { ScryfallClient, ScryfallRequestOptions } from "../../providers/scr
 import { ScryfallError } from "../../providers/scryfall/errors";
 import type { ScryfallCard } from "../../providers/scryfall/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, IdentityResolutionMethod, SelectedArtwork, WorkingCard } from "./types";
-import { isDoubleFacedIdentity } from "./back-selection";
+import { isDoubleFacedIdentity, isEligibleIdentityFaceSelection } from "./back-selection";
 import { DEFAULT_ARTWORK_POLICY_ID, IDENTITY_RESOLUTION_POLICY } from "./identity-policy";
 import { fuzzyMatchName } from "./fuzzy-matcher";
 
@@ -173,7 +173,9 @@ export class IdentityResolver {
 
 /** Assigns the printing that resolved this identity without querying the artwork catalog. */
 export function selectResolvedPrintingArtwork(workingCard: WorkingCard, candidates: readonly ArtworkCandidate[]): WorkingCard {
-  if (!workingCard.identity || !candidates.length) return workingCard;
+  if (!workingCard.identity) return workingCard;
+  workingCard = applyIdentityFacePolicy(workingCard, workingCard.identity);
+  if (!candidates.length) return workingCard;
   const selectedArtworkByFace = { ...workingCard.selectedArtworkByFace };
   let changed = false;
   const printingId = candidates[0].scryfallId ?? candidates[0].providerAssetId;
@@ -213,9 +215,32 @@ export function reconcileArtworkAfterIdentityChange(workingCard: WorkingCard, id
   return changed ? { ...workingCard, selectedArtworkByFace } : workingCard;
 }
 
+/** Removes imported/custom second-face state when the card is assigned a known non-DFC identity. */
+export function applyIdentityFacePolicy(workingCard: WorkingCard, identity: CardIdentity): WorkingCard {
+  if (isDoubleFacedIdentity(identity)) return workingCard;
+  const selectedArtworkByFace: Partial<Record<CardFaceSide, SelectedArtwork>> = { ...workingCard.selectedArtworkByFace };
+  delete selectedArtworkByFace.back;
+  const faces = workingCard.faces.filter((face) => face.side === "front");
+  const hasPhysicalManualBack = Boolean(workingCard.manualBackAsset || workingCard.manualBackArtwork);
+  const shouldRestoreProjectDefault = !hasPhysicalManualBack && (
+    workingCard.backMode === "auto" && workingCard.backModeSelectionPolicy === "automatic"
+    || workingCard.backMode === "manual"
+  );
+  const backMode = shouldRestoreProjectDefault ? "project-default" : workingCard.backMode;
+  const backModeSelectionPolicy = shouldRestoreProjectDefault ? "automatic" : workingCard.backModeSelectionPolicy;
+  if (faces.length === workingCard.faces.length
+    && selectedArtworkByFace.back === workingCard.selectedArtworkByFace.back
+    && backMode === workingCard.backMode
+    && backModeSelectionPolicy === workingCard.backModeSelectionPolicy) return workingCard;
+  return { ...workingCard, faces, selectedArtworkByFace, backMode, backModeSelectionPolicy };
+}
+
 export function selectDefaultArtworkForFace(workingCard: WorkingCard, side: CardFaceSide, candidates: readonly ArtworkCandidate[]): WorkingCard | undefined {
-  if (!workingCard.identity || !workingCard.faces.some((face) => face.side === side)) return undefined;
-  const identityId = workingCard.identity.id;
+  const identity = workingCard.identity;
+  if (!identity) return undefined;
+  workingCard = applyIdentityFacePolicy(workingCard, identity);
+  if (!isEligibleIdentityFaceSelection(workingCard, side) || !workingCard.faces.some((face) => face.side === side)) return undefined;
+  const identityId = identity.id;
   const selectedArtworkByFace = { ...workingCard.selectedArtworkByFace };
   const sideCandidates = candidates.filter((candidate) => candidate.source === "scryfall"
     && candidate.identityId === identityId
@@ -258,7 +283,7 @@ export function confirmIdentity(workingCard: WorkingCard, candidate: CardIdentit
     identity: candidate,
     identityResolution: { status: "resolved", method: "manual", query: candidate.name, confidence: 1, confirmed: true, candidates: [{ identity: candidate, score: 1, reason: "human-confirmed" }] },
   };
-  return reconcileArtworkAfterIdentityChange(confirmed, candidate.id);
+  return applyIdentityFacePolicy(reconcileArtworkAfterIdentityChange(confirmed, candidate.id), candidate);
 }
 
 export function keepCustom(workingCard: WorkingCard): WorkingCard {
@@ -272,13 +297,14 @@ export function keepCustom(workingCard: WorkingCard): WorkingCard {
 /** Applies one explicit default candidate per unselected face, without replacing uploads/MPC. */
 export function selectDefaultArtwork(workingCard: WorkingCard, candidates: readonly ArtworkCandidate[]): WorkingCard {
   if (!workingCard.identity) return workingCard;
+  workingCard = applyIdentityFacePolicy(workingCard, workingCard.identity);
   const eligible = sortedDefaultCandidates(candidates).filter((candidate) => candidate.identityId === workingCard.identity?.id);
   const selectedArtworkByFace = { ...workingCard.selectedArtworkByFace };
   let changed = false;
 
   if (workingCard.identityHints.scryfallId) {
     for (const side of ["front", "back"] as const) {
-      if (selectedArtworkByFace[side] || !workingCard.faces.some((face) => face.side === side)) continue;
+      if (selectedArtworkByFace[side] || !isEligibleIdentityFaceSelection(workingCard, side) || !workingCard.faces.some((face) => face.side === side)) continue;
       const printing = candidates.find((candidate) => candidate.source === "scryfall"
         && candidate.identityId === workingCard.identity?.id
         && candidate.faceId === side
@@ -291,7 +317,7 @@ export function selectDefaultArtwork(workingCard: WorkingCard, candidates: reado
 
   if (workingCard.identityHints.setCode && workingCard.identityHints.collectorNumber) {
     for (const side of ["front", "back"] as const) {
-      if (selectedArtworkByFace[side] || !workingCard.faces.some((face) => face.side === side)) continue;
+      if (selectedArtworkByFace[side] || !isEligibleIdentityFaceSelection(workingCard, side) || !workingCard.faces.some((face) => face.side === side)) continue;
       const printing = candidates.find((candidate) => candidate.source === "scryfall"
         && candidate.identityId === workingCard.identity?.id
         && candidate.faceId === side
@@ -303,9 +329,11 @@ export function selectDefaultArtwork(workingCard: WorkingCard, candidates: reado
     return changed ? { ...workingCard, selectedArtworkByFace } : workingCard;
   }
 
-  if (workingCard.faces.some((face) => face.side === "front") && workingCard.faces.some((face) => face.side === "back")) {
+  if (isDoubleFacedIdentity(workingCard.identity)
+    && workingCard.faces.some((face) => face.side === "front") && workingCard.faces.some((face) => face.side === "back")) {
     if (workingCard.identityResolution.method !== "name") return workingCard;
-    const missingSides = (["front", "back"] as const).filter((side) => !selectedArtworkByFace[side]);
+    const missingSides = (["front", "back"] as const).filter((side) =>
+      isEligibleIdentityFaceSelection(workingCard, side) && !selectedArtworkByFace[side]);
     if (!missingSides.length) return workingCard;
     const selectedScryfall = Object.values(selectedArtworkByFace).find((selection) => selection?.source === "scryfall");
     const selectedPrintingId = selectedScryfall?.providerAssetId ?? selectedScryfall?.candidateId.match(/^scryfall:([^:]+):/)?.[1];
@@ -344,7 +372,7 @@ export function selectDefaultArtwork(workingCard: WorkingCard, candidates: reado
   }
 
   for (const side of ["front", "back"] as const satisfies readonly CardFaceSide[]) {
-    if (selectedArtworkByFace[side] || !workingCard.faces.some((face) => face.side === side)) continue;
+    if (selectedArtworkByFace[side] || !isEligibleIdentityFaceSelection(workingCard, side) || !workingCard.faces.some((face) => face.side === side)) continue;
     if (workingCard.identityResolution.method !== "name") continue;
     const defaultCandidate = eligible.find((candidate) => candidate.faceId === side && candidate.originalAvailable);
     if (defaultCandidate) { selectedArtworkByFace[side] = selected(defaultCandidate); changed = true; }

@@ -162,7 +162,7 @@ export function restoreAutomaticBackSelection(card: WorkingCard): WorkingCard {
     return { ...card, backMode: "auto", backModeSelectionPolicy: "automatic" };
   }
   const selectedArtworkByFace = { ...card.selectedArtworkByFace };
-  if (card.backMode === "manual" || selectedArtworkByFace.back?.selectionPolicy === "user-selected") delete selectedArtworkByFace.back;
+  if (card.identity !== null || card.backMode === "manual" || selectedArtworkByFace.back?.selectionPolicy === "user-selected") delete selectedArtworkByFace.back;
   const { manualBackAsset: _manualBackAsset, manualBackArtwork: _manualBackArtwork, ...rest } = card;
   const isDfc = isDoubleFacedIdentity(card.identity);
   return {

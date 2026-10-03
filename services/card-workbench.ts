@@ -17,9 +17,9 @@ import { appDataPaths } from "../artwork/storage/paths";
 import { ArtworkRepository } from "../artwork/storage/repository";
 import { ArtworkThumbnailStore } from "../artwork/storage/thumbnail-store";
 import type { ArtworkCatalogSource, ArtworkPreview, ProviderHealth } from "../artwork/types";
-import { confirmIdentity, IdentityResolver, isDoubleFacedIdentity, keepCustom, reconcileArtworkAfterIdentityChange, restoreAutomaticBackSelection, selectDefaultArtworkForFace, selectResolvedPrintingArtwork } from "../core/cards/identity-resolver";
+import { applyIdentityFacePolicy, confirmIdentity, IdentityResolver, isDoubleFacedIdentity, keepCustom, reconcileArtworkAfterIdentityChange, restoreAutomaticBackSelection, selectDefaultArtworkForFace, selectResolvedPrintingArtwork } from "../core/cards/identity-resolver";
 import { selectArtwork as updateSelectedArtwork, createWorkingSet } from "../core/cards/working-set";
-import { BackSelectionPolicyError, isEligibleGenericPhysicalBack, selectManualBackArtwork as selectManualBackArtworkCore } from "../core/cards/back-selection";
+import { BackSelectionPolicyError, isEligibleGenericPhysicalBack, isEligibleIdentityFaceSelection, selectManualBackArtwork as selectManualBackArtworkCore } from "../core/cards/back-selection";
 import { mpcArtworkCandidateId } from "../core/cards/ids";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "../core/cards/types";
 import { ScryfallClient } from "../providers/scryfall/client";
@@ -225,10 +225,7 @@ function getIdentity(cache: ArtworkMetadataCache, identityId: string): CardIdent
 
 function applyIdentityFaces(card: WorkingCard, identity: CardIdentity): WorkingCard {
   if (!isDoubleFacedIdentity(identity)) {
-    if (card.backMode === "auto" && card.backModeSelectionPolicy === "automatic") {
-      return { ...card, backMode: "project-default" };
-    }
-    return card;
+    return applyIdentityFacePolicy(card, identity);
   }
   const identityFaces = Array.isArray(identity.metadata?.faces)
     ? identity.metadata.faces.flatMap((item): Array<{ name?: string }> => {
@@ -523,6 +520,7 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     async restoreDefaultArtwork(card, faceId, callOptions = {}) {
       if (callOptions.signal?.aborted) throw new ScryfallError("aborted", "The Scryfall request was cancelled.");
       if (!card.identity || !card.faces.some((face) => face.side === faceId)) return undefined;
+      if (!isEligibleIdentityFaceSelection(card, faceId)) throw new BackSelectionPolicyError("A simple card identity has no real back face; generic physical backs must use Back Library or a verified MPC cardback.");
       const resetCard = faceId === "back" ? restoreAutomaticBackSelection(card) : card;
       const candidates = await catalog.search(card.identity, { source: "scryfall", faceId, signal: callOptions.signal });
       const selected = selectDefaultArtworkForFace(resetCard, faceId, candidates);
@@ -589,8 +587,9 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
         ...(candidate.selectedArtworkId ? { selectedArtworkId: candidate.selectedArtworkId } : {}),
         selectionPolicy: "user-selected",
       };
+      const updated = updateSelectedArtwork(card, faceId, selection);
       if (candidate.source === "upload" && card.identity) local.linkUpload(card.identity.id, candidate.id, faceId);
-      return updateSelectedArtwork(card, faceId, selection);
+      return updated;
     },
     selectManualBackArtwork(card, candidate) {
       if (!isEligibleGenericPhysicalBack(card, candidate)) throw new BackSelectionPolicyError();

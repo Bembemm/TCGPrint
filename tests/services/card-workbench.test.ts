@@ -14,7 +14,7 @@ import type { ArtworkCandidate } from "../../core/cards/types";
 import { mapScryfallCard } from "../../providers/scryfall/mapper";
 import { formatResolutionSummary } from "../../core/cards/resolution-summary";
 import { mpcArtworkCandidateId } from "../../core/cards/ids";
-import { isDoubleFacedIdentity } from "../../core/cards/back-selection";
+import { BackSelectionPolicyError, isDoubleFacedIdentity } from "../../core/cards/back-selection";
 import { NO_CUT_GUIDES } from "../helpers/cut-guides";
 
 const roots: string[] = [];
@@ -457,8 +457,61 @@ describe("card workbench services", () => {
     expect(mpcBack.faces).toHaveLength(1);
     expect(mpcBack.mpcReferences).toContainEqual(expect.objectContaining({ faceId: "back", importedAssetId: "provider-manual-back", providerAssetId: "provider-manual-back", selectedArtworkId: "selected-manual-back", providerCardType: "CARDBACK", referenceOrigin: "gallery-selection" }));
     expect(() => workbench.selectManualBackArtwork(identified, uploadCandidate)).toThrow(/verified MPC cardback/);
+    expect(() => workbench.selectArtwork(identified, "back", { ...uploadCandidate, faceId: "back" })).toThrow(BackSelectionPolicyError);
+    await expect(workbench.listArtworkCandidates(identified.identity!.id, "back", "upload")).resolves.toEqual([]);
     expect(frontChanged.manualBackArtwork).toEqual(mpcBack.manualBackArtwork);
     expect(identityChanged.manualBackArtwork).toEqual(mpcBack.manualBackArtwork);
+  });
+
+  it("drops a custom Back face when confirming a simple identity while retaining its uploaded original", async () => {
+    const identityCard = resolvedDeckPrintings[0]!;
+    const fake = fakeScryfallClient([identityCard]);
+    const { workbench } = await setup(undefined, fake.client);
+    const bytes = new Uint8Array(await sharp({ create: { width: 32, height: 48, channels: 3, background: "#357" } }).png().toBuffer());
+    const imported = await workbench.importForWorkingSet({ files: [{ filename: "custom-two-face.png", bytes }] });
+    const importedCard = imported.workingCards[0]!;
+    const assetId = importedCard.localArtworkIds[0]!;
+    const upload = await workbench.getArtworkCandidate(assetId);
+    if (!upload) throw new Error("Expected a validated local artwork candidate.");
+    const customTwoFace = {
+      ...importedCard,
+      faces: [
+        { id: "front", side: "front" as const, importedAssetId: assetId },
+        { id: "back", side: "back" as const, importedAssetId: assetId },
+      ],
+    };
+    const customBack = workbench.selectArtwork(customTwoFace, "back", { ...upload, faceId: "back" });
+    const confirmed = await workbench.confirmWorkingCardIdentity(customBack, identityCard.id);
+    const original = await workbench.getArtworkOriginal(assetId);
+
+    expect(confirmed.identity).toMatchObject({ name: "Sol Ring" });
+    expect(confirmed.faces).toEqual([{ id: "front", side: "front", importedAssetId: assetId }]);
+    expect(confirmed.selectedArtworkByFace.back).toBeUndefined();
+    expect(confirmed.selectedArtworkByFace.front).toMatchObject({ source: "upload", candidateId: assetId, identityId: confirmed.identity?.id });
+    expect(confirmed).toMatchObject({ backMode: "project-default", backModeSelectionPolicy: "automatic", localArtworkIds: [assetId] });
+    expect(confirmed.manualBackAsset).toBeUndefined();
+    expect(confirmed.manualBackArtwork).toBeUndefined();
+    expect(original.bytes).toEqual(bytes);
+  });
+
+  it("rejects restoring a simple identity Back before searching Scryfall", async () => {
+    const identityCard = resolvedDeckPrintings[0]!;
+    const fake = fakeScryfallClient([identityCard]);
+    const { workbench } = await setup(undefined, fake.client);
+    const imported = await workbench.importForWorkingSet({ text: "1 Sol Ring" });
+    const identified = await workbench.confirmWorkingCardIdentity(imported.workingCards[0]!, identityCard.id);
+    const simpleWithForgedBack = {
+      ...identified,
+      faces: [...identified.faces, { id: "back", side: "back" as const, name: "Forged face" }],
+    };
+    const search = vi.spyOn(ArtworkCatalog.prototype, "search");
+
+    try {
+      await expect(workbench.restoreDefaultArtwork(simpleWithForgedBack, "back")).rejects.toBeInstanceOf(BackSelectionPolicyError);
+      expect(search).not.toHaveBeenCalled();
+    } finally {
+      search.mockRestore();
+    }
   });
 
   it("lists cardbacks through the dedicated MPC route and persists the verified CARDBACK reference", async () => {

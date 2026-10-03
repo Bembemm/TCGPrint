@@ -32,6 +32,7 @@ import { MpcArtworkProviderError } from "../../artwork/mpc-provider";
 import { openProjectDatabase } from "../../persistence/projects/database";
 import { ProjectRepository } from "../../persistence/projects/repository";
 import { DEFAULT_PROJECT_SETTINGS, deserializeProjectSnapshot, serializeProjectSnapshot } from "../../persistence/projects/serializer";
+import { BackSelectionPolicyError } from "../../core/cards/back-selection";
 
 const candidateId = `upload:${"a".repeat(64)}`;
 const identity: CardIdentity = { id: "scryfall:oracle:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", provider: "scryfall", name: "Sol Ring", oracleId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", resolutionMethod: "manual", confidence: 1 };
@@ -441,6 +442,52 @@ describe("card APIs", () => {
     expect(workbench.getArtworkCandidate).not.toHaveBeenCalled();
     expect(workbench.selectArtwork).not.toHaveBeenCalled();
     expect(card.selectedArtworkByFace.back).toBeUndefined();
+  });
+
+  it("rejects restore-default-artwork for a forged Back on a simple identity before provider lookup", async () => {
+    const restoreDefaultArtwork = vi.fn(async (workingCard: WorkingCard) => workingCard);
+    const workbench = testWorkbench({ restoreDefaultArtwork });
+    const simpleWithForgedBack = {
+      ...card,
+      faces: [...card.faces, { id: "back", side: "back" as const, name: "Forged face" }],
+    };
+    const before = structuredClone(simpleWithForgedBack);
+
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "restore-default-artwork",
+      card: simpleWithForgedBack,
+      faceId: "back",
+    }), workbench);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_PHYSICAL_BACK_SELECTION" });
+    expect(restoreDefaultArtwork).not.toHaveBeenCalled();
+    expect(simpleWithForgedBack).toEqual(before);
+  });
+
+  it("maps a BackSelectionPolicyError from a domain call to a deterministic client error", async () => {
+    const manualCandidate: ArtworkCandidate = {
+      id: "mpc:cardback-policy-test",
+      source: "mpc",
+      identityId: null,
+      faceId: "back",
+      providerAssetId: "mpc-cardback-123",
+      originalAvailable: true,
+      metadata: { cardType: "CARDBACK" },
+    };
+    const workbench = testWorkbench({
+      getArtworkCandidate: vi.fn(async () => manualCandidate),
+      selectManualBackArtwork: vi.fn(() => { throw new BackSelectionPolicyError(); }),
+    });
+
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "select-manual-back-artwork",
+      card,
+      candidateId: manualCandidate.id,
+    }), workbench);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_PHYSICAL_BACK_SELECTION" });
   });
 
   it("accepts a hydrated MPC CARDBACK through the API and preserves the explicit lock", async () => {

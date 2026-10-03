@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ImportResult, ImportedEntry } from "../../../import-engine/types";
 import { createWorkingSet } from "../../../core/cards/working-set";
-import { IdentityResolver, confirmIdentity, keepCustom, selectDefaultArtwork } from "../../../core/cards/identity-resolver";
+import { IdentityResolver, confirmIdentity, keepCustom, selectDefaultArtwork, selectDefaultArtworkForFace } from "../../../core/cards/identity-resolver";
 import * as identityResolver from "../../../core/cards/identity-resolver";
 import { DEFAULT_ARTWORK_POLICY_ID } from "../../../core/cards/identity-policy";
 import type { ArtworkCandidate, CardIdentity } from "../../../core/cards/types";
@@ -221,7 +221,7 @@ describe("identity resolver", () => {
   });
 
   it("restores only the requested face and leaves the prior selection intact when no default exists", () => {
-    const identity: CardIdentity = { id: "scryfall:oracle:delver", provider: "scryfall", name: "Delver of Secrets // Insectile Aberration", resolutionMethod: "name", confidence: 1 };
+    const identity: CardIdentity = { id: "scryfall:oracle:delver", provider: "scryfall", name: "Delver of Secrets // Insectile Aberration", resolutionMethod: "name", confidence: 1, metadata: { layout: "transform", faces: [{ name: "Delver of Secrets" }, { name: "Insectile Aberration" }] } };
     const original = {
       ...card({ name: "Delver of Secrets // Insectile Aberration" }),
       faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }],
@@ -279,6 +279,38 @@ describe("identity resolver", () => {
       faceId: "back",
       selectionPolicy: "user-selected",
     });
+  });
+
+  it("does not assign a default Back face to a known simple identity", () => {
+    const simpleIdentity: CardIdentity = {
+      id: "scryfall:oracle:island",
+      provider: "scryfall",
+      name: "Island",
+      resolutionMethod: "name",
+      confidence: 1,
+      metadata: { layout: "normal", faces: [{ name: "Island" }] },
+    };
+    const simpleWithForgedBack = {
+      ...card({ name: "Island" }),
+      identity: simpleIdentity,
+      identityResolution: { status: "resolved" as const, method: "name" as const, candidates: [], confirmed: false },
+      faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }],
+      selectedArtworkByFace: {},
+    };
+    const candidate: ArtworkCandidate = {
+      id: "scryfall:island-print:back",
+      source: "scryfall",
+      identityId: simpleIdentity.id,
+      faceId: "back",
+      scryfallId: "island-print",
+      originalAvailable: true,
+      language: "en",
+      releasedAt: "2025-01-01",
+      metadata: { digital: false, imageStatus: "highres_scan" },
+    };
+
+    expect(selectDefaultArtworkForFace(simpleWithForgedBack, "back", [candidate])).toBeUndefined();
+    expect(selectDefaultArtwork(simpleWithForgedBack, [candidate]).selectedArtworkByFace.back).toBeUndefined();
   });
 
   it("selects deterministic name defaults only after checking existing, Scryfall ID, and set/collector selections", () => {
@@ -354,7 +386,7 @@ describe("identity resolver", () => {
   });
 
   it("prefers the other DFC face's Scryfall printing when resetting a face", () => {
-    const identity: CardIdentity = { id: "scryfall:oracle:delver", provider: "scryfall", name: "Delver of Secrets // Insectile Aberration", resolutionMethod: "manual", confidence: 1 };
+    const identity: CardIdentity = { id: "scryfall:oracle:delver", provider: "scryfall", name: "Delver of Secrets // Insectile Aberration", resolutionMethod: "manual", confidence: 1, metadata: { layout: "transform", faces: [{ name: "Delver of Secrets" }, { name: "Insectile Aberration" }] } };
     const identified = {
       ...card({ name: identity.name }),
       faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }],
@@ -380,7 +412,7 @@ describe("identity resolver", () => {
     const identified = {
       ...card({ name: "Delver of Secrets // Insectile Aberration" }),
       faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }],
-      identity: { id: "scryfall:oracle:delver", provider: "scryfall", name: "Delver of Secrets // Insectile Aberration", oracleId: "delver", resolutionMethod: "name" as const, confidence: 1, metadata: { layout: "transform" } },
+      identity: { id: "scryfall:oracle:delver", provider: "scryfall", name: "Delver of Secrets // Insectile Aberration", oracleId: "delver", resolutionMethod: "name" as const, confidence: 1, metadata: { layout: "transform", faces: [{ name: "Delver of Secrets" }, { name: "Insectile Aberration" }] } },
       identityResolution: { status: "resolved" as const, method: "name" as const, candidates: [], confirmed: false },
     };
     const printing = (scryfallId: string, faceId: "front" | "back", releasedAt: string, originalAvailable = true) => ({

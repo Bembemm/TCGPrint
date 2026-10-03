@@ -28,7 +28,7 @@ const identity: CardIdentity = {
   confidence: 1,
 };
 
-async function setup(fetchImpl: typeof fetch, options: { timeoutMs?: number; maxOriginalBytes?: number } = {}) {
+async function setup(fetchImpl: typeof fetch, options: { timeoutMs?: number; maxOriginalBytes?: number; searchLimit?: number } = {}) {
   const base = await mkdtemp(join(tmpdir(), "tcgprint-mpc-provider-"));
   temporaryDirectories.push(base);
   const paths = appDataPaths(base);
@@ -45,6 +45,7 @@ async function setup(fetchImpl: typeof fetch, options: { timeoutMs?: number; max
     metadata,
     repository,
     timeoutMs: options.timeoutMs ?? 100,
+    ...(options.searchLimit !== undefined ? { searchLimit: options.searchLimit } : {}),
     waitForRetry: async () => undefined,
     ...(options.maxOriginalBytes !== undefined ? { maxOriginalBytes: options.maxOriginalBytes } : {}),
   });
@@ -119,6 +120,75 @@ describe("MPC artwork provider", () => {
     expect(candidates[0]).toMatchObject({ source: "mpc", identityId: null, faceId: "back", providerAssetId: ids[0], metadata: { cardType: "CARDBACK" } });
     expect(requests.map(({ path }) => path)).toEqual(["/2/sources/", "/2/cardbacks/", "/2/cards/"]);
     expect(requests[1]?.body).toMatchObject({ searchSettings: { filterSettings: { maximumSize: 30 } } });
+    database.close();
+  });
+
+  it("sends selected filters to the cardback endpoint and retains only matching hydrated results", async () => {
+    const requests: Array<{ path: string; body?: unknown }> = [];
+    const ids = ["eligible-cardback-123", "low-dpi-cardback-123", "wrong-tag-cardback-123"];
+    const records = [
+      { identifier: ids[0], cardType: "CARDBACK", name: "Holographic Back", sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000, dpi: 900, language: "en", tags: ["Holographic"] },
+      { identifier: ids[1], cardType: "CARDBACK", name: "Low DPI Back", sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000, dpi: 300, language: "en", tags: ["Holographic"] },
+      { identifier: ids[2], cardType: "CARDBACK", name: "Wrong Tag Back", sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000, dpi: 900, language: "en", tags: ["Foil"] },
+    ];
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      const body = typeof init.body === "string" ? JSON.parse(init.body) as unknown : undefined;
+      requests.push({ path: url.pathname, ...(body === undefined ? {} : { body }) });
+      if (url.pathname === "/2/sources/") return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.pathname === "/2/languages/") return jsonResponse({ languages: [{ code: "en", name: "English" }] });
+      if (url.pathname === "/2/tags/") return jsonResponse({ tags: [{ name: "Holographic" }, { name: "Foil" }] });
+      if (url.pathname === "/2/cardbacks/") return jsonResponse({ cardbacks: ids });
+      if (url.pathname === "/2/cards/") return jsonResponse({ results: Object.fromEntries(records.map((item) => [item.identifier, item])) });
+      throw new Error(`Unexpected fake request: ${url.pathname}`);
+    };
+    const { database, provider } = await setup(fetchImpl);
+
+    const candidates = await provider.searchCardbacks({ filters: {
+      minimumDpi: 600,
+      maximumDpi: 1200,
+      sources: [41],
+      includeTags: ["Holographic"],
+      languages: ["en"],
+    } });
+
+    expect(requests.find(({ path }) => path === "/2/cardbacks/")?.body).toMatchObject({ searchSettings: {
+      filterSettings: {
+        minimumDPI: 600,
+        maximumDPI: 1200,
+        includesTags: ["Holographic"],
+        excludesTags: [],
+        languages: ["en"],
+      },
+      searchTypeSettings: { fuzzySearch: false, filterCardbacks: true },
+      sourceSettings: { sources: [[41, true]] },
+    } });
+    expect(candidates.map(({ providerAssetId }) => providerAssetId)).toEqual([ids[0]]);
+    database.close();
+  });
+
+  it("accepts cardback catalogs above the old batch cap and hydrates only the configured bounded subset", async () => {
+    const ids = Array.from({ length: 501 }, (_, index) => `cardback-${String(index).padStart(4, "0")}-asset`);
+    const hydratedIds: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/2/sources/") return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.pathname === "/2/cardbacks/") return jsonResponse({ cardbacks: ids });
+      if (url.pathname === "/2/cards/") {
+        const body = JSON.parse(String(init.body)) as { cardIdentifiers: string[] };
+        hydratedIds.push(...body.cardIdentifiers);
+        return jsonResponse({ results: Object.fromEntries(body.cardIdentifiers.map((identifier) => [identifier, {
+          identifier, cardType: "CARDBACK", name: "Bounded Back", sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000, dpi: 1200,
+        }])) });
+      }
+      throw new Error(`Unexpected fake request: ${url.pathname}`);
+    };
+    const { database, provider } = await setup(fetchImpl, { searchLimit: 2 });
+
+    const candidates = await provider.searchCardbacks();
+
+    expect(candidates).toHaveLength(2);
+    expect(hydratedIds).toEqual(ids.slice(0, 2));
     database.close();
   });
 
