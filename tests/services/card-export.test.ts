@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PDFDocument, PDFName, PDFRawStream } from "@pdfme/pdf-lib";
@@ -6,7 +7,7 @@ import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import normal from "../fixtures/scryfall/normal-card.json";
-import { createCardWorkbench } from "../../services/card-workbench";
+import { createCardWorkbench, type CardWorkbench } from "../../services/card-workbench";
 import { handleCardExport } from "../../services/card-api";
 import { exportWorkingCards, exportWorkingCardsByContentMode, exportWorkingCardsWithDiagnostics } from "../../services/card-export";
 import { PAPER_FORMATS } from "../../core/geometry";
@@ -27,6 +28,162 @@ afterEach(async () => {
 });
 
 describe("decklist → identity → Scryfall artwork → PDF", () => {
+  it("bounds unique bleed work to two concurrent tasks and preserves card order", async () => {
+    const images = new Map<string, Uint8Array>();
+    const candidates = new Map<string, ArtworkCandidate>();
+    const originals = new Map<string, Awaited<ReturnType<CardWorkbench["getArtworkOriginal"]>>>();
+    for (let index = 0; index < 5; index += 1) {
+      const id = `upload:bounded-bleed-${index}`;
+      const bytes = new Uint8Array(await sharp({
+        create: { width: 8, height: 6, channels: 3, background: { r: index * 31, g: 255 - index * 23, b: index * 17 } },
+      }).jpeg().toBuffer());
+      const contentHash = createHash("sha256").update(bytes).digest("hex");
+      images.set(id, bytes);
+      candidates.set(id, { id, source: "upload", identityId: null, faceId: "front", originalAvailable: true });
+      originals.set(id, {
+        artworkId: id, contentHash, extension: "jpg", format: "jpeg", byteLength: bytes.byteLength,
+        widthPx: 8, heightPx: 6, createdAt: "2026-10-01T12:00:00.000Z", bytes, provenance: [],
+      });
+    }
+    const catalog = {
+      getArtworkCandidate: vi.fn(async (id: string) => candidates.get(id)),
+      getArtworkOriginal: vi.fn(async (id: string) => originals.get(id)!),
+    };
+    const cards = [...images.keys()].map((id, index) => ({
+      id: `bounded-bleed-${index}`, quantity: 1, order: index,
+      importSource: { sourceId: id, importKind: "synthetic" as const, entryKind: "card" as const },
+      identityHints: {}, identity: null,
+      identityResolution: { status: "unresolved" as const, candidates: [], confirmed: false },
+      faces: [{ id: `${id}-front`, side: "front" as const }],
+      selectedArtworkByFace: { front: { candidateId: id, source: "upload" as const, identityId: null, faceId: "front" } },
+      backMode: "none" as const, backModeSelectionPolicy: "explicit" as const,
+      localArtworkIds: [], mpcReferences: [], faceAssociations: [],
+    } satisfies WorkingCard));
+    const originalGenerate = BleedEngine.prototype.generate;
+    let active = 0;
+    let peak = 0;
+    const generate = vi.spyOn(BleedEngine.prototype, "generate").mockImplementation(async function (this: BleedEngine, request) {
+      active += 1;
+      peak = Math.max(peak, active);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 8));
+        return await originalGenerate.call(this, request);
+      } finally {
+        active -= 1;
+      }
+    });
+
+    const result = await exportWorkingCardsWithDiagnostics(catalog, cards, { bleedMm: 0.625, cutGuides: NO_CUT_GUIDES });
+
+    expect(generate).toHaveBeenCalledTimes(5);
+    expect(peak).toBe(Math.min(2, availableParallelism()));
+    expect(result.bleedDiagnostics.map(({ workingCardId }) => workingCardId)).toEqual(cards.map(({ id }) => id));
+  });
+
+  it("does not start queued bleed work or publish a PDF after cancellation", async () => {
+    const images = new Map<string, Uint8Array>();
+    const candidates = new Map<string, ArtworkCandidate>();
+    const originals = new Map<string, Awaited<ReturnType<CardWorkbench["getArtworkOriginal"]>>>();
+    for (let index = 0; index < 5; index += 1) {
+      const id = `upload:cancel-bleed-${index}`;
+      const bytes = new Uint8Array(await sharp({
+        create: { width: 8, height: 6, channels: 3, background: { r: index * 31, g: 255 - index * 23, b: index * 17 } },
+      }).jpeg().toBuffer());
+      candidates.set(id, { id, source: "upload", identityId: null, faceId: "front", originalAvailable: true });
+      originals.set(id, {
+        artworkId: id, contentHash: createHash("sha256").update(bytes).digest("hex"), extension: "jpg", format: "jpeg",
+        byteLength: bytes.byteLength, widthPx: 8, heightPx: 6, createdAt: "2026-10-01T12:00:00.000Z", bytes, provenance: [],
+      });
+    }
+    const controller = new AbortController();
+    let lookups = 0;
+    const catalog = {
+      async getArtworkCandidate(id: string) {
+        lookups += 1;
+        if (lookups === 4) controller.abort();
+        return candidates.get(id);
+      },
+      async getArtworkOriginal(id: string) { return originals.get(id)!; },
+    };
+    const cards = [...candidates.keys()].map((id, index) => ({
+      id: `cancel-bleed-${index}`, quantity: 1, order: index,
+      importSource: { sourceId: id, importKind: "synthetic" as const, entryKind: "card" as const },
+      identityHints: {}, identity: null,
+      identityResolution: { status: "unresolved" as const, candidates: [], confirmed: false },
+      faces: [{ id: `${id}-front`, side: "front" as const }],
+      selectedArtworkByFace: { front: { candidateId: id, source: "upload" as const, identityId: null, faceId: "front" } },
+      backMode: "none" as const, backModeSelectionPolicy: "explicit" as const,
+      localArtworkIds: [], mpcReferences: [], faceAssociations: [],
+    } satisfies WorkingCard));
+    const originalGenerate = BleedEngine.prototype.generate;
+    const generate = vi.spyOn(BleedEngine.prototype, "generate").mockImplementation(async function (this: BleedEngine, request) {
+      await new Promise((resolve) => setTimeout(resolve, 8));
+      return await originalGenerate.call(this, request);
+    });
+    const pdfGenerate = vi.spyOn(LosslessPdfEngine.prototype, "generate");
+
+    await expect(exportWorkingCardsWithDiagnostics(catalog, cards, { bleedMm: 0.625, cutGuides: NO_CUT_GUIDES }, controller.signal))
+      .rejects.toThrow(/cancelled/i);
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(pdfGenerate).not.toHaveBeenCalled();
+  });
+
+  it("memoizes repeated candidate metadata and original reads within one export", async () => {
+    const bytes = new Uint8Array(await readFile(join(process.cwd(), "tests", "fixtures", "pdf", "synthetic-gradient.jpg")));
+    const contentHash = createHash("sha256").update(bytes).digest("hex");
+    const candidate: ArtworkCandidate = {
+      id: "upload:repeated-export",
+      source: "upload",
+      identityId: null,
+      faceId: "front",
+      originalAvailable: true,
+    };
+    const original = {
+      artworkId: candidate.id,
+      contentHash,
+      extension: "jpg",
+      format: "jpeg" as const,
+      byteLength: bytes.byteLength,
+      widthPx: 8,
+      heightPx: 6,
+      createdAt: "2026-10-01T12:00:00.000Z",
+      bytes,
+      provenance: [],
+    };
+    const catalog = {
+      getArtworkCandidate: vi.fn(async () => candidate),
+      getArtworkOriginal: vi.fn(async () => original),
+    };
+    const cards: WorkingCard[] = Array.from({ length: 100 }, (_, order) => ({
+      id: `repeated-${order}`,
+      quantity: 1,
+      order,
+      importSource: { sourceId: `repeated-${order}`, importKind: "synthetic", entryKind: "card" },
+      identityHints: {},
+      identity: null,
+      identityResolution: { status: "unresolved", candidates: [], confirmed: false },
+      faces: [{ id: `repeated-${order}-front`, side: "front" }],
+      selectedArtworkByFace: { front: { candidateId: candidate.id, source: "upload", identityId: null, faceId: "front" } },
+      backMode: "none",
+      backModeSelectionPolicy: "explicit",
+      localArtworkIds: [],
+      mpcReferences: [],
+      faceAssociations: [],
+    }));
+    const generatePdf = vi.spyOn(LosslessPdfEngine.prototype, "generate");
+
+    await exportWorkingCardsWithDiagnostics(catalog, cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
+
+    expect(catalog.getArtworkCandidate).toHaveBeenCalledTimes(1);
+    expect(catalog.getArtworkOriginal).toHaveBeenCalledTimes(1);
+    const pdfRequest = generatePdf.mock.calls[0]![0];
+    expect(pdfRequest.images).toHaveLength(100);
+    expect(pdfRequest.images.every((image) => image === bytes)).toBe(true);
+    expect(pdfRequest.imageSha256).toEqual(Array.from({ length: 100 }, () => contentHash));
+  });
+
   it("routes front/back and separate/duplex exports through the selected side corrections", async () => {
     const bytes = new Uint8Array(await readFile(join(process.cwd(), "tests", "fixtures", "pdf", "synthetic-gradient.jpg")));
     const contentHash = createHash("sha256").update(bytes).digest("hex");
@@ -438,7 +595,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     await exportWorkingCardsWithDiagnostics(catalog, deleted.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
     expect(exportedNames(pdfGenerate.mock.calls[1][0].images)).toEqual(["C", "A", "A", "A", "A"]);
     expect(catalog.getArtworkCandidate.mock.calls.slice(3).map(([id]) => id)).toEqual([
-      "scryfall:C", "scryfall:A", "scryfall:A",
+      "scryfall:C", "scryfall:A",
     ]);
 
     const dfc = createWorkingCardEditorState([card("B", 0, 1)]);
@@ -449,8 +606,8 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     expect(dfcClone.selectedArtworkByFace.back?.candidateId).toBe("scryfall:B-back");
     await exportWorkingCardsWithDiagnostics(catalog, reorderedDfc.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
     expect(exportedNames(pdfGenerate.mock.calls[2][0].images)).toEqual(["B", "B"]);
-    expect(catalog.getArtworkCandidate.mock.calls.slice(6).map(([id]) => id)).toEqual([
-      "scryfall:B", "scryfall:B",
+    expect(catalog.getArtworkCandidate.mock.calls.slice(5).map(([id]) => id)).toEqual([
+      "scryfall:B",
     ]);
 
     let history = commitEditorHistory(

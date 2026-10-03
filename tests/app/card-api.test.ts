@@ -734,11 +734,13 @@ describe("card APIs", () => {
       expect(String(input)).toBe("/api/cards/resolve");
       return handleResolve(new Request(new URL(String(input), "http://localhost"), init), workbench);
     });
+    const controller = new AbortController();
 
-    const response = await postArtworkSelection(card, "front", frontCandidate.id, pickerFetch);
+    const response = await postArtworkSelection(card, "front", frontCandidate.id, pickerFetch, controller.signal);
     const body = await response.json() as { workingCards: WorkingCard[] };
 
     expect(response.status).toBe(200);
+    expect(pickerFetch.mock.calls[0][1]?.signal).toBe(controller.signal);
     expect(JSON.parse(String(pickerFetch.mock.calls[0][1]?.body))).toMatchObject({ action: "select", faceId: "front", candidateId: frontCandidate.id });
     expect(body.workingCards[0].selectedArtworkByFace.front).toMatchObject({ candidateId: frontCandidate.id, source: "scryfall", faceId: "front" });
     expect(body.workingCards[0].id).toBe(card.id);

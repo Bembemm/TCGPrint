@@ -242,10 +242,6 @@ export class BleedEngine {
     const sourceSha256 = createHash("sha256").update(bufferView(request.imageBytes)).digest("hex");
     const policyId = request.policyId ?? "direct-mode-v1";
 
-    const decodedSource = await decodeRaster(request.imageBytes, metadata);
-    const source = roundedCorners
-      ? applyRoundedCornerMask(decodedSource, trimWidthMm, trimHeightMm, cornerRadiusMm!)
-      : decodedSource;
     const sideDiagnostics: Readonly<Record<BleedSide, BleedSideDiagnostic>> = {
       top: { strategy: "nearest-edge-pixel" },
       right: { strategy: "nearest-edge-pixel" },
@@ -291,6 +287,14 @@ export class BleedEngine {
       });
     }
 
+    // Pixel decoding and rounded-corner masking are only needed to build a
+    // missing derivative. A warm cache still validates the source metadata,
+    // dimensions, MIME type and content hash above, then returns the lossless
+    // cached PNG without allocating full decoded pixel buffers.
+    const decodedSource = await decodeRaster(request.imageBytes, metadata);
+    const source = roundedCorners
+      ? applyRoundedCornerMask(decodedSource, trimWidthMm, trimHeightMm, cornerRadiusMm!)
+      : decodedSource;
     const extended = addRasterBleed(source, dimensions);
     const derivedBytes = await encodeRasterPng(source, extended.width, extended.height, extended.samples);
     try {

@@ -10,6 +10,8 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run --maxWorkers=2",
+    "benchmark:phase15": "node scripts/phase-15-benchmark.mjs",
+    "summarize:phase15": "node scripts/phase-15-summarize.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

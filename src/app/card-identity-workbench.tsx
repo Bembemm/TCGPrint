@@ -552,6 +552,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const [templateGeometry, setTemplateGeometry] = useState<TemplateLayoutGeometryMm | undefined>();
   const [cutSourceSelection, setCutSourceSelection] = useState<CutSourceSelection | null>(null);
   const [busy, setBusy] = useState(false);
+  const [abortableOperation, setAbortableOperation] = useState<"resolve" | "artwork" | "export" | null>(null);
   const [projectOpenPending, setProjectOpenPending] = useState(false);
   const [projectRestoreVersion, setProjectRestoreVersion] = useState(0);
   const [activeProjectSync, setActiveProjectSync] = useState<{ readonly projectId: string; readonly revision: number; readonly saved: boolean } | null>(null);
@@ -566,6 +567,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
   const projectRestoreLookupGate = useRef(createProjectRestoreLookupGate(-1));
   const [pdfUrl, setPdfUrl] = useState("");
   const [exportDownloadName, setExportDownloadName] = useState("tcgprint-cards.pdf");
+  const activeOperationAbortController = useRef<AbortController | null>(null);
   const [cutGeometryPreview, setCutGeometryPreview] = useState<CutPreviewDto | null>(null);
   const [cutPageNumber, setCutPageNumber] = useState(1);
   const [bleedDiagnostics, setBleedDiagnostics] = useState<BleedDiagnosticsReport | null>(null);
@@ -624,6 +626,19 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     setProblemCardId(cardId);
   }
 
+  function beginAbortableOperation(operation: "resolve" | "artwork" | "export"): AbortController {
+    const controller = new AbortController();
+    activeOperationAbortController.current = controller;
+    setAbortableOperation(operation);
+    return controller;
+  }
+
+  function finishAbortableOperation(controller: AbortController): void {
+    if (activeOperationAbortController.current !== controller) return;
+    activeOperationAbortController.current = null;
+    setAbortableOperation(null);
+  }
+
 
   const activeCard = useMemo(() => workingCards.find((card) => card.id === selectedCardId), [workingCards, selectedCardId]);
   const physicalCardCount = useMemo(() => workingCards.reduce((sum, card) => sum + card.quantity, 0), [workingCards]);
@@ -652,6 +667,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
     : "";
 
   useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+  useEffect(() => () => { activeOperationAbortController.current?.abort(); }, []);
 
   useEffect(() => {
     let current = true;
@@ -805,14 +821,18 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
   async function resolveAll() {
     if (!workingCards.length) return;
+    const controller = beginAbortableOperation("resolve");
     setBusy(true); clearProblem(); setStatus("Resolvendo identidades pelo Scryfall…");
     try {
-      const response = await fetch("/api/cards/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resolve", cards: workingCards }) });
+      const response = await fetch("/api/cards/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resolve", cards: workingCards }), signal: controller.signal });
       const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth: typeof providerHealth }>(response);
       dispatchEditor({ type: "apply-resolve-all-result", cards: result.workingCards }); setProviderHealth(result.providerHealth);
       setStatus(formatResolutionSummary(result.workingCards, result.providerHealth));
-    } catch (error) { setProblem(error instanceof Error ? error.message : "A resolução falhou."); setStatus(""); }
-    finally { setBusy(false); }
+    } catch (error) {
+      if (controller.signal.aborted) { setProblem(""); setStatus("Resolução cancelada."); }
+      else { setProblem(error instanceof Error ? error.message : "A resolução falhou."); setStatus(""); }
+    }
+    finally { finishAbortableOperation(controller); setBusy(false); }
   }
 
   async function reresolveCard(card: WorkingCard) {
@@ -867,12 +887,13 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
   async function chooseArtwork(candidate: CandidateDto) {
     if (!activeCard || !artworkRequest) return;
+    const controller = beginAbortableOperation("artwork");
     const problemCardId = activeCard.id;
     const problemRequestKey = artworkRequest.cacheKey;
     setBusy(true); setArtworkProblem(null); clearProblem(problemCardId);
     try {
       if (candidate.originalAvailable) {
-        const prepareResponse = await fetch(`/api/cards/artworks/${encodeURIComponent(candidate.id)}/prepare`, { method: "POST" });
+        const prepareResponse = await fetch(`/api/cards/artworks/${encodeURIComponent(candidate.id)}/prepare`, { method: "POST", signal: controller.signal });
         const prepared = await jsonResponse<{ candidate: CandidateDto }>(prepareResponse);
         updateResolvedRequestCache(artworkCatalogRequests.current, problemRequestKey, (cached) => ({
           ...cached,
@@ -881,21 +902,26 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         setArtworkCandidates((current) => current.map((item) => item.id === candidate.id ? prepared.candidate : item));
       }
       const response = manualPhysicalBackPicker
-        ? await postManualBackArtworkSelection(activeCard, candidate.id)
-        : await postArtworkSelection(activeCard, face, candidate.id);
+        ? await postManualBackArtworkSelection(activeCard, candidate.id, fetch, controller.signal)
+        : await postArtworkSelection(activeCard, face, candidate.id, fetch, controller.signal);
       const result = await jsonResponse<{ workingCards: WorkingCard[] }>(response);
       dispatchEditor({ type: "apply-artwork-selection", cardId: activeCard.id, card: result.workingCards[0] });
       setStatus(manualPhysicalBackPicker
         ? candidate.originalAvailable ? "Artwork selecionado como verso físico manual; original validado e armazenado no cache." : "Referência MPC selecionada como verso físico manual; nenhum original local está disponível."
         : candidate.originalAvailable ? "Artwork selecionado; original validado e armazenado no cache." : "Referência MPC selecionada; nenhum original local está disponível.");
     } catch (error) {
-      setArtworkProblem({
-        message: error instanceof Error ? error.message : "Não foi possível selecionar essa arte.",
-        cardId: problemCardId,
-        requestKey: problemRequestKey,
-      });
+      if (controller.signal.aborted) {
+        setArtworkProblem(null);
+        setStatus("Download/seleção da arte cancelado.");
+      } else {
+        setArtworkProblem({
+          message: error instanceof Error ? error.message : "Não foi possível selecionar essa arte.",
+          cardId: problemCardId,
+          requestKey: problemRequestKey,
+        });
+      }
     }
-    finally { setBusy(false); }
+    finally { finishAbortableOperation(controller); setBusy(false); }
   }
 
   async function refreshMpcMetadata(candidate: CandidateDto) {
@@ -958,11 +984,13 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           : "A versão selecionada ainda não foi verificada. Revise ou desassocie o template antes de exportar.");
       return;
     }
+    const controller = beginAbortableOperation("export");
     setBleedDiagnostics(null);
     setBusy(true); clearProblem(); setStatus(`Validando ${physicalCardCount} cartas físicas e compondo ${exportContentMode} ${paperFormat.name}…`);
     try {
       const response = await fetch("/api/cards/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({ cards: workingCards, options: {
           ...buildBleedExportOptions(
             bleedMm,
@@ -993,17 +1021,27 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
         const body = await response.json() as ApiErrorBody;
         throw new Error(body.message ?? "Não foi possível gerar o PDF.");
       }
+      if (controller.signal.aborted) throw new DOMException("Exportação cancelada.", "AbortError");
       setBleedDiagnostics(decodeBleedDiagnostics(response.headers.get("x-tcgprint-bleed-diagnostics")));
       const calibrationWarnings = decodeCalibrationBoundsWarnings(response.headers.get("x-tcgprint-calibration-warnings"));
       const disposition = response.headers.get("content-disposition") ?? "";
       const downloadName = disposition.match(/filename="([^"]+)"/i)?.[1] ?? (exportContentMode === "front-back-separated" ? "tcgprint-front-back.zip" : "tcgprint-cards.pdf");
-      const nextUrl = URL.createObjectURL(await response.blob());
+      const blob = await response.blob();
+      if (controller.signal.aborted) throw new DOMException("Exportação cancelada.", "AbortError");
+      const nextUrl = URL.createObjectURL(blob);
       const boundsStatus = calibrationWarnings.length
         ? ` Aviso de margem: ${calibrationWarnings.length} conteúdo(s) a até 0.5 mm da borda; menor folga ${Math.min(...calibrationWarnings.map(({ nearestEdgeClearanceMm }) => nearestEdgeClearanceMm)).toFixed(3)} mm.`
         : "";
       setPdfUrl(nextUrl); setExportDownloadName(downloadName); setStatus(`${downloadName} pronto · ${physicalCardCount} slots físicos pareados · ${paperFormat.name} · ${pageOrientation}.${boundsStatus}`);
-    } catch (error) { setBleedDiagnostics(null); setProblem(error instanceof Error ? error.message : "Export falhou."); setStatus(""); }
-    finally { setBusy(false); }
+    } catch (error) {
+      setBleedDiagnostics(null);
+      if (controller.signal.aborted) { setProblem(""); setStatus("Exportação cancelada."); }
+      else { setProblem(error instanceof Error ? error.message : "Export falhou."); setStatus(""); }
+    }
+    finally {
+      finishAbortableOperation(controller);
+      setBusy(false);
+    }
   }
 
   function restoreProject(project: ProjectDto) {
@@ -1166,6 +1204,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
       <div className="action-row phase5-actions">
         <button className="button primary" type="button" onClick={importToWorkingSet} disabled={interactionBusy}>{busy ? "Processando…" : "Universal Import → Working Set"}</button>
         <button className="button secondary" type="button" onClick={resolveAll} disabled={interactionBusy || !workingCards.length}>Resolver identidades</button>
+        {abortableOperation === "resolve" && <button className="button secondary" type="button" aria-label="Cancelar resolução" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar resolução</button>}
         <div className="editor-history-controls" role="group" aria-label="Histórico do editor">
           <button className="button secondary" type="button" aria-label="Desfazer" aria-keyshortcuts="Control+Z Meta+Z" disabled={interactionBusy || editorHistory.past.length === 0} onClick={() => dispatchEditor({ type: "undo" })}>Desfazer</button>
           <button className="button secondary" type="button" aria-label="Refazer" aria-keyshortcuts="Control+Y Meta+Y Control+Shift+Z Meta+Shift+Z" disabled={interactionBusy || editorHistory.future.length === 0} onClick={() => dispatchEditor({ type: "redo" })}>Refazer</button>
@@ -1253,6 +1292,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
 
           <div className="artwork-section">
             <div className="compact-heading"><div><strong>{manualPhysicalBackPicker ? "Escolher artwork como verso manual" : `Artwork Picker · ${face === "front" ? "Front" : "Back"}`}{!manualPhysicalBackPicker && isDoubleFacedIdentity(activeCard.identity) && <span className="multiface-label" aria-label="Carta dupla-face"> · Carta dupla-face</span>}</strong><span>Seleção atual é preservada durante a atualização do catálogo.</span></div></div>
+            {abortableOperation === "artwork" && <button className="button secondary" type="button" aria-label="Cancelar download e seleção da arte" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar download/seleção</button>}
             <div className="artwork-filter-row" role="group" aria-label="Filtrar origem das artes">
               {([ ["all", "Todas"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"], ["upload", "Meus uploads"] ] as const).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => setArtworkFilter(value)}>{label}</button>)}
             </div>
@@ -1405,6 +1445,7 @@ export default function CardIdentityWorkbench({ files, text, choices }: Props) {
           {templateRegistrationStatus === "legacy-physical-format-unconfigured" && <p className="error-message" role="alert">A versão legada do template declara papel ou carta custom sem dimensões físicas. Os formatos atuais do Working Set não foram substituídos; exportação bloqueada até selecionar uma versão com geometria explícita.</p>}
           {templateRegistrationStatus === "unavailable" && <p className="error-message" role="alert">A versão exata do template não está disponível para validar registration. Revise ou desassocie o template.</p>}
           <button className="button primary" type="button" disabled={interactionBusy || templateRegistrationRequiresUserChoice(templateRegistrationStatus) || !projectCutSyncReady || (exportModeRequiresFrontArtwork(exportContentMode) && !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))) || (exportContentMode !== "front-only" && backValidation.blockers.length > 0)} onClick={() => void exportPdf()}>Validar e gerar {exportContentMode === "front-back-separated" ? "front.pdf + back.pdf" : exportContentMode}</button>
+          {abortableOperation === "export" && <button className="button secondary" type="button" aria-label="Cancelar exportação do PDF" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar exportação</button>}
           {pdfUrl && <a className="download-link" href={pdfUrl} download={exportDownloadName}>Baixar {exportDownloadName}</a>}
         </div>
         <p className="muted">Bleed estende somente os pixels da borda imediata de cada lado. Moldura preta continua preta; full-art continua a própria arte. O trim da carta permanece intacto. Cantos arredondados são uma opção separada.</p>

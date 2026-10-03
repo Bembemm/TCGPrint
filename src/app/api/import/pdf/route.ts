@@ -6,7 +6,6 @@ import { LosslessPdfEngine, PdfExportError } from "../../../../../pdf-engine/doc
 
 export const runtime = "nodejs";
 
-const bleedEngine = new BleedEngine();
 const pdfEngine = new LosslessPdfEngine();
 
 function errorResponse(code: string, message: string, status: number): Response {
@@ -65,7 +64,9 @@ export async function POST(request: Request): Promise<Response> {
     if (!Number.isFinite(bleedMm) || bleedMm < 0 || bleedMm > 3) {
       return errorResponse("INVALID_BLEED", "Bleed must be between 0 and 3 mm.", 400);
     }
-    const bleed = await bleedEngine.generate({
+    // This endpoint processes one image per request, so a process-wide cache
+    // has no within-request reuse and would retain every upload's derivative.
+    const bleed = await new BleedEngine().generate({
       imageBytes: bytes,
       bleedMm,
       trimSizeMm: { widthMm: MAGIC_STANDARD_CARD.widthMm, heightMm: MAGIC_STANDARD_CARD.heightMm },

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { availableParallelism } from "node:os";
 import { PDFDocument } from "@pdfme/pdf-lib";
 import {
   BLEED_ALGORITHM_VERSION,
@@ -185,6 +186,149 @@ function digest(bytes: Uint8Array): string {
   return createHash("sha256").update(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)).digest("hex");
 }
 
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  if (left === right) return true;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function getOrAddUniqueImage(
+  uniqueImages: Map<string, Uint8Array>,
+  collidingImages: Map<string, Uint8Array[]>,
+  sha256: string,
+  sourceBytes: Uint8Array,
+): Uint8Array {
+  const existing = uniqueImages.get(sha256);
+  if (!existing) {
+    uniqueImages.set(sha256, sourceBytes);
+    return sourceBytes;
+  }
+  if (bytesEqual(existing, sourceBytes)) return existing;
+
+  const collisionBucket = collidingImages.get(sha256) ?? [];
+  const collision = collisionBucket.find((bytes) => bytesEqual(bytes, sourceBytes));
+  if (collision) return collision;
+  collisionBucket.push(sourceBytes);
+  collidingImages.set(sha256, collisionBucket);
+  return sourceBytes;
+}
+
+function hasDrawableCopy(quantity: number, firstPhysicalCardIndex: number, skipImageIndexes?: ReadonlySet<number>): boolean {
+  if (!skipImageIndexes) return quantity > 0;
+  for (let index = 0; index < quantity; index += 1) {
+    if (!skipImageIndexes.has(firstPhysicalCardIndex + index)) return true;
+  }
+  return false;
+}
+
+type BleedWorkState = "queued" | "running" | "cancelling" | "cancelled" | "completed" | "failed";
+
+interface BleedWork<T> {
+  state: BleedWorkState;
+  run?: () => Promise<T>;
+  result?: T;
+  error?: unknown;
+}
+
+/** Export-scoped native-image work queue. It starts at most two raster operations. */
+class ExportBleedQueue<T> {
+  private readonly pending: BleedWork<T>[] = [];
+  private readonly active = new Set<Promise<void>>();
+  private readonly activeWork = new Set<BleedWork<T>>();
+  private firstFailure: unknown;
+  private cancelled = false;
+  private readonly abortListener: () => void;
+
+  constructor(private readonly concurrency: number, private readonly signal?: AbortSignal) {
+    this.abortListener = () => {
+      this.cancelled = true;
+      for (const work of this.activeWork) work.state = "cancelling";
+      this.cancelQueued();
+    };
+    if (signal?.aborted) this.abortListener();
+    else signal?.addEventListener("abort", this.abortListener, { once: true });
+  }
+
+  enqueue(run: () => Promise<T>): BleedWork<T> {
+    const work: BleedWork<T> = { state: "queued", run };
+    this.pending.push(work);
+    this.pump();
+    return work;
+  }
+
+  async drain(): Promise<void> {
+    try {
+      while (this.active.size > 0 || this.pending.length > 0) {
+        if (this.signal?.aborted) this.abortListener();
+        const current = [...this.active];
+        if (current.length > 0) await Promise.race(current);
+        else this.pump();
+      }
+      if (this.signal?.aborted || this.cancelled) {
+        throw new CardExportServiceError("EXPORT_FAILED", "PDF export was cancelled.");
+      }
+      if (this.firstFailure !== undefined) throw this.firstFailure;
+    } finally {
+      this.signal?.removeEventListener("abort", this.abortListener);
+    }
+  }
+
+  async abandon(): Promise<void> {
+    this.cancelled = true;
+    for (const work of this.activeWork) work.state = "cancelling";
+    this.cancelQueued();
+    while (this.active.size > 0) await Promise.race([...this.active]);
+    this.signal?.removeEventListener("abort", this.abortListener);
+  }
+
+  private cancelQueued(): void {
+    for (const work of this.pending.splice(0)) {
+      work.state = "cancelled";
+      work.run = undefined;
+    }
+  }
+
+  private pump(): void {
+    if (this.cancelled || this.firstFailure !== undefined) {
+      this.cancelQueued();
+      return;
+    }
+    while (this.active.size < this.concurrency && this.pending.length > 0) {
+      const work = this.pending.shift()!;
+      work.state = "running";
+      this.activeWork.add(work);
+      const run = work.run!;
+      work.run = undefined;
+      let task!: Promise<void>;
+      task = (async () => {
+        try {
+          const result = await run();
+          if (this.cancelled || this.signal?.aborted) work.state = "cancelled";
+          else {
+            work.result = result;
+            work.state = "completed";
+          }
+        } catch (error) {
+          if (this.cancelled || this.signal?.aborted) work.state = "cancelled";
+          else {
+            work.error = error;
+            work.state = "failed";
+            this.firstFailure ??= error;
+          }
+        }
+      })().finally(() => {
+        this.active.delete(task);
+        this.activeWork.delete(work);
+        this.pump();
+      });
+      this.active.add(task);
+    }
+  }
+}
+
 function mpcReferencesForSelection(card: WorkingCard, selection: SelectedArtwork): readonly WorkingCardMpcReference[] {
   if (selection.source !== "mpc") return card.mpcReferences;
   const faceId: CardFaceSide = selection.faceId === "back" ? "back" : "front";
@@ -204,6 +348,19 @@ function mpcReferencesForSelection(card: WorkingCard, selection: SelectedArtwork
     slots: [],
     availableLocally: false,
   }];
+}
+
+function candidateLookupKey(
+  card: WorkingCard,
+  selection: SelectedArtwork,
+  mpcReferences: readonly WorkingCardMpcReference[],
+): string {
+  return `context:${JSON.stringify([
+    selection.candidateId,
+    selection.source,
+    card.identity ?? null,
+    mpcReferences,
+  ])}`;
 }
 
 function isMpcUnsupportedFormat(error: unknown): error is Error & { readonly kind: "unsupported-format" } {
@@ -239,11 +396,25 @@ export async function exportWorkingCardsWithDiagnostics(
   if (total > MAX_PHYSICAL_CARDS_PER_EXPORT) throw new CardExportServiceError("EXPORT_TOO_LARGE", `The first export is limited to ${MAX_PHYSICAL_CARDS_PER_EXPORT} physical cards per PDF.`);
 
   const uniqueImages = new Map<string, Uint8Array>();
-  const uniqueBleeds = new Map<string, BleedResult>();
+  const collidingImages = new Map<string, Uint8Array[]>();
+  const uniqueBleeds = new Map<string, Array<{ readonly sourceBytes: Uint8Array; readonly work: BleedWork<BleedResult> }>>();
   const composedImages: Uint8Array[] = [];
+  const composedImageSha256: Array<string | undefined> = [];
   const composedBleeds: Array<BleedResult | undefined> = [];
+  const composedBleedWorks: Array<BleedWork<BleedResult> | undefined> = [];
   const bleedDiagnostics: CardExportBleedDiagnostic[] = [];
+  const pendingBleedDiagnostics: Array<{
+    readonly work: BleedWork<BleedResult>;
+    readonly card: WorkingCard;
+    readonly candidate: ArtworkCandidate;
+    readonly policy: ReturnType<typeof resolveBleedSourcePolicy>;
+    readonly cornerRadiusMm?: number;
+  }> = [];
+  const memoizedCandidates = new Map<string, ArtworkCandidate | undefined>();
+  const memoizedOriginals = new Map<string, Awaited<ReturnType<CardWorkbench["getArtworkOriginal"]>>>();
+  const originalDigests = new WeakMap<Uint8Array, string>();
   const bleedEngine = new BleedEngine();
+  const bleedQueue = new ExportBleedQueue<BleedResult>(availableParallelism() > 1 ? 2 : 1, signal);
   const pdfEngine = new LosslessPdfEngine();
   const paperFormat = options.paperFormat ?? PAPER_FORMATS.A4;
   const cardFormat = options.cardFormat ?? MAGIC_STANDARD_CARD;
@@ -255,27 +426,51 @@ export async function exportWorkingCardsWithDiagnostics(
     throw new CardExportServiceError("INVALID_ROUNDED_CORNERS", "Rounded-corner bleed needs a card format with an explicit physical corner radius.");
   }
 
+  const orderedCards = [...cards].sort((a, b) => a.order - b.order);
+  const seenCandidateIds = new Set<string>();
+  const repeatedCandidateIds = new Set<string>();
+  let physicalCardCursor = 0;
+  try {
+  for (const card of orderedCards) {
+    const selection = card.selectedArtworkByFace.front;
+    if (selection && hasDrawableCopy(card.quantity, physicalCardCursor, options.skipImageIndexes)) {
+      const id = selection.candidateId;
+      if (seenCandidateIds.has(id)) repeatedCandidateIds.add(id);
+      else seenCandidateIds.add(id);
+    }
+    physicalCardCursor += card.quantity;
+  }
   let nextPhysicalCardIndex = 0;
-  for (const card of [...cards].sort((a, b) => a.order - b.order)) {
+  for (const card of orderedCards) {
     if (signal?.aborted) throw new CardExportServiceError("EXPORT_FAILED", "PDF export was cancelled.");
     const physicalCardIndexes = Array.from({ length: card.quantity }, () => nextPhysicalCardIndex++);
-    const drawableCopies = physicalCardIndexes.filter((index) => !options.skipImageIndexes?.has(index));
-    if (drawableCopies.length === 0) {
+    const hasDrawableCopies = physicalCardIndexes.some((index) => !options.skipImageIndexes?.has(index));
+    if (!hasDrawableCopies) {
       for (const _physicalCardIndex of physicalCardIndexes) {
         composedImages.push(new Uint8Array());
+        composedImageSha256.push(undefined);
         composedBleeds.push(undefined);
+        composedBleedWorks.push(undefined);
       }
       continue;
     }
     const selection = card.selectedArtworkByFace.front;
     if (!selection) throw new CardExportServiceError("ARTWORK_REQUIRED", `${card.identity?.name ?? card.identityHints.name ?? "Custom card"} needs a selected front artwork.`);
+    const mpcReferences = mpcReferencesForSelection(card, selection);
+    const memoizeOriginal = repeatedCandidateIds.has(selection.candidateId);
+    const lookupKey = memoizeOriginal ? candidateLookupKey(card, selection, mpcReferences) : undefined;
     let candidate: ArtworkCandidate | undefined;
     try {
-      candidate = await catalog.getArtworkCandidate(selection.candidateId, {
-        mpcReferences: mpcReferencesForSelection(card, selection),
-        ...(card.identity ? { identity: card.identity } : {}),
-        ...(signal ? { signal } : {}),
-      });
+      if (lookupKey !== undefined && memoizedCandidates.has(lookupKey)) {
+        candidate = memoizedCandidates.get(lookupKey);
+      } else {
+        candidate = await catalog.getArtworkCandidate(selection.candidateId, {
+          mpcReferences,
+          ...(card.identity ? { identity: card.identity } : {}),
+          ...(signal ? { signal } : {}),
+        });
+        if (lookupKey !== undefined) memoizedCandidates.set(lookupKey, candidate);
+      }
     } catch (error) {
       if (selection.source === "mpc") throw mpcExportFailure(error);
       throw error;
@@ -285,7 +480,11 @@ export async function exportWorkingCardsWithDiagnostics(
     }
     let original: Awaited<ReturnType<CardWorkbench["getArtworkOriginal"]>>;
     try {
-      original = await catalog.getArtworkOriginal(candidate.id, signal);
+      if (memoizeOriginal && memoizedOriginals.has(candidate.id)) {
+        original = memoizedOriginals.get(candidate.id)!;
+      } else {
+        original = await catalog.getArtworkOriginal(candidate.id, signal);
+      }
     } catch (error) {
       if (selection.source === "mpc") throw mpcExportFailure(error);
       throw error;
@@ -296,13 +495,14 @@ export async function exportWorkingCardsWithDiagnostics(
     if (!["jpeg", "png", "svg"].includes(original.format)) {
       throw new CardExportServiceError("UNSUPPORTED_FORMAT", `The PDF engine does not currently support ${original.format.toUpperCase()} artwork.`);
     }
-    const hash = digest(original.bytes);
-    let image = uniqueImages.get(hash);
-    if (!image) {
-      image = original.bytes;
-      uniqueImages.set(hash, image);
+    if (memoizeOriginal && !memoizedOriginals.has(candidate.id)) memoizedOriginals.set(candidate.id, original);
+    let hash = memoizeOriginal ? originalDigests.get(original.bytes) : undefined;
+    if (!hash) {
+      hash = digest(original.bytes);
+      if (memoizeOriginal) originalDigests.set(original.bytes, hash);
     }
-    let bleed: BleedResult | undefined;
+    const image = getOrAddUniqueImage(uniqueImages, collidingImages, hash, original.bytes);
+    let bleedWork: BleedWork<BleedResult> | undefined;
     if (options.bleedMm > 0 || roundedCorners) {
       if (original.format === "svg") {
         throw new CardExportServiceError("UNSUPPORTED_FORMAT", "SVG artwork stays vector; raster bleed and rounded-corner derivatives are not supported for SVG.");
@@ -317,10 +517,12 @@ export async function exportWorkingCardsWithDiagnostics(
         roundedCorners,
         ...(roundedCorners ? { cornerRadiusMm } : {}),
       });
-      bleed = uniqueBleeds.get(key);
-      if (!bleed) {
-        try {
-          bleed = await bleedEngine.generate({
+      const existing = uniqueBleeds.get(key) ?? [];
+      const matching = existing.find((entry) => bytesEqual(entry.sourceBytes, image));
+      bleedWork = matching?.work;
+      if (!bleedWork) {
+        const engine = existing.length === 0 ? bleedEngine : new BleedEngine();
+        bleedWork = bleedQueue.enqueue(() => engine.generate({
             imageBytes: image,
             bleedMm: options.bleedMm,
             trimSizeMm,
@@ -328,42 +530,72 @@ export async function exportWorkingCardsWithDiagnostics(
             policyId: policy.policyId,
             roundedCorners,
             ...(roundedCorners ? { cornerRadiusMm } : {}),
-          });
-          uniqueBleeds.set(key, bleed);
-        } catch (error) {
-          if (error instanceof BleedGenerationError) throw new CardExportServiceError("EXPORT_FAILED", error.message, { cause: error });
-          throw error;
-        }
+          }));
+        existing.push({ sourceBytes: image, work: bleedWork });
+        uniqueBleeds.set(key, existing);
       }
-      if (bleed.status !== "derived") throw new CardExportServiceError("EXPORT_FAILED", "Positive bleed unexpectedly returned a passthrough result.");
-      bleedDiagnostics.push({
-        workingCardId: card.id,
-        identityId: card.identity?.id ?? null,
-        cardName: card.identity?.name ?? card.identityHints.name ?? "Custom card",
-        source: candidate.source,
-        requestedMode: policy.requestedMode,
-        resolvedMode: policy.mode,
-        effectiveMode: bleed.effectiveMode,
-        algorithmVersion: bleed.algorithmVersion,
-        policyId: policy.policyId,
-        bleedMm: options.bleedMm,
-        trimSizeMm: bleed.trimSizeMm,
-        roundedCorners,
-        ...(roundedCorners ? { cornerRadiusMm } : {}),
-        sideDiagnostics: bleed.sideDiagnostics,
-        previewSha256: digest(bleed.preview.bytes),
-      });
+      pendingBleedDiagnostics.push({ work: bleedWork, card, candidate, policy, ...(roundedCorners ? { cornerRadiusMm } : {}) });
     }
     for (const physicalCardIndex of physicalCardIndexes) {
       if (options.skipImageIndexes?.has(physicalCardIndex)) {
         composedImages.push(new Uint8Array());
+        composedImageSha256.push(undefined);
         composedBleeds.push(undefined);
+        composedBleedWorks.push(undefined);
       } else {
         composedImages.push(image);
-        composedBleeds.push(bleed);
+        composedImageSha256.push(hash);
+        composedBleeds.push(undefined);
+        composedBleedWorks.push(bleedWork);
       }
     }
   }
+  } catch (error) {
+    await bleedQueue.abandon();
+    throw error;
+  }
+
+  try {
+    await bleedQueue.drain();
+  } catch (error) {
+    if (error instanceof BleedGenerationError) throw new CardExportServiceError("EXPORT_FAILED", error.message, { cause: error });
+    throw error;
+  }
+  for (let index = 0; index < composedBleedWorks.length; index += 1) {
+    const work = composedBleedWorks[index];
+    if (work) {
+      if (!work.result || work.result.status !== "derived") {
+        throw new CardExportServiceError("EXPORT_FAILED", "Positive bleed unexpectedly returned a passthrough result.");
+      }
+      composedBleeds[index] = work.result;
+    }
+  }
+  for (const pending of pendingBleedDiagnostics) {
+    const bleed = pending.work.result;
+    if (!bleed || bleed.status !== "derived") {
+      throw new CardExportServiceError("EXPORT_FAILED", "Positive bleed unexpectedly returned a passthrough result.");
+    }
+    bleedDiagnostics.push({
+      workingCardId: pending.card.id,
+      identityId: pending.card.identity?.id ?? null,
+      cardName: pending.card.identity?.name ?? pending.card.identityHints.name ?? "Custom card",
+      source: pending.candidate.source,
+      requestedMode: pending.policy.requestedMode,
+      resolvedMode: pending.policy.mode,
+      effectiveMode: bleed.effectiveMode,
+      algorithmVersion: bleed.algorithmVersion,
+      policyId: pending.policy.policyId,
+      bleedMm: options.bleedMm,
+      trimSizeMm: bleed.trimSizeMm,
+      roundedCorners,
+      ...(roundedCorners ? { cornerRadiusMm: pending.cornerRadiusMm } : {}),
+      sideDiagnostics: bleed.sideDiagnostics,
+      previewSha256: digest(bleed.preview.bytes),
+    });
+  }
+  pendingBleedDiagnostics.length = 0;
+  composedBleedWorks.fill(undefined);
+  uniqueBleeds.clear();
 
   const pagePlacements = options.pagePlacements ?? calculateSharedPagePlacements(total, options).pages;
   const calibrationBoundsWarnings: CalibrationBoundsWarning[] = [];
@@ -428,6 +660,7 @@ export async function exportWorkingCardsWithDiagnostics(
   try {
     const pdfBytes = await pdfEngine.generate({
       images: composedImages,
+      imageSha256: composedImageSha256,
       bleedResults: composedBleeds,
       cutGuides: options.cutGuides,
       paperFormat,

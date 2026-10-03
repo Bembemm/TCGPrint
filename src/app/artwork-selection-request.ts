@@ -7,11 +7,13 @@ export function postArtworkSelection(
   face: CardFaceSide,
   candidateId: string,
   fetcher: ArtworkSelectionFetch = fetch,
+  signal?: AbortSignal,
 ): Promise<Response> {
   return fetcher("/api/cards/resolve", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "select", card, faceId: face, candidateId }),
+    ...(signal ? { signal } : {}),
   });
 }
 
@@ -20,10 +22,12 @@ export function postManualBackArtworkSelection(
   card: WorkingCard,
   candidateId: string,
   fetcher: ArtworkSelectionFetch = fetch,
+  signal?: AbortSignal,
 ): Promise<Response> {
   return fetcher("/api/cards/resolve", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "select-manual-back-artwork", card, candidateId }),
+    ...(signal ? { signal } : {}),
   });
 }

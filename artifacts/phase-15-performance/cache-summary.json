@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "baseSha": "18bcad3916b2ff2137ca3f1bfa747236e69c4072",
+  "policy": {
+    "pdfRasterResources": "Per PDFDocument only; key includes format, byte length, raster dimensions, PNG bit depth/color type or JPEG precision/components and SHA-256; exact byte equality confirms reuse. SHA bucket collisions remain distinct resources.",
+    "bleed": "Export scoped BleedEngine/MemoryBleedCache, complete key covers algorithm version, original content hash, bleed, trim dimensions, rounded-corner flag and radius/version as applicable; validate metadata and digest before cache lookup; decode only on a miss.",
+    "repeatedInputs": "Within one export, exact repeated source bytes share the candidate/original lookup when the candidate/context repeats and share bleed work by derivative key plus byte equality. Large unique originals are not stored in the candidate/original memo.",
+    "artworkStores": "ArtworkOriginalStore remains content-addressed and immutable; ArtworkThumbnailStore and ArtworkMetadataCache retain their existing storage/validation/expiry semantics. No original GC or new persistent cache was added.",
+    "scopeAndEviction": "No new global cache, cross-PDF reuse, persistent derivative cache, page cache, or destructive cleanup policy. Per-export memo/cache references are operation scoped."
+  },
+  "measured": {
+    "bleedCold": {
+      "baselineMs": 118.1501229999999,
+      "optimizedMs": 113.42195600000014,
+      "baselineBytes": 283012,
+      "optimizedBytes": 283012,
+      "outputBytesIdentical": true
+    },
+    "bleedWarm": {
+      "baselineMs": 10.963344000000234,
+      "optimizedMs": 2.22272699999985,
+      "baselineBytes": 283012,
+      "optimizedBytes": 283012,
+      "outputBytesIdentical": true,
+      "cacheHit": "hit",
+      "unitEvidence": "tests/image-engine/bleed-engine.test.ts asserts the warm hit bypasses decode and returns identical cached PNG bytes"
+    },
+    "candidateAndOriginal500Repeated": {
+      "baselineLookups": 500,
+      "optimizedLookups": 1,
+      "baselineOriginalReads": 500,
+      "optimizedOriginalReads": 1
+    },
+    "pdf500Repeated": {
+      "baselineImageEmbeds": 500,
+      "optimizedImageEmbeds": 1,
+      "baselinePdfBytes": 19632382,
+      "optimizedPdfBytes": 59466
+    }
+  },
+  "existingCacheOwners": [
+    {
+      "name": "MemoryBleedCache",
+      "module": "image-engine/bleed/cache.ts",
+      "phase15Change": "scope at the one-image import PDF route and export operation; no global LRU"
+    },
+    {
+      "name": "ArtworkThumbnailStore",
+      "module": "artwork/storage/thumbnail-store.ts",
+      "phase15Change": "preserved; content-addressed bytes continue to be hash and length validated"
+    },
+    {
+      "name": "ArtworkOriginalStore",
+      "module": "artwork/storage/original-store.ts",
+      "phase15Change": "preserved; immutable originals are not eligible for eviction/GC"
+    },
+    {
+      "name": "ArtworkMetadataCache",
+      "module": "artwork/storage/metadata-cache.ts",
+      "phase15Change": "preserved; existing expiry behavior"
+    }
+  ]
+}

@@ -1,0 +1,3482 @@
+{
+  "schemaVersion": 1,
+  "phase": "baseline-run-1",
+  "baseSha": "18bcad3916b2ff2137ca3f1bfa747236e69c4072",
+  "recordedAt": "2026-10-03T03:51:32.621Z",
+  "network": false,
+  "fixtures": {
+    "synthetic": true,
+    "copyrightedImages": false,
+    "rasterSize": {
+      "widthPx": 745,
+      "heightPx": 1040
+    },
+    "bleedScaleRasterSize": {
+      "widthPx": 96,
+      "heightPx": 134
+    },
+    "jpegQuality": 88
+  },
+  "runtime": {
+    "node": "v22.23.3",
+    "platform": "linux",
+    "architecture": "x64",
+    "cpuCount": 4,
+    "systemMemoryBytes": 8326938624,
+    "sharpConcurrency": 1,
+    "npmUserAgent": null
+  },
+  "methodology": {
+    "runsPerScenario": 3,
+    "processCountPerScenario": 3,
+    "sampleIntervalMs": 5,
+    "limitsOrGates": "None; measurements are recorded for comparison and are not timing pass/fail gates.",
+    "memory": "process.memoryUsage sampled every 5 ms during each async operation; event-loop delay is sampled at the same interval.",
+    "import": "Universal Import synthetic decklist → ImportPreview JSON → Working Set → Project snapshot serialization/key → actual WorkingCardList React server render. Projects allow at most 500 entries.",
+    "artworkLookup": "ArtworkCatalog with a local synthetic provider; no HTTP requests. Artwork gallery/Projects list are their actual components server-rendered with synthetic state/results.",
+    "export": "exportWorkingCardsWithDiagnostics with synthetic JPEGs and no external cut guides; repeated and unique bleed are measured at 9/100/500 cards, with 745x1040 assets at 9 and compact 96x134 synthetic assets at 100/500 to bound fixture-generation and native-raster memory; PDF page count/XObjects inspected after timed export.",
+    "aggregation": "Each scenario is run once in three independent Node/Vitest processes; output values are medians, with per-run measurements retained in rawRuns."
+  },
+  "scenarios": [
+    {
+      "name": "import-decklist-9",
+      "count": 9,
+      "wallTimeMs": 7.301285000000007,
+      "cpuUserMs": 6.265,
+      "cpuSystemMs": 0.994,
+      "rssBeforeBytes": 126939136,
+      "rssPeakSampledBytes": 127201280,
+      "rssAfterBytes": 127201280,
+      "heapBeforeBytes": 35408112,
+      "heapPeakSampledBytes": 35587472,
+      "heapAfterBytes": 35587472,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "entries": 9,
+        "errors": 0,
+        "networkRequests": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 8.524969000000056,
+          "cpuUserMs": 8.583,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 133185536,
+          "heapPeakSampledBytes": 38452864,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 9,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 7.301285000000007,
+          "cpuUserMs": 6.265,
+          "cpuSystemMs": 1.065,
+          "rssPeakSampledBytes": 127168512,
+          "heapPeakSampledBytes": 34985520,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 9,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 5.915077999999994,
+          "cpuUserMs": 4.951,
+          "cpuSystemMs": 0.994,
+          "rssPeakSampledBytes": 127201280,
+          "heapPeakSampledBytes": 35587472,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 9,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "preview-json-9",
+      "count": 9,
+      "wallTimeMs": 0.24516399999993155,
+      "cpuUserMs": 0.257,
+      "cpuSystemMs": 0,
+      "rssBeforeBytes": 127201280,
+      "rssPeakSampledBytes": 127201280,
+      "rssAfterBytes": 127201280,
+      "heapBeforeBytes": 35592304,
+      "heapPeakSampledBytes": 35607728,
+      "heapAfterBytes": 35607728,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "responseCharacters": 4320,
+        "entries": 9
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 0.2829630000001089,
+          "cpuUserMs": 0.293,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 133316608,
+          "heapPeakSampledBytes": 38473120,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 4320,
+            "entries": 9
+          }
+        },
+        {
+          "wallTimeMs": 0.24516399999993155,
+          "cpuUserMs": 0.257,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 127168512,
+          "heapPeakSampledBytes": 35005776,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 4320,
+            "entries": 9
+          }
+        },
+        {
+          "wallTimeMs": 0.18301900000005844,
+          "cpuUserMs": 0.167,
+          "cpuSystemMs": 0.025,
+          "rssPeakSampledBytes": 127201280,
+          "heapPeakSampledBytes": 35607728,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 4320,
+            "entries": 9
+          }
+        }
+      ]
+    },
+    {
+      "name": "working-set-build-9",
+      "count": 9,
+      "wallTimeMs": 2.113943000000063,
+      "cpuUserMs": 1.875,
+      "cpuSystemMs": 0,
+      "rssBeforeBytes": 127201280,
+      "rssPeakSampledBytes": 127201280,
+      "rssAfterBytes": 127201280,
+      "heapBeforeBytes": 35608952,
+      "heapPeakSampledBytes": 35720056,
+      "heapAfterBytes": 35720056,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "entries": 9,
+        "physicalCards": 9
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 2.142626000000064,
+          "cpuUserMs": 1.266,
+          "cpuSystemMs": 0.89,
+          "rssPeakSampledBytes": 133316608,
+          "heapPeakSampledBytes": 38585440,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 9,
+            "physicalCards": 9
+          }
+        },
+        {
+          "wallTimeMs": 2.113943000000063,
+          "cpuUserMs": 2.13,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 127168512,
+          "heapPeakSampledBytes": 35118096,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 9,
+            "physicalCards": 9
+          }
+        },
+        {
+          "wallTimeMs": 1.8781149999999798,
+          "cpuUserMs": 1.875,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 127201280,
+          "heapPeakSampledBytes": 35720056,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 9,
+            "physicalCards": 9
+          }
+        }
+      ]
+    },
+    {
+      "name": "project-snapshot-key-9",
+      "count": 9,
+      "wallTimeMs": 7.071889999999939,
+      "cpuUserMs": 6.146,
+      "cpuSystemMs": 0.038,
+      "rssBeforeBytes": 127201280,
+      "rssPeakSampledBytes": 127594496,
+      "rssAfterBytes": 127594496,
+      "heapBeforeBytes": 35721280,
+      "heapPeakSampledBytes": 36387408,
+      "heapAfterBytes": 36387408,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "snapshotCharacters": 6482,
+        "entries": 9
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 7.372755999999981,
+          "cpuUserMs": 7.353,
+          "cpuSystemMs": 0.038,
+          "rssPeakSampledBytes": 133971968,
+          "heapPeakSampledBytes": 39240728,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 6482,
+            "entries": 9
+          }
+        },
+        {
+          "wallTimeMs": 7.071889999999939,
+          "cpuUserMs": 6.146,
+          "cpuSystemMs": 0.948,
+          "rssPeakSampledBytes": 127299584,
+          "heapPeakSampledBytes": 35773304,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 6482,
+            "entries": 9
+          }
+        },
+        {
+          "wallTimeMs": 6.019422000000077,
+          "cpuUserMs": 6.034,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 127594496,
+          "heapPeakSampledBytes": 36387408,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 6482,
+            "entries": 9
+          }
+        }
+      ]
+    },
+    {
+      "name": "working-set-server-render-9",
+      "count": 9,
+      "wallTimeMs": 19.318346999999903,
+      "cpuUserMs": 18.566,
+      "cpuSystemMs": 0.902,
+      "rssBeforeBytes": 127594496,
+      "rssPeakSampledBytes": 128643072,
+      "rssAfterBytes": 128643072,
+      "heapBeforeBytes": 36388632,
+      "heapPeakSampledBytes": 37442320,
+      "heapAfterBytes": 37442320,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "markupCharacters": 12504,
+        "renderedRows": 9,
+        "renderedButtons": 63
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 21.528428000000076,
+          "cpuUserMs": 20.667,
+          "cpuSystemMs": 0.902,
+          "rssPeakSampledBytes": 135020544,
+          "heapPeakSampledBytes": 40291928,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 12504,
+            "renderedRows": 9,
+            "renderedButtons": 63
+          }
+        },
+        {
+          "wallTimeMs": 19.318346999999903,
+          "cpuUserMs": 17.493,
+          "cpuSystemMs": 1.857,
+          "rssPeakSampledBytes": 127823872,
+          "heapPeakSampledBytes": 36822520,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 12504,
+            "renderedRows": 9,
+            "renderedButtons": 63
+          }
+        },
+        {
+          "wallTimeMs": 19.29888200000005,
+          "cpuUserMs": 18.566,
+          "cpuSystemMs": 0.764,
+          "rssPeakSampledBytes": 128643072,
+          "heapPeakSampledBytes": 37442320,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 12504,
+            "renderedRows": 9,
+            "renderedButtons": 63
+          }
+        }
+      ]
+    },
+    {
+      "name": "projects-list-server-render-9",
+      "count": 9,
+      "wallTimeMs": 11.326545000000124,
+      "cpuUserMs": 9.705,
+      "cpuSystemMs": 0.936,
+      "rssBeforeBytes": 127823872,
+      "rssPeakSampledBytes": 129429504,
+      "rssAfterBytes": 128217088,
+      "heapBeforeBytes": 36842592,
+      "heapPeakSampledBytes": 38195400,
+      "heapAfterBytes": 37576928,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "markupCharacters": 8315,
+        "renderedRows": 9,
+        "renderedButtons": 30
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 11.326545000000124,
+          "cpuUserMs": 9.302,
+          "cpuSystemMs": 2.048,
+          "rssPeakSampledBytes": 135806976,
+          "heapPeakSampledBytes": 41044320,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 8315,
+            "renderedRows": 9,
+            "renderedButtons": 30
+          }
+        },
+        {
+          "wallTimeMs": 10.616601000000173,
+          "cpuUserMs": 9.705,
+          "cpuSystemMs": 0.936,
+          "rssPeakSampledBytes": 128217088,
+          "heapPeakSampledBytes": 37576928,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 8315,
+            "renderedRows": 9,
+            "renderedButtons": 30
+          }
+        },
+        {
+          "wallTimeMs": 13.05268100000012,
+          "cpuUserMs": 13.083,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 129429504,
+          "heapPeakSampledBytes": 38195400,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 8315,
+            "renderedRows": 9,
+            "renderedButtons": 30
+          }
+        }
+      ]
+    },
+    {
+      "name": "import-decklist-100",
+      "count": 100,
+      "wallTimeMs": 2.9893039999999473,
+      "cpuUserMs": 3.805,
+      "cpuSystemMs": 0.935,
+      "rssBeforeBytes": 128217088,
+      "rssPeakSampledBytes": 129822720,
+      "rssAfterBytes": 128610304,
+      "heapBeforeBytes": 37578368,
+      "heapPeakSampledBytes": 38464544,
+      "heapAfterBytes": 37841264,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "entries": 100,
+        "errors": 0,
+        "networkRequests": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 2.9893039999999473,
+          "cpuUserMs": 5.718,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 136069120,
+          "heapPeakSampledBytes": 41308656,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 100,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 2.5685639999996965,
+          "cpuUserMs": 2.998,
+          "cpuSystemMs": 0.935,
+          "rssPeakSampledBytes": 128610304,
+          "heapPeakSampledBytes": 37841264,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 100,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 3.2683709999998882,
+          "cpuUserMs": 3.805,
+          "cpuSystemMs": 1.978,
+          "rssPeakSampledBytes": 129822720,
+          "heapPeakSampledBytes": 38464544,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 100,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "preview-json-100",
+      "count": 100,
+      "wallTimeMs": 0.2855380000000878,
+      "cpuUserMs": 0.401,
+      "cpuSystemMs": 0.038,
+      "rssBeforeBytes": 128610304,
+      "rssPeakSampledBytes": 129822720,
+      "rssAfterBytes": 128741376,
+      "heapBeforeBytes": 37842504,
+      "heapPeakSampledBytes": 38575768,
+      "heapAfterBytes": 37921952,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "responseCharacters": 31899,
+        "entries": 100
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 0.3778389999999945,
+          "cpuUserMs": 0.696,
+          "cpuSystemMs": 0.001,
+          "rssPeakSampledBytes": 136069120,
+          "heapPeakSampledBytes": 41392864,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 31899,
+            "entries": 100
+          }
+        },
+        {
+          "wallTimeMs": 0.24244799999996758,
+          "cpuUserMs": 0.401,
+          "cpuSystemMs": 0.853,
+          "rssPeakSampledBytes": 128741376,
+          "heapPeakSampledBytes": 37921952,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 31899,
+            "entries": 100
+          }
+        },
+        {
+          "wallTimeMs": 0.2855380000000878,
+          "cpuUserMs": 0.259,
+          "cpuSystemMs": 0.038,
+          "rssPeakSampledBytes": 129822720,
+          "heapPeakSampledBytes": 38575768,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 31899,
+            "entries": 100
+          }
+        }
+      ]
+    },
+    {
+      "name": "working-set-build-100",
+      "count": 100,
+      "wallTimeMs": 1.4803499999998166,
+      "cpuUserMs": 0.782,
+      "cpuSystemMs": 0.942,
+      "rssBeforeBytes": 128741376,
+      "rssPeakSampledBytes": 130347008,
+      "rssAfterBytes": 129134592,
+      "heapBeforeBytes": 37923584,
+      "heapPeakSampledBytes": 39036784,
+      "heapAfterBytes": 38386488,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "entries": 100,
+        "physicalCards": 100
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 1.4803499999998166,
+          "cpuUserMs": 0.547,
+          "cpuSystemMs": 0.942,
+          "rssPeakSampledBytes": 136593408,
+          "heapPeakSampledBytes": 41853880,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 100,
+            "physicalCards": 100
+          }
+        },
+        {
+          "wallTimeMs": 1.4778949999999895,
+          "cpuUserMs": 1.588,
+          "cpuSystemMs": 0.147,
+          "rssPeakSampledBytes": 129134592,
+          "heapPeakSampledBytes": 38386488,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 100,
+            "physicalCards": 100
+          }
+        },
+        {
+          "wallTimeMs": 1.7425450000000637,
+          "cpuUserMs": 0.782,
+          "cpuSystemMs": 0.973,
+          "rssPeakSampledBytes": 130347008,
+          "heapPeakSampledBytes": 39036784,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 100,
+            "physicalCards": 100
+          }
+        }
+      ]
+    },
+    {
+      "name": "project-snapshot-key-100",
+      "count": 100,
+      "wallTimeMs": 17.935568000000103,
+      "cpuUserMs": 24.647,
+      "cpuSystemMs": 4.084,
+      "rssBeforeBytes": 129134592,
+      "rssPeakSampledBytes": 135196672,
+      "rssAfterBytes": 134115328,
+      "heapBeforeBytes": 38397632,
+      "heapPeakSampledBytes": 43376272,
+      "heapAfterBytes": 43376272,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "snapshotCharacters": 62810,
+        "entries": 100
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 20.734208999999964,
+          "cpuUserMs": 25.234,
+          "cpuSystemMs": 9.969,
+          "rssPeakSampledBytes": 141836288,
+          "heapPeakSampledBytes": 41865024,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 62810,
+            "entries": 100
+          }
+        },
+        {
+          "wallTimeMs": 16.436181999999917,
+          "cpuUserMs": 22.369,
+          "cpuSystemMs": 4.084,
+          "rssPeakSampledBytes": 134115328,
+          "heapPeakSampledBytes": 43376272,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 62810,
+            "entries": 100
+          }
+        },
+        {
+          "wallTimeMs": 17.935568000000103,
+          "cpuUserMs": 24.647,
+          "cpuSystemMs": 2.946,
+          "rssPeakSampledBytes": 135196672,
+          "heapPeakSampledBytes": 44076192,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 62810,
+            "entries": 100
+          }
+        }
+      ]
+    },
+    {
+      "name": "working-set-server-render-100",
+      "count": 100,
+      "wallTimeMs": 56.74003399999992,
+      "cpuUserMs": 91.559,
+      "cpuSystemMs": 6.8,
+      "rssBeforeBytes": 135196672,
+      "rssPeakSampledBytes": 140931072,
+      "rssAfterBytes": 140046336,
+      "heapBeforeBytes": 44081976,
+      "heapPeakSampledBytes": 43377512,
+      "heapAfterBytes": 38939032,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "markupCharacters": 137015,
+        "renderedRows": 100,
+        "renderedButtons": 700
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 56.74003399999992,
+          "cpuUserMs": 91.559,
+          "cpuSystemMs": 2.583,
+          "rssPeakSampledBytes": 144744448,
+          "heapPeakSampledBytes": 41351984,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 137015,
+            "renderedRows": 100,
+            "renderedButtons": 700
+          }
+        },
+        {
+          "wallTimeMs": 66.4657570000004,
+          "cpuUserMs": 97.805,
+          "cpuSystemMs": 15.387,
+          "rssPeakSampledBytes": 140931072,
+          "heapPeakSampledBytes": 43377512,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 137015,
+            "renderedRows": 100,
+            "renderedButtons": 700
+          }
+        },
+        {
+          "wallTimeMs": 53.99263999999994,
+          "cpuUserMs": 84.771,
+          "cpuSystemMs": 6.8,
+          "rssPeakSampledBytes": 140046336,
+          "heapPeakSampledBytes": 44081976,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 137015,
+            "renderedRows": 100,
+            "renderedButtons": 700
+          }
+        }
+      ]
+    },
+    {
+      "name": "projects-list-server-render-100",
+      "count": 100,
+      "wallTimeMs": 23.953407999999854,
+      "cpuUserMs": 22.307,
+      "cpuSystemMs": 2.795,
+      "rssBeforeBytes": 140046336,
+      "rssPeakSampledBytes": 142798848,
+      "rssAfterBytes": 142798848,
+      "heapBeforeBytes": 38971544,
+      "heapPeakSampledBytes": 41799064,
+      "heapAfterBytes": 41799064,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "markupCharacters": 59360,
+        "renderedRows": 100,
+        "renderedButtons": 303
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 24.486002999999982,
+          "cpuUserMs": 22.307,
+          "cpuSystemMs": 6.936,
+          "rssPeakSampledBytes": 147496960,
+          "heapPeakSampledBytes": 44210520,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 59360,
+            "renderedRows": 100,
+            "renderedButtons": 303
+          }
+        },
+        {
+          "wallTimeMs": 23.953407999999854,
+          "cpuUserMs": 28.61,
+          "cpuSystemMs": 1.103,
+          "rssPeakSampledBytes": 141455360,
+          "heapPeakSampledBytes": 41727648,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 59360,
+            "renderedRows": 100,
+            "renderedButtons": 303
+          }
+        },
+        {
+          "wallTimeMs": 21.018104999999878,
+          "cpuUserMs": 22.23,
+          "cpuSystemMs": 2.795,
+          "rssPeakSampledBytes": 142798848,
+          "heapPeakSampledBytes": 41799064,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 59360,
+            "renderedRows": 100,
+            "renderedButtons": 303
+          }
+        }
+      ]
+    },
+    {
+      "name": "import-decklist-500",
+      "count": 500,
+      "wallTimeMs": 3.95302700000002,
+      "cpuUserMs": 5.032,
+      "cpuSystemMs": 1.186,
+      "rssBeforeBytes": 147496960,
+      "rssPeakSampledBytes": 143847424,
+      "rssAfterBytes": 148545536,
+      "heapBeforeBytes": 44212048,
+      "heapPeakSampledBytes": 42862856,
+      "heapAfterBytes": 45270776,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "entries": 500,
+        "errors": 0,
+        "networkRequests": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 3.7514139999998406,
+          "cpuUserMs": 5.032,
+          "cpuSystemMs": 1.008,
+          "rssPeakSampledBytes": 148545536,
+          "heapPeakSampledBytes": 45270776,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 500,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 4.993701999999757,
+          "cpuUserMs": 3.893,
+          "cpuSystemMs": 2.992,
+          "rssPeakSampledBytes": 142503936,
+          "heapPeakSampledBytes": 42787832,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 500,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 3.95302700000002,
+          "cpuUserMs": 5.316,
+          "cpuSystemMs": 1.186,
+          "rssPeakSampledBytes": 143847424,
+          "heapPeakSampledBytes": 42862856,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 500,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "preview-json-500",
+      "count": 500,
+      "wallTimeMs": 1.2227619999998751,
+      "cpuUserMs": 1.052,
+      "cpuSystemMs": 0.03,
+      "rssBeforeBytes": 143847424,
+      "rssPeakSampledBytes": 144240640,
+      "rssAfterBytes": 144240640,
+      "heapBeforeBytes": 42864160,
+      "heapPeakSampledBytes": 43244928,
+      "heapAfterBytes": 43244928,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "responseCharacters": 154300,
+        "entries": 500
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 1.2227619999998751,
+          "cpuUserMs": 1.2,
+          "cpuSystemMs": 0.03,
+          "rssPeakSampledBytes": 148938752,
+          "heapPeakSampledBytes": 45652848,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 154300,
+            "entries": 500
+          }
+        },
+        {
+          "wallTimeMs": 1.5500489999999445,
+          "cpuUserMs": 0,
+          "cpuSystemMs": 1.557,
+          "rssPeakSampledBytes": 142897152,
+          "heapPeakSampledBytes": 43169960,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 154300,
+            "entries": 500
+          }
+        },
+        {
+          "wallTimeMs": 1.0523880000000645,
+          "cpuUserMs": 1.052,
+          "cpuSystemMs": 0.007,
+          "rssPeakSampledBytes": 144240640,
+          "heapPeakSampledBytes": 43244928,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 154300,
+            "entries": 500
+          }
+        }
+      ]
+    },
+    {
+      "name": "working-set-build-500",
+      "count": 500,
+      "wallTimeMs": 7.069295000000238,
+      "cpuUserMs": 5.867,
+      "cpuSystemMs": 1.877,
+      "rssBeforeBytes": 144240640,
+      "rssPeakSampledBytes": 146468864,
+      "rssAfterBytes": 146468864,
+      "heapBeforeBytes": 43246232,
+      "heapPeakSampledBytes": 45509856,
+      "heapAfterBytes": 45509856,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "entries": 500,
+        "physicalCards": 500
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 7.069295000000238,
+          "cpuUserMs": 6.165,
+          "cpuSystemMs": 1.877,
+          "rssPeakSampledBytes": 151166976,
+          "heapPeakSampledBytes": 47919048,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 500,
+            "physicalCards": 500
+          }
+        },
+        {
+          "wallTimeMs": 8.529066999999941,
+          "cpuUserMs": 5.035,
+          "cpuSystemMs": 4.408,
+          "rssPeakSampledBytes": 145125376,
+          "heapPeakSampledBytes": 45430968,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 500,
+            "physicalCards": 500
+          }
+        },
+        {
+          "wallTimeMs": 6.367715999999973,
+          "cpuUserMs": 5.867,
+          "cpuSystemMs": 1.844,
+          "rssPeakSampledBytes": 146468864,
+          "heapPeakSampledBytes": 45509856,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 500,
+            "physicalCards": 500
+          }
+        }
+      ]
+    },
+    {
+      "name": "project-snapshot-key-500",
+      "count": 500,
+      "wallTimeMs": 39.77415999999994,
+      "cpuUserMs": 44.851,
+      "cpuSystemMs": 9.818,
+      "rssBeforeBytes": 146468864,
+      "rssPeakSampledBytes": 151814144,
+      "rssAfterBytes": 151814144,
+      "heapBeforeBytes": 45512480,
+      "heapPeakSampledBytes": 47920352,
+      "heapAfterBytes": 35723120,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "snapshotCharacters": 310810,
+        "entries": 500
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 39.77415999999994,
+          "cpuUserMs": 45.924,
+          "cpuSystemMs": 8.322,
+          "rssPeakSampledBytes": 155746304,
+          "heapPeakSampledBytes": 47920352,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 310810,
+            "entries": 500
+          }
+        },
+        {
+          "wallTimeMs": 45.40068599999995,
+          "cpuUserMs": 44.851,
+          "cpuSystemMs": 10.723,
+          "rssPeakSampledBytes": 151556096,
+          "heapPeakSampledBytes": 50357816,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 310810,
+            "entries": 500
+          }
+        },
+        {
+          "wallTimeMs": 39.00102100000004,
+          "cpuUserMs": 40.664,
+          "cpuSystemMs": 9.818,
+          "rssPeakSampledBytes": 151814144,
+          "heapPeakSampledBytes": 45512480,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 310810,
+            "entries": 500
+          }
+        }
+      ]
+    },
+    {
+      "name": "project-snapshot-single-card-change-500",
+      "count": 500,
+      "wallTimeMs": 32.63297499999999,
+      "cpuUserMs": 32.452,
+      "cpuSystemMs": 2.096,
+      "rssBeforeBytes": 155746304,
+      "rssPeakSampledBytes": 152092672,
+      "rssAfterBytes": 155783168,
+      "heapBeforeBytes": 39569072,
+      "heapPeakSampledBytes": 42405568,
+      "heapAfterBytes": 42405568,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "snapshotCharacters": 310818,
+        "changedEntries": 1,
+        "entriesSerialized": 500
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 32.58730800000012,
+          "cpuUserMs": 32.452,
+          "cpuSystemMs": 1.014,
+          "rssPeakSampledBytes": 155783168,
+          "heapPeakSampledBytes": 42405568,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 310818,
+            "changedEntries": 1,
+            "entriesSerialized": 500
+          }
+        },
+        {
+          "wallTimeMs": 38.07672000000002,
+          "cpuUserMs": 39.563,
+          "cpuSystemMs": 2.2,
+          "rssPeakSampledBytes": 151556096,
+          "heapPeakSampledBytes": 50368600,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 310818,
+            "changedEntries": 1,
+            "entriesSerialized": 500
+          }
+        },
+        {
+          "wallTimeMs": 32.63297499999999,
+          "cpuUserMs": 31.706,
+          "cpuSystemMs": 2.096,
+          "rssPeakSampledBytes": 152092672,
+          "heapPeakSampledBytes": 39030480,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "snapshotCharacters": 310818,
+            "changedEntries": 1,
+            "entriesSerialized": 500
+          }
+        }
+      ]
+    },
+    {
+      "name": "working-set-server-render-500",
+      "count": 500,
+      "wallTimeMs": 188.68990500000018,
+      "cpuUserMs": 274.141,
+      "cpuSystemMs": 11.429,
+      "rssBeforeBytes": 155783168,
+      "rssPeakSampledBytes": 157024256,
+      "rssAfterBytes": 157474816,
+      "heapBeforeBytes": 42406872,
+      "heapPeakSampledBytes": 43690640,
+      "heapAfterBytes": 43690640,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "markupCharacters": 695615,
+        "renderedRows": 500,
+        "renderedButtons": 3500
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 182.77552200000036,
+          "cpuUserMs": 274.759,
+          "cpuSystemMs": 12.348,
+          "rssPeakSampledBytes": 157474816,
+          "heapPeakSampledBytes": 43690640,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 695615,
+            "renderedRows": 500,
+            "renderedButtons": 3500
+          }
+        },
+        {
+          "wallTimeMs": 207.53108699999984,
+          "cpuUserMs": 274.141,
+          "cpuSystemMs": 11.429,
+          "rssPeakSampledBytes": 157024256,
+          "heapPeakSampledBytes": 56628848,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 695615,
+            "renderedRows": 500,
+            "renderedButtons": 3500
+          }
+        },
+        {
+          "wallTimeMs": 188.68990500000018,
+          "cpuUserMs": 248.048,
+          "cpuSystemMs": 8.945,
+          "rssPeakSampledBytes": 154300416,
+          "heapPeakSampledBytes": 43036128,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 695615,
+            "renderedRows": 500,
+            "renderedButtons": 3500
+          }
+        }
+      ]
+    },
+    {
+      "name": "projects-list-server-render-500",
+      "count": 500,
+      "wallTimeMs": 28.188454999999976,
+      "cpuUserMs": 30.926,
+      "cpuSystemMs": 1.986,
+      "rssBeforeBytes": 154300416,
+      "rssPeakSampledBytes": 155742208,
+      "rssAfterBytes": 155742208,
+      "heapBeforeBytes": 43187016,
+      "heapPeakSampledBytes": 52493696,
+      "heapAfterBytes": 52493696,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "markupCharacters": 286960,
+        "renderedRows": 500,
+        "renderedButtons": 1503
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 28.188454999999976,
+          "cpuUserMs": 29.966,
+          "cpuSystemMs": 3.034,
+          "rssPeakSampledBytes": 158916608,
+          "heapPeakSampledBytes": 53277888,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 286960,
+            "renderedRows": 500,
+            "renderedButtons": 1503
+          }
+        },
+        {
+          "wallTimeMs": 35.508266000000276,
+          "cpuUserMs": 37.706,
+          "cpuSystemMs": 1.905,
+          "rssPeakSampledBytes": 155500544,
+          "heapPeakSampledBytes": 46901432,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 286960,
+            "renderedRows": 500,
+            "renderedButtons": 1503
+          }
+        },
+        {
+          "wallTimeMs": 28.005337999999938,
+          "cpuUserMs": 30.926,
+          "cpuSystemMs": 1.986,
+          "rssPeakSampledBytes": 155742208,
+          "heapPeakSampledBytes": 52493696,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 286960,
+            "renderedRows": 500,
+            "renderedButtons": 1503
+          }
+        }
+      ]
+    },
+    {
+      "name": "import-decklist-1000",
+      "count": 1000,
+      "wallTimeMs": 4.405594999999721,
+      "cpuUserMs": 4.399,
+      "cpuSystemMs": 0,
+      "rssBeforeBytes": 158916608,
+      "rssPeakSampledBytes": 155742208,
+      "rssAfterBytes": 158916608,
+      "heapBeforeBytes": 53279464,
+      "heapPeakSampledBytes": 54559216,
+      "heapAfterBytes": 55324608,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "entries": 1000,
+        "errors": 0,
+        "networkRequests": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 4.316771000000244,
+          "cpuUserMs": 4.3,
+          "cpuSystemMs": 0.027,
+          "rssPeakSampledBytes": 158916608,
+          "heapPeakSampledBytes": 55324608,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 1000,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 5.837293999999929,
+          "cpuUserMs": 5.85,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 155500544,
+          "heapPeakSampledBytes": 48948152,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 1000,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 4.405594999999721,
+          "cpuUserMs": 4.399,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 155742208,
+          "heapPeakSampledBytes": 54559216,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 1000,
+            "errors": 0,
+            "networkRequests": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "preview-json-1000",
+      "count": 1000,
+      "wallTimeMs": 2.0544629999999415,
+      "cpuUserMs": 2.069,
+      "cpuSystemMs": 0,
+      "rssBeforeBytes": 158916608,
+      "rssPeakSampledBytes": 156004352,
+      "rssAfterBytes": 159571968,
+      "heapBeforeBytes": 55325912,
+      "heapPeakSampledBytes": 55318064,
+      "heapAfterBytes": 56083432,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "responseCharacters": 307304,
+        "entries": 1000
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 1.885960999999952,
+          "cpuUserMs": 1.895,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 159571968,
+          "heapPeakSampledBytes": 56083432,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 307304,
+            "entries": 1000
+          }
+        },
+        {
+          "wallTimeMs": 2.0766539999999623,
+          "cpuUserMs": 2.083,
+          "cpuSystemMs": 0.002,
+          "rssPeakSampledBytes": 155762688,
+          "heapPeakSampledBytes": 49706976,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 307304,
+            "entries": 1000
+          }
+        },
+        {
+          "wallTimeMs": 2.0544629999999415,
+          "cpuUserMs": 2.069,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 156004352,
+          "heapPeakSampledBytes": 55318064,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "responseCharacters": 307304,
+            "entries": 1000
+          }
+        }
+      ]
+    },
+    {
+      "name": "working-set-build-1000",
+      "count": 1000,
+      "wallTimeMs": 11.40905900000007,
+      "cpuUserMs": 13.116,
+      "cpuSystemMs": 0.059,
+      "rssBeforeBytes": 159571968,
+      "rssPeakSampledBytes": 156004352,
+      "rssAfterBytes": 158347264,
+      "heapBeforeBytes": 56084736,
+      "heapPeakSampledBytes": 55319368,
+      "heapAfterBytes": 43283448,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "entries": 1000,
+        "physicalCards": 1000
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 11.274769000000106,
+          "cpuUserMs": 13.116,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 159571968,
+          "heapPeakSampledBytes": 56084736,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 1000,
+            "physicalCards": 1000
+          }
+        },
+        {
+          "wallTimeMs": 11.40905900000007,
+          "cpuUserMs": 11.369,
+          "cpuSystemMs": 0.059,
+          "rssPeakSampledBytes": 155762688,
+          "heapPeakSampledBytes": 53945288,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 1000,
+            "physicalCards": 1000
+          }
+        },
+        {
+          "wallTimeMs": 12.48015099999975,
+          "cpuUserMs": 14.272,
+          "cpuSystemMs": 0.765,
+          "rssPeakSampledBytes": 156004352,
+          "heapPeakSampledBytes": 55319368,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "entries": 1000,
+            "physicalCards": 1000
+          }
+        }
+      ]
+    },
+    {
+      "name": "working-set-server-render-1000",
+      "count": 1000,
+      "wallTimeMs": 143.92022700000007,
+      "cpuUserMs": 155.149,
+      "cpuSystemMs": 21.343,
+      "rssBeforeBytes": 155762688,
+      "rssPeakSampledBytes": 167415808,
+      "rssAfterBytes": 167415808,
+      "heapBeforeBytes": 53946592,
+      "heapPeakSampledBytes": 62239944,
+      "heapAfterBytes": 61059560,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "markupCharacters": 1392118,
+        "renderedRows": 1000,
+        "renderedButtons": 7000
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 144.84129799999982,
+          "cpuUserMs": 155.149,
+          "cpuSystemMs": 25.524,
+          "rssPeakSampledBytes": 170012672,
+          "heapPeakSampledBytes": 62890384,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 1392118,
+            "renderedRows": 1000,
+            "renderedButtons": 7000
+          }
+        },
+        {
+          "wallTimeMs": 142.79744699999992,
+          "cpuUserMs": 163.692,
+          "cpuSystemMs": 17.485,
+          "rssPeakSampledBytes": 167415808,
+          "heapPeakSampledBytes": 61059560,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 1392118,
+            "renderedRows": 1000,
+            "renderedButtons": 7000
+          }
+        },
+        {
+          "wallTimeMs": 143.92022700000007,
+          "cpuUserMs": 154.764,
+          "cpuSystemMs": 21.343,
+          "rssPeakSampledBytes": 166510592,
+          "heapPeakSampledBytes": 62239944,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 1392118,
+            "renderedRows": 1000,
+            "renderedButtons": 7000
+          }
+        }
+      ]
+    },
+    {
+      "name": "import-cancellation-after-first-root",
+      "count": 2,
+      "wallTimeMs": 1.9693849999998747,
+      "cpuUserMs": 1.979,
+      "cpuSystemMs": 0,
+      "rssBeforeBytes": 166510592,
+      "rssPeakSampledBytes": 167415808,
+      "rssAfterBytes": 166510592,
+      "heapBeforeBytes": 62241256,
+      "heapPeakSampledBytes": 62295320,
+      "heapAfterBytes": 62295320,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "cancelled": true,
+        "errorName": "ImportCancelledError",
+        "partialResultReturned": false,
+        "progressEvents": 1
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 2.378081999999722,
+          "cpuUserMs": 2.349,
+          "cpuSystemMs": 0.04,
+          "rssPeakSampledBytes": 170012672,
+          "heapPeakSampledBytes": 62946736,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "cancelled": true,
+            "errorName": "ImportCancelledError",
+            "partialResultReturned": false,
+            "progressEvents": 1
+          }
+        },
+        {
+          "wallTimeMs": 1.9693849999998747,
+          "cpuUserMs": 1.979,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 167415808,
+          "heapPeakSampledBytes": 61115912,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "cancelled": true,
+            "errorName": "ImportCancelledError",
+            "partialResultReturned": false,
+            "progressEvents": 1
+          }
+        },
+        {
+          "wallTimeMs": 1.539379000000281,
+          "cpuUserMs": 1.549,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 166510592,
+          "heapPeakSampledBytes": 62295320,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "cancelled": true,
+            "errorName": "ImportCancelledError",
+            "partialResultReturned": false,
+            "progressEvents": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "artwork-catalog-lookup-9",
+      "count": 9,
+      "wallTimeMs": 0.3480139999996936,
+      "cpuUserMs": 0.322,
+      "cpuSystemMs": 0,
+      "rssBeforeBytes": 167415808,
+      "rssPeakSampledBytes": 167415808,
+      "rssAfterBytes": 167415808,
+      "heapBeforeBytes": 61127560,
+      "heapPeakSampledBytes": 62317720,
+      "heapAfterBytes": 61138312,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "candidatesReturned": 9,
+        "networkRequests": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 0.3480139999996936,
+          "cpuUserMs": 0,
+          "cpuSystemMs": 0.355,
+          "rssPeakSampledBytes": 170012672,
+          "heapPeakSampledBytes": 62969136,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 9,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 0.31411100000013903,
+          "cpuUserMs": 0.322,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 167415808,
+          "heapPeakSampledBytes": 61138312,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 9,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 0.37375199999996767,
+          "cpuUserMs": 0.38,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 166510592,
+          "heapPeakSampledBytes": 62317720,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 9,
+            "networkRequests": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "artwork-gallery-server-render-9",
+      "count": 9,
+      "wallTimeMs": 34.45908300000019,
+      "cpuUserMs": 35.632,
+      "cpuSystemMs": 0,
+      "rssBeforeBytes": 166510592,
+      "rssPeakSampledBytes": 168071168,
+      "rssAfterBytes": 167297024,
+      "heapBeforeBytes": 62333984,
+      "heapPeakSampledBytes": 64775896,
+      "heapAfterBytes": 64775896,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "markupCharacters": 30401,
+        "renderedCandidates": 9,
+        "renderedPreviewImages": 9,
+        "originalBytesLoaded": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 35.2723689999998,
+          "cpuUserMs": 37.055,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 170799104,
+          "heapPeakSampledBytes": 65415440,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 30401,
+            "renderedCandidates": 9,
+            "renderedPreviewImages": 9,
+            "originalBytesLoaded": 0
+          }
+        },
+        {
+          "wallTimeMs": 34.45908300000019,
+          "cpuUserMs": 35.632,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 168071168,
+          "heapPeakSampledBytes": 63528504,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 30401,
+            "renderedCandidates": 9,
+            "renderedPreviewImages": 9,
+            "originalBytesLoaded": 0
+          }
+        },
+        {
+          "wallTimeMs": 30.642849999999726,
+          "cpuUserMs": 30.694,
+          "cpuSystemMs": 2.03,
+          "rssPeakSampledBytes": 167297024,
+          "heapPeakSampledBytes": 64775896,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 30401,
+            "renderedCandidates": 9,
+            "renderedPreviewImages": 9,
+            "originalBytesLoaded": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "artwork-catalog-lookup-100",
+      "count": 100,
+      "wallTimeMs": 0.04641600000013568,
+      "cpuUserMs": 0.039,
+      "cpuSystemMs": 0,
+      "rssBeforeBytes": 168071168,
+      "rssPeakSampledBytes": 168071168,
+      "rssAfterBytes": 168071168,
+      "heapBeforeBytes": 63551064,
+      "heapPeakSampledBytes": 64805128,
+      "heapAfterBytes": 63557736,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "candidatesReturned": 100,
+        "networkRequests": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 0.04641600000013568,
+          "cpuUserMs": 0.056,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 170799104,
+          "heapPeakSampledBytes": 65444672,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 100,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 0.03387199999997392,
+          "cpuUserMs": 0.039,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 168071168,
+          "heapPeakSampledBytes": 63557736,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 100,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 0.06456000000025597,
+          "cpuUserMs": 0,
+          "cpuSystemMs": 0.069,
+          "rssPeakSampledBytes": 167297024,
+          "heapPeakSampledBytes": 64805128,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 100,
+            "networkRequests": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "artwork-gallery-server-render-100",
+      "count": 100,
+      "wallTimeMs": 34.78334300000006,
+      "cpuUserMs": 58.564,
+      "cpuSystemMs": 2.637,
+      "rssBeforeBytes": 167297024,
+      "rssPeakSampledBytes": 168988672,
+      "rssAfterBytes": 168607744,
+      "heapBeforeBytes": 64808216,
+      "heapPeakSampledBytes": 64808216,
+      "heapAfterBytes": 54374496,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "markupCharacters": 74535,
+        "renderedCandidates": 100,
+        "renderedPreviewImages": 100,
+        "originalBytesLoaded": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 34.78334300000006,
+          "cpuUserMs": 62.825,
+          "cpuSystemMs": 2.93,
+          "rssPeakSampledBytes": 172109824,
+          "heapPeakSampledBytes": 65447760,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 74535,
+            "renderedCandidates": 100,
+            "renderedPreviewImages": 100,
+            "originalBytesLoaded": 0
+          }
+        },
+        {
+          "wallTimeMs": 35.31090899999981,
+          "cpuUserMs": 58.564,
+          "cpuSystemMs": 1.446,
+          "rssPeakSampledBytes": 168988672,
+          "heapPeakSampledBytes": 63560824,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 74535,
+            "renderedCandidates": 100,
+            "renderedPreviewImages": 100,
+            "originalBytesLoaded": 0
+          }
+        },
+        {
+          "wallTimeMs": 29.928927999999814,
+          "cpuUserMs": 54.891,
+          "cpuSystemMs": 2.637,
+          "rssPeakSampledBytes": 168607744,
+          "heapPeakSampledBytes": 64808216,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 74535,
+            "renderedCandidates": 100,
+            "renderedPreviewImages": 100,
+            "originalBytesLoaded": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "artwork-catalog-lookup-500",
+      "count": 500,
+      "wallTimeMs": 0.04933099999971091,
+      "cpuUserMs": 0.049,
+      "cpuSystemMs": 0.007,
+      "rssBeforeBytes": 168988672,
+      "rssPeakSampledBytes": 168988672,
+      "rssAfterBytes": 168988672,
+      "heapBeforeBytes": 52843248,
+      "heapPeakSampledBytes": 54489584,
+      "heapAfterBytes": 52859080,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "candidatesReturned": 500,
+        "networkRequests": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 0.04933099999971091,
+          "cpuUserMs": 0.049,
+          "cpuSystemMs": 0.007,
+          "rssPeakSampledBytes": 172109824,
+          "heapPeakSampledBytes": 55129112,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 500,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 0.039764000000104716,
+          "cpuUserMs": 0.037,
+          "cpuSystemMs": 0.006,
+          "rssPeakSampledBytes": 168988672,
+          "heapPeakSampledBytes": 52859080,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 500,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 0.05565299999989293,
+          "cpuUserMs": 0.055,
+          "cpuSystemMs": 0.007,
+          "rssPeakSampledBytes": 168607744,
+          "heapPeakSampledBytes": 54489584,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 500,
+            "networkRequests": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "artwork-gallery-server-render-500",
+      "count": 500,
+      "wallTimeMs": 77.98111300000028,
+      "cpuUserMs": 147.363,
+      "cpuSystemMs": 5.856,
+      "rssBeforeBytes": 172109824,
+      "rssPeakSampledBytes": 170876928,
+      "rssAfterBytes": 173457408,
+      "heapBeforeBytes": 55132360,
+      "heapPeakSampledBytes": 55908520,
+      "heapAfterBytes": 55908520,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "markupCharacters": 268935,
+        "renderedCandidates": 500,
+        "renderedPreviewImages": 500,
+        "originalBytesLoaded": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 76.2762560000001,
+          "cpuUserMs": 146.199,
+          "cpuSystemMs": 5.856,
+          "rssPeakSampledBytes": 173457408,
+          "heapPeakSampledBytes": 55908520,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 268935,
+            "renderedCandidates": 500,
+            "renderedPreviewImages": 500,
+            "originalBytesLoaded": 0
+          }
+        },
+        {
+          "wallTimeMs": 86.49566199999981,
+          "cpuUserMs": 147.363,
+          "cpuSystemMs": 11.497,
+          "rssPeakSampledBytes": 170876928,
+          "heapPeakSampledBytes": 69115320,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 268935,
+            "renderedCandidates": 500,
+            "renderedPreviewImages": 500,
+            "originalBytesLoaded": 0
+          }
+        },
+        {
+          "wallTimeMs": 77.98111300000028,
+          "cpuUserMs": 153.718,
+          "cpuSystemMs": 3.024,
+          "rssPeakSampledBytes": 170340352,
+          "heapPeakSampledBytes": 55288240,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 268935,
+            "renderedCandidates": 500,
+            "renderedPreviewImages": 500,
+            "originalBytesLoaded": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "artwork-catalog-lookup-1000",
+      "count": 1000,
+      "wallTimeMs": 0.06815700000015568,
+      "cpuUserMs": 0.075,
+      "cpuSystemMs": 0,
+      "rssBeforeBytes": 173457408,
+      "rssPeakSampledBytes": 170876928,
+      "rssAfterBytes": 173457408,
+      "heapBeforeBytes": 56103776,
+      "heapPeakSampledBytes": 56136736,
+      "heapAfterBytes": 56136736,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "candidatesReturned": 1000,
+        "networkRequests": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 0.0574760000004062,
+          "cpuUserMs": 0.064,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 173457408,
+          "heapPeakSampledBytes": 56136736,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 1000,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 0.0833039999997709,
+          "cpuUserMs": 0.088,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 170876928,
+          "heapPeakSampledBytes": 69343536,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 1000,
+            "networkRequests": 0
+          }
+        },
+        {
+          "wallTimeMs": 0.06815700000015568,
+          "cpuUserMs": 0.075,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 170340352,
+          "heapPeakSampledBytes": 55525008,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "candidatesReturned": 1000,
+            "networkRequests": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "artwork-gallery-server-render-1000",
+      "count": 1000,
+      "wallTimeMs": 110.51699400000007,
+      "cpuUserMs": 149.514,
+      "cpuSystemMs": 8.096,
+      "rssBeforeBytes": 170340352,
+      "rssPeakSampledBytes": 173981696,
+      "rssAfterBytes": 173981696,
+      "heapBeforeBytes": 55528096,
+      "heapPeakSampledBytes": 72611064,
+      "heapAfterBytes": 72611064,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "markupCharacters": 511935,
+        "renderedCandidates": 1000,
+        "renderedPreviewImages": 1000,
+        "originalBytesLoaded": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 110.51699400000007,
+          "cpuUserMs": 149.514,
+          "cpuSystemMs": 5.212,
+          "rssPeakSampledBytes": 177287168,
+          "heapPeakSampledBytes": 73242696,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 511935,
+            "renderedCandidates": 1000,
+            "renderedPreviewImages": 1000,
+            "originalBytesLoaded": 0
+          }
+        },
+        {
+          "wallTimeMs": 142.1544359999998,
+          "cpuUserMs": 181.662,
+          "cpuSystemMs": 9.485,
+          "rssPeakSampledBytes": 173756416,
+          "heapPeakSampledBytes": 69447864,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 511935,
+            "renderedCandidates": 1000,
+            "renderedPreviewImages": 1000,
+            "originalBytesLoaded": 0
+          }
+        },
+        {
+          "wallTimeMs": 107.790571,
+          "cpuUserMs": 145.53,
+          "cpuSystemMs": 8.096,
+          "rssPeakSampledBytes": 173981696,
+          "heapPeakSampledBytes": 72611064,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "markupCharacters": 511935,
+            "renderedCandidates": 1000,
+            "renderedPreviewImages": 1000,
+            "originalBytesLoaded": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "bleed-cache-cold",
+      "count": 1,
+      "wallTimeMs": 118.1501229999999,
+      "cpuUserMs": 119.112,
+      "cpuSystemMs": 12.679,
+      "rssBeforeBytes": 173338624,
+      "rssPeakSampledBytes": 184791040,
+      "rssAfterBytes": 181596160,
+      "heapBeforeBytes": 34933792,
+      "heapPeakSampledBytes": 46409256,
+      "heapAfterBytes": 46396560,
+      "peakEventLoopDelayMs": 84.7500570000002,
+      "details": {
+        "cacheStatus": "miss",
+        "outputBytes": 283012
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 118.1501229999999,
+          "cpuUserMs": 119.112,
+          "cpuSystemMs": 9.796,
+          "rssPeakSampledBytes": 184791040,
+          "heapPeakSampledBytes": 46409256,
+          "peakEventLoopDelayMs": 92.50673199999983,
+          "details": {
+            "cacheStatus": "miss",
+            "outputBytes": 283012
+          }
+        },
+        {
+          "wallTimeMs": 112.80719499999987,
+          "cpuUserMs": 117.496,
+          "cpuSystemMs": 12.679,
+          "rssPeakSampledBytes": 181596160,
+          "heapPeakSampledBytes": 46396560,
+          "peakEventLoopDelayMs": 77.99882900000011,
+          "details": {
+            "cacheStatus": "miss",
+            "outputBytes": 283012
+          }
+        },
+        {
+          "wallTimeMs": 122.16771199999994,
+          "cpuUserMs": 163.19,
+          "cpuSystemMs": 16.449,
+          "rssPeakSampledBytes": 191934464,
+          "heapPeakSampledBytes": 67416008,
+          "peakEventLoopDelayMs": 84.7500570000002,
+          "details": {
+            "cacheStatus": "miss",
+            "outputBytes": 283012
+          }
+        }
+      ]
+    },
+    {
+      "name": "bleed-cache-warm",
+      "count": 1,
+      "wallTimeMs": 10.963344000000234,
+      "cpuUserMs": 4.805,
+      "cpuSystemMs": 4.929,
+      "rssBeforeBytes": 184791040,
+      "rssPeakSampledBytes": 184680448,
+      "rssAfterBytes": 187674624,
+      "heapBeforeBytes": 46411024,
+      "heapPeakSampledBytes": 46485408,
+      "heapAfterBytes": 46507064,
+      "peakEventLoopDelayMs": 0.9358569999999418,
+      "details": {
+        "cacheStatus": "hit",
+        "outputBytes": 283012
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 8.991993999999977,
+          "cpuUserMs": 4.805,
+          "cpuSystemMs": 4.929,
+          "rssPeakSampledBytes": 187674624,
+          "heapPeakSampledBytes": 46507064,
+          "peakEventLoopDelayMs": 0.9358569999999418,
+          "details": {
+            "cacheStatus": "hit",
+            "outputBytes": 283012
+          }
+        },
+        {
+          "wallTimeMs": 12.665854000000309,
+          "cpuUserMs": 9.823,
+          "cpuSystemMs": 3.996,
+          "rssPeakSampledBytes": 184217600,
+          "heapPeakSampledBytes": 46485408,
+          "peakEventLoopDelayMs": 0.44149200000038036,
+          "details": {
+            "cacheStatus": "hit",
+            "outputBytes": 283012
+          }
+        },
+        {
+          "wallTimeMs": 10.963344000000234,
+          "cpuUserMs": 2.41,
+          "cpuSystemMs": 9.775,
+          "rssPeakSampledBytes": 184680448,
+          "heapPeakSampledBytes": 33927720,
+          "peakEventLoopDelayMs": 1.2208150000001297,
+          "details": {
+            "cacheStatus": "hit",
+            "outputBytes": 283012
+          }
+        }
+      ]
+    },
+    {
+      "name": "bleed-batch-native-concurrency-1",
+      "count": 9,
+      "wallTimeMs": 926.4983380000003,
+      "cpuUserMs": 1102.069,
+      "cpuSystemMs": 45.477,
+      "rssBeforeBytes": 276299776,
+      "rssPeakSampledBytes": 262311936,
+      "rssAfterBytes": 236969984,
+      "heapBeforeBytes": 33949952,
+      "heapPeakSampledBytes": 45328536,
+      "heapAfterBytes": 31411992,
+      "peakEventLoopDelayMs": 83.36941099999967,
+      "details": {
+        "configuredConcurrency": 1,
+        "peakConcurrency": 1,
+        "sharpConcurrency": 1
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 1025.8651590000004,
+          "cpuUserMs": 1102.069,
+          "cpuSystemMs": 50.583,
+          "rssPeakSampledBytes": 249802752,
+          "heapPeakSampledBytes": 48634072,
+          "peakEventLoopDelayMs": 104.85741299999972,
+          "details": {
+            "configuredConcurrency": 1,
+            "peakConcurrency": 1,
+            "sharpConcurrency": 1
+          }
+        },
+        {
+          "wallTimeMs": 926.4983380000003,
+          "cpuUserMs": 1131.353,
+          "cpuSystemMs": 45.477,
+          "rssPeakSampledBytes": 262311936,
+          "heapPeakSampledBytes": 42803696,
+          "peakEventLoopDelayMs": 83.36941099999967,
+          "details": {
+            "configuredConcurrency": 1,
+            "peakConcurrency": 1,
+            "sharpConcurrency": 1
+          }
+        },
+        {
+          "wallTimeMs": 818.1832890000005,
+          "cpuUserMs": 1007.559,
+          "cpuSystemMs": 39.561,
+          "rssPeakSampledBytes": 276299776,
+          "heapPeakSampledBytes": 45328536,
+          "peakEventLoopDelayMs": 69.74054500000011,
+          "details": {
+            "configuredConcurrency": 1,
+            "peakConcurrency": 1,
+            "sharpConcurrency": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "bleed-batch-native-concurrency-2",
+      "count": 9,
+      "wallTimeMs": 840.8619960000001,
+      "cpuUserMs": 1065.807,
+      "cpuSystemMs": 42.534,
+      "rssBeforeBytes": 236969984,
+      "rssPeakSampledBytes": 251711488,
+      "rssAfterBytes": 256151552,
+      "heapBeforeBytes": 31413912,
+      "heapPeakSampledBytes": 45328352,
+      "heapAfterBytes": 31374064,
+      "peakEventLoopDelayMs": 98.65981399999964,
+      "details": {
+        "configuredConcurrency": 2,
+        "peakConcurrency": 2,
+        "sharpConcurrency": 1
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 880.7804120000001,
+          "cpuUserMs": 1160.912,
+          "cpuSystemMs": 42.534,
+          "rssPeakSampledBytes": 251711488,
+          "heapPeakSampledBytes": 45328352,
+          "peakEventLoopDelayMs": 110.37651900000037,
+          "details": {
+            "configuredConcurrency": 2,
+            "peakConcurrency": 2,
+            "sharpConcurrency": 1
+          }
+        },
+        {
+          "wallTimeMs": 840.8619960000001,
+          "cpuUserMs": 1065.807,
+          "cpuSystemMs": 46.531,
+          "rssPeakSampledBytes": 247103488,
+          "heapPeakSampledBytes": 47922088,
+          "peakEventLoopDelayMs": 98.65981399999964,
+          "details": {
+            "configuredConcurrency": 2,
+            "peakConcurrency": 2,
+            "sharpConcurrency": 1
+          }
+        },
+        {
+          "wallTimeMs": 749.6671659999993,
+          "cpuUserMs": 1002.667,
+          "cpuSystemMs": 36.353,
+          "rssPeakSampledBytes": 256151552,
+          "heapPeakSampledBytes": 42789480,
+          "peakEventLoopDelayMs": 87.19113700000071,
+          "details": {
+            "configuredConcurrency": 2,
+            "peakConcurrency": 2,
+            "sharpConcurrency": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "bleed-batch-native-concurrency-4",
+      "count": 9,
+      "wallTimeMs": 792.0379419999999,
+      "cpuUserMs": 1021.181,
+      "cpuSystemMs": 60.192,
+      "rssBeforeBytes": 247103488,
+      "rssPeakSampledBytes": 272400384,
+      "rssAfterBytes": 262180864,
+      "heapBeforeBytes": 39955768,
+      "heapPeakSampledBytes": 43355224,
+      "heapAfterBytes": 31485744,
+      "peakEventLoopDelayMs": 229.67725699999983,
+      "details": {
+        "configuredConcurrency": 4,
+        "peakConcurrency": 4,
+        "sharpConcurrency": 1
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 792.0379419999999,
+          "cpuUserMs": 1067.3,
+          "cpuSystemMs": 60.192,
+          "rssPeakSampledBytes": 272400384,
+          "heapPeakSampledBytes": 43355224,
+          "peakEventLoopDelayMs": 253.5136220000004,
+          "details": {
+            "configuredConcurrency": 4,
+            "peakConcurrency": 4,
+            "sharpConcurrency": 1
+          }
+        },
+        {
+          "wallTimeMs": 741.3949840000005,
+          "cpuUserMs": 1021.181,
+          "cpuSystemMs": 42.696,
+          "rssPeakSampledBytes": 262598656,
+          "heapPeakSampledBytes": 42971240,
+          "peakEventLoopDelayMs": 210.05173899999954,
+          "details": {
+            "configuredConcurrency": 4,
+            "peakConcurrency": 4,
+            "sharpConcurrency": 1
+          }
+        },
+        {
+          "wallTimeMs": 802.043443,
+          "cpuUserMs": 950.861,
+          "cpuSystemMs": 73.453,
+          "rssPeakSampledBytes": 276299776,
+          "heapPeakSampledBytes": 47618264,
+          "peakEventLoopDelayMs": 229.67725699999983,
+          "details": {
+            "configuredConcurrency": 4,
+            "peakConcurrency": 4,
+            "sharpConcurrency": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "bleed-export-repeated-9",
+      "count": 9,
+      "wallTimeMs": 1147.6916499999998,
+      "cpuUserMs": 1410.95,
+      "cpuSystemMs": 48.098,
+      "rssBeforeBytes": 250736640,
+      "rssPeakSampledBytes": 287125504,
+      "rssAfterBytes": 277258240,
+      "heapBeforeBytes": 31462272,
+      "heapPeakSampledBytes": 42856392,
+      "heapAfterBytes": 33183600,
+      "peakEventLoopDelayMs": 66.5388780000003,
+      "details": {
+        "derivedResults": 9,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2696225,
+        "sourceRasterSize": {
+          "width": 745,
+          "height": 1040
+        }
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 1459.189152,
+          "cpuUserMs": 1685.031,
+          "cpuSystemMs": 123.515,
+          "rssPeakSampledBytes": 287125504,
+          "heapPeakSampledBytes": 42864968,
+          "peakEventLoopDelayMs": 74.07138899999973,
+          "details": {
+            "derivedResults": 9,
+            "bleedEngineCalls": 1,
+            "cacheHits": 0,
+            "cacheMisses": 1,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2696225,
+            "sourceRasterSize": {
+              "width": 745,
+              "height": 1040
+            }
+          }
+        },
+        {
+          "wallTimeMs": 1129.2987000000003,
+          "cpuUserMs": 1376.127,
+          "cpuSystemMs": 41.328,
+          "rssPeakSampledBytes": 277258240,
+          "heapPeakSampledBytes": 42856392,
+          "peakEventLoopDelayMs": 66.5388780000003,
+          "details": {
+            "derivedResults": 9,
+            "bleedEngineCalls": 1,
+            "cacheHits": 0,
+            "cacheMisses": 1,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2696225,
+            "sourceRasterSize": {
+              "width": 745,
+              "height": 1040
+            }
+          }
+        },
+        {
+          "wallTimeMs": 1147.6916499999998,
+          "cpuUserMs": 1410.95,
+          "cpuSystemMs": 48.098,
+          "rssPeakSampledBytes": 293064704,
+          "heapPeakSampledBytes": 42810280,
+          "peakEventLoopDelayMs": 61.95694800000001,
+          "details": {
+            "derivedResults": 9,
+            "bleedEngineCalls": 1,
+            "cacheHits": 0,
+            "cacheMisses": 1,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2696225,
+            "sourceRasterSize": {
+              "width": 745,
+              "height": 1040
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "bleed-export-unique-9",
+      "count": 9,
+      "wallTimeMs": 2017.8030200000003,
+      "cpuUserMs": 2361.092,
+      "cpuSystemMs": 116.117,
+      "rssBeforeBytes": 277258240,
+      "rssPeakSampledBytes": 290271232,
+      "rssAfterBytes": 279961600,
+      "heapBeforeBytes": 33232624,
+      "heapPeakSampledBytes": 44682360,
+      "heapAfterBytes": 33350736,
+      "peakEventLoopDelayMs": 92.50473099999999,
+      "details": {
+        "derivedResults": 9,
+        "bleedEngineCalls": 9,
+        "cacheHits": 0,
+        "cacheMisses": 9,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2655990,
+        "sourceRasterSize": {
+          "width": 745,
+          "height": 1040
+        }
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 2142.80029,
+          "cpuUserMs": 2475.3,
+          "cpuSystemMs": 135.767,
+          "rssPeakSampledBytes": 290271232,
+          "heapPeakSampledBytes": 44727832,
+          "peakEventLoopDelayMs": 115.03707599999962,
+          "details": {
+            "derivedResults": 9,
+            "bleedEngineCalls": 9,
+            "cacheHits": 0,
+            "cacheMisses": 9,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2655990,
+            "sourceRasterSize": {
+              "width": 745,
+              "height": 1040
+            }
+          }
+        },
+        {
+          "wallTimeMs": 1811.963024999999,
+          "cpuUserMs": 2091.687,
+          "cpuSystemMs": 116.117,
+          "rssPeakSampledBytes": 279961600,
+          "heapPeakSampledBytes": 44637216,
+          "peakEventLoopDelayMs": 92.50473099999999,
+          "details": {
+            "derivedResults": 9,
+            "bleedEngineCalls": 9,
+            "cacheHits": 0,
+            "cacheMisses": 9,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2655990,
+            "sourceRasterSize": {
+              "width": 745,
+              "height": 1040
+            }
+          }
+        },
+        {
+          "wallTimeMs": 2017.8030200000003,
+          "cpuUserMs": 2361.092,
+          "cpuSystemMs": 61.704,
+          "rssPeakSampledBytes": 293064704,
+          "heapPeakSampledBytes": 44682360,
+          "peakEventLoopDelayMs": 91.67558699999972,
+          "details": {
+            "derivedResults": 9,
+            "bleedEngineCalls": 9,
+            "cacheHits": 0,
+            "cacheMisses": 9,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2655990,
+            "sourceRasterSize": {
+              "width": 745,
+              "height": 1040
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "bleed-export-repeated-100",
+      "count": 100,
+      "wallTimeMs": 407.2411240000001,
+      "cpuUserMs": 575.002,
+      "cpuSystemMs": 11.71,
+      "rssBeforeBytes": 273817600,
+      "rssPeakSampledBytes": 273817600,
+      "rssAfterBytes": 262787072,
+      "heapBeforeBytes": 34748144,
+      "heapPeakSampledBytes": 36111960,
+      "heapAfterBytes": 35033640,
+      "peakEventLoopDelayMs": 361.834331,
+      "details": {
+        "derivedResults": 100,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2421522,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 407.2411240000001,
+          "cpuUserMs": 603.243,
+          "cpuSystemMs": 8.719,
+          "rssPeakSampledBytes": 290332672,
+          "heapPeakSampledBytes": 35953344,
+          "peakEventLoopDelayMs": 361.834331,
+          "details": {
+            "derivedResults": 100,
+            "bleedEngineCalls": 1,
+            "cacheHits": 0,
+            "cacheMisses": 1,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2421523,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        },
+        {
+          "wallTimeMs": 413.3126979999997,
+          "cpuUserMs": 575.002,
+          "cpuSystemMs": 16.344,
+          "rssPeakSampledBytes": 265310208,
+          "heapPeakSampledBytes": 36111960,
+          "peakEventLoopDelayMs": 366.0545889999994,
+          "details": {
+            "derivedResults": 100,
+            "bleedEngineCalls": 1,
+            "cacheHits": 0,
+            "cacheMisses": 1,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2421521,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        },
+        {
+          "wallTimeMs": 366.06423600000016,
+          "cpuUserMs": 547.361,
+          "cpuSystemMs": 11.71,
+          "rssPeakSampledBytes": 273817600,
+          "heapPeakSampledBytes": 36877120,
+          "peakEventLoopDelayMs": 324.2509140000002,
+          "details": {
+            "derivedResults": 100,
+            "bleedEngineCalls": 1,
+            "cacheHits": 0,
+            "cacheMisses": 1,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2421522,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "bleed-export-unique-100",
+      "count": 100,
+      "wallTimeMs": 1147.9889170000006,
+      "cpuUserMs": 1315.087,
+      "cpuSystemMs": 68.41,
+      "rssBeforeBytes": 262787072,
+      "rssPeakSampledBytes": 269209600,
+      "rssAfterBytes": 269209600,
+      "heapBeforeBytes": 35274040,
+      "heapPeakSampledBytes": 47467152,
+      "heapAfterBytes": 35309856,
+      "peakEventLoopDelayMs": 427.45732899999894,
+      "details": {
+        "derivedResults": 100,
+        "bleedEngineCalls": 100,
+        "cacheHits": 0,
+        "cacheMisses": 100,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2120863,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 1214.0517410000011,
+          "cpuUserMs": 1415.861,
+          "cpuSystemMs": 66.923,
+          "rssPeakSampledBytes": 271728640,
+          "heapPeakSampledBytes": 47467152,
+          "peakEventLoopDelayMs": 427.45732899999894,
+          "details": {
+            "derivedResults": 100,
+            "bleedEngineCalls": 100,
+            "cacheHits": 0,
+            "cacheMisses": 100,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2120864,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        },
+        {
+          "wallTimeMs": 1147.9889170000006,
+          "cpuUserMs": 1315.087,
+          "cpuSystemMs": 69.741,
+          "rssPeakSampledBytes": 267210752,
+          "heapPeakSampledBytes": 47633152,
+          "peakEventLoopDelayMs": 475.31497800000034,
+          "details": {
+            "derivedResults": 100,
+            "bleedEngineCalls": 100,
+            "cacheHits": 0,
+            "cacheMisses": 100,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2120864,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        },
+        {
+          "wallTimeMs": 1029.5694759999988,
+          "cpuUserMs": 1184.107,
+          "cpuSystemMs": 68.41,
+          "rssPeakSampledBytes": 269209600,
+          "heapPeakSampledBytes": 47453184,
+          "peakEventLoopDelayMs": 331.32163200000105,
+          "details": {
+            "derivedResults": 100,
+            "bleedEngineCalls": 100,
+            "cacheHits": 0,
+            "cacheMisses": 100,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 2120863,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "bleed-export-repeated-500",
+      "count": 500,
+      "wallTimeMs": 1946.161572000001,
+      "cpuUserMs": 2355.044,
+      "cpuSystemMs": 52.62,
+      "rssBeforeBytes": 269209600,
+      "rssPeakSampledBytes": 300429312,
+      "rssAfterBytes": 293031936,
+      "heapBeforeBytes": 46294048,
+      "heapPeakSampledBytes": 48882896,
+      "heapAfterBytes": 48882896,
+      "peakEventLoopDelayMs": 1802.255169,
+      "details": {
+        "derivedResults": 500,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 11536046,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 1946.161572000001,
+          "cpuUserMs": 2355.044,
+          "cpuSystemMs": 52.62,
+          "rssPeakSampledBytes": 309084160,
+          "heapPeakSampledBytes": 49083368,
+          "peakEventLoopDelayMs": 1802.255169,
+          "details": {
+            "derivedResults": 500,
+            "bleedEngineCalls": 1,
+            "cacheHits": 0,
+            "cacheMisses": 1,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 11536046,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        },
+        {
+          "wallTimeMs": 2250.62529,
+          "cpuUserMs": 2885.79,
+          "cpuSystemMs": 84.866,
+          "rssPeakSampledBytes": 300429312,
+          "heapPeakSampledBytes": 48330784,
+          "peakEventLoopDelayMs": 2109.528456,
+          "details": {
+            "derivedResults": 500,
+            "bleedEngineCalls": 1,
+            "cacheHits": 0,
+            "cacheMisses": 1,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 11536043,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        },
+        {
+          "wallTimeMs": 1855.2860739999996,
+          "cpuUserMs": 2288.771,
+          "cpuSystemMs": 45.524,
+          "rssPeakSampledBytes": 293031936,
+          "heapPeakSampledBytes": 48882896,
+          "peakEventLoopDelayMs": 1728.4308990000009,
+          "details": {
+            "derivedResults": 500,
+            "bleedEngineCalls": 1,
+            "cacheHits": 0,
+            "cacheMisses": 1,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 11536046,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "bleed-export-unique-500",
+      "count": 500,
+      "wallTimeMs": 5325.443889,
+      "cpuUserMs": 5407.435,
+      "cpuSystemMs": 371.47,
+      "rssBeforeBytes": 300429312,
+      "rssPeakSampledBytes": 331100160,
+      "rssAfterBytes": 324411392,
+      "heapBeforeBytes": 44078056,
+      "heapPeakSampledBytes": 55986056,
+      "heapAfterBytes": 48242224,
+      "peakEventLoopDelayMs": 1685.4298559999988,
+      "details": {
+        "derivedResults": 500,
+        "bleedEngineCalls": 500,
+        "cacheHits": 0,
+        "cacheMisses": 500,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 10610692,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 5392.202402000001,
+          "cpuUserMs": 5407.435,
+          "cpuSystemMs": 403.628,
+          "rssPeakSampledBytes": 333365248,
+          "heapPeakSampledBytes": 56058080,
+          "peakEventLoopDelayMs": 1659.3961230000023,
+          "details": {
+            "derivedResults": 500,
+            "bleedEngineCalls": 500,
+            "cacheHits": 0,
+            "cacheMisses": 500,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 10610692,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        },
+        {
+          "wallTimeMs": 5243.637760000001,
+          "cpuUserMs": 5496.38,
+          "cpuSystemMs": 331.141,
+          "rssPeakSampledBytes": 324411392,
+          "heapPeakSampledBytes": 55320544,
+          "peakEventLoopDelayMs": 1685.4298559999988,
+          "details": {
+            "derivedResults": 500,
+            "bleedEngineCalls": 500,
+            "cacheHits": 0,
+            "cacheMisses": 500,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 10610692,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        },
+        {
+          "wallTimeMs": 5325.443889,
+          "cpuUserMs": 5346.817,
+          "cpuSystemMs": 371.47,
+          "rssPeakSampledBytes": 331100160,
+          "heapPeakSampledBytes": 55986056,
+          "peakEventLoopDelayMs": 1708.684612000001,
+          "details": {
+            "derivedResults": 500,
+            "bleedEngineCalls": 500,
+            "cacheHits": 0,
+            "cacheMisses": 500,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "peakBleedConcurrency": 1,
+            "pdfBytes": 10610692,
+            "sourceRasterSize": {
+              "width": 96,
+              "height": 134
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "pdf-export-9-repeated-artwork",
+      "count": 9,
+      "wallTimeMs": 4.264031999999133,
+      "cpuUserMs": 4.673,
+      "cpuSystemMs": 0,
+      "rssBeforeBytes": 342278144,
+      "rssPeakSampledBytes": 339881984,
+      "rssAfterBytes": 342278144,
+      "heapBeforeBytes": 45560200,
+      "heapPeakSampledBytes": 48865568,
+      "heapAfterBytes": 45962552,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "pdfBytes": 474793,
+        "uniqueArtworkHashes": 1,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "pagesGenerated": 1,
+        "embeddedImageObjects": 9,
+        "jpegEmbedCalls": 9,
+        "pngEmbedCalls": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 4.08188599999994,
+          "cpuUserMs": 4.758,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 342278144,
+          "heapPeakSampledBytes": 45962552,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "pdfBytes": 474793,
+            "uniqueArtworkHashes": 1,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "pagesGenerated": 1,
+            "embeddedImageObjects": 9,
+            "jpegEmbedCalls": 9,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 4.343770999999833,
+          "cpuUserMs": 4.41,
+          "cpuSystemMs": 0.968,
+          "rssPeakSampledBytes": 333062144,
+          "heapPeakSampledBytes": 48881904,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "pdfBytes": 474793,
+            "uniqueArtworkHashes": 1,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "pagesGenerated": 1,
+            "embeddedImageObjects": 9,
+            "jpegEmbedCalls": 9,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 4.264031999999133,
+          "cpuUserMs": 4.673,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 339881984,
+          "heapPeakSampledBytes": 48865568,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "pdfBytes": 474794,
+            "uniqueArtworkHashes": 1,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "pagesGenerated": 1,
+            "embeddedImageObjects": 9,
+            "jpegEmbedCalls": 9,
+            "pngEmbedCalls": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "pdf-export-9-unique-artwork",
+      "count": 9,
+      "wallTimeMs": 4.322120000000723,
+      "cpuUserMs": 8.773,
+      "cpuSystemMs": 0.027,
+      "rssBeforeBytes": 340013056,
+      "rssPeakSampledBytes": 340013056,
+      "rssAfterBytes": 340013056,
+      "heapBeforeBytes": 49375464,
+      "heapPeakSampledBytes": 49774240,
+      "heapAfterBytes": 49774240,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "pdfBytes": 482722,
+        "uniqueArtworkHashes": 9,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "pagesGenerated": 1,
+        "embeddedImageObjects": 9,
+        "jpegEmbedCalls": 9,
+        "pngEmbedCalls": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 5.262651000000915,
+          "cpuUserMs": 11.715,
+          "cpuSystemMs": 0.102,
+          "rssPeakSampledBytes": 342409216,
+          "heapPeakSampledBytes": 46883744,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "pdfBytes": 482722,
+            "uniqueArtworkHashes": 9,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "pagesGenerated": 1,
+            "embeddedImageObjects": 9,
+            "jpegEmbedCalls": 9,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 4.322120000000723,
+          "cpuUserMs": 8.773,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 333062144,
+          "heapPeakSampledBytes": 49789016,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "pdfBytes": 482722,
+            "uniqueArtworkHashes": 9,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "pagesGenerated": 1,
+            "embeddedImageObjects": 9,
+            "jpegEmbedCalls": 9,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 4.137558999998873,
+          "cpuUserMs": 6.539,
+          "cpuSystemMs": 0.027,
+          "rssPeakSampledBytes": 340013056,
+          "heapPeakSampledBytes": 49774240,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "pdfBytes": 482722,
+            "uniqueArtworkHashes": 9,
+            "candidateLookups": 9,
+            "originalLookups": 9,
+            "pagesGenerated": 1,
+            "embeddedImageObjects": 9,
+            "jpegEmbedCalls": 9,
+            "pngEmbedCalls": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "pdf-export-100-repeated-artwork",
+      "count": 100,
+      "wallTimeMs": 29.78123499999856,
+      "cpuUserMs": 29.056,
+      "cpuSystemMs": 3.056,
+      "rssBeforeBytes": 350273536,
+      "rssPeakSampledBytes": 338305024,
+      "rssAfterBytes": 350273536,
+      "heapBeforeBytes": 49309392,
+      "heapPeakSampledBytes": 48021832,
+      "heapAfterBytes": 52595544,
+      "peakEventLoopDelayMs": 10.10529900000256,
+      "details": {
+        "pdfBytes": 4371352,
+        "uniqueArtworkHashes": 1,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "pagesGenerated": 12,
+        "embeddedImageObjects": 100,
+        "jpegEmbedCalls": 100,
+        "pngEmbedCalls": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 29.427200000001903,
+          "cpuUserMs": 42.791,
+          "cpuSystemMs": 3.056,
+          "rssPeakSampledBytes": 350273536,
+          "heapPeakSampledBytes": 52595544,
+          "peakEventLoopDelayMs": 10.10529900000256,
+          "details": {
+            "pdfBytes": 4371352,
+            "uniqueArtworkHashes": 1,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "pagesGenerated": 12,
+            "embeddedImageObjects": 100,
+            "jpegEmbedCalls": 100,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 31.019216000000597,
+          "cpuUserMs": 29.056,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 338305024,
+          "heapPeakSampledBytes": 48021832,
+          "peakEventLoopDelayMs": 11.767385999999533,
+          "details": {
+            "pdfBytes": 4371352,
+            "uniqueArtworkHashes": 1,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "pagesGenerated": 12,
+            "embeddedImageObjects": 100,
+            "jpegEmbedCalls": 100,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 29.78123499999856,
+          "cpuUserMs": 21.776,
+          "cpuSystemMs": 6.045,
+          "rssPeakSampledBytes": 325967872,
+          "heapPeakSampledBytes": 39646312,
+          "peakEventLoopDelayMs": 8.031090000000404,
+          "details": {
+            "pdfBytes": 4371352,
+            "uniqueArtworkHashes": 1,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "pagesGenerated": 12,
+            "embeddedImageObjects": 100,
+            "jpegEmbedCalls": 100,
+            "pngEmbedCalls": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "pdf-export-100-unique-artwork",
+      "count": 100,
+      "wallTimeMs": 42.277296000000206,
+      "cpuUserMs": 40.547,
+      "cpuSystemMs": 3.027,
+      "rssBeforeBytes": 350404608,
+      "rssPeakSampledBytes": 347086848,
+      "rssAfterBytes": 350404608,
+      "heapBeforeBytes": 35563744,
+      "heapPeakSampledBytes": 41953352,
+      "heapAfterBytes": 38895840,
+      "peakEventLoopDelayMs": 13.038980000001175,
+      "details": {
+        "pdfBytes": 5171710,
+        "uniqueArtworkHashes": 100,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "pagesGenerated": 12,
+        "embeddedImageObjects": 100,
+        "jpegEmbedCalls": 100,
+        "pngEmbedCalls": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 40.453568000000814,
+          "cpuUserMs": 39.683,
+          "cpuSystemMs": 0.001,
+          "rssPeakSampledBytes": 350404608,
+          "heapPeakSampledBytes": 38895840,
+          "peakEventLoopDelayMs": 12.509860999998637,
+          "details": {
+            "pdfBytes": 5171710,
+            "uniqueArtworkHashes": 100,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "pagesGenerated": 12,
+            "embeddedImageObjects": 100,
+            "jpegEmbedCalls": 100,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 51.538376999997126,
+          "cpuUserMs": 90.913,
+          "cpuSystemMs": 5.951,
+          "rssPeakSampledBytes": 347086848,
+          "heapPeakSampledBytes": 49346416,
+          "peakEventLoopDelayMs": 15.271293000001606,
+          "details": {
+            "pdfBytes": 5171710,
+            "uniqueArtworkHashes": 100,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "pagesGenerated": 12,
+            "embeddedImageObjects": 100,
+            "jpegEmbedCalls": 100,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 42.277296000000206,
+          "cpuUserMs": 40.547,
+          "cpuSystemMs": 3.027,
+          "rssPeakSampledBytes": 331079680,
+          "heapPeakSampledBytes": 41953352,
+          "peakEventLoopDelayMs": 13.038980000001175,
+          "details": {
+            "pdfBytes": 5171710,
+            "uniqueArtworkHashes": 100,
+            "candidateLookups": 100,
+            "originalLookups": 100,
+            "pagesGenerated": 12,
+            "embeddedImageObjects": 100,
+            "jpegEmbedCalls": 100,
+            "pngEmbedCalls": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "pdf-export-500-repeated-artwork",
+      "count": 500,
+      "wallTimeMs": 197.76765499999965,
+      "cpuUserMs": 366.487,
+      "cpuSystemMs": 23.525,
+      "rssBeforeBytes": 355475456,
+      "rssPeakSampledBytes": 375267328,
+      "rssAfterBytes": 375267328,
+      "heapBeforeBytes": 37735456,
+      "heapPeakSampledBytes": 40000432,
+      "heapAfterBytes": 38197896,
+      "peakEventLoopDelayMs": 78.67516199999955,
+      "details": {
+        "pdfBytes": 19632382,
+        "uniqueArtworkHashes": 1,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "pagesGenerated": 56,
+        "embeddedImageObjects": 500,
+        "jpegEmbedCalls": 500,
+        "pngEmbedCalls": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 197.76765499999965,
+          "cpuUserMs": 377.459,
+          "cpuSystemMs": 33.999,
+          "rssPeakSampledBytes": 379633664,
+          "heapPeakSampledBytes": 39817448,
+          "peakEventLoopDelayMs": 78.67516199999955,
+          "details": {
+            "pdfBytes": 19632382,
+            "uniqueArtworkHashes": 1,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "pagesGenerated": 56,
+            "embeddedImageObjects": 500,
+            "jpegEmbedCalls": 500,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 173.18543599999975,
+          "cpuUserMs": 283.587,
+          "cpuSystemMs": 20.074,
+          "rssPeakSampledBytes": 375267328,
+          "heapPeakSampledBytes": 40000432,
+          "peakEventLoopDelayMs": 69.063562000003,
+          "details": {
+            "pdfBytes": 19632382,
+            "uniqueArtworkHashes": 1,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "pagesGenerated": 56,
+            "embeddedImageObjects": 500,
+            "jpegEmbedCalls": 500,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 248.0504940000028,
+          "cpuUserMs": 366.487,
+          "cpuSystemMs": 23.525,
+          "rssPeakSampledBytes": 357031936,
+          "heapPeakSampledBytes": 40858032,
+          "peakEventLoopDelayMs": 116.8308700000016,
+          "details": {
+            "pdfBytes": 19632382,
+            "uniqueArtworkHashes": 1,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "pagesGenerated": 56,
+            "embeddedImageObjects": 500,
+            "jpegEmbedCalls": 500,
+            "pngEmbedCalls": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "pdf-export-500-unique-artwork",
+      "count": 500,
+      "wallTimeMs": 225.87295000000086,
+      "cpuUserMs": 373.368,
+      "cpuSystemMs": 28.015,
+      "rssBeforeBytes": 366108672,
+      "rssPeakSampledBytes": 392290304,
+      "rssAfterBytes": 391667712,
+      "heapBeforeBytes": 42919112,
+      "heapPeakSampledBytes": 50400152,
+      "heapAfterBytes": 38241600,
+      "peakEventLoopDelayMs": 82.13420599999881,
+      "details": {
+        "pdfBytes": 25530919,
+        "uniqueArtworkHashes": 500,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "pagesGenerated": 56,
+        "embeddedImageObjects": 500,
+        "jpegEmbedCalls": 500,
+        "pngEmbedCalls": 0
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 216.09126200000173,
+          "cpuUserMs": 360.128,
+          "cpuSystemMs": 21.819,
+          "rssPeakSampledBytes": 391667712,
+          "heapPeakSampledBytes": 48813576,
+          "peakEventLoopDelayMs": 68.12477399999989,
+          "details": {
+            "pdfBytes": 25530919,
+            "uniqueArtworkHashes": 500,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "pagesGenerated": 56,
+            "embeddedImageObjects": 500,
+            "jpegEmbedCalls": 500,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 225.87295000000086,
+          "cpuUserMs": 373.368,
+          "cpuSystemMs": 28.015,
+          "rssPeakSampledBytes": 400957440,
+          "heapPeakSampledBytes": 50400152,
+          "peakEventLoopDelayMs": 82.13420599999881,
+          "details": {
+            "pdfBytes": 25530919,
+            "uniqueArtworkHashes": 500,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "pagesGenerated": 56,
+            "embeddedImageObjects": 500,
+            "jpegEmbedCalls": 500,
+            "pngEmbedCalls": 0
+          }
+        },
+        {
+          "wallTimeMs": 278.7003079999995,
+          "cpuUserMs": 373.99,
+          "cpuSystemMs": 76.488,
+          "rssPeakSampledBytes": 392290304,
+          "heapPeakSampledBytes": 50704608,
+          "peakEventLoopDelayMs": 85.252117,
+          "details": {
+            "pdfBytes": 25530919,
+            "uniqueArtworkHashes": 500,
+            "candidateLookups": 500,
+            "originalLookups": 500,
+            "pagesGenerated": 56,
+            "embeddedImageObjects": 500,
+            "jpegEmbedCalls": 500,
+            "pngEmbedCalls": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "pdf-export-sequential-500-unique-three-times",
+      "count": 1500,
+      "wallTimeMs": 634.1132110000035,
+      "cpuUserMs": 1002.252,
+      "cpuSystemMs": 161.518,
+      "rssBeforeBytes": 402427904,
+      "rssPeakSampledBytes": 459083776,
+      "rssAfterBytes": 459083776,
+      "heapBeforeBytes": 41028496,
+      "heapPeakSampledBytes": 49322624,
+      "heapAfterBytes": 37893848,
+      "peakEventLoopDelayMs": 82.82438399999955,
+      "details": {
+        "exports": 3,
+        "cardsPerExport": 500,
+        "pdfBytesPerExport": [
+          25602162,
+          25602162,
+          25602162
+        ],
+        "memoryAfterExport": [
+          {
+            "rssBytes": 431263744,
+            "heapUsedBytes": 37825896
+          },
+          {
+            "rssBytes": 458919936,
+            "heapUsedBytes": 39709448
+          },
+          {
+            "rssBytes": 459083776,
+            "heapUsedBytes": 37891536
+          }
+        ],
+        "candidateLookups": 1500,
+        "originalLookups": 1500,
+        "cacheScope": "each export independently; no shared candidate/original memo buffers"
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 826.9883650000047,
+          "cpuUserMs": 1138.407,
+          "cpuSystemMs": 210.168,
+          "rssPeakSampledBytes": 462995456,
+          "heapPeakSampledBytes": 49385720,
+          "peakEventLoopDelayMs": 163.61693699999887,
+          "details": {
+            "exports": 3,
+            "cardsPerExport": 500,
+            "pdfBytesPerExport": [
+              25602162,
+              25602162,
+              25602162
+            ],
+            "memoryAfterExport": [
+              {
+                "rssBytes": 461029376,
+                "heapUsedBytes": 37962880
+              },
+              {
+                "rssBytes": 462995456,
+                "heapUsedBytes": 38003856
+              },
+              {
+                "rssBytes": 462630912,
+                "heapUsedBytes": 38044984
+              }
+            ],
+            "candidateLookups": 1500,
+            "originalLookups": 1500,
+            "cacheScope": "each export independently; no shared candidate/original memo buffers"
+          }
+        },
+        {
+          "wallTimeMs": 554.8121370000008,
+          "cpuUserMs": 914.74,
+          "cpuSystemMs": 80.166,
+          "rssPeakSampledBytes": 459083776,
+          "heapPeakSampledBytes": 49241960,
+          "peakEventLoopDelayMs": 78.0409690000015,
+          "details": {
+            "exports": 3,
+            "cardsPerExport": 500,
+            "pdfBytesPerExport": [
+              25602162,
+              25602162,
+              25602162
+            ],
+            "memoryAfterExport": [
+              {
+                "rssBytes": 431263744,
+                "heapUsedBytes": 37825896
+              },
+              {
+                "rssBytes": 458919936,
+                "heapUsedBytes": 39709448
+              },
+              {
+                "rssBytes": 459083776,
+                "heapUsedBytes": 37891536
+              }
+            ],
+            "candidateLookups": 1500,
+            "originalLookups": 1500,
+            "cacheScope": "each export independently; no shared candidate/original memo buffers"
+          }
+        },
+        {
+          "wallTimeMs": 634.1132110000035,
+          "cpuUserMs": 1002.252,
+          "cpuSystemMs": 161.518,
+          "rssPeakSampledBytes": 446840832,
+          "heapPeakSampledBytes": 49322624,
+          "peakEventLoopDelayMs": 82.82438399999955,
+          "details": {
+            "exports": 3,
+            "cardsPerExport": 500,
+            "pdfBytesPerExport": [
+              25602162,
+              25602162,
+              25602162
+            ],
+            "memoryAfterExport": [
+              {
+                "rssBytes": 421150720,
+                "heapUsedBytes": 37946696
+              },
+              {
+                "rssBytes": 446840832,
+                "heapUsedBytes": 38008120
+              },
+              {
+                "rssBytes": 437350400,
+                "heapUsedBytes": 37855264
+              }
+            ],
+            "candidateLookups": 1500,
+            "originalLookups": 1500,
+            "cacheScope": "each export independently; no shared candidate/original memo buffers"
+          }
+        }
+      ]
+    },
+    {
+      "name": "pdf-export-cancellation-after-first-card",
+      "count": 9,
+      "wallTimeMs": 1.0312689999991562,
+      "cpuUserMs": 1.041,
+      "cpuSystemMs": 0.001,
+      "rssBeforeBytes": 459083776,
+      "rssPeakSampledBytes": 459214848,
+      "rssAfterBytes": 459214848,
+      "heapBeforeBytes": 37932384,
+      "heapPeakSampledBytes": 37959872,
+      "heapAfterBytes": 37959872,
+      "peakEventLoopDelayMs": 0,
+      "details": {
+        "cancelled": true,
+        "errorName": "CardExportServiceError",
+        "partialPdfReturned": false,
+        "candidateLookups": 1,
+        "originalLookups": 1
+      },
+      "rawRuns": [
+        {
+          "wallTimeMs": 1.5206950000065262,
+          "cpuUserMs": 1.504,
+          "cpuSystemMs": 0.034,
+          "rssPeakSampledBytes": 462761984,
+          "heapPeakSampledBytes": 38115328,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "cancelled": true,
+            "errorName": "CardExportServiceError",
+            "partialPdfReturned": false,
+            "candidateLookups": 1,
+            "originalLookups": 1
+          }
+        },
+        {
+          "wallTimeMs": 0.9356230000048527,
+          "cpuUserMs": 0.945,
+          "cpuSystemMs": 0,
+          "rssPeakSampledBytes": 459214848,
+          "heapPeakSampledBytes": 37959872,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "cancelled": true,
+            "errorName": "CardExportServiceError",
+            "partialPdfReturned": false,
+            "candidateLookups": 1,
+            "originalLookups": 1
+          }
+        },
+        {
+          "wallTimeMs": 1.0312689999991562,
+          "cpuUserMs": 1.041,
+          "cpuSystemMs": 0.001,
+          "rssPeakSampledBytes": 437350400,
+          "heapPeakSampledBytes": 37922600,
+          "peakEventLoopDelayMs": 0,
+          "details": {
+            "cancelled": true,
+            "errorName": "CardExportServiceError",
+            "partialPdfReturned": false,
+            "candidateLookups": 1,
+            "originalLookups": 1
+          }
+        }
+      ]
+    }
+  ]
+}

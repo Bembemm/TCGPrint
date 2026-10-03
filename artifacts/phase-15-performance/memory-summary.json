@@ -1,0 +1,547 @@
+{
+  "schemaVersion": 1,
+  "baseSha": "18bcad3916b2ff2137ca3f1bfa747236e69c4072",
+  "methodology": "RSS and heap sampled every 5 ms during measured operations in independent Node processes; no forced GC; byte values are retained as recorded.",
+  "artifacts": {
+    "baseline": "baseline.json",
+    "optimized": "optimized.json"
+  },
+  "comparableBaseline": [
+    {
+      "name": "pdf-export-500-unique-artwork",
+      "baseline": {
+        "name": "pdf-export-500-unique-artwork",
+        "wallTimeMs": 225.87295000000086,
+        "rssBeforeBytes": 366108672,
+        "rssPeakSampledBytes": 392290304,
+        "rssAfterBytes": 391667712,
+        "heapBeforeBytes": 42919112,
+        "heapPeakSampledBytes": 50400152,
+        "heapAfterBytes": 38241600,
+        "peakEventLoopDelayMs": 82.13420599999881,
+        "details": {
+          "pdfBytes": 25530919,
+          "uniqueArtworkHashes": 500,
+          "candidateLookups": 500,
+          "originalLookups": 500,
+          "pagesGenerated": 56,
+          "embeddedImageObjects": 500,
+          "jpegEmbedCalls": 500,
+          "pngEmbedCalls": 0
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      },
+      "optimized": {
+        "name": "pdf-export-500-unique-artwork",
+        "wallTimeMs": 278.8097620000008,
+        "rssBeforeBytes": 342163456,
+        "rssPeakSampledBytes": 362672128,
+        "rssAfterBytes": 362672128,
+        "heapBeforeBytes": 40329768,
+        "heapPeakSampledBytes": 40227536,
+        "heapAfterBytes": 38172576,
+        "peakEventLoopDelayMs": 81.32447999999931,
+        "details": {
+          "pdfBytes": 25530919,
+          "uniqueArtworkHashes": 500,
+          "candidateLookups": 500,
+          "originalLookups": 500,
+          "pagesGenerated": 56,
+          "embeddedImageObjects": 500,
+          "jpegEmbedCalls": 500,
+          "pngEmbedCalls": 0
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      }
+    },
+    {
+      "name": "pdf-export-sequential-500-unique-three-times",
+      "baseline": {
+        "name": "pdf-export-sequential-500-unique-three-times",
+        "wallTimeMs": 634.1132110000035,
+        "rssBeforeBytes": 402427904,
+        "rssPeakSampledBytes": 459083776,
+        "rssAfterBytes": 459083776,
+        "heapBeforeBytes": 41028496,
+        "heapPeakSampledBytes": 49322624,
+        "heapAfterBytes": 37893848,
+        "peakEventLoopDelayMs": 82.82438399999955,
+        "details": {
+          "exports": 3,
+          "cardsPerExport": 500,
+          "pdfBytesPerExport": [
+            25602162,
+            25602162,
+            25602162
+          ],
+          "memoryAfterExport": [
+            {
+              "rssBytes": 431263744,
+              "heapUsedBytes": 37825896
+            },
+            {
+              "rssBytes": 458919936,
+              "heapUsedBytes": 39709448
+            },
+            {
+              "rssBytes": 459083776,
+              "heapUsedBytes": 37891536
+            }
+          ],
+          "candidateLookups": 1500,
+          "originalLookups": 1500,
+          "cacheScope": "each export independently; no shared candidate/original memo buffers"
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      },
+      "optimized": {
+        "name": "pdf-export-sequential-500-unique-three-times",
+        "wallTimeMs": 622.0079459999979,
+        "rssBeforeBytes": 397651968,
+        "rssPeakSampledBytes": 433958912,
+        "rssAfterBytes": 433958912,
+        "heapBeforeBytes": 37934944,
+        "heapPeakSampledBytes": 50579912,
+        "heapAfterBytes": 38083016,
+        "peakEventLoopDelayMs": 86.15931399999681,
+        "details": {
+          "exports": 3,
+          "cardsPerExport": 500,
+          "pdfBytesPerExport": [
+            25602162,
+            25602162,
+            25602162
+          ],
+          "memoryAfterExport": [
+            {
+              "rssBytes": 402632704,
+              "heapUsedBytes": 37957840
+            },
+            {
+              "rssBytes": 428322816,
+              "heapUsedBytes": 38472000
+            },
+            {
+              "rssBytes": 433958912,
+              "heapUsedBytes": 38080704
+            }
+          ],
+          "candidateLookups": 1500,
+          "originalLookups": 1500,
+          "cacheScope": "each export independently; no shared candidate/original memo buffers"
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      }
+    },
+    {
+      "name": "bleed-export-repeated-9",
+      "baseline": {
+        "name": "bleed-export-repeated-9",
+        "wallTimeMs": 1147.6916499999998,
+        "rssBeforeBytes": 250736640,
+        "rssPeakSampledBytes": 287125504,
+        "rssAfterBytes": 277258240,
+        "heapBeforeBytes": 31462272,
+        "heapPeakSampledBytes": 42856392,
+        "heapAfterBytes": 33183600,
+        "peakEventLoopDelayMs": 66.5388780000003,
+        "details": {
+          "derivedResults": 9,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 9,
+          "originalLookups": 9,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 2696225,
+          "sourceRasterSize": {
+            "width": 745,
+            "height": 1040
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      },
+      "optimized": {
+        "name": "bleed-export-repeated-9",
+        "wallTimeMs": 370.69261599999936,
+        "rssBeforeBytes": 259424256,
+        "rssPeakSampledBytes": 247881728,
+        "rssAfterBytes": 261259264,
+        "heapBeforeBytes": 31669736,
+        "heapPeakSampledBytes": 44916656,
+        "heapAfterBytes": 45026312,
+        "peakEventLoopDelayMs": 72.98910700000033,
+        "details": {
+          "derivedResults": 9,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 1,
+          "originalLookups": 1,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 301246,
+          "sourceRasterSize": {
+            "width": 745,
+            "height": 1040
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      }
+    },
+    {
+      "name": "bleed-export-unique-9",
+      "baseline": {
+        "name": "bleed-export-unique-9",
+        "wallTimeMs": 2017.8030200000003,
+        "rssBeforeBytes": 277258240,
+        "rssPeakSampledBytes": 290271232,
+        "rssAfterBytes": 279961600,
+        "heapBeforeBytes": 33232624,
+        "heapPeakSampledBytes": 44682360,
+        "heapAfterBytes": 33350736,
+        "peakEventLoopDelayMs": 92.50473099999999,
+        "details": {
+          "derivedResults": 9,
+          "bleedEngineCalls": 9,
+          "cacheHits": 0,
+          "cacheMisses": 9,
+          "candidateLookups": 9,
+          "originalLookups": 9,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 2655990,
+          "sourceRasterSize": {
+            "width": 745,
+            "height": 1040
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      },
+      "optimized": {
+        "name": "bleed-export-unique-9",
+        "wallTimeMs": 1790.444214,
+        "rssBeforeBytes": 244469760,
+        "rssPeakSampledBytes": 287010816,
+        "rssAfterBytes": 287010816,
+        "heapBeforeBytes": 44830816,
+        "heapPeakSampledBytes": 45160344,
+        "heapAfterBytes": 33582760,
+        "peakEventLoopDelayMs": 99.03973299999961,
+        "details": {
+          "derivedResults": 9,
+          "bleedEngineCalls": 9,
+          "cacheHits": 0,
+          "cacheMisses": 9,
+          "candidateLookups": 9,
+          "originalLookups": 9,
+          "peakBleedConcurrency": 2,
+          "pdfBytes": 2655990,
+          "sourceRasterSize": {
+            "width": 745,
+            "height": 1040
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      }
+    },
+    {
+      "name": "bleed-export-repeated-100",
+      "baseline": {
+        "name": "bleed-export-repeated-100",
+        "wallTimeMs": 407.2411240000001,
+        "rssBeforeBytes": 273817600,
+        "rssPeakSampledBytes": 273817600,
+        "rssAfterBytes": 262787072,
+        "heapBeforeBytes": 34748144,
+        "heapPeakSampledBytes": 36111960,
+        "heapAfterBytes": 35033640,
+        "peakEventLoopDelayMs": 361.834331,
+        "details": {
+          "derivedResults": 100,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 100,
+          "originalLookups": 100,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 2421522,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      },
+      "optimized": {
+        "name": "bleed-export-repeated-100",
+        "wallTimeMs": 75.84035899999981,
+        "rssBeforeBytes": 270274560,
+        "rssPeakSampledBytes": 270536704,
+        "rssAfterBytes": 270536704,
+        "heapBeforeBytes": 34993176,
+        "heapPeakSampledBytes": 44776080,
+        "heapAfterBytes": 44839776,
+        "peakEventLoopDelayMs": 0.044411000000764034,
+        "details": {
+          "derivedResults": 100,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 1,
+          "originalLookups": 1,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 38197,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      }
+    },
+    {
+      "name": "bleed-export-unique-100",
+      "baseline": {
+        "name": "bleed-export-unique-100",
+        "wallTimeMs": 1147.9889170000006,
+        "rssBeforeBytes": 262787072,
+        "rssPeakSampledBytes": 269209600,
+        "rssAfterBytes": 269209600,
+        "heapBeforeBytes": 35274040,
+        "heapPeakSampledBytes": 47467152,
+        "heapAfterBytes": 35309856,
+        "peakEventLoopDelayMs": 427.45732899999894,
+        "details": {
+          "derivedResults": 100,
+          "bleedEngineCalls": 100,
+          "cacheHits": 0,
+          "cacheMisses": 100,
+          "candidateLookups": 100,
+          "originalLookups": 100,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 2120863,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      },
+      "optimized": {
+        "name": "bleed-export-unique-100",
+        "wallTimeMs": 812.9988589999994,
+        "rssBeforeBytes": 270536704,
+        "rssPeakSampledBytes": 271323136,
+        "rssAfterBytes": 271323136,
+        "heapBeforeBytes": 45070080,
+        "heapPeakSampledBytes": 47091296,
+        "heapAfterBytes": 35467464,
+        "peakEventLoopDelayMs": 362.6182399999998,
+        "details": {
+          "derivedResults": 100,
+          "bleedEngineCalls": 100,
+          "cacheHits": 0,
+          "cacheMisses": 100,
+          "candidateLookups": 100,
+          "originalLookups": 100,
+          "peakBleedConcurrency": 2,
+          "pdfBytes": 2120864,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      }
+    },
+    {
+      "name": "bleed-export-repeated-500",
+      "baseline": {
+        "name": "bleed-export-repeated-500",
+        "wallTimeMs": 1946.161572000001,
+        "rssBeforeBytes": 269209600,
+        "rssPeakSampledBytes": 300429312,
+        "rssAfterBytes": 293031936,
+        "heapBeforeBytes": 46294048,
+        "heapPeakSampledBytes": 48882896,
+        "heapAfterBytes": 48882896,
+        "peakEventLoopDelayMs": 1802.255169,
+        "details": {
+          "derivedResults": 500,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 500,
+          "originalLookups": 500,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 11536046,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      },
+      "optimized": {
+        "name": "bleed-export-repeated-500",
+        "wallTimeMs": 247.01770699999906,
+        "rssBeforeBytes": 271978496,
+        "rssPeakSampledBytes": 271978496,
+        "rssAfterBytes": 271978496,
+        "heapBeforeBytes": 46462192,
+        "heapPeakSampledBytes": 48340424,
+        "heapAfterBytes": 48340424,
+        "peakEventLoopDelayMs": 207.56362699999954,
+        "details": {
+          "derivedResults": 500,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 1,
+          "originalLookups": 1,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 90539,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      }
+    },
+    {
+      "name": "bleed-export-unique-500",
+      "baseline": {
+        "name": "bleed-export-unique-500",
+        "wallTimeMs": 5325.443889,
+        "rssBeforeBytes": 300429312,
+        "rssPeakSampledBytes": 331100160,
+        "rssAfterBytes": 324411392,
+        "heapBeforeBytes": 44078056,
+        "heapPeakSampledBytes": 55986056,
+        "heapAfterBytes": 48242224,
+        "peakEventLoopDelayMs": 1685.4298559999988,
+        "details": {
+          "derivedResults": 500,
+          "bleedEngineCalls": 500,
+          "cacheHits": 0,
+          "cacheMisses": 500,
+          "candidateLookups": 500,
+          "originalLookups": 500,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 10610692,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      },
+      "optimized": {
+        "name": "bleed-export-unique-500",
+        "wallTimeMs": 4134.119597000001,
+        "rssBeforeBytes": 270577664,
+        "rssPeakSampledBytes": 310673408,
+        "rssAfterBytes": 310673408,
+        "heapBeforeBytes": 42633976,
+        "heapPeakSampledBytes": 56490080,
+        "heapAfterBytes": 48147224,
+        "peakEventLoopDelayMs": 1986.712176000001,
+        "details": {
+          "derivedResults": 500,
+          "bleedEngineCalls": 500,
+          "cacheHits": 0,
+          "cacheMisses": 500,
+          "candidateLookups": 500,
+          "originalLookups": 500,
+          "peakBleedConcurrency": 2,
+          "pdfBytes": 10610692,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+      }
+    }
+  ],
+  "sequentialExports": {
+    "baseline": {
+      "name": "pdf-export-sequential-500-unique-three-times",
+      "wallTimeMs": 634.1132110000035,
+      "rssBeforeBytes": 402427904,
+      "rssPeakSampledBytes": 459083776,
+      "rssAfterBytes": 459083776,
+      "heapBeforeBytes": 41028496,
+      "heapPeakSampledBytes": 49322624,
+      "heapAfterBytes": 37893848,
+      "peakEventLoopDelayMs": 82.82438399999955,
+      "details": {
+        "exports": 3,
+        "cardsPerExport": 500,
+        "pdfBytesPerExport": [
+          25602162,
+          25602162,
+          25602162
+        ],
+        "memoryAfterExport": [
+          {
+            "rssBytes": 431263744,
+            "heapUsedBytes": 37825896
+          },
+          {
+            "rssBytes": 458919936,
+            "heapUsedBytes": 39709448
+          },
+          {
+            "rssBytes": 459083776,
+            "heapUsedBytes": 37891536
+          }
+        ],
+        "candidateLookups": 1500,
+        "originalLookups": 1500,
+        "cacheScope": "each export independently; no shared candidate/original memo buffers"
+      },
+      "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+    },
+    "optimized": {
+      "name": "pdf-export-sequential-500-unique-three-times",
+      "wallTimeMs": 622.0079459999979,
+      "rssBeforeBytes": 397651968,
+      "rssPeakSampledBytes": 433958912,
+      "rssAfterBytes": 433958912,
+      "heapBeforeBytes": 37934944,
+      "heapPeakSampledBytes": 50579912,
+      "heapAfterBytes": 38083016,
+      "peakEventLoopDelayMs": 86.15931399999681,
+      "details": {
+        "exports": 3,
+        "cardsPerExport": 500,
+        "pdfBytesPerExport": [
+          25602162,
+          25602162,
+          25602162
+        ],
+        "memoryAfterExport": [
+          {
+            "rssBytes": 402632704,
+            "heapUsedBytes": 37957840
+          },
+          {
+            "rssBytes": 428322816,
+            "heapUsedBytes": 38472000
+          },
+          {
+            "rssBytes": 433958912,
+            "heapUsedBytes": 38080704
+          }
+        ],
+        "candidateLookups": 1500,
+        "originalLookups": 1500,
+        "cacheScope": "each export independently; no shared candidate/original memo buffers"
+      },
+      "sampling": "5 ms interval; process RSS includes native allocations; short peaks may be missed"
+    },
+    "interpretation": "Three consecutive exports in one process show startup/native allocator growth between exports one and two and only a small change between two and three; heap after each export returns to a similar ~38–40 MB range. This is a three-export observation, not a claim about unbounded runs."
+  },
+  "earlierBaselineContext": "An earlier preliminary 500-unique run reported about 434 MiB RSS while synthetic fixtures were generated with unbounded Promise.all in the same process. The comparable artifacts here generate fixtures sequentially and report the isolated export scenario separately from the 3-export scenario; do not compare the preliminary fixture-inclusive peak as if it were the isolated-export peak."
+}

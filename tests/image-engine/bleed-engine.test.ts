@@ -2,7 +2,8 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as bleedRaster from "../../image-engine/bleed/raster";
 import {
   BleedEngine,
   BleedGenerationError,
@@ -300,6 +301,22 @@ describe("BleedEngine", () => {
     expect(changed.cacheStatus).toBe("miss");
     expect(changed.cacheKey).not.toBe(first.cacheKey);
     expect(first.algorithmVersion).toBe("edge-extension-v1");
+  });
+
+  it("returns a validated warm derivative before decoding source pixels", async () => {
+    const cache = new MemoryBleedCache();
+    const engine = new BleedEngine({ cache });
+    const imageBytes = await readFixture(BLEED_FIXTURE);
+    const decode = vi.spyOn(bleedRaster, "decodeRaster");
+
+    const first = await engine.generate({ imageBytes, bleedMm: 1 });
+    expect(first.cacheStatus).toBe("miss");
+    expect(decode).toHaveBeenCalledTimes(1);
+    const second = await engine.generate({ imageBytes, bleedMm: 1 });
+
+    expect(second.cacheStatus).toBe("hit");
+    expect(second.preview.bytes).toEqual(first.preview.bytes);
+    expect(decode).toHaveBeenCalledTimes(1);
   });
 
   it("persists deterministic derivatives in the file cache for later previews", async () => {

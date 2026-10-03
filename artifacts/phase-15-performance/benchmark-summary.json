@@ -1,0 +1,4834 @@
+{
+  "schemaVersion": 1,
+  "baseSha": "18bcad3916b2ff2137ca3f1bfa747236e69c4072",
+  "branch": "feature/fase-15-performance",
+  "baselineRecordedAt": "2026-10-03T03:51:32.621Z",
+  "optimizedRecordedAt": "2026-10-03T04:33:30.988Z",
+  "runtime": {
+    "node": "v22.23.3",
+    "platform": "linux",
+    "architecture": "x64",
+    "cpuCount": 4,
+    "systemMemoryBytes": 8326938624,
+    "sharpConcurrency": 1,
+    "npmUserAgent": "npm/10.9.9 node/v22.23.3 linux x64 workspaces/false"
+  },
+  "methodology": {
+    "runsPerScenario": 3,
+    "aggregation": "Median across three independent Node/Vitest processes; raw runs remain in baseline.json and optimized.json.",
+    "fixtures": "Synthetic decklists, projects, JPEGs and PNGs only; offline; no copyrighted images and no real internet requests.",
+    "memory": "RSS/heap sampled at 5 ms while an asynchronous scenario runs; event-loop delay is sampled, not an absolute CI gate.",
+    "uiLimitation": "Only React server rendering was measured. Chromium and Playwright are unavailable in this environment; browser scroll, focus, keyboard, drag/drop, paint and interaction timings are unmeasured.",
+    "importLimitation": "Import scenarios exercise the local Universal Import parser/preview/Working Set path and do not include file selection, filesystem persistence or remote catalog access."
+  },
+  "scaleCoverage": [
+    {
+      "count": 9,
+      "import": {
+        "name": "import-decklist-9",
+        "count": 9,
+        "wallTimeMs": {
+          "baseline": 7.301285000000007,
+          "optimized": 7.556101000000126,
+          "deltaPercent": 3.49
+        },
+        "cpuUserMs": {
+          "baseline": 6.265,
+          "optimized": 7.615,
+          "deltaPercent": 21.55
+        },
+        "cpuSystemMs": {
+          "baseline": 0.994,
+          "optimized": 0,
+          "deltaPercent": -100
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 127201280,
+          "optimized": 124764160,
+          "deltaPercent": -1.92
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 35587472,
+          "optimized": 35114704,
+          "deltaPercent": -1.33
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "entries": 9,
+          "errors": 0,
+          "networkRequests": 0
+        },
+        "optimizedDetails": {
+          "entries": 9,
+          "errors": 0,
+          "networkRequests": 0
+        }
+      },
+      "workingSetBuild": {
+        "name": "working-set-build-9",
+        "count": 9,
+        "wallTimeMs": {
+          "baseline": 2.113943000000063,
+          "optimized": 1.890378999999939,
+          "deltaPercent": -10.58
+        },
+        "cpuUserMs": {
+          "baseline": 1.875,
+          "optimized": 1.904,
+          "deltaPercent": 1.55
+        },
+        "cpuSystemMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 127201280,
+          "optimized": 124895232,
+          "deltaPercent": -1.81
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 35720056,
+          "optimized": 35247280,
+          "deltaPercent": -1.32
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "entries": 9,
+          "physicalCards": 9
+        },
+        "optimizedDetails": {
+          "entries": 9,
+          "physicalCards": 9
+        }
+      },
+      "workingSetSSR": {
+        "name": "working-set-server-render-9",
+        "count": 9,
+        "wallTimeMs": {
+          "baseline": 19.318346999999903,
+          "optimized": 19.067775999999867,
+          "deltaPercent": -1.3
+        },
+        "cpuUserMs": {
+          "baseline": 18.566,
+          "optimized": 19.127,
+          "deltaPercent": 3.02
+        },
+        "cpuSystemMs": {
+          "baseline": 0.902,
+          "optimized": 0.893,
+          "deltaPercent": -1
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 128643072,
+          "optimized": 125419520,
+          "deltaPercent": -2.51
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 37442320,
+          "optimized": 36952728,
+          "deltaPercent": -1.31
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "markupCharacters": 12504,
+          "renderedRows": 9,
+          "renderedButtons": 63
+        },
+        "optimizedDetails": {
+          "markupCharacters": 12504,
+          "renderedRows": 9,
+          "renderedButtons": 63
+        }
+      },
+      "artworkPickerSSR": {
+        "name": "artwork-gallery-server-render-9",
+        "count": 9,
+        "wallTimeMs": {
+          "baseline": 34.45908300000019,
+          "optimized": 36.16745800000035,
+          "deltaPercent": 4.96
+        },
+        "cpuUserMs": {
+          "baseline": 35.632,
+          "optimized": 36.309,
+          "deltaPercent": 1.9
+        },
+        "cpuSystemMs": {
+          "baseline": 0,
+          "optimized": 2.638,
+          "deltaPercent": null
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 168071168,
+          "optimized": 168300544,
+          "deltaPercent": 0.14
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 64775896,
+          "optimized": 63449968,
+          "deltaPercent": -2.05
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "markupCharacters": 30401,
+          "renderedCandidates": 9,
+          "renderedPreviewImages": 9,
+          "originalBytesLoaded": 0
+        },
+        "optimizedDetails": {
+          "markupCharacters": 30401,
+          "renderedCandidates": 9,
+          "renderedPreviewImages": 9,
+          "originalBytesLoaded": 0
+        }
+      },
+      "projectsSSR": {
+        "name": "projects-list-server-render-9",
+        "count": 9,
+        "wallTimeMs": {
+          "baseline": 11.326545000000124,
+          "optimized": 11.448639000000185,
+          "deltaPercent": 1.08
+        },
+        "cpuUserMs": {
+          "baseline": 9.705,
+          "optimized": 11.48,
+          "deltaPercent": 18.29
+        },
+        "cpuSystemMs": {
+          "baseline": 0.936,
+          "optimized": 0.778,
+          "deltaPercent": -16.88
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 129429504,
+          "optimized": 125681664,
+          "deltaPercent": -2.9
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 38195400,
+          "optimized": 37705120,
+          "deltaPercent": -1.28
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "markupCharacters": 8315,
+          "renderedRows": 9,
+          "renderedButtons": 30
+        },
+        "optimizedDetails": {
+          "markupCharacters": 8315,
+          "renderedRows": 9,
+          "renderedButtons": 30
+        }
+      },
+      "pdfRepeated": {
+        "name": "pdf-export-9-repeated-artwork",
+        "count": 9,
+        "wallTimeMs": {
+          "baseline": 4.264031999999133,
+          "optimized": 4.630224000000453,
+          "deltaPercent": 8.59
+        },
+        "cpuUserMs": {
+          "baseline": 4.673,
+          "optimized": 4.593,
+          "deltaPercent": -1.71
+        },
+        "cpuSystemMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 339881984,
+          "optimized": 322207744,
+          "deltaPercent": -5.2
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 48865568,
+          "optimized": 49554184,
+          "deltaPercent": 1.41
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "pdfBytes": 474793,
+          "uniqueArtworkHashes": 1,
+          "candidateLookups": 9,
+          "originalLookups": 9,
+          "pagesGenerated": 1,
+          "embeddedImageObjects": 9,
+          "jpegEmbedCalls": 9,
+          "pngEmbedCalls": 0
+        },
+        "optimizedDetails": {
+          "pdfBytes": 53646,
+          "uniqueArtworkHashes": 1,
+          "candidateLookups": 1,
+          "originalLookups": 1,
+          "pagesGenerated": 1,
+          "embeddedImageObjects": 1,
+          "jpegEmbedCalls": 1,
+          "pngEmbedCalls": 0
+        }
+      },
+      "pdfUnique": {
+        "name": "pdf-export-9-unique-artwork",
+        "count": 9,
+        "wallTimeMs": {
+          "baseline": 4.322120000000723,
+          "optimized": 4.518436999998812,
+          "deltaPercent": 4.54
+        },
+        "cpuUserMs": {
+          "baseline": 8.773,
+          "optimized": 6.869,
+          "deltaPercent": -21.7
+        },
+        "cpuSystemMs": {
+          "baseline": 0.027,
+          "optimized": 0.059,
+          "deltaPercent": 118.52
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 340013056,
+          "optimized": 322207744,
+          "deltaPercent": -5.24
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 49774240,
+          "optimized": 50346512,
+          "deltaPercent": 1.15
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "pdfBytes": 482722,
+          "uniqueArtworkHashes": 9,
+          "candidateLookups": 9,
+          "originalLookups": 9,
+          "pagesGenerated": 1,
+          "embeddedImageObjects": 9,
+          "jpegEmbedCalls": 9,
+          "pngEmbedCalls": 0
+        },
+        "optimizedDetails": {
+          "pdfBytes": 482722,
+          "uniqueArtworkHashes": 9,
+          "candidateLookups": 9,
+          "originalLookups": 9,
+          "pagesGenerated": 1,
+          "embeddedImageObjects": 9,
+          "jpegEmbedCalls": 9,
+          "pngEmbedCalls": 0
+        }
+      },
+      "bleedRepeated": {
+        "name": "bleed-export-repeated-9",
+        "count": 9,
+        "wallTimeMs": {
+          "baseline": 1147.6916499999998,
+          "optimized": 370.69261599999936,
+          "deltaPercent": -67.7
+        },
+        "cpuUserMs": {
+          "baseline": 1410.95,
+          "optimized": 490.807,
+          "deltaPercent": -65.21
+        },
+        "cpuSystemMs": {
+          "baseline": 48.098,
+          "optimized": 13.977,
+          "deltaPercent": -70.94
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 287125504,
+          "optimized": 247881728,
+          "deltaPercent": -13.67
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 42856392,
+          "optimized": 44916656,
+          "deltaPercent": 4.81
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 66.5388780000003,
+          "optimized": 72.98910700000033,
+          "deltaPercent": 9.69
+        },
+        "baselineDetails": {
+          "derivedResults": 9,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 9,
+          "originalLookups": 9,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 2696225,
+          "sourceRasterSize": {
+            "width": 745,
+            "height": 1040
+          }
+        },
+        "optimizedDetails": {
+          "derivedResults": 9,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 1,
+          "originalLookups": 1,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 301246,
+          "sourceRasterSize": {
+            "width": 745,
+            "height": 1040
+          }
+        }
+      },
+      "bleedUnique": {
+        "name": "bleed-export-unique-9",
+        "count": 9,
+        "wallTimeMs": {
+          "baseline": 2017.8030200000003,
+          "optimized": 1790.444214,
+          "deltaPercent": -11.27
+        },
+        "cpuUserMs": {
+          "baseline": 2361.092,
+          "optimized": 2295.034,
+          "deltaPercent": -2.8
+        },
+        "cpuSystemMs": {
+          "baseline": 116.117,
+          "optimized": 82.802,
+          "deltaPercent": -28.69
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 290271232,
+          "optimized": 287010816,
+          "deltaPercent": -1.12
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 44682360,
+          "optimized": 45160344,
+          "deltaPercent": 1.07
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 92.50473099999999,
+          "optimized": 99.03973299999961,
+          "deltaPercent": 7.06
+        },
+        "baselineDetails": {
+          "derivedResults": 9,
+          "bleedEngineCalls": 9,
+          "cacheHits": 0,
+          "cacheMisses": 9,
+          "candidateLookups": 9,
+          "originalLookups": 9,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 2655990,
+          "sourceRasterSize": {
+            "width": 745,
+            "height": 1040
+          }
+        },
+        "optimizedDetails": {
+          "derivedResults": 9,
+          "bleedEngineCalls": 9,
+          "cacheHits": 0,
+          "cacheMisses": 9,
+          "candidateLookups": 9,
+          "originalLookups": 9,
+          "peakBleedConcurrency": 2,
+          "pdfBytes": 2655990,
+          "sourceRasterSize": {
+            "width": 745,
+            "height": 1040
+          }
+        }
+      }
+    },
+    {
+      "count": 100,
+      "import": {
+        "name": "import-decklist-100",
+        "count": 100,
+        "wallTimeMs": {
+          "baseline": 2.9893039999999473,
+          "optimized": 2.954330000000027,
+          "deltaPercent": -1.17
+        },
+        "cpuUserMs": {
+          "baseline": 3.805,
+          "optimized": 4.611,
+          "deltaPercent": 21.18
+        },
+        "cpuSystemMs": {
+          "baseline": 0.935,
+          "optimized": 0.127,
+          "deltaPercent": -86.42
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 129822720,
+          "optimized": 125943808,
+          "deltaPercent": -2.99
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 38464544,
+          "optimized": 37969456,
+          "deltaPercent": -1.29
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "entries": 100,
+          "errors": 0,
+          "networkRequests": 0
+        },
+        "optimizedDetails": {
+          "entries": 100,
+          "errors": 0,
+          "networkRequests": 0
+        }
+      },
+      "workingSetBuild": {
+        "name": "working-set-build-100",
+        "count": 100,
+        "wallTimeMs": {
+          "baseline": 1.4803499999998166,
+          "optimized": 1.8266920000000937,
+          "deltaPercent": 23.4
+        },
+        "cpuUserMs": {
+          "baseline": 0.782,
+          "optimized": 1.555,
+          "deltaPercent": 98.85
+        },
+        "cpuSystemMs": {
+          "baseline": 0.942,
+          "optimized": 0.984,
+          "deltaPercent": 4.46
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 130347008,
+          "optimized": 126468096,
+          "deltaPercent": -2.98
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 39036784,
+          "optimized": 38514680,
+          "deltaPercent": -1.34
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "entries": 100,
+          "physicalCards": 100
+        },
+        "optimizedDetails": {
+          "entries": 100,
+          "physicalCards": 100
+        }
+      },
+      "workingSetSSR": {
+        "name": "working-set-server-render-100",
+        "count": 100,
+        "wallTimeMs": {
+          "baseline": 56.74003399999992,
+          "optimized": 63.089268000000175,
+          "deltaPercent": 11.19
+        },
+        "cpuUserMs": {
+          "baseline": 91.559,
+          "optimized": 95.158,
+          "deltaPercent": 3.93
+        },
+        "cpuSystemMs": {
+          "baseline": 6.8,
+          "optimized": 13.65,
+          "deltaPercent": 100.74
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 140931072,
+          "optimized": 137654272,
+          "deltaPercent": -2.33
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 43377512,
+          "optimized": 43501168,
+          "deltaPercent": 0.29
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "markupCharacters": 137015,
+          "renderedRows": 100,
+          "renderedButtons": 700
+        },
+        "optimizedDetails": {
+          "markupCharacters": 137015,
+          "renderedRows": 100,
+          "renderedButtons": 700
+        }
+      },
+      "artworkPickerSSR": {
+        "name": "artwork-gallery-server-render-100",
+        "count": 100,
+        "wallTimeMs": {
+          "baseline": 34.78334300000006,
+          "optimized": 32.552374999999756,
+          "deltaPercent": -6.41
+        },
+        "cpuUserMs": {
+          "baseline": 58.564,
+          "optimized": 56.557,
+          "deltaPercent": -3.43
+        },
+        "cpuSystemMs": {
+          "baseline": 2.637,
+          "optimized": 5.022,
+          "deltaPercent": 90.44
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 168988672,
+          "optimized": 168824832,
+          "deltaPercent": -0.1
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 64808216,
+          "optimized": 63482288,
+          "deltaPercent": -2.05
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "markupCharacters": 74535,
+          "renderedCandidates": 100,
+          "renderedPreviewImages": 100,
+          "originalBytesLoaded": 0
+        },
+        "optimizedDetails": {
+          "markupCharacters": 74535,
+          "renderedCandidates": 100,
+          "renderedPreviewImages": 100,
+          "originalBytesLoaded": 0
+        }
+      },
+      "projectsSSR": {
+        "name": "projects-list-server-render-100",
+        "count": 100,
+        "wallTimeMs": {
+          "baseline": 23.953407999999854,
+          "optimized": 24.856846000000132,
+          "deltaPercent": 3.77
+        },
+        "cpuUserMs": {
+          "baseline": 22.307,
+          "optimized": 28.891,
+          "deltaPercent": 29.52
+        },
+        "cpuSystemMs": {
+          "baseline": 2.795,
+          "optimized": 0.022,
+          "deltaPercent": -99.21
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 142798848,
+          "optimized": 138309632,
+          "deltaPercent": -3.14
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 41799064,
+          "optimized": 41706200,
+          "deltaPercent": -0.22
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "markupCharacters": 59360,
+          "renderedRows": 100,
+          "renderedButtons": 303
+        },
+        "optimizedDetails": {
+          "markupCharacters": 59360,
+          "renderedRows": 100,
+          "renderedButtons": 303
+        }
+      },
+      "pdfRepeated": {
+        "name": "pdf-export-100-repeated-artwork",
+        "count": 100,
+        "wallTimeMs": {
+          "baseline": 29.78123499999856,
+          "optimized": 20.85021599999891,
+          "deltaPercent": -29.99
+        },
+        "cpuUserMs": {
+          "baseline": 29.056,
+          "optimized": 24.138,
+          "deltaPercent": -16.93
+        },
+        "cpuSystemMs": {
+          "baseline": 3.056,
+          "optimized": 0.019,
+          "deltaPercent": -99.38
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 338305024,
+          "optimized": 326135808,
+          "deltaPercent": -3.6
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 48021832,
+          "optimized": 47865000,
+          "deltaPercent": -0.33
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 10.10529900000256,
+          "optimized": 0,
+          "deltaPercent": -100
+        },
+        "baselineDetails": {
+          "pdfBytes": 4371352,
+          "uniqueArtworkHashes": 1,
+          "candidateLookups": 100,
+          "originalLookups": 100,
+          "pagesGenerated": 12,
+          "embeddedImageObjects": 100,
+          "jpegEmbedCalls": 100,
+          "pngEmbedCalls": 0
+        },
+        "optimizedDetails": {
+          "pdfBytes": 48334,
+          "uniqueArtworkHashes": 1,
+          "candidateLookups": 1,
+          "originalLookups": 1,
+          "pagesGenerated": 12,
+          "embeddedImageObjects": 1,
+          "jpegEmbedCalls": 1,
+          "pngEmbedCalls": 0
+        }
+      },
+      "pdfUnique": {
+        "name": "pdf-export-100-unique-artwork",
+        "count": 100,
+        "wallTimeMs": {
+          "baseline": 42.277296000000206,
+          "optimized": 50.017744000000675,
+          "deltaPercent": 18.31
+        },
+        "cpuUserMs": {
+          "baseline": 40.547,
+          "optimized": 47.528,
+          "deltaPercent": 17.22
+        },
+        "cpuSystemMs": {
+          "baseline": 3.027,
+          "optimized": 9.09,
+          "deltaPercent": 200.3
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 347086848,
+          "optimized": 331247616,
+          "deltaPercent": -4.56
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 41953352,
+          "optimized": 48783192,
+          "deltaPercent": 16.28
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 13.038980000001175,
+          "optimized": 16.08350900000005,
+          "deltaPercent": 23.35
+        },
+        "baselineDetails": {
+          "pdfBytes": 5171710,
+          "uniqueArtworkHashes": 100,
+          "candidateLookups": 100,
+          "originalLookups": 100,
+          "pagesGenerated": 12,
+          "embeddedImageObjects": 100,
+          "jpegEmbedCalls": 100,
+          "pngEmbedCalls": 0
+        },
+        "optimizedDetails": {
+          "pdfBytes": 5171710,
+          "uniqueArtworkHashes": 100,
+          "candidateLookups": 100,
+          "originalLookups": 100,
+          "pagesGenerated": 12,
+          "embeddedImageObjects": 100,
+          "jpegEmbedCalls": 100,
+          "pngEmbedCalls": 0
+        }
+      },
+      "bleedRepeated": {
+        "name": "bleed-export-repeated-100",
+        "count": 100,
+        "wallTimeMs": {
+          "baseline": 407.2411240000001,
+          "optimized": 75.84035899999981,
+          "deltaPercent": -81.38
+        },
+        "cpuUserMs": {
+          "baseline": 575.002,
+          "optimized": 130.777,
+          "deltaPercent": -77.26
+        },
+        "cpuSystemMs": {
+          "baseline": 11.71,
+          "optimized": 4.84,
+          "deltaPercent": -58.67
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 273817600,
+          "optimized": 270536704,
+          "deltaPercent": -1.2
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 36111960,
+          "optimized": 44776080,
+          "deltaPercent": 23.99
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 361.834331,
+          "optimized": 0.044411000000764034,
+          "deltaPercent": -99.99
+        },
+        "baselineDetails": {
+          "derivedResults": 100,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 100,
+          "originalLookups": 100,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 2421522,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "optimizedDetails": {
+          "derivedResults": 100,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 1,
+          "originalLookups": 1,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 38197,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        }
+      },
+      "bleedUnique": {
+        "name": "bleed-export-unique-100",
+        "count": 100,
+        "wallTimeMs": {
+          "baseline": 1147.9889170000006,
+          "optimized": 812.9988589999994,
+          "deltaPercent": -29.18
+        },
+        "cpuUserMs": {
+          "baseline": 1315.087,
+          "optimized": 1224.119,
+          "deltaPercent": -6.92
+        },
+        "cpuSystemMs": {
+          "baseline": 68.41,
+          "optimized": 82.412,
+          "deltaPercent": 20.47
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 269209600,
+          "optimized": 271323136,
+          "deltaPercent": 0.79
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 47467152,
+          "optimized": 47091296,
+          "deltaPercent": -0.79
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 427.45732899999894,
+          "optimized": 362.6182399999998,
+          "deltaPercent": -15.17
+        },
+        "baselineDetails": {
+          "derivedResults": 100,
+          "bleedEngineCalls": 100,
+          "cacheHits": 0,
+          "cacheMisses": 100,
+          "candidateLookups": 100,
+          "originalLookups": 100,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 2120863,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "optimizedDetails": {
+          "derivedResults": 100,
+          "bleedEngineCalls": 100,
+          "cacheHits": 0,
+          "cacheMisses": 100,
+          "candidateLookups": 100,
+          "originalLookups": 100,
+          "peakBleedConcurrency": 2,
+          "pdfBytes": 2120864,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        }
+      }
+    },
+    {
+      "count": 500,
+      "import": {
+        "name": "import-decklist-500",
+        "count": 500,
+        "wallTimeMs": {
+          "baseline": 3.95302700000002,
+          "optimized": 4.5323419999999714,
+          "deltaPercent": 14.65
+        },
+        "cpuUserMs": {
+          "baseline": 5.032,
+          "optimized": 5.926,
+          "deltaPercent": 17.77
+        },
+        "cpuSystemMs": {
+          "baseline": 1.186,
+          "optimized": 1.001,
+          "deltaPercent": -15.6
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 143847424,
+          "optimized": 139358208,
+          "deltaPercent": -3.12
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 42862856,
+          "optimized": 42766456,
+          "deltaPercent": -0.22
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "entries": 500,
+          "errors": 0,
+          "networkRequests": 0
+        },
+        "optimizedDetails": {
+          "entries": 500,
+          "errors": 0,
+          "networkRequests": 0
+        }
+      },
+      "workingSetBuild": {
+        "name": "working-set-build-500",
+        "count": 500,
+        "wallTimeMs": {
+          "baseline": 7.069295000000238,
+          "optimized": 7.326206000000184,
+          "deltaPercent": 3.63
+        },
+        "cpuUserMs": {
+          "baseline": 5.867,
+          "optimized": 7.23,
+          "deltaPercent": 23.23
+        },
+        "cpuSystemMs": {
+          "baseline": 1.877,
+          "optimized": 1.706,
+          "deltaPercent": -9.11
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 146468864,
+          "optimized": 141979648,
+          "deltaPercent": -3.06
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 45509856,
+          "optimized": 45419416,
+          "deltaPercent": -0.2
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "entries": 500,
+          "physicalCards": 500
+        },
+        "optimizedDetails": {
+          "entries": 500,
+          "physicalCards": 500
+        }
+      },
+      "workingSetSSR": {
+        "name": "working-set-server-render-500",
+        "count": 500,
+        "wallTimeMs": {
+          "baseline": 188.68990500000018,
+          "optimized": 190.2082760000003,
+          "deltaPercent": 0.8
+        },
+        "cpuUserMs": {
+          "baseline": 274.141,
+          "optimized": 271.04,
+          "deltaPercent": -1.13
+        },
+        "cpuSystemMs": {
+          "baseline": 11.429,
+          "optimized": 16.32,
+          "deltaPercent": 42.79
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 157024256,
+          "optimized": 154578944,
+          "deltaPercent": -1.56
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 43690640,
+          "optimized": 56256984,
+          "deltaPercent": 28.76
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "markupCharacters": 695615,
+          "renderedRows": 500,
+          "renderedButtons": 3500
+        },
+        "optimizedDetails": {
+          "markupCharacters": 695615,
+          "renderedRows": 500,
+          "renderedButtons": 3500
+        }
+      },
+      "artworkPickerSSR": {
+        "name": "artwork-gallery-server-render-500",
+        "count": 500,
+        "wallTimeMs": {
+          "baseline": 77.98111300000028,
+          "optimized": 88.18949500000008,
+          "deltaPercent": 13.09
+        },
+        "cpuUserMs": {
+          "baseline": 147.363,
+          "optimized": 161.959,
+          "deltaPercent": 9.9
+        },
+        "cpuSystemMs": {
+          "baseline": 5.856,
+          "optimized": 12.591,
+          "deltaPercent": 115.01
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 170876928,
+          "optimized": 169975808,
+          "deltaPercent": -0.53
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 55908520,
+          "optimized": 69052248,
+          "deltaPercent": 23.51
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "markupCharacters": 268935,
+          "renderedCandidates": 500,
+          "renderedPreviewImages": 500,
+          "originalBytesLoaded": 0
+        },
+        "optimizedDetails": {
+          "markupCharacters": 268935,
+          "renderedCandidates": 500,
+          "renderedPreviewImages": 500,
+          "originalBytesLoaded": 0
+        }
+      },
+      "projectsSSR": {
+        "name": "projects-list-server-render-500",
+        "count": 500,
+        "wallTimeMs": {
+          "baseline": 28.188454999999976,
+          "optimized": 30.077802999999676,
+          "deltaPercent": 6.7
+        },
+        "cpuUserMs": {
+          "baseline": 30.926,
+          "optimized": 33.386,
+          "deltaPercent": 7.95
+        },
+        "cpuSystemMs": {
+          "baseline": 1.986,
+          "optimized": 1.879,
+          "deltaPercent": -5.39
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 155742208,
+          "optimized": 155680768,
+          "deltaPercent": -0.04
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 52493696,
+          "optimized": 47289536,
+          "deltaPercent": -9.91
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "markupCharacters": 286960,
+          "renderedRows": 500,
+          "renderedButtons": 1503
+        },
+        "optimizedDetails": {
+          "markupCharacters": 286960,
+          "renderedRows": 500,
+          "renderedButtons": 1503
+        }
+      },
+      "pdfRepeated": {
+        "name": "pdf-export-500-repeated-artwork",
+        "count": 500,
+        "wallTimeMs": {
+          "baseline": 197.76765499999965,
+          "optimized": 131.70154200000252,
+          "deltaPercent": -33.41
+        },
+        "cpuUserMs": {
+          "baseline": 366.487,
+          "optimized": 236.01,
+          "deltaPercent": -35.6
+        },
+        "cpuSystemMs": {
+          "baseline": 23.525,
+          "optimized": 1.934,
+          "deltaPercent": -91.78
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 375267328,
+          "optimized": 342163456,
+          "deltaPercent": -8.82
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 40000432,
+          "optimized": 38998776,
+          "deltaPercent": -2.5
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 78.67516199999955,
+          "optimized": 116.24707399999897,
+          "deltaPercent": 47.76
+        },
+        "baselineDetails": {
+          "pdfBytes": 19632382,
+          "uniqueArtworkHashes": 1,
+          "candidateLookups": 500,
+          "originalLookups": 500,
+          "pagesGenerated": 56,
+          "embeddedImageObjects": 500,
+          "jpegEmbedCalls": 500,
+          "pngEmbedCalls": 0
+        },
+        "optimizedDetails": {
+          "pdfBytes": 59466,
+          "uniqueArtworkHashes": 1,
+          "candidateLookups": 1,
+          "originalLookups": 1,
+          "pagesGenerated": 56,
+          "embeddedImageObjects": 1,
+          "jpegEmbedCalls": 1,
+          "pngEmbedCalls": 0
+        }
+      },
+      "pdfUnique": {
+        "name": "pdf-export-500-unique-artwork",
+        "count": 500,
+        "wallTimeMs": {
+          "baseline": 225.87295000000086,
+          "optimized": 278.8097620000008,
+          "deltaPercent": 23.44
+        },
+        "cpuUserMs": {
+          "baseline": 373.368,
+          "optimized": 306.819,
+          "deltaPercent": -17.82
+        },
+        "cpuSystemMs": {
+          "baseline": 28.015,
+          "optimized": 58.935,
+          "deltaPercent": 110.37
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 392290304,
+          "optimized": 362672128,
+          "deltaPercent": -7.55
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 50400152,
+          "optimized": 40227536,
+          "deltaPercent": -20.18
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 82.13420599999881,
+          "optimized": 81.32447999999931,
+          "deltaPercent": -0.99
+        },
+        "baselineDetails": {
+          "pdfBytes": 25530919,
+          "uniqueArtworkHashes": 500,
+          "candidateLookups": 500,
+          "originalLookups": 500,
+          "pagesGenerated": 56,
+          "embeddedImageObjects": 500,
+          "jpegEmbedCalls": 500,
+          "pngEmbedCalls": 0
+        },
+        "optimizedDetails": {
+          "pdfBytes": 25530919,
+          "uniqueArtworkHashes": 500,
+          "candidateLookups": 500,
+          "originalLookups": 500,
+          "pagesGenerated": 56,
+          "embeddedImageObjects": 500,
+          "jpegEmbedCalls": 500,
+          "pngEmbedCalls": 0
+        }
+      },
+      "bleedRepeated": {
+        "name": "bleed-export-repeated-500",
+        "count": 500,
+        "wallTimeMs": {
+          "baseline": 1946.161572000001,
+          "optimized": 247.01770699999906,
+          "deltaPercent": -87.31
+        },
+        "cpuUserMs": {
+          "baseline": 2355.044,
+          "optimized": 432,
+          "deltaPercent": -81.66
+        },
+        "cpuSystemMs": {
+          "baseline": 52.62,
+          "optimized": 2.268,
+          "deltaPercent": -95.69
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 300429312,
+          "optimized": 271978496,
+          "deltaPercent": -9.47
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 48882896,
+          "optimized": 48340424,
+          "deltaPercent": -1.11
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 1802.255169,
+          "optimized": 207.56362699999954,
+          "deltaPercent": -88.48
+        },
+        "baselineDetails": {
+          "derivedResults": 500,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 500,
+          "originalLookups": 500,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 11536046,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "optimizedDetails": {
+          "derivedResults": 500,
+          "bleedEngineCalls": 1,
+          "cacheHits": 0,
+          "cacheMisses": 1,
+          "candidateLookups": 1,
+          "originalLookups": 1,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 90539,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        }
+      },
+      "bleedUnique": {
+        "name": "bleed-export-unique-500",
+        "count": 500,
+        "wallTimeMs": {
+          "baseline": 5325.443889,
+          "optimized": 4134.119597000001,
+          "deltaPercent": -22.37
+        },
+        "cpuUserMs": {
+          "baseline": 5407.435,
+          "optimized": 5683.727,
+          "deltaPercent": 5.11
+        },
+        "cpuSystemMs": {
+          "baseline": 371.47,
+          "optimized": 434.628,
+          "deltaPercent": 17
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 331100160,
+          "optimized": 310673408,
+          "deltaPercent": -6.17
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 55986056,
+          "optimized": 56490080,
+          "deltaPercent": 0.9
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 1685.4298559999988,
+          "optimized": 1986.712176000001,
+          "deltaPercent": 17.88
+        },
+        "baselineDetails": {
+          "derivedResults": 500,
+          "bleedEngineCalls": 500,
+          "cacheHits": 0,
+          "cacheMisses": 500,
+          "candidateLookups": 500,
+          "originalLookups": 500,
+          "peakBleedConcurrency": 1,
+          "pdfBytes": 10610692,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        },
+        "optimizedDetails": {
+          "derivedResults": 500,
+          "bleedEngineCalls": 500,
+          "cacheHits": 0,
+          "cacheMisses": 500,
+          "candidateLookups": 500,
+          "originalLookups": 500,
+          "peakBleedConcurrency": 2,
+          "pdfBytes": 10610692,
+          "sourceRasterSize": {
+            "width": 96,
+            "height": 134
+          }
+        }
+      }
+    },
+    {
+      "count": 1000,
+      "import": {
+        "name": "import-decklist-1000",
+        "count": 1000,
+        "wallTimeMs": {
+          "baseline": 4.405594999999721,
+          "optimized": 4.690745000000334,
+          "deltaPercent": 6.47
+        },
+        "cpuUserMs": {
+          "baseline": 4.399,
+          "optimized": 4.711,
+          "deltaPercent": 7.09
+        },
+        "cpuSystemMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 155742208,
+          "optimized": 155680768,
+          "deltaPercent": -0.04
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 54559216,
+          "optimized": 49336256,
+          "deltaPercent": -9.57
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "entries": 1000,
+          "errors": 0,
+          "networkRequests": 0
+        },
+        "optimizedDetails": {
+          "entries": 1000,
+          "errors": 0,
+          "networkRequests": 0
+        }
+      },
+      "workingSetBuild": {
+        "name": "working-set-build-1000",
+        "count": 1000,
+        "wallTimeMs": {
+          "baseline": 11.40905900000007,
+          "optimized": 8.66979399999991,
+          "deltaPercent": -24.01
+        },
+        "cpuUserMs": {
+          "baseline": 13.116,
+          "optimized": 9.303,
+          "deltaPercent": -29.07
+        },
+        "cpuSystemMs": {
+          "baseline": 0.059,
+          "optimized": 0,
+          "deltaPercent": -100
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 156004352,
+          "optimized": 155942912,
+          "deltaPercent": -0.04
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 55319368,
+          "optimized": 54333392,
+          "deltaPercent": -1.78
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "entries": 1000,
+          "physicalCards": 1000
+        },
+        "optimizedDetails": {
+          "entries": 1000,
+          "physicalCards": 1000
+        }
+      },
+      "workingSetSSR": {
+        "name": "working-set-server-render-1000",
+        "count": 1000,
+        "wallTimeMs": {
+          "baseline": 143.92022700000007,
+          "optimized": 143.8078989999999,
+          "deltaPercent": -0.08
+        },
+        "cpuUserMs": {
+          "baseline": 155.149,
+          "optimized": 163.781,
+          "deltaPercent": 5.56
+        },
+        "cpuSystemMs": {
+          "baseline": 21.343,
+          "optimized": 19.829,
+          "deltaPercent": -7.09
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 167415808,
+          "optimized": 167514112,
+          "deltaPercent": 0.06
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 62239944,
+          "optimized": 60971752,
+          "deltaPercent": -2.04
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "markupCharacters": 1392118,
+          "renderedRows": 1000,
+          "renderedButtons": 7000
+        },
+        "optimizedDetails": {
+          "markupCharacters": 1392118,
+          "renderedRows": 1000,
+          "renderedButtons": 7000
+        }
+      },
+      "artworkPickerSSR": {
+        "name": "artwork-gallery-server-render-1000",
+        "count": 1000,
+        "wallTimeMs": {
+          "baseline": 110.51699400000007,
+          "optimized": 126.74132800000007,
+          "deltaPercent": 14.68
+        },
+        "cpuUserMs": {
+          "baseline": 149.514,
+          "optimized": 174.408,
+          "deltaPercent": 16.65
+        },
+        "cpuSystemMs": {
+          "baseline": 8.096,
+          "optimized": 7.259,
+          "deltaPercent": -10.34
+        },
+        "rssPeakSampledBytes": {
+          "baseline": 173981696,
+          "optimized": 173903872,
+          "deltaPercent": -0.04
+        },
+        "heapPeakSampledBytes": {
+          "baseline": 72611064,
+          "optimized": 69373184,
+          "deltaPercent": -4.46
+        },
+        "peakEventLoopDelayMs": {
+          "baseline": 0,
+          "optimized": 0,
+          "deltaPercent": null
+        },
+        "baselineDetails": {
+          "markupCharacters": 511935,
+          "renderedCandidates": 1000,
+          "renderedPreviewImages": 1000,
+          "originalBytesLoaded": 0
+        },
+        "optimizedDetails": {
+          "markupCharacters": 511935,
+          "renderedCandidates": 1000,
+          "renderedPreviewImages": 1000,
+          "originalBytesLoaded": 0
+        }
+      },
+      "projectsSSR": null,
+      "pdfRepeated": null,
+      "pdfUnique": null,
+      "bleedRepeated": null,
+      "bleedUnique": null
+    }
+  ],
+  "pdfResourceDedupe": [
+    {
+      "count": 9,
+      "repeatedArtwork": {
+        "uses": 9,
+        "embedsOrImageXObjectsBefore": 9,
+        "embedsOrImageXObjectsAfter": 1,
+        "jpegEmbedCallsBefore": 9,
+        "jpegEmbedCallsAfter": 1,
+        "pagesBefore": 1,
+        "pagesAfter": 1,
+        "pdfBytesBefore": 474793,
+        "pdfBytesAfter": 53646,
+        "wallTimeMsBefore": 4.264031999999133,
+        "wallTimeMsAfter": 4.630224000000453,
+        "drawsAfter": 9,
+        "drawInvariantEvidence": "tests/pdf-engine/pdf-engine.test.ts: repeated JPEG resource keeps all physical draw placements"
+      },
+      "uniqueArtwork": {
+        "uniqueImagesBefore": 9,
+        "uniqueImagesAfter": 9,
+        "pdfBytesBefore": 482722,
+        "pdfBytesAfter": 482722,
+        "wallTimeMsBefore": 4.322120000000723,
+        "wallTimeMsAfter": 4.518436999998812
+      }
+    },
+    {
+      "count": 100,
+      "repeatedArtwork": {
+        "uses": 100,
+        "embedsOrImageXObjectsBefore": 100,
+        "embedsOrImageXObjectsAfter": 1,
+        "jpegEmbedCallsBefore": 100,
+        "jpegEmbedCallsAfter": 1,
+        "pagesBefore": 12,
+        "pagesAfter": 12,
+        "pdfBytesBefore": 4371352,
+        "pdfBytesAfter": 48334,
+        "wallTimeMsBefore": 29.78123499999856,
+        "wallTimeMsAfter": 20.85021599999891,
+        "drawsAfter": 100,
+        "drawInvariantEvidence": "tests/pdf-engine/pdf-engine.test.ts: repeated JPEG resource keeps all physical draw placements"
+      },
+      "uniqueArtwork": {
+        "uniqueImagesBefore": 100,
+        "uniqueImagesAfter": 100,
+        "pdfBytesBefore": 5171710,
+        "pdfBytesAfter": 5171710,
+        "wallTimeMsBefore": 42.277296000000206,
+        "wallTimeMsAfter": 50.017744000000675
+      }
+    },
+    {
+      "count": 500,
+      "repeatedArtwork": {
+        "uses": 500,
+        "embedsOrImageXObjectsBefore": 500,
+        "embedsOrImageXObjectsAfter": 1,
+        "jpegEmbedCallsBefore": 500,
+        "jpegEmbedCallsAfter": 1,
+        "pagesBefore": 56,
+        "pagesAfter": 56,
+        "pdfBytesBefore": 19632382,
+        "pdfBytesAfter": 59466,
+        "wallTimeMsBefore": 197.76765499999965,
+        "wallTimeMsAfter": 131.70154200000252,
+        "drawsAfter": 500,
+        "drawInvariantEvidence": "tests/pdf-engine/pdf-engine.test.ts: repeated JPEG resource keeps all physical draw placements"
+      },
+      "uniqueArtwork": {
+        "uniqueImagesBefore": 500,
+        "uniqueImagesAfter": 500,
+        "pdfBytesBefore": 25530919,
+        "pdfBytesAfter": 25530919,
+        "wallTimeMsBefore": 225.87295000000086,
+        "wallTimeMsAfter": 278.8097620000008
+      }
+    }
+  ],
+  "bleedExports": [
+    {
+      "name": "bleed-export-repeated-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 1147.6916499999998,
+        "optimized": 370.69261599999936,
+        "deltaPercent": -67.7
+      },
+      "cpuUserMs": {
+        "baseline": 1410.95,
+        "optimized": 490.807,
+        "deltaPercent": -65.21
+      },
+      "cpuSystemMs": {
+        "baseline": 48.098,
+        "optimized": 13.977,
+        "deltaPercent": -70.94
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 287125504,
+        "optimized": 247881728,
+        "deltaPercent": -13.67
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 42856392,
+        "optimized": 44916656,
+        "deltaPercent": 4.81
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 66.5388780000003,
+        "optimized": 72.98910700000033,
+        "deltaPercent": 9.69
+      },
+      "baselineDetails": {
+        "derivedResults": 9,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2696225,
+        "sourceRasterSize": {
+          "width": 745,
+          "height": 1040
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 9,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 1,
+        "originalLookups": 1,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 301246,
+        "sourceRasterSize": {
+          "width": 745,
+          "height": 1040
+        }
+      }
+    },
+    {
+      "name": "bleed-export-unique-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 2017.8030200000003,
+        "optimized": 1790.444214,
+        "deltaPercent": -11.27
+      },
+      "cpuUserMs": {
+        "baseline": 2361.092,
+        "optimized": 2295.034,
+        "deltaPercent": -2.8
+      },
+      "cpuSystemMs": {
+        "baseline": 116.117,
+        "optimized": 82.802,
+        "deltaPercent": -28.69
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 290271232,
+        "optimized": 287010816,
+        "deltaPercent": -1.12
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 44682360,
+        "optimized": 45160344,
+        "deltaPercent": 1.07
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 92.50473099999999,
+        "optimized": 99.03973299999961,
+        "deltaPercent": 7.06
+      },
+      "baselineDetails": {
+        "derivedResults": 9,
+        "bleedEngineCalls": 9,
+        "cacheHits": 0,
+        "cacheMisses": 9,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2655990,
+        "sourceRasterSize": {
+          "width": 745,
+          "height": 1040
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 9,
+        "bleedEngineCalls": 9,
+        "cacheHits": 0,
+        "cacheMisses": 9,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "peakBleedConcurrency": 2,
+        "pdfBytes": 2655990,
+        "sourceRasterSize": {
+          "width": 745,
+          "height": 1040
+        }
+      }
+    },
+    {
+      "name": "bleed-export-repeated-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 407.2411240000001,
+        "optimized": 75.84035899999981,
+        "deltaPercent": -81.38
+      },
+      "cpuUserMs": {
+        "baseline": 575.002,
+        "optimized": 130.777,
+        "deltaPercent": -77.26
+      },
+      "cpuSystemMs": {
+        "baseline": 11.71,
+        "optimized": 4.84,
+        "deltaPercent": -58.67
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 273817600,
+        "optimized": 270536704,
+        "deltaPercent": -1.2
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 36111960,
+        "optimized": 44776080,
+        "deltaPercent": 23.99
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 361.834331,
+        "optimized": 0.044411000000764034,
+        "deltaPercent": -99.99
+      },
+      "baselineDetails": {
+        "derivedResults": 100,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2421522,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 100,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 1,
+        "originalLookups": 1,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 38197,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      }
+    },
+    {
+      "name": "bleed-export-unique-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 1147.9889170000006,
+        "optimized": 812.9988589999994,
+        "deltaPercent": -29.18
+      },
+      "cpuUserMs": {
+        "baseline": 1315.087,
+        "optimized": 1224.119,
+        "deltaPercent": -6.92
+      },
+      "cpuSystemMs": {
+        "baseline": 68.41,
+        "optimized": 82.412,
+        "deltaPercent": 20.47
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 269209600,
+        "optimized": 271323136,
+        "deltaPercent": 0.79
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 47467152,
+        "optimized": 47091296,
+        "deltaPercent": -0.79
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 427.45732899999894,
+        "optimized": 362.6182399999998,
+        "deltaPercent": -15.17
+      },
+      "baselineDetails": {
+        "derivedResults": 100,
+        "bleedEngineCalls": 100,
+        "cacheHits": 0,
+        "cacheMisses": 100,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2120863,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 100,
+        "bleedEngineCalls": 100,
+        "cacheHits": 0,
+        "cacheMisses": 100,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "peakBleedConcurrency": 2,
+        "pdfBytes": 2120864,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      }
+    },
+    {
+      "name": "bleed-export-repeated-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 1946.161572000001,
+        "optimized": 247.01770699999906,
+        "deltaPercent": -87.31
+      },
+      "cpuUserMs": {
+        "baseline": 2355.044,
+        "optimized": 432,
+        "deltaPercent": -81.66
+      },
+      "cpuSystemMs": {
+        "baseline": 52.62,
+        "optimized": 2.268,
+        "deltaPercent": -95.69
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 300429312,
+        "optimized": 271978496,
+        "deltaPercent": -9.47
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 48882896,
+        "optimized": 48340424,
+        "deltaPercent": -1.11
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 1802.255169,
+        "optimized": 207.56362699999954,
+        "deltaPercent": -88.48
+      },
+      "baselineDetails": {
+        "derivedResults": 500,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 11536046,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 500,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 1,
+        "originalLookups": 1,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 90539,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      }
+    },
+    {
+      "name": "bleed-export-unique-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 5325.443889,
+        "optimized": 4134.119597000001,
+        "deltaPercent": -22.37
+      },
+      "cpuUserMs": {
+        "baseline": 5407.435,
+        "optimized": 5683.727,
+        "deltaPercent": 5.11
+      },
+      "cpuSystemMs": {
+        "baseline": 371.47,
+        "optimized": 434.628,
+        "deltaPercent": 17
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 331100160,
+        "optimized": 310673408,
+        "deltaPercent": -6.17
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 55986056,
+        "optimized": 56490080,
+        "deltaPercent": 0.9
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 1685.4298559999988,
+        "optimized": 1986.712176000001,
+        "deltaPercent": 17.88
+      },
+      "baselineDetails": {
+        "derivedResults": 500,
+        "bleedEngineCalls": 500,
+        "cacheHits": 0,
+        "cacheMisses": 500,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 10610692,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 500,
+        "bleedEngineCalls": 500,
+        "cacheHits": 0,
+        "cacheMisses": 500,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "peakBleedConcurrency": 2,
+        "pdfBytes": 10610692,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      }
+    }
+  ],
+  "bleedCache": {
+    "cold": {
+      "name": "bleed-cache-cold",
+      "count": 1,
+      "wallTimeMs": {
+        "baseline": 118.1501229999999,
+        "optimized": 113.42195600000014,
+        "deltaPercent": -4
+      },
+      "cpuUserMs": {
+        "baseline": 119.112,
+        "optimized": 119.729,
+        "deltaPercent": 0.52
+      },
+      "cpuSystemMs": {
+        "baseline": 12.679,
+        "optimized": 11.011,
+        "deltaPercent": -13.16
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 184791040,
+        "optimized": 181477376,
+        "deltaPercent": -1.79
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 46409256,
+        "optimized": 46537584,
+        "deltaPercent": 0.28
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 84.7500570000002,
+        "optimized": 82.73644599999989,
+        "deltaPercent": -2.38
+      },
+      "baselineDetails": {
+        "cacheStatus": "miss",
+        "outputBytes": 283012
+      },
+      "optimizedDetails": {
+        "cacheStatus": "miss",
+        "outputBytes": 283012
+      }
+    },
+    "warm": {
+      "name": "bleed-cache-warm",
+      "count": 1,
+      "wallTimeMs": {
+        "baseline": 10.963344000000234,
+        "optimized": 2.22272699999985,
+        "deltaPercent": -79.73
+      },
+      "cpuUserMs": {
+        "baseline": 4.805,
+        "optimized": 2.379,
+        "deltaPercent": -50.49
+      },
+      "cpuSystemMs": {
+        "baseline": 4.929,
+        "optimized": 0,
+        "deltaPercent": -100
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 184680448,
+        "optimized": 181739520,
+        "deltaPercent": -1.59
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 46485408,
+        "optimized": 46594216,
+        "deltaPercent": 0.23
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0.9358569999999418,
+        "optimized": 0,
+        "deltaPercent": -100
+      },
+      "baselineDetails": {
+        "cacheStatus": "hit",
+        "outputBytes": 283012
+      },
+      "optimizedDetails": {
+        "cacheStatus": "hit",
+        "outputBytes": 283012
+      }
+    }
+  },
+  "nativeConcurrency": [
+    {
+      "concurrency": 1,
+      "baseline": {
+        "configuredConcurrency": 1,
+        "peakConcurrency": 1,
+        "sharpConcurrency": 1
+      },
+      "optimized": {
+        "configuredConcurrency": 1,
+        "peakConcurrency": 1,
+        "sharpConcurrency": 1
+      },
+      "baselineWallTimeMs": 926.4983380000003,
+      "optimizedWallTimeMs": 969.272172,
+      "productionQueueMaximum": 2
+    },
+    {
+      "concurrency": 2,
+      "baseline": {
+        "configuredConcurrency": 2,
+        "peakConcurrency": 2,
+        "sharpConcurrency": 1
+      },
+      "optimized": {
+        "configuredConcurrency": 2,
+        "peakConcurrency": 2,
+        "sharpConcurrency": 1
+      },
+      "baselineWallTimeMs": 840.8619960000001,
+      "optimizedWallTimeMs": 907.5945790000001,
+      "productionQueueMaximum": 2
+    },
+    {
+      "concurrency": 4,
+      "baseline": {
+        "configuredConcurrency": 4,
+        "peakConcurrency": 4,
+        "sharpConcurrency": 1
+      },
+      "optimized": {
+        "configuredConcurrency": 4,
+        "peakConcurrency": 4,
+        "sharpConcurrency": 1
+      },
+      "baselineWallTimeMs": 792.0379419999999,
+      "optimizedWallTimeMs": 779.3105590000005,
+      "productionQueueMaximum": 2
+    }
+  ],
+  "sequentialExports": {
+    "name": "pdf-export-sequential-500-unique-three-times",
+    "count": 1500,
+    "wallTimeMs": {
+      "baseline": 634.1132110000035,
+      "optimized": 622.0079459999979,
+      "deltaPercent": -1.91
+    },
+    "cpuUserMs": {
+      "baseline": 1002.252,
+      "optimized": 1018.839,
+      "deltaPercent": 1.65
+    },
+    "cpuSystemMs": {
+      "baseline": 161.518,
+      "optimized": 126.144,
+      "deltaPercent": -21.9
+    },
+    "rssPeakSampledBytes": {
+      "baseline": 459083776,
+      "optimized": 433958912,
+      "deltaPercent": -5.47
+    },
+    "heapPeakSampledBytes": {
+      "baseline": 49322624,
+      "optimized": 50579912,
+      "deltaPercent": 2.55
+    },
+    "peakEventLoopDelayMs": {
+      "baseline": 82.82438399999955,
+      "optimized": 86.15931399999681,
+      "deltaPercent": 4.03
+    },
+    "baselineDetails": {
+      "exports": 3,
+      "cardsPerExport": 500,
+      "pdfBytesPerExport": [
+        25602162,
+        25602162,
+        25602162
+      ],
+      "memoryAfterExport": [
+        {
+          "rssBytes": 431263744,
+          "heapUsedBytes": 37825896
+        },
+        {
+          "rssBytes": 458919936,
+          "heapUsedBytes": 39709448
+        },
+        {
+          "rssBytes": 459083776,
+          "heapUsedBytes": 37891536
+        }
+      ],
+      "candidateLookups": 1500,
+      "originalLookups": 1500,
+      "cacheScope": "each export independently; no shared candidate/original memo buffers"
+    },
+    "optimizedDetails": {
+      "exports": 3,
+      "cardsPerExport": 500,
+      "pdfBytesPerExport": [
+        25602162,
+        25602162,
+        25602162
+      ],
+      "memoryAfterExport": [
+        {
+          "rssBytes": 402632704,
+          "heapUsedBytes": 37957840
+        },
+        {
+          "rssBytes": 428322816,
+          "heapUsedBytes": 38472000
+        },
+        {
+          "rssBytes": 433958912,
+          "heapUsedBytes": 38080704
+        }
+      ],
+      "candidateLookups": 1500,
+      "originalLookups": 1500,
+      "cacheScope": "each export independently; no shared candidate/original memo buffers"
+    }
+  },
+  "projectIncrementalCandidate": {
+    "name": "project-snapshot-single-card-change-500",
+    "count": 500,
+    "wallTimeMs": {
+      "baseline": 32.63297499999999,
+      "optimized": 36.94126099999994,
+      "deltaPercent": 13.2
+    },
+    "cpuUserMs": {
+      "baseline": 32.452,
+      "optimized": 39.753,
+      "deltaPercent": 22.5
+    },
+    "cpuSystemMs": {
+      "baseline": 2.096,
+      "optimized": 3.711,
+      "deltaPercent": 77.05
+    },
+    "rssPeakSampledBytes": {
+      "baseline": 152092672,
+      "optimized": 148635648,
+      "deltaPercent": -2.27
+    },
+    "heapPeakSampledBytes": {
+      "baseline": 42405568,
+      "optimized": 50373008,
+      "deltaPercent": 18.79
+    },
+    "peakEventLoopDelayMs": {
+      "baseline": 0,
+      "optimized": 0,
+      "deltaPercent": null
+    },
+    "baselineDetails": {
+      "snapshotCharacters": 310818,
+      "changedEntries": 1,
+      "entriesSerialized": 500
+    },
+    "optimizedDetails": {
+      "snapshotCharacters": 310818,
+      "changedEntries": 1,
+      "entriesSerialized": 500
+    }
+  },
+  "cancellation": [
+    {
+      "name": "import-cancellation-after-first-root",
+      "count": 2,
+      "wallTimeMs": {
+        "baseline": 1.9693849999998747,
+        "optimized": 1.8486830000001646,
+        "deltaPercent": -6.13
+      },
+      "cpuUserMs": {
+        "baseline": 1.979,
+        "optimized": 1.649,
+        "deltaPercent": -16.68
+      },
+      "cpuSystemMs": {
+        "baseline": 0,
+        "optimized": 0.043,
+        "deltaPercent": null
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 167415808,
+        "optimized": 167514112,
+        "deltaPercent": 0.06
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 62295320,
+        "optimized": 61028104,
+        "deltaPercent": -2.03
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "cancelled": true,
+        "errorName": "ImportCancelledError",
+        "partialResultReturned": false,
+        "progressEvents": 1
+      },
+      "optimizedDetails": {
+        "cancelled": true,
+        "errorName": "ImportCancelledError",
+        "partialResultReturned": false,
+        "progressEvents": 1
+      }
+    },
+    {
+      "name": "pdf-export-cancellation-after-first-card",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 1.0312689999991562,
+        "optimized": 2.212546000002476,
+        "deltaPercent": 114.55
+      },
+      "cpuUserMs": {
+        "baseline": 1.041,
+        "optimized": 2.214,
+        "deltaPercent": 112.68
+      },
+      "cpuSystemMs": {
+        "baseline": 0.001,
+        "optimized": 0,
+        "deltaPercent": -100
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 459214848,
+        "optimized": 433958912,
+        "deltaPercent": -5.5
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 37959872,
+        "optimized": 38230736,
+        "deltaPercent": 0.71
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "cancelled": true,
+        "errorName": "CardExportServiceError",
+        "partialPdfReturned": false,
+        "candidateLookups": 1,
+        "originalLookups": 1
+      },
+      "optimizedDetails": {
+        "cancelled": true,
+        "errorName": "CardExportServiceError",
+        "partialPdfReturned": false,
+        "candidateLookups": 1,
+        "originalLookups": 1
+      }
+    }
+  ],
+  "uiBrowser": {
+    "available": false,
+    "browserFound": false,
+    "playwrightFound": false,
+    "virtualizationImplemented": false,
+    "note": "No browser virtualizer was added; SSR results were not used as a browser benchmark substitute."
+  },
+  "allScenarioComparisons": [
+    {
+      "name": "import-decklist-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 7.301285000000007,
+        "optimized": 7.556101000000126,
+        "deltaPercent": 3.49
+      },
+      "cpuUserMs": {
+        "baseline": 6.265,
+        "optimized": 7.615,
+        "deltaPercent": 21.55
+      },
+      "cpuSystemMs": {
+        "baseline": 0.994,
+        "optimized": 0,
+        "deltaPercent": -100
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 127201280,
+        "optimized": 124764160,
+        "deltaPercent": -1.92
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 35587472,
+        "optimized": 35114704,
+        "deltaPercent": -1.33
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "entries": 9,
+        "errors": 0,
+        "networkRequests": 0
+      },
+      "optimizedDetails": {
+        "entries": 9,
+        "errors": 0,
+        "networkRequests": 0
+      }
+    },
+    {
+      "name": "preview-json-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 0.24516399999993155,
+        "optimized": 0.24663799999962066,
+        "deltaPercent": 0.6
+      },
+      "cpuUserMs": {
+        "baseline": 0.257,
+        "optimized": 0.227,
+        "deltaPercent": -11.67
+      },
+      "cpuSystemMs": {
+        "baseline": 0,
+        "optimized": 0.031,
+        "deltaPercent": null
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 127201280,
+        "optimized": 124764160,
+        "deltaPercent": -1.92
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 35607728,
+        "optimized": 35134960,
+        "deltaPercent": -1.33
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "responseCharacters": 4320,
+        "entries": 9
+      },
+      "optimizedDetails": {
+        "responseCharacters": 4320,
+        "entries": 9
+      }
+    },
+    {
+      "name": "working-set-build-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 2.113943000000063,
+        "optimized": 1.890378999999939,
+        "deltaPercent": -10.58
+      },
+      "cpuUserMs": {
+        "baseline": 1.875,
+        "optimized": 1.904,
+        "deltaPercent": 1.55
+      },
+      "cpuSystemMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 127201280,
+        "optimized": 124895232,
+        "deltaPercent": -1.81
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 35720056,
+        "optimized": 35247280,
+        "deltaPercent": -1.32
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "entries": 9,
+        "physicalCards": 9
+      },
+      "optimizedDetails": {
+        "entries": 9,
+        "physicalCards": 9
+      }
+    },
+    {
+      "name": "project-snapshot-key-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 7.071889999999939,
+        "optimized": 6.073014999999941,
+        "deltaPercent": -14.12
+      },
+      "cpuUserMs": {
+        "baseline": 6.146,
+        "optimized": 6.071,
+        "deltaPercent": -1.22
+      },
+      "cpuSystemMs": {
+        "baseline": 0.038,
+        "optimized": 0,
+        "deltaPercent": -100
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 127594496,
+        "optimized": 124895232,
+        "deltaPercent": -2.12
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 36387408,
+        "optimized": 35902312,
+        "deltaPercent": -1.33
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "snapshotCharacters": 6482,
+        "entries": 9
+      },
+      "optimizedDetails": {
+        "snapshotCharacters": 6482,
+        "entries": 9
+      }
+    },
+    {
+      "name": "working-set-server-render-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 19.318346999999903,
+        "optimized": 19.067775999999867,
+        "deltaPercent": -1.3
+      },
+      "cpuUserMs": {
+        "baseline": 18.566,
+        "optimized": 19.127,
+        "deltaPercent": 3.02
+      },
+      "cpuSystemMs": {
+        "baseline": 0.902,
+        "optimized": 0.893,
+        "deltaPercent": -1
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 128643072,
+        "optimized": 125419520,
+        "deltaPercent": -2.51
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 37442320,
+        "optimized": 36952728,
+        "deltaPercent": -1.31
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "markupCharacters": 12504,
+        "renderedRows": 9,
+        "renderedButtons": 63
+      },
+      "optimizedDetails": {
+        "markupCharacters": 12504,
+        "renderedRows": 9,
+        "renderedButtons": 63
+      }
+    },
+    {
+      "name": "projects-list-server-render-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 11.326545000000124,
+        "optimized": 11.448639000000185,
+        "deltaPercent": 1.08
+      },
+      "cpuUserMs": {
+        "baseline": 9.705,
+        "optimized": 11.48,
+        "deltaPercent": 18.29
+      },
+      "cpuSystemMs": {
+        "baseline": 0.936,
+        "optimized": 0.778,
+        "deltaPercent": -16.88
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 129429504,
+        "optimized": 125681664,
+        "deltaPercent": -2.9
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 38195400,
+        "optimized": 37705120,
+        "deltaPercent": -1.28
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "markupCharacters": 8315,
+        "renderedRows": 9,
+        "renderedButtons": 30
+      },
+      "optimizedDetails": {
+        "markupCharacters": 8315,
+        "renderedRows": 9,
+        "renderedButtons": 30
+      }
+    },
+    {
+      "name": "import-decklist-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 2.9893039999999473,
+        "optimized": 2.954330000000027,
+        "deltaPercent": -1.17
+      },
+      "cpuUserMs": {
+        "baseline": 3.805,
+        "optimized": 4.611,
+        "deltaPercent": 21.18
+      },
+      "cpuSystemMs": {
+        "baseline": 0.935,
+        "optimized": 0.127,
+        "deltaPercent": -86.42
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 129822720,
+        "optimized": 125943808,
+        "deltaPercent": -2.99
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 38464544,
+        "optimized": 37969456,
+        "deltaPercent": -1.29
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "entries": 100,
+        "errors": 0,
+        "networkRequests": 0
+      },
+      "optimizedDetails": {
+        "entries": 100,
+        "errors": 0,
+        "networkRequests": 0
+      }
+    },
+    {
+      "name": "preview-json-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 0.2855380000000878,
+        "optimized": 0.30232999999998356,
+        "deltaPercent": 5.88
+      },
+      "cpuUserMs": {
+        "baseline": 0.401,
+        "optimized": 0.946,
+        "deltaPercent": 135.91
+      },
+      "cpuSystemMs": {
+        "baseline": 0.038,
+        "optimized": 0.068,
+        "deltaPercent": 78.95
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 129822720,
+        "optimized": 125943808,
+        "deltaPercent": -2.99
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 38575768,
+        "optimized": 38053664,
+        "deltaPercent": -1.35
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "responseCharacters": 31899,
+        "entries": 100
+      },
+      "optimizedDetails": {
+        "responseCharacters": 31899,
+        "entries": 100
+      }
+    },
+    {
+      "name": "working-set-build-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 1.4803499999998166,
+        "optimized": 1.8266920000000937,
+        "deltaPercent": 23.4
+      },
+      "cpuUserMs": {
+        "baseline": 0.782,
+        "optimized": 1.555,
+        "deltaPercent": 98.85
+      },
+      "cpuSystemMs": {
+        "baseline": 0.942,
+        "optimized": 0.984,
+        "deltaPercent": 4.46
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 130347008,
+        "optimized": 126468096,
+        "deltaPercent": -2.98
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 39036784,
+        "optimized": 38514680,
+        "deltaPercent": -1.34
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "entries": 100,
+        "physicalCards": 100
+      },
+      "optimizedDetails": {
+        "entries": 100,
+        "physicalCards": 100
+      }
+    },
+    {
+      "name": "project-snapshot-key-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 17.935568000000103,
+        "optimized": 17.6409749999998,
+        "deltaPercent": -1.64
+      },
+      "cpuUserMs": {
+        "baseline": 24.647,
+        "optimized": 22.88,
+        "deltaPercent": -7.17
+      },
+      "cpuSystemMs": {
+        "baseline": 4.084,
+        "optimized": 5.748,
+        "deltaPercent": 40.74
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 135196672,
+        "optimized": 130818048,
+        "deltaPercent": -3.24
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 43376272,
+        "optimized": 43499928,
+        "deltaPercent": 0.29
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "snapshotCharacters": 62810,
+        "entries": 100
+      },
+      "optimizedDetails": {
+        "snapshotCharacters": 62810,
+        "entries": 100
+      }
+    },
+    {
+      "name": "working-set-server-render-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 56.74003399999992,
+        "optimized": 63.089268000000175,
+        "deltaPercent": 11.19
+      },
+      "cpuUserMs": {
+        "baseline": 91.559,
+        "optimized": 95.158,
+        "deltaPercent": 3.93
+      },
+      "cpuSystemMs": {
+        "baseline": 6.8,
+        "optimized": 13.65,
+        "deltaPercent": 100.74
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 140931072,
+        "optimized": 137654272,
+        "deltaPercent": -2.33
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 43377512,
+        "optimized": 43501168,
+        "deltaPercent": 0.29
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "markupCharacters": 137015,
+        "renderedRows": 100,
+        "renderedButtons": 700
+      },
+      "optimizedDetails": {
+        "markupCharacters": 137015,
+        "renderedRows": 100,
+        "renderedButtons": 700
+      }
+    },
+    {
+      "name": "projects-list-server-render-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 23.953407999999854,
+        "optimized": 24.856846000000132,
+        "deltaPercent": 3.77
+      },
+      "cpuUserMs": {
+        "baseline": 22.307,
+        "optimized": 28.891,
+        "deltaPercent": 29.52
+      },
+      "cpuSystemMs": {
+        "baseline": 2.795,
+        "optimized": 0.022,
+        "deltaPercent": -99.21
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 142798848,
+        "optimized": 138309632,
+        "deltaPercent": -3.14
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 41799064,
+        "optimized": 41706200,
+        "deltaPercent": -0.22
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "markupCharacters": 59360,
+        "renderedRows": 100,
+        "renderedButtons": 303
+      },
+      "optimizedDetails": {
+        "markupCharacters": 59360,
+        "renderedRows": 100,
+        "renderedButtons": 303
+      }
+    },
+    {
+      "name": "import-decklist-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 3.95302700000002,
+        "optimized": 4.5323419999999714,
+        "deltaPercent": 14.65
+      },
+      "cpuUserMs": {
+        "baseline": 5.032,
+        "optimized": 5.926,
+        "deltaPercent": 17.77
+      },
+      "cpuSystemMs": {
+        "baseline": 1.186,
+        "optimized": 1.001,
+        "deltaPercent": -15.6
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 143847424,
+        "optimized": 139358208,
+        "deltaPercent": -3.12
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 42862856,
+        "optimized": 42766456,
+        "deltaPercent": -0.22
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "entries": 500,
+        "errors": 0,
+        "networkRequests": 0
+      },
+      "optimizedDetails": {
+        "entries": 500,
+        "errors": 0,
+        "networkRequests": 0
+      }
+    },
+    {
+      "name": "preview-json-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 1.2227619999998751,
+        "optimized": 1.2120149999996102,
+        "deltaPercent": -0.88
+      },
+      "cpuUserMs": {
+        "baseline": 1.052,
+        "optimized": 0.474,
+        "deltaPercent": -54.94
+      },
+      "cpuSystemMs": {
+        "baseline": 0.03,
+        "optimized": 0.748,
+        "deltaPercent": 2393.33
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 144240640,
+        "optimized": 139751424,
+        "deltaPercent": -3.11
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 43244928,
+        "optimized": 43148528,
+        "deltaPercent": -0.22
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "responseCharacters": 154300,
+        "entries": 500
+      },
+      "optimizedDetails": {
+        "responseCharacters": 154300,
+        "entries": 500
+      }
+    },
+    {
+      "name": "working-set-build-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 7.069295000000238,
+        "optimized": 7.326206000000184,
+        "deltaPercent": 3.63
+      },
+      "cpuUserMs": {
+        "baseline": 5.867,
+        "optimized": 7.23,
+        "deltaPercent": 23.23
+      },
+      "cpuSystemMs": {
+        "baseline": 1.877,
+        "optimized": 1.706,
+        "deltaPercent": -9.11
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 146468864,
+        "optimized": 141979648,
+        "deltaPercent": -3.06
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 45509856,
+        "optimized": 45419416,
+        "deltaPercent": -0.2
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "entries": 500,
+        "physicalCards": 500
+      },
+      "optimizedDetails": {
+        "entries": 500,
+        "physicalCards": 500
+      }
+    },
+    {
+      "name": "project-snapshot-key-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 39.77415999999994,
+        "optimized": 49.33604100000002,
+        "deltaPercent": 24.04
+      },
+      "cpuUserMs": {
+        "baseline": 44.851,
+        "optimized": 49.305,
+        "deltaPercent": 9.93
+      },
+      "cpuSystemMs": {
+        "baseline": 9.818,
+        "optimized": 9.378,
+        "deltaPercent": -4.48
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 151814144,
+        "optimized": 148635648,
+        "deltaPercent": -2.09
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 47920352,
+        "optimized": 50362224,
+        "deltaPercent": 5.1
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "snapshotCharacters": 310810,
+        "entries": 500
+      },
+      "optimizedDetails": {
+        "snapshotCharacters": 310810,
+        "entries": 500
+      }
+    },
+    {
+      "name": "project-snapshot-single-card-change-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 32.63297499999999,
+        "optimized": 36.94126099999994,
+        "deltaPercent": 13.2
+      },
+      "cpuUserMs": {
+        "baseline": 32.452,
+        "optimized": 39.753,
+        "deltaPercent": 22.5
+      },
+      "cpuSystemMs": {
+        "baseline": 2.096,
+        "optimized": 3.711,
+        "deltaPercent": 77.05
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 152092672,
+        "optimized": 148635648,
+        "deltaPercent": -2.27
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 42405568,
+        "optimized": 50373008,
+        "deltaPercent": 18.79
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "snapshotCharacters": 310818,
+        "changedEntries": 1,
+        "entriesSerialized": 500
+      },
+      "optimizedDetails": {
+        "snapshotCharacters": 310818,
+        "changedEntries": 1,
+        "entriesSerialized": 500
+      }
+    },
+    {
+      "name": "working-set-server-render-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 188.68990500000018,
+        "optimized": 190.2082760000003,
+        "deltaPercent": 0.8
+      },
+      "cpuUserMs": {
+        "baseline": 274.141,
+        "optimized": 271.04,
+        "deltaPercent": -1.13
+      },
+      "cpuSystemMs": {
+        "baseline": 11.429,
+        "optimized": 16.32,
+        "deltaPercent": 42.79
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 157024256,
+        "optimized": 154578944,
+        "deltaPercent": -1.56
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 43690640,
+        "optimized": 56256984,
+        "deltaPercent": 28.76
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "markupCharacters": 695615,
+        "renderedRows": 500,
+        "renderedButtons": 3500
+      },
+      "optimizedDetails": {
+        "markupCharacters": 695615,
+        "renderedRows": 500,
+        "renderedButtons": 3500
+      }
+    },
+    {
+      "name": "projects-list-server-render-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 28.188454999999976,
+        "optimized": 30.077802999999676,
+        "deltaPercent": 6.7
+      },
+      "cpuUserMs": {
+        "baseline": 30.926,
+        "optimized": 33.386,
+        "deltaPercent": 7.95
+      },
+      "cpuSystemMs": {
+        "baseline": 1.986,
+        "optimized": 1.879,
+        "deltaPercent": -5.39
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 155742208,
+        "optimized": 155680768,
+        "deltaPercent": -0.04
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 52493696,
+        "optimized": 47289536,
+        "deltaPercent": -9.91
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "markupCharacters": 286960,
+        "renderedRows": 500,
+        "renderedButtons": 1503
+      },
+      "optimizedDetails": {
+        "markupCharacters": 286960,
+        "renderedRows": 500,
+        "renderedButtons": 1503
+      }
+    },
+    {
+      "name": "import-decklist-1000",
+      "count": 1000,
+      "wallTimeMs": {
+        "baseline": 4.405594999999721,
+        "optimized": 4.690745000000334,
+        "deltaPercent": 6.47
+      },
+      "cpuUserMs": {
+        "baseline": 4.399,
+        "optimized": 4.711,
+        "deltaPercent": 7.09
+      },
+      "cpuSystemMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 155742208,
+        "optimized": 155680768,
+        "deltaPercent": -0.04
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 54559216,
+        "optimized": 49336256,
+        "deltaPercent": -9.57
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "entries": 1000,
+        "errors": 0,
+        "networkRequests": 0
+      },
+      "optimizedDetails": {
+        "entries": 1000,
+        "errors": 0,
+        "networkRequests": 0
+      }
+    },
+    {
+      "name": "preview-json-1000",
+      "count": 1000,
+      "wallTimeMs": {
+        "baseline": 2.0544629999999415,
+        "optimized": 1.8158229999999094,
+        "deltaPercent": -11.62
+      },
+      "cpuUserMs": {
+        "baseline": 2.069,
+        "optimized": 1.826,
+        "deltaPercent": -11.74
+      },
+      "cpuSystemMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 156004352,
+        "optimized": 155942912,
+        "deltaPercent": -0.04
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 55318064,
+        "optimized": 50095080,
+        "deltaPercent": -9.44
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "responseCharacters": 307304,
+        "entries": 1000
+      },
+      "optimizedDetails": {
+        "responseCharacters": 307304,
+        "entries": 1000
+      }
+    },
+    {
+      "name": "working-set-build-1000",
+      "count": 1000,
+      "wallTimeMs": {
+        "baseline": 11.40905900000007,
+        "optimized": 8.66979399999991,
+        "deltaPercent": -24.01
+      },
+      "cpuUserMs": {
+        "baseline": 13.116,
+        "optimized": 9.303,
+        "deltaPercent": -29.07
+      },
+      "cpuSystemMs": {
+        "baseline": 0.059,
+        "optimized": 0,
+        "deltaPercent": -100
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 156004352,
+        "optimized": 155942912,
+        "deltaPercent": -0.04
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 55319368,
+        "optimized": 54333392,
+        "deltaPercent": -1.78
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "entries": 1000,
+        "physicalCards": 1000
+      },
+      "optimizedDetails": {
+        "entries": 1000,
+        "physicalCards": 1000
+      }
+    },
+    {
+      "name": "working-set-server-render-1000",
+      "count": 1000,
+      "wallTimeMs": {
+        "baseline": 143.92022700000007,
+        "optimized": 143.8078989999999,
+        "deltaPercent": -0.08
+      },
+      "cpuUserMs": {
+        "baseline": 155.149,
+        "optimized": 163.781,
+        "deltaPercent": 5.56
+      },
+      "cpuSystemMs": {
+        "baseline": 21.343,
+        "optimized": 19.829,
+        "deltaPercent": -7.09
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 167415808,
+        "optimized": 167514112,
+        "deltaPercent": 0.06
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 62239944,
+        "optimized": 60971752,
+        "deltaPercent": -2.04
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "markupCharacters": 1392118,
+        "renderedRows": 1000,
+        "renderedButtons": 7000
+      },
+      "optimizedDetails": {
+        "markupCharacters": 1392118,
+        "renderedRows": 1000,
+        "renderedButtons": 7000
+      }
+    },
+    {
+      "name": "import-cancellation-after-first-root",
+      "count": 2,
+      "wallTimeMs": {
+        "baseline": 1.9693849999998747,
+        "optimized": 1.8486830000001646,
+        "deltaPercent": -6.13
+      },
+      "cpuUserMs": {
+        "baseline": 1.979,
+        "optimized": 1.649,
+        "deltaPercent": -16.68
+      },
+      "cpuSystemMs": {
+        "baseline": 0,
+        "optimized": 0.043,
+        "deltaPercent": null
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 167415808,
+        "optimized": 167514112,
+        "deltaPercent": 0.06
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 62295320,
+        "optimized": 61028104,
+        "deltaPercent": -2.03
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "cancelled": true,
+        "errorName": "ImportCancelledError",
+        "partialResultReturned": false,
+        "progressEvents": 1
+      },
+      "optimizedDetails": {
+        "cancelled": true,
+        "errorName": "ImportCancelledError",
+        "partialResultReturned": false,
+        "progressEvents": 1
+      }
+    },
+    {
+      "name": "artwork-catalog-lookup-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 0.3480139999996936,
+        "optimized": 0.32722599999988233,
+        "deltaPercent": -5.97
+      },
+      "cpuUserMs": {
+        "baseline": 0.322,
+        "optimized": 0.335,
+        "deltaPercent": 4.04
+      },
+      "cpuSystemMs": {
+        "baseline": 0,
+        "optimized": 0.008,
+        "deltaPercent": null
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 167415808,
+        "optimized": 167514112,
+        "deltaPercent": 0.06
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 62317720,
+        "optimized": 61050504,
+        "deltaPercent": -2.03
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "candidatesReturned": 9,
+        "networkRequests": 0
+      },
+      "optimizedDetails": {
+        "candidatesReturned": 9,
+        "networkRequests": 0
+      }
+    },
+    {
+      "name": "artwork-gallery-server-render-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 34.45908300000019,
+        "optimized": 36.16745800000035,
+        "deltaPercent": 4.96
+      },
+      "cpuUserMs": {
+        "baseline": 35.632,
+        "optimized": 36.309,
+        "deltaPercent": 1.9
+      },
+      "cpuSystemMs": {
+        "baseline": 0,
+        "optimized": 2.638,
+        "deltaPercent": null
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 168071168,
+        "optimized": 168300544,
+        "deltaPercent": 0.14
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 64775896,
+        "optimized": 63449968,
+        "deltaPercent": -2.05
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "markupCharacters": 30401,
+        "renderedCandidates": 9,
+        "renderedPreviewImages": 9,
+        "originalBytesLoaded": 0
+      },
+      "optimizedDetails": {
+        "markupCharacters": 30401,
+        "renderedCandidates": 9,
+        "renderedPreviewImages": 9,
+        "originalBytesLoaded": 0
+      }
+    },
+    {
+      "name": "artwork-catalog-lookup-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 0.04641600000013568,
+        "optimized": 0.05556299999989278,
+        "deltaPercent": 19.71
+      },
+      "cpuUserMs": {
+        "baseline": 0.039,
+        "optimized": 0.065,
+        "deltaPercent": 66.67
+      },
+      "cpuSystemMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 168071168,
+        "optimized": 168300544,
+        "deltaPercent": 0.14
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 64805128,
+        "optimized": 63479200,
+        "deltaPercent": -2.05
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "candidatesReturned": 100,
+        "networkRequests": 0
+      },
+      "optimizedDetails": {
+        "candidatesReturned": 100,
+        "networkRequests": 0
+      }
+    },
+    {
+      "name": "artwork-gallery-server-render-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 34.78334300000006,
+        "optimized": 32.552374999999756,
+        "deltaPercent": -6.41
+      },
+      "cpuUserMs": {
+        "baseline": 58.564,
+        "optimized": 56.557,
+        "deltaPercent": -3.43
+      },
+      "cpuSystemMs": {
+        "baseline": 2.637,
+        "optimized": 5.022,
+        "deltaPercent": 90.44
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 168988672,
+        "optimized": 168824832,
+        "deltaPercent": -0.1
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 64808216,
+        "optimized": 63482288,
+        "deltaPercent": -2.05
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "markupCharacters": 74535,
+        "renderedCandidates": 100,
+        "renderedPreviewImages": 100,
+        "originalBytesLoaded": 0
+      },
+      "optimizedDetails": {
+        "markupCharacters": 74535,
+        "renderedCandidates": 100,
+        "renderedPreviewImages": 100,
+        "originalBytesLoaded": 0
+      }
+    },
+    {
+      "name": "artwork-catalog-lookup-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 0.04933099999971091,
+        "optimized": 0.043660999999701744,
+        "deltaPercent": -11.49
+      },
+      "cpuUserMs": {
+        "baseline": 0.049,
+        "optimized": 0.041,
+        "deltaPercent": -16.33
+      },
+      "cpuSystemMs": {
+        "baseline": 0.007,
+        "optimized": 0.008,
+        "deltaPercent": 14.29
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 168988672,
+        "optimized": 168824832,
+        "deltaPercent": -0.1
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 54489584,
+        "optimized": 52780272,
+        "deltaPercent": -3.14
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "candidatesReturned": 500,
+        "networkRequests": 0
+      },
+      "optimizedDetails": {
+        "candidatesReturned": 500,
+        "networkRequests": 0
+      }
+    },
+    {
+      "name": "artwork-gallery-server-render-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 77.98111300000028,
+        "optimized": 88.18949500000008,
+        "deltaPercent": 13.09
+      },
+      "cpuUserMs": {
+        "baseline": 147.363,
+        "optimized": 161.959,
+        "deltaPercent": 9.9
+      },
+      "cpuSystemMs": {
+        "baseline": 5.856,
+        "optimized": 12.591,
+        "deltaPercent": 115.01
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 170876928,
+        "optimized": 169975808,
+        "deltaPercent": -0.53
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 55908520,
+        "optimized": 69052248,
+        "deltaPercent": 23.51
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "markupCharacters": 268935,
+        "renderedCandidates": 500,
+        "renderedPreviewImages": 500,
+        "originalBytesLoaded": 0
+      },
+      "optimizedDetails": {
+        "markupCharacters": 268935,
+        "renderedCandidates": 500,
+        "renderedPreviewImages": 500,
+        "originalBytesLoaded": 0
+      }
+    },
+    {
+      "name": "artwork-catalog-lookup-1000",
+      "count": 1000,
+      "wallTimeMs": {
+        "baseline": 0.06815700000015568,
+        "optimized": 0.06991999999991094,
+        "deltaPercent": 2.59
+      },
+      "cpuUserMs": {
+        "baseline": 0.075,
+        "optimized": 0.062,
+        "deltaPercent": -17.33
+      },
+      "cpuSystemMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 170876928,
+        "optimized": 169975808,
+        "deltaPercent": -0.53
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 56136736,
+        "optimized": 69280544,
+        "deltaPercent": 23.41
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "candidatesReturned": 1000,
+        "networkRequests": 0
+      },
+      "optimizedDetails": {
+        "candidatesReturned": 1000,
+        "networkRequests": 0
+      }
+    },
+    {
+      "name": "artwork-gallery-server-render-1000",
+      "count": 1000,
+      "wallTimeMs": {
+        "baseline": 110.51699400000007,
+        "optimized": 126.74132800000007,
+        "deltaPercent": 14.68
+      },
+      "cpuUserMs": {
+        "baseline": 149.514,
+        "optimized": 174.408,
+        "deltaPercent": 16.65
+      },
+      "cpuSystemMs": {
+        "baseline": 8.096,
+        "optimized": 7.259,
+        "deltaPercent": -10.34
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 173981696,
+        "optimized": 173903872,
+        "deltaPercent": -0.04
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 72611064,
+        "optimized": 69373184,
+        "deltaPercent": -4.46
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "markupCharacters": 511935,
+        "renderedCandidates": 1000,
+        "renderedPreviewImages": 1000,
+        "originalBytesLoaded": 0
+      },
+      "optimizedDetails": {
+        "markupCharacters": 511935,
+        "renderedCandidates": 1000,
+        "renderedPreviewImages": 1000,
+        "originalBytesLoaded": 0
+      }
+    },
+    {
+      "name": "bleed-cache-cold",
+      "count": 1,
+      "wallTimeMs": {
+        "baseline": 118.1501229999999,
+        "optimized": 113.42195600000014,
+        "deltaPercent": -4
+      },
+      "cpuUserMs": {
+        "baseline": 119.112,
+        "optimized": 119.729,
+        "deltaPercent": 0.52
+      },
+      "cpuSystemMs": {
+        "baseline": 12.679,
+        "optimized": 11.011,
+        "deltaPercent": -13.16
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 184791040,
+        "optimized": 181477376,
+        "deltaPercent": -1.79
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 46409256,
+        "optimized": 46537584,
+        "deltaPercent": 0.28
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 84.7500570000002,
+        "optimized": 82.73644599999989,
+        "deltaPercent": -2.38
+      },
+      "baselineDetails": {
+        "cacheStatus": "miss",
+        "outputBytes": 283012
+      },
+      "optimizedDetails": {
+        "cacheStatus": "miss",
+        "outputBytes": 283012
+      }
+    },
+    {
+      "name": "bleed-cache-warm",
+      "count": 1,
+      "wallTimeMs": {
+        "baseline": 10.963344000000234,
+        "optimized": 2.22272699999985,
+        "deltaPercent": -79.73
+      },
+      "cpuUserMs": {
+        "baseline": 4.805,
+        "optimized": 2.379,
+        "deltaPercent": -50.49
+      },
+      "cpuSystemMs": {
+        "baseline": 4.929,
+        "optimized": 0,
+        "deltaPercent": -100
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 184680448,
+        "optimized": 181739520,
+        "deltaPercent": -1.59
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 46485408,
+        "optimized": 46594216,
+        "deltaPercent": 0.23
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0.9358569999999418,
+        "optimized": 0,
+        "deltaPercent": -100
+      },
+      "baselineDetails": {
+        "cacheStatus": "hit",
+        "outputBytes": 283012
+      },
+      "optimizedDetails": {
+        "cacheStatus": "hit",
+        "outputBytes": 283012
+      }
+    },
+    {
+      "name": "bleed-batch-native-concurrency-1",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 926.4983380000003,
+        "optimized": 969.272172,
+        "deltaPercent": 4.62
+      },
+      "cpuUserMs": {
+        "baseline": 1102.069,
+        "optimized": 1146.163,
+        "deltaPercent": 4
+      },
+      "cpuSystemMs": {
+        "baseline": 45.477,
+        "optimized": 60.265,
+        "deltaPercent": 32.52
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 262311936,
+        "optimized": 251473920,
+        "deltaPercent": -4.13
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 45328536,
+        "optimized": 45513872,
+        "deltaPercent": 0.41
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 83.36941099999967,
+        "optimized": 96.41049500000008,
+        "deltaPercent": 15.64
+      },
+      "baselineDetails": {
+        "configuredConcurrency": 1,
+        "peakConcurrency": 1,
+        "sharpConcurrency": 1
+      },
+      "optimizedDetails": {
+        "configuredConcurrency": 1,
+        "peakConcurrency": 1,
+        "sharpConcurrency": 1
+      }
+    },
+    {
+      "name": "bleed-batch-native-concurrency-2",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 840.8619960000001,
+        "optimized": 907.5945790000001,
+        "deltaPercent": 7.94
+      },
+      "cpuUserMs": {
+        "baseline": 1065.807,
+        "optimized": 1136.23,
+        "deltaPercent": 6.61
+      },
+      "cpuSystemMs": {
+        "baseline": 42.534,
+        "optimized": 48.57,
+        "deltaPercent": 14.19
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 251711488,
+        "optimized": 246272000,
+        "deltaPercent": -2.16
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 45328352,
+        "optimized": 45510312,
+        "deltaPercent": 0.4
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 98.65981399999964,
+        "optimized": 104.96714999999995,
+        "deltaPercent": 6.39
+      },
+      "baselineDetails": {
+        "configuredConcurrency": 2,
+        "peakConcurrency": 2,
+        "sharpConcurrency": 1
+      },
+      "optimizedDetails": {
+        "configuredConcurrency": 2,
+        "peakConcurrency": 2,
+        "sharpConcurrency": 1
+      }
+    },
+    {
+      "name": "bleed-batch-native-concurrency-4",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 792.0379419999999,
+        "optimized": 779.3105590000005,
+        "deltaPercent": -1.61
+      },
+      "cpuUserMs": {
+        "baseline": 1021.181,
+        "optimized": 986.397,
+        "deltaPercent": -3.41
+      },
+      "cpuSystemMs": {
+        "baseline": 60.192,
+        "optimized": 60.138,
+        "deltaPercent": -0.09
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 272400384,
+        "optimized": 263778304,
+        "deltaPercent": -3.17
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 43355224,
+        "optimized": 45537904,
+        "deltaPercent": 5.03
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 229.67725699999983,
+        "optimized": 228.27088999999978,
+        "deltaPercent": -0.61
+      },
+      "baselineDetails": {
+        "configuredConcurrency": 4,
+        "peakConcurrency": 4,
+        "sharpConcurrency": 1
+      },
+      "optimizedDetails": {
+        "configuredConcurrency": 4,
+        "peakConcurrency": 4,
+        "sharpConcurrency": 1
+      }
+    },
+    {
+      "name": "bleed-export-repeated-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 1147.6916499999998,
+        "optimized": 370.69261599999936,
+        "deltaPercent": -67.7
+      },
+      "cpuUserMs": {
+        "baseline": 1410.95,
+        "optimized": 490.807,
+        "deltaPercent": -65.21
+      },
+      "cpuSystemMs": {
+        "baseline": 48.098,
+        "optimized": 13.977,
+        "deltaPercent": -70.94
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 287125504,
+        "optimized": 247881728,
+        "deltaPercent": -13.67
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 42856392,
+        "optimized": 44916656,
+        "deltaPercent": 4.81
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 66.5388780000003,
+        "optimized": 72.98910700000033,
+        "deltaPercent": 9.69
+      },
+      "baselineDetails": {
+        "derivedResults": 9,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2696225,
+        "sourceRasterSize": {
+          "width": 745,
+          "height": 1040
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 9,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 1,
+        "originalLookups": 1,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 301246,
+        "sourceRasterSize": {
+          "width": 745,
+          "height": 1040
+        }
+      }
+    },
+    {
+      "name": "bleed-export-unique-9",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 2017.8030200000003,
+        "optimized": 1790.444214,
+        "deltaPercent": -11.27
+      },
+      "cpuUserMs": {
+        "baseline": 2361.092,
+        "optimized": 2295.034,
+        "deltaPercent": -2.8
+      },
+      "cpuSystemMs": {
+        "baseline": 116.117,
+        "optimized": 82.802,
+        "deltaPercent": -28.69
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 290271232,
+        "optimized": 287010816,
+        "deltaPercent": -1.12
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 44682360,
+        "optimized": 45160344,
+        "deltaPercent": 1.07
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 92.50473099999999,
+        "optimized": 99.03973299999961,
+        "deltaPercent": 7.06
+      },
+      "baselineDetails": {
+        "derivedResults": 9,
+        "bleedEngineCalls": 9,
+        "cacheHits": 0,
+        "cacheMisses": 9,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2655990,
+        "sourceRasterSize": {
+          "width": 745,
+          "height": 1040
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 9,
+        "bleedEngineCalls": 9,
+        "cacheHits": 0,
+        "cacheMisses": 9,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "peakBleedConcurrency": 2,
+        "pdfBytes": 2655990,
+        "sourceRasterSize": {
+          "width": 745,
+          "height": 1040
+        }
+      }
+    },
+    {
+      "name": "bleed-export-repeated-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 407.2411240000001,
+        "optimized": 75.84035899999981,
+        "deltaPercent": -81.38
+      },
+      "cpuUserMs": {
+        "baseline": 575.002,
+        "optimized": 130.777,
+        "deltaPercent": -77.26
+      },
+      "cpuSystemMs": {
+        "baseline": 11.71,
+        "optimized": 4.84,
+        "deltaPercent": -58.67
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 273817600,
+        "optimized": 270536704,
+        "deltaPercent": -1.2
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 36111960,
+        "optimized": 44776080,
+        "deltaPercent": 23.99
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 361.834331,
+        "optimized": 0.044411000000764034,
+        "deltaPercent": -99.99
+      },
+      "baselineDetails": {
+        "derivedResults": 100,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2421522,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 100,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 1,
+        "originalLookups": 1,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 38197,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      }
+    },
+    {
+      "name": "bleed-export-unique-100",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 1147.9889170000006,
+        "optimized": 812.9988589999994,
+        "deltaPercent": -29.18
+      },
+      "cpuUserMs": {
+        "baseline": 1315.087,
+        "optimized": 1224.119,
+        "deltaPercent": -6.92
+      },
+      "cpuSystemMs": {
+        "baseline": 68.41,
+        "optimized": 82.412,
+        "deltaPercent": 20.47
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 269209600,
+        "optimized": 271323136,
+        "deltaPercent": 0.79
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 47467152,
+        "optimized": 47091296,
+        "deltaPercent": -0.79
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 427.45732899999894,
+        "optimized": 362.6182399999998,
+        "deltaPercent": -15.17
+      },
+      "baselineDetails": {
+        "derivedResults": 100,
+        "bleedEngineCalls": 100,
+        "cacheHits": 0,
+        "cacheMisses": 100,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 2120863,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 100,
+        "bleedEngineCalls": 100,
+        "cacheHits": 0,
+        "cacheMisses": 100,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "peakBleedConcurrency": 2,
+        "pdfBytes": 2120864,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      }
+    },
+    {
+      "name": "bleed-export-repeated-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 1946.161572000001,
+        "optimized": 247.01770699999906,
+        "deltaPercent": -87.31
+      },
+      "cpuUserMs": {
+        "baseline": 2355.044,
+        "optimized": 432,
+        "deltaPercent": -81.66
+      },
+      "cpuSystemMs": {
+        "baseline": 52.62,
+        "optimized": 2.268,
+        "deltaPercent": -95.69
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 300429312,
+        "optimized": 271978496,
+        "deltaPercent": -9.47
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 48882896,
+        "optimized": 48340424,
+        "deltaPercent": -1.11
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 1802.255169,
+        "optimized": 207.56362699999954,
+        "deltaPercent": -88.48
+      },
+      "baselineDetails": {
+        "derivedResults": 500,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 11536046,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 500,
+        "bleedEngineCalls": 1,
+        "cacheHits": 0,
+        "cacheMisses": 1,
+        "candidateLookups": 1,
+        "originalLookups": 1,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 90539,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      }
+    },
+    {
+      "name": "bleed-export-unique-500",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 5325.443889,
+        "optimized": 4134.119597000001,
+        "deltaPercent": -22.37
+      },
+      "cpuUserMs": {
+        "baseline": 5407.435,
+        "optimized": 5683.727,
+        "deltaPercent": 5.11
+      },
+      "cpuSystemMs": {
+        "baseline": 371.47,
+        "optimized": 434.628,
+        "deltaPercent": 17
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 331100160,
+        "optimized": 310673408,
+        "deltaPercent": -6.17
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 55986056,
+        "optimized": 56490080,
+        "deltaPercent": 0.9
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 1685.4298559999988,
+        "optimized": 1986.712176000001,
+        "deltaPercent": 17.88
+      },
+      "baselineDetails": {
+        "derivedResults": 500,
+        "bleedEngineCalls": 500,
+        "cacheHits": 0,
+        "cacheMisses": 500,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "peakBleedConcurrency": 1,
+        "pdfBytes": 10610692,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      },
+      "optimizedDetails": {
+        "derivedResults": 500,
+        "bleedEngineCalls": 500,
+        "cacheHits": 0,
+        "cacheMisses": 500,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "peakBleedConcurrency": 2,
+        "pdfBytes": 10610692,
+        "sourceRasterSize": {
+          "width": 96,
+          "height": 134
+        }
+      }
+    },
+    {
+      "name": "pdf-export-9-repeated-artwork",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 4.264031999999133,
+        "optimized": 4.630224000000453,
+        "deltaPercent": 8.59
+      },
+      "cpuUserMs": {
+        "baseline": 4.673,
+        "optimized": 4.593,
+        "deltaPercent": -1.71
+      },
+      "cpuSystemMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 339881984,
+        "optimized": 322207744,
+        "deltaPercent": -5.2
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 48865568,
+        "optimized": 49554184,
+        "deltaPercent": 1.41
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "pdfBytes": 474793,
+        "uniqueArtworkHashes": 1,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "pagesGenerated": 1,
+        "embeddedImageObjects": 9,
+        "jpegEmbedCalls": 9,
+        "pngEmbedCalls": 0
+      },
+      "optimizedDetails": {
+        "pdfBytes": 53646,
+        "uniqueArtworkHashes": 1,
+        "candidateLookups": 1,
+        "originalLookups": 1,
+        "pagesGenerated": 1,
+        "embeddedImageObjects": 1,
+        "jpegEmbedCalls": 1,
+        "pngEmbedCalls": 0
+      }
+    },
+    {
+      "name": "pdf-export-9-unique-artwork",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 4.322120000000723,
+        "optimized": 4.518436999998812,
+        "deltaPercent": 4.54
+      },
+      "cpuUserMs": {
+        "baseline": 8.773,
+        "optimized": 6.869,
+        "deltaPercent": -21.7
+      },
+      "cpuSystemMs": {
+        "baseline": 0.027,
+        "optimized": 0.059,
+        "deltaPercent": 118.52
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 340013056,
+        "optimized": 322207744,
+        "deltaPercent": -5.24
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 49774240,
+        "optimized": 50346512,
+        "deltaPercent": 1.15
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "pdfBytes": 482722,
+        "uniqueArtworkHashes": 9,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "pagesGenerated": 1,
+        "embeddedImageObjects": 9,
+        "jpegEmbedCalls": 9,
+        "pngEmbedCalls": 0
+      },
+      "optimizedDetails": {
+        "pdfBytes": 482722,
+        "uniqueArtworkHashes": 9,
+        "candidateLookups": 9,
+        "originalLookups": 9,
+        "pagesGenerated": 1,
+        "embeddedImageObjects": 9,
+        "jpegEmbedCalls": 9,
+        "pngEmbedCalls": 0
+      }
+    },
+    {
+      "name": "pdf-export-100-repeated-artwork",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 29.78123499999856,
+        "optimized": 20.85021599999891,
+        "deltaPercent": -29.99
+      },
+      "cpuUserMs": {
+        "baseline": 29.056,
+        "optimized": 24.138,
+        "deltaPercent": -16.93
+      },
+      "cpuSystemMs": {
+        "baseline": 3.056,
+        "optimized": 0.019,
+        "deltaPercent": -99.38
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 338305024,
+        "optimized": 326135808,
+        "deltaPercent": -3.6
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 48021832,
+        "optimized": 47865000,
+        "deltaPercent": -0.33
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 10.10529900000256,
+        "optimized": 0,
+        "deltaPercent": -100
+      },
+      "baselineDetails": {
+        "pdfBytes": 4371352,
+        "uniqueArtworkHashes": 1,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "pagesGenerated": 12,
+        "embeddedImageObjects": 100,
+        "jpegEmbedCalls": 100,
+        "pngEmbedCalls": 0
+      },
+      "optimizedDetails": {
+        "pdfBytes": 48334,
+        "uniqueArtworkHashes": 1,
+        "candidateLookups": 1,
+        "originalLookups": 1,
+        "pagesGenerated": 12,
+        "embeddedImageObjects": 1,
+        "jpegEmbedCalls": 1,
+        "pngEmbedCalls": 0
+      }
+    },
+    {
+      "name": "pdf-export-100-unique-artwork",
+      "count": 100,
+      "wallTimeMs": {
+        "baseline": 42.277296000000206,
+        "optimized": 50.017744000000675,
+        "deltaPercent": 18.31
+      },
+      "cpuUserMs": {
+        "baseline": 40.547,
+        "optimized": 47.528,
+        "deltaPercent": 17.22
+      },
+      "cpuSystemMs": {
+        "baseline": 3.027,
+        "optimized": 9.09,
+        "deltaPercent": 200.3
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 347086848,
+        "optimized": 331247616,
+        "deltaPercent": -4.56
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 41953352,
+        "optimized": 48783192,
+        "deltaPercent": 16.28
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 13.038980000001175,
+        "optimized": 16.08350900000005,
+        "deltaPercent": 23.35
+      },
+      "baselineDetails": {
+        "pdfBytes": 5171710,
+        "uniqueArtworkHashes": 100,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "pagesGenerated": 12,
+        "embeddedImageObjects": 100,
+        "jpegEmbedCalls": 100,
+        "pngEmbedCalls": 0
+      },
+      "optimizedDetails": {
+        "pdfBytes": 5171710,
+        "uniqueArtworkHashes": 100,
+        "candidateLookups": 100,
+        "originalLookups": 100,
+        "pagesGenerated": 12,
+        "embeddedImageObjects": 100,
+        "jpegEmbedCalls": 100,
+        "pngEmbedCalls": 0
+      }
+    },
+    {
+      "name": "pdf-export-500-repeated-artwork",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 197.76765499999965,
+        "optimized": 131.70154200000252,
+        "deltaPercent": -33.41
+      },
+      "cpuUserMs": {
+        "baseline": 366.487,
+        "optimized": 236.01,
+        "deltaPercent": -35.6
+      },
+      "cpuSystemMs": {
+        "baseline": 23.525,
+        "optimized": 1.934,
+        "deltaPercent": -91.78
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 375267328,
+        "optimized": 342163456,
+        "deltaPercent": -8.82
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 40000432,
+        "optimized": 38998776,
+        "deltaPercent": -2.5
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 78.67516199999955,
+        "optimized": 116.24707399999897,
+        "deltaPercent": 47.76
+      },
+      "baselineDetails": {
+        "pdfBytes": 19632382,
+        "uniqueArtworkHashes": 1,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "pagesGenerated": 56,
+        "embeddedImageObjects": 500,
+        "jpegEmbedCalls": 500,
+        "pngEmbedCalls": 0
+      },
+      "optimizedDetails": {
+        "pdfBytes": 59466,
+        "uniqueArtworkHashes": 1,
+        "candidateLookups": 1,
+        "originalLookups": 1,
+        "pagesGenerated": 56,
+        "embeddedImageObjects": 1,
+        "jpegEmbedCalls": 1,
+        "pngEmbedCalls": 0
+      }
+    },
+    {
+      "name": "pdf-export-500-unique-artwork",
+      "count": 500,
+      "wallTimeMs": {
+        "baseline": 225.87295000000086,
+        "optimized": 278.8097620000008,
+        "deltaPercent": 23.44
+      },
+      "cpuUserMs": {
+        "baseline": 373.368,
+        "optimized": 306.819,
+        "deltaPercent": -17.82
+      },
+      "cpuSystemMs": {
+        "baseline": 28.015,
+        "optimized": 58.935,
+        "deltaPercent": 110.37
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 392290304,
+        "optimized": 362672128,
+        "deltaPercent": -7.55
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 50400152,
+        "optimized": 40227536,
+        "deltaPercent": -20.18
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 82.13420599999881,
+        "optimized": 81.32447999999931,
+        "deltaPercent": -0.99
+      },
+      "baselineDetails": {
+        "pdfBytes": 25530919,
+        "uniqueArtworkHashes": 500,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "pagesGenerated": 56,
+        "embeddedImageObjects": 500,
+        "jpegEmbedCalls": 500,
+        "pngEmbedCalls": 0
+      },
+      "optimizedDetails": {
+        "pdfBytes": 25530919,
+        "uniqueArtworkHashes": 500,
+        "candidateLookups": 500,
+        "originalLookups": 500,
+        "pagesGenerated": 56,
+        "embeddedImageObjects": 500,
+        "jpegEmbedCalls": 500,
+        "pngEmbedCalls": 0
+      }
+    },
+    {
+      "name": "pdf-export-sequential-500-unique-three-times",
+      "count": 1500,
+      "wallTimeMs": {
+        "baseline": 634.1132110000035,
+        "optimized": 622.0079459999979,
+        "deltaPercent": -1.91
+      },
+      "cpuUserMs": {
+        "baseline": 1002.252,
+        "optimized": 1018.839,
+        "deltaPercent": 1.65
+      },
+      "cpuSystemMs": {
+        "baseline": 161.518,
+        "optimized": 126.144,
+        "deltaPercent": -21.9
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 459083776,
+        "optimized": 433958912,
+        "deltaPercent": -5.47
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 49322624,
+        "optimized": 50579912,
+        "deltaPercent": 2.55
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 82.82438399999955,
+        "optimized": 86.15931399999681,
+        "deltaPercent": 4.03
+      },
+      "baselineDetails": {
+        "exports": 3,
+        "cardsPerExport": 500,
+        "pdfBytesPerExport": [
+          25602162,
+          25602162,
+          25602162
+        ],
+        "memoryAfterExport": [
+          {
+            "rssBytes": 431263744,
+            "heapUsedBytes": 37825896
+          },
+          {
+            "rssBytes": 458919936,
+            "heapUsedBytes": 39709448
+          },
+          {
+            "rssBytes": 459083776,
+            "heapUsedBytes": 37891536
+          }
+        ],
+        "candidateLookups": 1500,
+        "originalLookups": 1500,
+        "cacheScope": "each export independently; no shared candidate/original memo buffers"
+      },
+      "optimizedDetails": {
+        "exports": 3,
+        "cardsPerExport": 500,
+        "pdfBytesPerExport": [
+          25602162,
+          25602162,
+          25602162
+        ],
+        "memoryAfterExport": [
+          {
+            "rssBytes": 402632704,
+            "heapUsedBytes": 37957840
+          },
+          {
+            "rssBytes": 428322816,
+            "heapUsedBytes": 38472000
+          },
+          {
+            "rssBytes": 433958912,
+            "heapUsedBytes": 38080704
+          }
+        ],
+        "candidateLookups": 1500,
+        "originalLookups": 1500,
+        "cacheScope": "each export independently; no shared candidate/original memo buffers"
+      }
+    },
+    {
+      "name": "pdf-export-cancellation-after-first-card",
+      "count": 9,
+      "wallTimeMs": {
+        "baseline": 1.0312689999991562,
+        "optimized": 2.212546000002476,
+        "deltaPercent": 114.55
+      },
+      "cpuUserMs": {
+        "baseline": 1.041,
+        "optimized": 2.214,
+        "deltaPercent": 112.68
+      },
+      "cpuSystemMs": {
+        "baseline": 0.001,
+        "optimized": 0,
+        "deltaPercent": -100
+      },
+      "rssPeakSampledBytes": {
+        "baseline": 459214848,
+        "optimized": 433958912,
+        "deltaPercent": -5.5
+      },
+      "heapPeakSampledBytes": {
+        "baseline": 37959872,
+        "optimized": 38230736,
+        "deltaPercent": 0.71
+      },
+      "peakEventLoopDelayMs": {
+        "baseline": 0,
+        "optimized": 0,
+        "deltaPercent": null
+      },
+      "baselineDetails": {
+        "cancelled": true,
+        "errorName": "CardExportServiceError",
+        "partialPdfReturned": false,
+        "candidateLookups": 1,
+        "originalLookups": 1
+      },
+      "optimizedDetails": {
+        "cancelled": true,
+        "errorName": "CardExportServiceError",
+        "partialPdfReturned": false,
+        "candidateLookups": 1,
+        "originalLookups": 1
+      }
+    }
+  ]
+}
