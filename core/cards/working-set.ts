@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mpcArtworkCandidateId } from "./ids";
+import { BackSelectionPolicyError, isEligibleIdentityFaceSelection } from "./back-selection";
 import type { ImportedAsset, ImportedEntry, ImportResult, ImportedFace } from "../../import-engine/types";
 import type { CardFace, CardFaceSide, SelectedArtwork, WorkingCard, WorkingCardMpcReference } from "./types";
 
@@ -190,6 +191,9 @@ export function createWorkingSet(result: ImportResult, options: CreateWorkingSet
 
 export function selectArtwork(card: WorkingCard, side: CardFaceSide, artwork: SelectedArtwork): WorkingCard {
   if (artwork.faceId !== side) throw new Error(`Artwork face ${artwork.faceId} does not match selected face ${side}.`);
+  if ((side === "front" || side === "back") && !isEligibleIdentityFaceSelection(card, side)) {
+    throw new BackSelectionPolicyError("A simple card identity has no real back face; generic physical backs must use Back Library or a verified MPC cardback.");
+  }
   if (!card.faces.some((face) => face.side === side)) throw new Error(`Working card ${card.id} has no ${side} face.`);
   const next = {
     ...card,

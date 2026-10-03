@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ImportResult, ImportedEntry } from "../../../import-engine/types";
 import { createWorkingSet, selectArtwork } from "../../../core/cards/working-set";
-import type { CardIdentity, SelectedArtwork } from "../../../core/cards/types";
+import { BackSelectionPolicyError } from "../../../core/cards/back-selection";
+import type { CardIdentity, SelectedArtwork, WorkingCard } from "../../../core/cards/types";
 
 function result(entries: readonly ImportedEntry[]): ImportResult {
   return {
@@ -133,7 +134,12 @@ describe("session Working Set", () => {
     expect(card.backModeSelectionPolicy).toBe("explicit");
     expect(card.mpcReferences.every((reference) => reference.availableLocally === false)).toBe(true);
 
-    const withIdentity = { ...card, identity };
+    const dfcIdentity: CardIdentity = {
+      ...identity,
+      name: "Delver of Secrets // Insectile Aberration",
+      metadata: { layout: "transform", faces: [{ name: "Delver of Secrets" }, { name: "Insectile Aberration" }] },
+    };
+    const withIdentity = { ...card, identity: dfcIdentity };
     const withFrontUpload = selectArtwork(withIdentity, "front", artwork("upload:abc", "upload"));
     const withBackScryfall = selectArtwork(withFrontUpload, "back", artwork("scryfall:xyz", "scryfall", "back"));
     expect(withBackScryfall.id).toBe(card.id);
@@ -142,6 +148,20 @@ describe("session Working Set", () => {
     expect(withBackScryfall.backModeSelectionPolicy).toBe("explicit");
     expect(withBackScryfall.selectedArtworkByFace).toMatchObject({ front: { source: "upload" }, back: { source: "scryfall" } });
     expect(withBackScryfall.mpcReferences).toEqual(card.mpcReferences);
+  });
+
+  it("rejects a fake back face for a simple Magic identity while preserving custom two-face cards", () => {
+    const [simple] = createWorkingSet(result([entries[1]]), { idFactory: () => "simple-card" });
+    const simpleWithIdentity = {
+      ...simple,
+      identity,
+      faces: [{ id: "front", side: "front" as const }, { id: "back", side: "back" as const }],
+    };
+    const scryfallBack = artwork("scryfall:back-face", "scryfall", "back");
+    const customTwoFace: WorkingCard = { ...simpleWithIdentity, identity: null };
+
+    expect(() => selectArtwork(simpleWithIdentity, "back", scryfallBack)).toThrow(BackSelectionPolicyError);
+    expect(selectArtwork(customTwoFace, "back", scryfallBack).selectedArtworkByFace.back).toEqual(scryfallBack);
   });
 
   it("does not make identity part of artwork selection or change it when correcting artwork", () => {

@@ -3,7 +3,7 @@ import { CardExportServiceError, exportWorkingCardsByContentMode, exportWorkingC
 import type { ArtworkCatalogSource } from "../artwork/types";
 import type { ArtworkCandidate, BackLibraryAssetReference, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardBackMode, WorkingCardBackModeSelectionPolicy, WorkingCardMpcReference } from "../core/cards/types";
 import { isSafeArtworkCandidateId } from "../core/cards/ids";
-import { isDoubleFacedIdentity, isEligibleGenericPhysicalBack } from "../core/cards/back-selection";
+import { isDoubleFacedIdentity, isEligibleGenericPhysicalBack, isEligibleIdentityFaceSelection } from "../core/cards/back-selection";
 import { sanitizeCardIdentityMetadata } from "../core/cards/safe-identity-metadata";
 import type { UniversalImportRequest } from "../import-engine/types";
 import { sanitizeRelativeImportPath } from "../import-engine/source-path";
@@ -624,6 +624,9 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
       const card = parseWorkingCards([body.card])[0];
       const faceId = body.faceId === "back" ? "back" : body.faceId === "front" ? "front" : undefined;
       if (!faceId) throw new ApiRequestError(400, "INVALID_FACE", "Face must be front or back.");
+      if (!isEligibleIdentityFaceSelection(card, faceId)) {
+        throw new ApiRequestError(400, "INVALID_PHYSICAL_BACK_SELECTION", "A simple card's back artwork must use Back Library or a verified MPC cardback.");
+      }
       const candidateId = requiredString(body.candidateId, "candidateId", 128);
       const candidate = await workbench.getArtworkCandidate(candidateId, {
         mpcReferences: card.mpcReferences,

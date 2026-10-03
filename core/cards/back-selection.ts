@@ -44,6 +44,11 @@ export function isDoubleFacedIdentity(identity: CardIdentity | null | undefined)
     && (face as { name: string }).name.trim().length > 0));
 }
 
+/** A known non-DFC identity has no real back face; custom two-face entries remain selectable. */
+export function isEligibleIdentityFaceSelection(card: WorkingCard, faceId: "front" | "back"): boolean {
+  return faceId !== "back" || card.identity === null || isDoubleFacedIdentity(card.identity);
+}
+
 /** A generic physical back must be an MPC cardback document, never an ordinary card face. */
 export function isEligibleGenericPhysicalBack(card: WorkingCard, candidate: ArtworkCandidate): boolean {
   return !isDoubleFacedIdentity(card.identity)

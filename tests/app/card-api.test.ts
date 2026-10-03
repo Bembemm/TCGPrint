@@ -421,6 +421,28 @@ describe("card APIs", () => {
     expect(card).not.toHaveProperty("manualBackArtwork");
   });
 
+  it.each([
+    { label: "Scryfall", candidate: { ...candidate, id: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:back", source: "scryfall" as const, faceId: "back" } },
+    { label: "upload", candidate: { ...candidate, faceId: "back" } },
+  ])("rejects a forged back-face selection for a simple card through the API ($label)", async ({ candidate: forbidden }) => {
+    const workbench = testWorkbench({
+      getArtworkCandidate: vi.fn(async () => forbidden),
+      selectArtwork: vi.fn((workingCard: WorkingCard) => workingCard),
+    });
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "select",
+      card: { ...card, faces: [...card.faces, { id: "back", side: "back", name: "Forged face" }] },
+      faceId: "back",
+      candidateId: forbidden.id,
+    }), workbench);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_PHYSICAL_BACK_SELECTION" });
+    expect(workbench.getArtworkCandidate).not.toHaveBeenCalled();
+    expect(workbench.selectArtwork).not.toHaveBeenCalled();
+    expect(card.selectedArtworkByFace.back).toBeUndefined();
+  });
+
   it("accepts a hydrated MPC CARDBACK through the API and preserves the explicit lock", async () => {
     const manualCandidate: ArtworkCandidate = {
       id: `mpc:${"e".repeat(64)}`, source: "mpc", identityId: null, faceId: "back", providerAssetId: "mpc-cardback-123",
@@ -765,7 +787,11 @@ describe("card APIs", () => {
 
   it("selects the back candidate from the Artwork Picker for a DFC", async () => {
     const backCandidate: ArtworkCandidate = { ...candidate, id: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:back", source: "scryfall", faceId: "back", originalUri: undefined, localOriginalPath: undefined, previewUri: "https://cards.scryfall.io/small/back.png" };
-    const dfcCard: WorkingCard = { ...card, faces: [{ id: "front", side: "front", name: "Front Face" }, { id: "back", side: "back", name: "Back Face" }] };
+    const dfcCard: WorkingCard = {
+      ...card,
+      identity: { ...identity, name: "Front Face // Back Face", metadata: { layout: "transform", faces: [{ name: "Front Face" }, { name: "Back Face" }] } },
+      faces: [{ id: "front", side: "front", name: "Front Face" }, { id: "back", side: "back", name: "Back Face" }],
+    };
     const workbench = testWorkbench({
       getArtworkCandidate: vi.fn(async () => backCandidate),
       selectArtwork: (workingCard: WorkingCard, faceId: "front" | "back", item: ArtworkCandidate) => selectWorkingCardArtwork(workingCard, faceId, { candidateId: item.id, source: item.source, identityId: workingCard.identity?.id ?? null, faceId }),
