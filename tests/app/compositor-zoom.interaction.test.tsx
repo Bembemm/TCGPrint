@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { Profiler } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
@@ -13,6 +14,95 @@ afterEach(() => {
 });
 
 describe("compositor zoom interactions", () => {
+  it("keeps fit scales stable for duplicate and subpixel observer callbacks while the sidebar changes width", async () => {
+    let layoutWidthPx = 820;
+    let layoutHeightPx = 500;
+    const notifications: Array<(width: number, height: number) => void> = [];
+    class TestResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        const notify = (width: number, height: number) => {
+          layoutWidthPx = Math.round(width);
+          layoutHeightPx = Math.round(height);
+          this.callback([{
+            target,
+            contentRect: { width, height } as DOMRectReadOnly,
+          } as ResizeObserverEntry], this as unknown as ResizeObserver);
+        };
+        notifications.push(notify);
+        notify(layoutWidthPx, layoutHeightPx);
+      }
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("compositor-sheet-scroll") ? layoutWidthPx : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("compositor-sheet-scroll") ? layoutHeightPx : 0;
+    });
+
+    const commits: number[] = [];
+    const user = userEvent.setup();
+    render(<Profiler id="compositor" onRender={(_id, _phase, _actual, _base, _start, commitTime) => commits.push(commitTime)}>
+      <RegistrationLayoutPreview
+        settings={{ ...DEFAULT_PROJECT_SETTINGS, pageOrientation: "portrait", layout: { skippedSlotIndices: [] } }}
+        cardCount={0}
+        cards={[]}
+        selectedPageNumber={1}
+        onSelectPage={vi.fn()}
+        onToggleSkippedSlot={vi.fn()}
+      />
+    </Profiler>);
+
+    const sheet = screen.getByRole("img", { name: /Compositor live/ });
+    const scale = () => Number(sheet.getAttribute("data-compositor-zoom-scale"));
+    const baseWidthPx = 210 * 96 / 25.4;
+    const baseHeightPx = 297 * 96 / 25.4;
+    const fitWidth = (width: number) => (width - 32) / baseWidthPx;
+    const fitPage = (width: number, height: number) => Math.min(fitWidth(width), (height - 32) / baseHeightPx);
+
+    await waitFor(() => expect(scale()).toBeCloseTo(fitPage(820, 500), 8));
+    const notify = notifications[0];
+    act(() => notify(820, 500));
+    expect(scale()).toBeCloseTo(fitPage(820, 500), 8);
+    const stableCommits = commits.length;
+    for (const [width, height] of [[820, 500], [820.1, 500], [820, 500]]) {
+      act(() => notify(width, height));
+      expect(scale()).toBeCloseTo(fitPage(820, 500), 8);
+      expect(commits).toHaveLength(stableCommits);
+    }
+
+    await user.click(screen.getByRole("button", { name: "Fit Width" }));
+    expect(scale()).toBeCloseTo(fitWidth(820), 8);
+    act(() => notify(610, 500));
+    expect(scale()).toBeCloseTo(fitWidth(610), 8);
+    act(() => notify(820, 500));
+    expect(scale()).toBeCloseTo(fitWidth(820), 8);
+
+    await user.click(screen.getByRole("button", { name: "Fit Page" }));
+    act(() => notify(820, 900));
+    expect(scale()).toBeCloseTo(fitPage(820, 900), 8);
+    act(() => notify(610, 900));
+    expect(scale()).toBeCloseTo(fitPage(610, 900), 8);
+    act(() => notify(820, 900));
+    expect(scale()).toBeCloseTo(fitPage(820, 900), 8);
+
+    const settledScales: number[] = [];
+    act(() => notify(820, 900));
+    settledScales.push(scale());
+    act(() => notify(820, 900));
+    settledScales.push(scale());
+    const settledCommits = commits.length;
+    for (const [width, height] of [[820.1, 900], [820, 900], [820, 900]]) {
+      act(() => notify(width, height));
+      settledScales.push(scale());
+    }
+    expect(new Set(settledScales)).toEqual(new Set([fitPage(820, 900)]));
+    expect(commits).toHaveLength(settledCommits);
+  });
+
   it("fits its measured viewport, follows resize in fit modes, and keeps manual scale", async () => {
     const user = userEvent.setup();
     let widthPx = 820;
@@ -35,6 +125,12 @@ describe("compositor zoom interactions", () => {
       unobserve() { this.target = null; }
     }
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("compositor-sheet-scroll") ? widthPx : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("compositor-sheet-scroll") ? heightPx : 0;
+    });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this.classList.contains("compositor-sheet-scroll")) {
         return { width: widthPx, height: heightPx, top: 0, left: 0, right: widthPx, bottom: heightPx, x: 0, y: 0, toJSON() {} } as DOMRect;

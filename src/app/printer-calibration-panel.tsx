@@ -145,7 +145,7 @@ export default function PrinterCalibrationPanel({
   const [physicalMeasurementAttested, setPhysicalMeasurementAttested] = useState(false);
   const [verificationSheetKey, setVerificationSheetKey] = useState<string | null>(null);
   const [residualSummary, setResidualSummary] = useState<{ mean: number; min: number; max: number } | null>(null);
-  const [sessionId, setSessionId] = useState(() => freshId("calibration-session"));
+  const [sessionId, setSessionId] = useState("");
   const [previewOpacity, setPreviewOpacity] = useState("45");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -156,6 +156,10 @@ export default function PrinterCalibrationPanel({
     const body = await responseJson<{ profiles: PrinterProfileSnapshot[] }>(response);
     setProfiles(body.profiles);
     return body.profiles;
+  }, []);
+
+  useEffect(() => {
+    setSessionId(freshId("calibration-session"));
   }, []);
 
   useEffect(() => {
@@ -399,6 +403,7 @@ export default function PrinterCalibrationPanel({
   });
 
   const recordPhysicalVerification = () => run(async () => {
+    if (!sessionId) throw new Error("A sessão de calibração ainda está sendo preparada.");
     if (!printerProfileSelection || !selectedLibraryProfile) throw new Error("Selecione um profile salvo antes de registrar medições físicas.");
     if (!sheetCompatibility?.compatible) {
       throw new Error(`Profile incompatível com esta folha de verificação: ${sheetCompatibility?.reasons.join(", ") ?? "profile ausente"}.`);
@@ -442,6 +447,7 @@ export default function PrinterCalibrationPanel({
   });
 
   const downloadSheet = (verification: boolean) => run(async () => {
+    if (!sessionId) throw new Error("A sessão de calibração ainda está sendo preparada.");
     if (!printerProfileSelection) throw new Error("Selecione ou crie um profile antes de gerar uma folha.");
     if (!sheetCompatibility?.compatible) {
       throw new Error(`Profile incompatível com esta folha: ${sheetCompatibility?.reasons.join(", ") ?? "profile ausente"}.`);
@@ -678,7 +684,7 @@ export default function PrinterCalibrationPanel({
         </div>
 
         <div className="calibration-measurements physical-verification-measurements" hidden={step !== 4}>
-          <p>Profile {printerProfileSelection?.name ?? "não selecionado"} · revisão {printerProfileSelection ? `v${printerProfileSelection.version}` : "—"} · lado {side} · sessão {sessionId}</p>
+          <p>Profile {printerProfileSelection?.name ?? "não selecionado"} · revisão {printerProfileSelection ? `v${printerProfileSelection.version}` : "—"} · lado {side} · sessão {sessionId || "—"}</p>
           {printerProfileSelection?.physicalVerification
             ? <div className="calibration-accuracy-summary" role="status">
                 <strong>Verificação física registrada · {printerProfileSelection.physicalValidationStatus}</strong>
@@ -686,7 +692,7 @@ export default function PrinterCalibrationPanel({
                 <ul>{printerProfileSelection.physicalVerification.measurements.map((item) => <li key={item.pointId}>{item.pointId}: X {millimeters(item.residualXUm)} mm · Y {millimeters(item.residualYUm)} mm</li>)}</ul>
               </div>
             : <p className="muted">Status atual: {printerProfileSelection?.physicalValidationStatus ?? "sem profile"}. Ainda não há uma medição física registrada para esta revisão.</p>}
-          <button type="button" className="button secondary" disabled={disabled || busy || !printerProfileSelection} onClick={() => void downloadSheet(true)}>
+          <button type="button" className="button secondary" disabled={disabled || busy || !printerProfileSelection || !sessionId} onClick={() => void downloadSheet(true)}>
             {printerDuplexMode.startsWith("automatic-") ? "Gerar Verification PDF duplex (2 páginas)" : `Gerar Verification PDF · ${side}`}
           </button>
           <h4>Residual medido após correção (mm)</h4>
@@ -697,7 +703,7 @@ export default function PrinterCalibrationPanel({
             <label>Y residual (mm)<input inputMode="decimal" value={verificationMeasurements[pointId].y} disabled={disabled || busy || !verificationSheetKey} onChange={(event) => { setPhysicalMeasurementAttested(false); setVerificationMeasurements((current) => ({ ...current, [pointId]: { ...current[pointId], y: event.currentTarget.value } })); }} /></label>
           </div>)}
           <label className="calibration-attestation"><input type="checkbox" checked={physicalMeasurementAttested} disabled={disabled || busy || !verificationSheetKey} onChange={(event) => setPhysicalMeasurementAttested(event.currentTarget.checked)} />Confirmo que medi estes residuals fisicamente no Verification PDF desta sessão, profile, versão e lado.</label>
-          <button className="button primary" type="button" disabled={disabled || busy || !physicalMeasurementAttested || !verificationSheetKey || !printerProfileSelection} onClick={() => void recordPhysicalVerification()}>Registrar medição física e criar revisão</button>
+          <button className="button primary" type="button" disabled={disabled || busy || !physicalMeasurementAttested || !verificationSheetKey || !printerProfileSelection || !sessionId} onClick={() => void recordPhysicalVerification()}>Registrar medição física e criar revisão</button>
         </div>
       </div>
 
@@ -718,7 +724,7 @@ export default function PrinterCalibrationPanel({
           <label>Fixture session ID<input type="text" value={sessionId} readOnly /></label>
           <button type="button" className="button secondary" onClick={() => { invalidateVerificationSheet(); setSessionId(freshId("calibration-session")); }}>Nova sessão</button>
           {printerDuplexMode.startsWith("automatic-") && <p className="muted calibration-duplex-job-instruction">Imprima este PDF de 2 páginas usando duplex automático e o binding selecionado. Não faça reinserção manual.</p>}
-          <button type="button" className="button secondary" disabled={disabled || busy || !printerProfileSelection} onClick={() => void downloadSheet(false)}>
+          <button type="button" className="button secondary" disabled={disabled || busy || !printerProfileSelection || !sessionId} onClick={() => void downloadSheet(false)}>
             {printerDuplexMode.startsWith("automatic-") ? "Gerar Calibration PDF duplex (2 páginas)" : `Gerar Calibration PDF · ${side}`}
           </button>
           <button type="button" className="button primary" disabled={disabled || busy || !printerProfileSelection} onClick={() => void saveRecalibration()}>Salvar nova revisão do profile</button>

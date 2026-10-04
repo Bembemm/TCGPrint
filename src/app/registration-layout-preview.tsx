@@ -144,19 +144,19 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   useEffect(() => {
     const viewport = sheetViewportRef.current;
     if (!viewport) return;
-    const measure = (width?: number, height?: number) => {
-      const rect = viewport.getBoundingClientRect();
-      setViewportSize({
-        widthPx: width || viewport.clientWidth || rect.width,
-        heightPx: height || viewport.clientHeight || rect.height,
+    const measure = () => {
+      const next = {
+        widthPx: Math.round(viewport.clientWidth),
+        heightPx: Math.round(viewport.clientHeight),
+      };
+      setViewportSize((current) => {
+        if (current.widthPx === next.widthPx && current.heightPx === next.heightPx) return current;
+        return next;
       });
     };
     measure();
     if (typeof ResizeObserver !== "undefined") {
-      const observer = new ResizeObserver((entries) => {
-        const entry = entries.find(({ target }) => target === viewport);
-        if (entry) measure(entry.contentRect.width, entry.contentRect.height);
-      });
+      const observer = new ResizeObserver(() => measure());
       observer.observe(viewport);
       return () => observer.disconnect();
     }

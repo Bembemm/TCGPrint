@@ -209,5 +209,8 @@ describe("workspace shell interactions", () => {
     expect(css).toMatch(/\.workspace-sidebar \{[^}]*position:\s*fixed;[^}]*right:\s*0;[^}]*width:\s*min\(420px,\s*100vw\)/s);
     expect(css).toContain(".workspace-shell[data-drawer-open=\"true\"] .workspace-backdrop");
     expect(css).toContain("html, body { width: 100%; height: 100%; overflow: hidden; }");
+    expect(css).toMatch(/\.workspace-preview-content \{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*align-items:\s*stretch/s);
+    expect(css).toMatch(/\.workspace-preview-stack \{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*justify-content:\s*center/s);
+    expect(css).toMatch(/\.compositor-sheet-scroll \{[^}]*min-height:\s*0;[^}]*flex:\s*1;[^}]*overflow:\s*auto/s);
   });
 });
