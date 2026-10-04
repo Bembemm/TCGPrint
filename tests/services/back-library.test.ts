@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import sharp from "sharp";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ArtworkOriginalStore } from "../../artwork/storage/original-store";
 import { appDataPaths } from "../../artwork/storage/paths";
 import { ArtworkRepository } from "../../artwork/storage/repository";
+import { ArtworkThumbnailStore } from "../../artwork/storage/thumbnail-store";
 import { openArtworkDatabase } from "../../persistence/sqlite";
 import { BackLibraryRepository } from "../../persistence/back-library/repository";
 import { BackLibraryService } from "../../services/back-library";
@@ -29,7 +30,7 @@ async function makeService(options: { maximumBytes?: number; maximumDimensionPix
   databases.push(database);
   const artworkRepository = new ArtworkRepository(database);
   const originals = new ArtworkOriginalStore(paths.originalsDirectory, artworkRepository, { maximumBytes: options.maximumBytes ?? 20 * 1024 * 1024 });
-  return { service: new BackLibraryService(new BackLibraryRepository(database), originals, options), database, paths };
+  return { service: new BackLibraryService(new BackLibraryRepository(database), originals, options, new ArtworkThumbnailStore(paths.thumbnailsDirectory, artworkRepository)), database, paths, originals, artworkRepository };
 }
 
 async function png(width = 64, height = 96) {
@@ -37,6 +38,26 @@ async function png(width = 64, height = 96) {
 }
 
 describe("Back Library", () => {
+  it("persists its live thumbnail so a compositor preview does not resolve the print original", async () => {
+    const { service, originals, artworkRepository, database, paths } = await makeService();
+    const bytes = await png(1200, 1800);
+    const asset = await service.add({ bytes, filename: "Preview.png" });
+    const getOriginal = vi.spyOn(originals, "getOriginal");
+    const reopened = new BackLibraryService(
+      new BackLibraryRepository(database),
+      originals,
+      {},
+      new ArtworkThumbnailStore(paths.thumbnailsDirectory, artworkRepository),
+    );
+
+    const preview = await reopened.resolvePreview({ assetId: asset.assetId, sha256: asset.sha256, format: asset.format });
+
+    expect(preview.contentType).toBe("image/png");
+    expect(preview.widthPx).toBeLessThanOrEqual(640);
+    expect(preview.heightPx).toBeLessThanOrEqual(896);
+    expect(getOriginal).not.toHaveBeenCalled();
+  });
+
   it("validates real PNG bytes, keeps original bytes, and returns path-free immutable metadata", async () => {
     const { service } = await makeService();
     const bytes = await png();
@@ -55,6 +76,23 @@ describe("Back Library", () => {
     });
     expect(JSON.stringify(record)).not.toMatch(/path|blob|bytes|filesystem/i);
     await expect(service.resolveOriginal({ assetId: record.assetId, sha256: hash, format: "png" })).resolves.toMatchObject({ bytes, contentHash: hash });
+  });
+
+  it("serves a cached, bounded preview derivative without exposing the Back Library original", async () => {
+    const { service } = await makeService();
+    const bytes = await png(2400, 3600);
+    const record = await service.add({ bytes, filename: "Large back.png" });
+    const reference = { assetId: record.assetId, sha256: record.sha256, format: record.format } as const;
+
+    const preview = await service.resolvePreview(reference);
+    const metadata = await sharp(preview.bytes).metadata();
+
+    expect(preview.contentType).toBe("image/png");
+    expect(preview.bytes.byteLength).toBeLessThan(bytes.byteLength);
+    expect(metadata.width).toBeLessThanOrEqual(640);
+    expect(metadata.height).toBeLessThanOrEqual(896);
+    expect(preview.bytes).not.toEqual(bytes);
+    await expect(service.resolvePreview({ ...reference, sha256: "0".repeat(64) })).rejects.toMatchObject({ code: "BACK_REFERENCE_MISMATCH" });
   });
 
   it("deduplicates by byte hash and preserves the first asset identity and metadata", async () => {
@@ -88,6 +126,8 @@ describe("Back Library", () => {
     const reopened = new BackLibraryService(
       new BackLibraryRepository(reopenedDatabase),
       new ArtworkOriginalStore(paths.originalsDirectory, reopenedArtworkRepository),
+      {},
+      new ArtworkThumbnailStore(paths.thumbnailsDirectory, reopenedArtworkRepository),
     );
     expect(await reopened.list()).toEqual([]);
     await expect(reopened.resolveOriginal(reference)).resolves.toMatchObject({ bytes, contentHash: added.sha256 });

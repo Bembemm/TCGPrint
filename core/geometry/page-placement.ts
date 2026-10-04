@@ -19,8 +19,9 @@ export interface GridPagePlacementRequest {
 }
 
 /**
- * Resolves the same largest-fitting row-major batches used for every PDF and
- * cut sheet. Placements always use one physical page coordinate frame.
+ * Resolves the capacity grid once and reuses its physical coordinates on all
+ * pages, including the final partial page. Bleed remains card-specific inside
+ * that shared slot envelope.
  */
 export function calculateGridPagePlacements(request: GridPagePlacementRequest): readonly GridPlacementPage[] {
   if (!Number.isSafeInteger(request.count) || request.count < 0 || request.count > MAX_PHYSICAL_CARDS_PER_EXPORT) {
@@ -37,6 +38,12 @@ export function calculateGridPagePlacements(request: GridPagePlacementRequest): 
   }
 
   const pages: GridPlacementPage[] = [];
+  const gridPlacement = {
+    ...request.placement,
+    rows: request.placement.rows ?? zeroBleedGrid.rows,
+    columns: request.placement.columns ?? zeroBleedGrid.columns,
+    bleedMm: request.placement.bleedMm,
+  };
   let startCardIndex = 0;
   while (startCardIndex < request.count) {
     const remaining = request.count - startCardIndex;
@@ -47,9 +54,8 @@ export function calculateGridPagePlacements(request: GridPagePlacementRequest): 
     for (let candidateCount = maximumCandidate; candidateCount > 0; candidateCount -= 1) {
       try {
         selectedPlacement = calculateGridPlacement({
-          ...request.placement,
+          ...gridPlacement,
           count: candidateCount,
-          bleedMm: 0,
           bleedByCardMm: bleedByCardMm.slice(startCardIndex, startCardIndex + candidateCount),
         });
         selectedCount = candidateCount;
@@ -64,9 +70,8 @@ export function calculateGridPagePlacements(request: GridPagePlacementRequest): 
 
     if (!selectedPlacement) {
       calculateGridPlacement({
-        ...request.placement,
+        ...gridPlacement,
         count: 1,
-        bleedMm: 0,
         bleedByCardMm: [bleedByCardMm[startCardIndex]!],
       });
       throw new RangeError("No physical card slot fits on the selected paper.");

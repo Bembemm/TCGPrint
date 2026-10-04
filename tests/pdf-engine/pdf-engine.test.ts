@@ -7,9 +7,10 @@ import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
 import { calculateGridPagePlacements, calculateGridPlacement, MAGIC_STANDARD_CARD, PAPER_FORMATS, type CardFormat } from "../../core/geometry";
 import { createDuplexPagePairing } from "../../core/duplex";
+import { buildCanonicalPrintPlan } from "../../core/duplex";
 import { mmToPoints, pointsToMm } from "../../core/units";
 import { BleedEngine } from "../../image-engine/bleed";
-import type { CutGuideConfig, GuideColor } from "../../core/geometry/cut-guides";
+import { CutGuideEngine, type CutGuideConfig, type GuideColor } from "../../core/geometry/cut-guides";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
 import { countRasterReuseOccurrences, readPdfRasterCacheDiagnostics } from "../../pdf-engine/document/raster-resource-policy";
 import { createDefaultRegistrationConfig, generateRegistrationGeometry } from "../../core/registration";
@@ -24,6 +25,23 @@ const A4_WIDTH_POINTS = 595.2755905511812;
 const A4_HEIGHT_POINTS = 841.8897637795276;
 const MAGIC_CARD_WIDTH_POINTS = 180;
 const MAGIC_CARD_HEIGHT_POINTS = 252;
+
+function singleCardTrim(bleedMm = 0, cardOrientation?: "portrait" | "landscape", marginsMm = { top: 0, right: 0, bottom: 0, left: 0 }) {
+  const page = calculateGridPagePlacements({
+    placement: {
+      paper: PAPER_FORMATS.A4,
+      card: MAGIC_STANDARD_CARD,
+      pageOrientation: "portrait",
+      ...(cardOrientation ? { cardOrientation } : {}),
+      bleedMm: 0,
+      marginsMm,
+      reservedZonesMm: [],
+    },
+    count: 1,
+    bleedByCardMm: [bleedMm],
+  })[0]!;
+  return page.placement.slots[0]!.trim;
+}
 
 interface DecodedFixturePng {
   readonly width: number;
@@ -439,6 +457,7 @@ describe("LosslessPdfEngine", () => {
       cardOrientation: "portrait",
       count: 1,
       bleedMm: 0,
+      reservedZonesMm: geometry.reservedZones,
     });
 
     expect(mediaBox.width).toBeCloseTo(A4_HEIGHT_POINTS, 10);
@@ -581,8 +600,8 @@ describe("LosslessPdfEngine", () => {
     const parsed = await parsePdf(pdf);
     const cardMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d]) =>
       Math.abs(a - MAGIC_CARD_WIDTH_POINTS) < 1e-8 && Math.abs(b) < 1e-8 && Math.abs(c) < 1e-8 && Math.abs(d - MAGIC_CARD_HEIGHT_POINTS) < 1e-8);
-    const positionMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d, x]) =>
-      Math.abs(a - 1) < 1e-10 && Math.abs(b) < 1e-10 && Math.abs(c) < 1e-10 && Math.abs(d - 1) < 1e-10 && Math.abs(x) > 1e-10);
+    const positionMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d, x, y]) =>
+      Math.abs(a - 1) < 1e-10 && Math.abs(b) < 1e-10 && Math.abs(c) < 1e-10 && Math.abs(d - 1) < 1e-10 && (Math.abs(x) > 1e-10 || Math.abs(y) > 1e-10));
     const actualX = positionMatrices.map(([, , , , x]) => pointsToMm(x)).sort((a, b) => a - b);
     const expectedX = layout.slots.map(({ trim }) => trim.xMm).sort((a, b) => a - b);
 
@@ -795,8 +814,9 @@ describe("LosslessPdfEngine", () => {
         && Math.abs(d - 1) < 1e-10
         && (Math.abs(e) > 1e-10 || Math.abs(f) > 1e-10),
     );
-    const trimX = mmToPoints((210 - 63.5) / 2);
-    const trimTop = (297 - 88.9) / 2;
+    const canonicalTrim = singleCardTrim(0.625);
+    const trimX = mmToPoints(canonicalTrim.xMm);
+    const trimTop = canonicalTrim.yMm;
     const trimY = mmToPoints(297 - trimTop - 88.9);
     const bottomPaddingPx = previewHeightPx - trimRect.y - trimRect.height;
 
@@ -835,13 +855,18 @@ describe("LosslessPdfEngine", () => {
       bleedResults: [bleed],
       cardOrientation: "landscape",
     }));
-    const placement = calculateGridPlacement({
-      paper: PAPER_FORMATS.A4,
-      card: MAGIC_STANDARD_CARD,
-      cardOrientation: "landscape",
+    const placement = calculateGridPagePlacements({
+      placement: {
+        paper: PAPER_FORMATS.A4,
+        card: MAGIC_STANDARD_CARD,
+        pageOrientation: "portrait",
+        cardOrientation: "landscape",
+        bleedMm: 0,
+        reservedZonesMm: [],
+      },
       count: 1,
-      bleedMm: 0.625,
-    });
+      bleedByCardMm: [0.625],
+    })[0]!.placement;
     const trim = placement.slots[0]!.trim;
     const sourceWidth = mmToPoints(MAGIC_STANDARD_CARD.widthMm);
     const sourceHeight = mmToPoints(MAGIC_STANDARD_CARD.heightMm);
@@ -969,8 +994,9 @@ describe("LosslessPdfEngine", () => {
     const draws = getImageDrawsWithClips(parsed.content);
     const trimWidth = mmToPoints(63.5);
     const trimHeight = mmToPoints(88.9);
-    const trimX = mmToPoints((210 - 63.5) / 2);
-    const trimTop = (297 - 88.9) / 2;
+    const canonicalTrim = singleCardTrim(bleedMm);
+    const trimX = mmToPoints(canonicalTrim.xMm);
+    const trimTop = canonicalTrim.yMm;
     const trimY = mmToPoints(297 - trimTop - 88.9);
     const bleedPoints = mmToPoints(bleedMm);
     const expectedClips: readonly PdfClipRectangle[] = [
@@ -1109,11 +1135,12 @@ describe("LosslessPdfEngine", () => {
     const fullLines = getVectorSegments(guidedPdf.content);
     const trimWidthPoints = mmToPoints(63.5);
     const trimHeightPoints = mmToPoints(88.9);
+    const canonicalTrim = singleCardTrim();
     expect(fullLines).toContainEqual([
-      expect.closeTo(mmToPoints(73.25), 7),
-      expect.closeTo(mmToPoints(192.95), 7),
-      expect.closeTo(mmToPoints(136.75), 7),
-      expect.closeTo(mmToPoints(192.95), 7),
+      expect.closeTo(mmToPoints(canonicalTrim.xMm), 7),
+      expect.closeTo(mmToPoints(297 - canonicalTrim.yMm - canonicalTrim.heightMm), 7),
+      expect.closeTo(mmToPoints(canonicalTrim.xMm + canonicalTrim.widthMm), 7),
+      expect.closeTo(mmToPoints(297 - canonicalTrim.yMm - canonicalTrim.heightMm), 7),
     ]);
     expect(trimWidthPoints).toBe(180);
     expect(trimHeightPoints).toBeCloseTo(252, 10);
@@ -1200,6 +1227,7 @@ describe("LosslessPdfEngine", () => {
       };
       const pdf = await parsePdf(await engine.generate({
         images: [original],
+        marginsMm: { top: 10, right: 10, bottom: 10, left: 10 },
         cutGuides: config,
       }));
       const rgbOperators = [...pdf.content.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) RG\b/g)]
@@ -1243,16 +1271,22 @@ describe("LosslessPdfEngine", () => {
       return [x1Mm, Math.min(y1Mm, y2Mm), x1Mm, Math.max(y1Mm, y2Mm)];
     }).map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8))))
       .sort((a, b) => a.join(",").localeCompare(b.join(",")));
+    const canonicalTrim = singleCardTrim();
+    const left = canonicalTrim.xMm;
+    const right = canonicalTrim.xMm + canonicalTrim.widthMm;
+    const top = canonicalTrim.yMm;
+    const bottom = canonicalTrim.yMm + canonicalTrim.heightMm;
     const expectedSegments = [
-      [73.25, 104.05, 74.25, 104.05],
-      [135.75, 104.05, 136.75, 104.05],
-      [73.25, 192.95, 74.25, 192.95],
-      [135.75, 192.95, 136.75, 192.95],
-      [73.25, 104.05, 73.25, 105.05],
-      [136.75, 104.05, 136.75, 105.05],
-      [73.25, 191.95, 73.25, 192.95],
-      [136.75, 191.95, 136.75, 192.95],
-    ].sort((a, b) => a.join(",").localeCompare(b.join(",")));
+      [left, top, left + 1, top],
+      [right - 1, top, right, top],
+      [left, bottom, left + 1, bottom],
+      [right - 1, bottom, right, bottom],
+      [left, top, left, top + 1],
+      [right, top, right, top + 1],
+      [left, bottom - 1, left, bottom],
+      [right, bottom - 1, right, bottom],
+    ].map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8))))
+      .sort((a, b) => a.join(",").localeCompare(b.join(",")));
 
     expect(segments).toHaveLength(8);
     expect(horizontal).toHaveLength(4);
@@ -1263,21 +1297,21 @@ describe("LosslessPdfEngine", () => {
       expect(Math.hypot(x2Mm - x1Mm, y2Mm - y1Mm)).toBeCloseTo(1, 8);
     }
     for (const { x1Mm, y1Mm, x2Mm } of horizontal) {
-      expect([104.05, 192.95].some((edge) => Math.abs(y1Mm - edge) < 1e-8)).toBe(true);
+      expect([top, bottom].some((edge) => Math.abs(y1Mm - edge) < 1e-8)).toBe(true);
       const start = Math.min(x1Mm, x2Mm);
       const end = Math.max(x1Mm, x2Mm);
       expect(
-        (Math.abs(start - 73.25) < 1e-8 && Math.abs(end - 74.25) < 1e-8)
-        || (Math.abs(start - 135.75) < 1e-8 && Math.abs(end - 136.75) < 1e-8),
+        (Math.abs(start - left) < 1e-8 && Math.abs(end - left - 1) < 1e-8)
+        || (Math.abs(start - right + 1) < 1e-8 && Math.abs(end - right) < 1e-8),
       ).toBe(true);
     }
     for (const { x1Mm, y1Mm, y2Mm } of vertical) {
-      expect([73.25, 136.75].some((edge) => Math.abs(x1Mm - edge) < 1e-8)).toBe(true);
+      expect([left, right].some((edge) => Math.abs(x1Mm - edge) < 1e-8)).toBe(true);
       const start = Math.min(y1Mm, y2Mm);
       const end = Math.max(y1Mm, y2Mm);
       expect(
-        (Math.abs(start - 104.05) < 1e-8 && Math.abs(end - 105.05) < 1e-8)
-        || (Math.abs(start - 191.95) < 1e-8 && Math.abs(end - 192.95) < 1e-8),
+        (Math.abs(start - top) < 1e-8 && Math.abs(end - top - 1) < 1e-8)
+        || (Math.abs(start - bottom + 1) < 1e-8 && Math.abs(end - bottom) < 1e-8),
       ).toBe(true);
     }
   });
@@ -1290,7 +1324,7 @@ describe("LosslessPdfEngine", () => {
   ] as const)("keeps %s vector-only and independent of image objects", async (_mode, config, segmentCount) => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const clean = await engine.generate({ images: [original] });
-    const guided = await engine.generate({ images: [original], cutGuides: config });
+    const guided = await engine.generate({ images: [original], marginsMm: { top: 10, right: 10, bottom: 10, left: 10 }, cutGuides: config });
     const cleanPdf = await parsePdf(clean);
     const guidedPdf = await parsePdf(guided);
 
@@ -1306,6 +1340,7 @@ describe("LosslessPdfEngine", () => {
     const pdf = await engine.generate({
       images: [original],
       bleedResults: [bleed],
+      marginsMm: { top: 10, right: 10, bottom: 10, left: 10 },
       cutGuides: {
         trim: { enabled: false, extentMm: 1, color: "blue" },
         external: { enabled: true, strokeWidthPt: 0.3, color: "black" },
@@ -1314,8 +1349,9 @@ describe("LosslessPdfEngine", () => {
     const parsed = await parsePdf(pdf);
     const lines = getVectorSegments(parsed.content);
     const radiusMm = 0.3 * 25.4 / 72 / 2;
-    const trimX = 73.25;
-    const trimTop = 104.05;
+    const canonicalTrim = singleCardTrim(0.625, undefined, { top: 10, right: 10, bottom: 10, left: 10 });
+    const trimX = canonicalTrim.xMm;
+    const trimTop = canonicalTrim.yMm;
     const pageY = 297 - trimTop;
 
     expect(lines).toHaveLength(8);
@@ -1369,14 +1405,15 @@ describe("LosslessPdfEngine", () => {
     const guides = getVectorSegments(parsed.content);
 
     expect(guides).toHaveLength(4);
-    expect(guides.map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8)))))
-      .toEqual([
-        [mmToPoints(73.25), mmToPoints(192.95), mmToPoints(136.75), mmToPoints(192.95)],
-        [mmToPoints(73.25), mmToPoints(104.05), mmToPoints(136.75), mmToPoints(104.05)],
-        [mmToPoints(73.25), mmToPoints(192.95), mmToPoints(73.25), mmToPoints(104.05)],
-        [mmToPoints(136.75), mmToPoints(192.95), mmToPoints(136.75), mmToPoints(104.05)],
-      ].map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8)))));
-    expect(pointsToMm(guides[0][2] - guides[0][0])).toBe(63.5);
+    const canonicalTrim = singleCardTrim(bleedMm);
+    const x1 = mmToPoints(canonicalTrim.xMm);
+    const x2 = mmToPoints(canonicalTrim.xMm + canonicalTrim.widthMm);
+    const y1 = mmToPoints(297 - canonicalTrim.yMm - canonicalTrim.heightMm);
+    const y2 = mmToPoints(297 - canonicalTrim.yMm);
+    expect(guides.map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8))))).toEqual([
+      [x1, y2, x2, y2], [x1, y1, x2, y1], [x1, y2, x1, y1], [x2, y2, x2, y1],
+    ].map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8)))));
+    expect(pointsToMm(guides[0][2] - guides[0][0])).toBeCloseTo(63.5, 10);
     expect(Math.abs(pointsToMm(guides[1][1] - guides[0][1]))).toBeCloseTo(88.9, 12);
   });
 
@@ -1405,14 +1442,15 @@ describe("LosslessPdfEngine", () => {
     const requestedBleedPoints = mmToPoints(0.625);
     const trimWidthPoints = mmToPoints(63.5);
     const trimHeightPoints = mmToPoints(88.9);
+    const pagePlacement = calculateGridPagePlacements({
+      placement: { paper: PAPER_FORMATS.A4, pageOrientation: "portrait", card: MAGIC_STANDARD_CARD, bleedMm: 0 },
+      count: 9,
+      bleedByCardMm: Array.from({ length: 9 }, () => 0.625),
+    })[0]!;
     const expectedClips = new Set<string>();
-    for (const [xMm, topMm] of [
-      [8.5, 194.2], [73.25, 194.2], [138, 194.2],
-      [8.5, 104.05], [73.25, 104.05], [138, 104.05],
-      [8.5, 13.9], [73.25, 13.9], [138, 13.9],
-    ]) {
-      const trimXPoints = mmToPoints(xMm);
-      const trimYPoints = mmToPoints(297 - topMm - 88.9);
+    for (const { trim } of pagePlacement.placement.slots) {
+      const trimXPoints = mmToPoints(trim.xMm);
+      const trimYPoints = mmToPoints(297 - trim.yMm - trim.heightMm);
       const clips = [
         { x: trimXPoints - requestedBleedPoints, y: trimYPoints - requestedBleedPoints, width: requestedBleedPoints, height: trimHeightPoints + 2 * requestedBleedPoints },
         { x: trimXPoints + trimWidthPoints, y: trimYPoints - requestedBleedPoints, width: requestedBleedPoints, height: trimHeightPoints + 2 * requestedBleedPoints },
@@ -1433,14 +1471,15 @@ describe("LosslessPdfEngine", () => {
     const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 3 });
     const paperFormat = { name: "Letter", widthMm: 215.9, heightMm: 279.4 } as const;
     const bleedByCardMm = [3, 0, 0, 0, 0, 0, 0, 0, 0];
+    const cutGuides = {
+      trim: { enabled: false, extentMm: 1 as const, color: "blue" as const },
+      external: { enabled: true, strokeWidthPt, color: "black" as const },
+    };
     const pdf = await engine.generate({
       images: Array.from({ length: 9 }, () => original),
       bleedResults: [bleed, ...Array.from({ length: 8 }, () => undefined)],
       paperFormat,
-      cutGuides: {
-        trim: { enabled: false, extentMm: 1, color: "blue" },
-        external: { enabled: true, strokeWidthPt, color: "black" },
-      },
+      cutGuides,
     });
     const parsed = await parsePdf(pdf);
 
@@ -1448,24 +1487,24 @@ describe("LosslessPdfEngine", () => {
     expect(parsed.images).toHaveLength(2);
     const guides = getVectorSegments(parsed.content);
     expect(guides.length).toBeGreaterThan(10);
-    const uniqueVerticalCoordinates = [...new Set(guides
-      .filter(([x1, , x2]) => Math.abs(x1 - x2) < 1e-10)
-      .map(([x1]) => Number(pointsToMm(x1).toFixed(8))))];
-    const uniqueHorizontalCoordinates = [...new Set(guides
-      .filter(([, y1, , y2]) => Math.abs(y1 - y2) < 1e-10)
-      .map(([, y1]) => Number(pointsToMm(y1).toFixed(8))))]
-      .sort((a, b) => a - b);
-    expect(uniqueVerticalCoordinates).toEqual([12.7, 76.2, 79.2, 142.7, 206.2]);
-    expect(uniqueHorizontalCoordinates).toEqual([3.35, 92.25, 181.15, 184.15, 273.05]);
-
-    const placement = calculateGridPlacement({
-      paper: paperFormat,
-      card: MAGIC_STANDARD_CARD,
-      count: 9,
+    const plan = buildCanonicalPrintPlan(9, {
       bleedMm: 0,
+      paperFormat,
+      pageOrientation: "portrait",
+      cardFormat: MAGIC_STANDARD_CARD,
       bleedByCardMm,
     });
+    const placement = plan.pages[0]!.placement;
     const cards = placement.slots.map((slot, index) => ({ trim: slot.trim, bleedMm: bleedByCardMm[index] }));
+    const expectedGeometry = new CutGuideEngine().generate({ cards, pageSizeMm: placement.pageSizeMm, config: cutGuides });
+    const normalize = (values: readonly number[]) => values.map((value) => Number(value.toFixed(8)));
+    const expectedSegments = expectedGeometry.externalSegments
+      .map(({ x1Mm, y1Mm, x2Mm, y2Mm }) => normalize([x1Mm, paperFormat.heightMm - y1Mm, x2Mm, paperFormat.heightMm - y2Mm]))
+      .sort((left, right) => left.join(",").localeCompare(right.join(",")));
+    const actualSegments = guides
+      .map(([x1, y1, x2, y2]) => normalize([pointsToMm(x1), pointsToMm(y1), pointsToMm(x2), pointsToMm(y2)]))
+      .sort((left, right) => left.join(",").localeCompare(right.join(",")));
+    expect(actualSegments).toEqual(expectedSegments);
     expect(/([\d.]+) w\b/.exec(parsed.content)?.[1]).toBe(String(strokeWidthPt));
     expectExternalPdfSegmentsClear(guides, cards, paperFormat.heightMm, strokeWidthPt);
   });
@@ -1481,8 +1520,8 @@ describe("LosslessPdfEngine", () => {
       registration: {
         type: "custom",
         orientation: "portrait",
-        marks: [[{ type: "line", x1Mm: 3, y1Mm: 3, x2Mm: 5, y2Mm: 3, strokeWidthMm: 0.2 }]],
-        reservedZones: [{ xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }],
+        marks: [[{ type: "line", x1Mm: 205, y1Mm: 275, x2Mm: 207, y2Mm: 275, strokeWidthMm: 0.2 }]],
+        reservedZones: [{ xMm: 205, yMm: 275, widthMm: 2, heightMm: 2 }],
       },
     });
     const parsed = await parsePdf(pdf);
@@ -1750,6 +1789,7 @@ describe("LosslessPdfEngine", () => {
       images: [original],
       paperFormat: PAPER_FORMATS.A4,
       pageOrientation: "portrait",
+      marginsMm: { top: 20, right: 20, bottom: 20, left: 20 },
       registration: createDefaultRegistrationConfig("three-point", "portrait"),
       cutGuides: { trim: { enabled: true, extentMm: 1, color: "blue" }, external: { enabled: false, strokeWidthPt: 0.3, color: "black" } },
       printCalibration: calibration,
@@ -1814,7 +1854,7 @@ describe("LosslessPdfEngine", () => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const calibration = parseSideCalibration({ offsetXUm: -683, offsetYUm: 247, rotationDeg: 0.031, scaleX: 1.00012, scaleY: 0.99987 });
     const placements = calculateGridPagePlacements({
-      placement: { paper: PAPER_FORMATS.A4, pageOrientation: "portrait", card: MAGIC_STANDARD_CARD, cardOrientation: "portrait", bleedMm: 0 },
+      placement: { paper: PAPER_FORMATS.A4, pageOrientation: "portrait", card: MAGIC_STANDARD_CARD, cardOrientation: "portrait", bleedMm: 0, marginsMm: { top: 10, right: 10, bottom: 10, left: 10 } },
       count,
     });
     const expected = createPrintCalibrationTransform({ widthMm: 210, heightMm: 297 }, calibration, "back").matrix;
@@ -2036,11 +2076,18 @@ describe("LosslessPdfEngine", () => {
     const parsed = await parsePdf(pdf);
     const settings = { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 0 };
     const cutPages = resolveCutLayoutPages({ projectId: "pdf-cut-pages", projectRevision: 1, settings, cardCount: 10 });
-    const sharedPlacements = calculateGridPagePlacements({
-      placement: { paper: settings.paperFormat, card: settings.cardFormat, pageOrientation: settings.pageOrientation, cardOrientation: settings.cardOrientation, bleedMm: 0, marginsMm: settings.marginsMm, horizontalGapMm: settings.horizontalGapMm, verticalGapMm: settings.verticalGapMm, reservedZonesMm: [] },
-      count: 10,
-      bleedByCardMm: Array.from({ length: 10 }, () => 0),
-    });
+    const sharedPlacements = buildCanonicalPrintPlan(10, {
+      paperFormat: settings.paperFormat,
+      cardFormat: settings.cardFormat,
+      pageOrientation: settings.pageOrientation,
+      cardOrientation: settings.cardOrientation,
+      bleedMm: 0,
+      marginsMm: settings.marginsMm,
+      horizontalGapMm: settings.horizontalGapMm,
+      verticalGapMm: settings.verticalGapMm,
+      registration: settings.registration,
+      duplexFlipMode: settings.duplexFlipMode,
+    }).pages;
 
     expect(parsed.document.getPages()).toHaveLength(2);
     expect(cutPages).toHaveLength(2);

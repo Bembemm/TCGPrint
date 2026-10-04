@@ -27,6 +27,7 @@ import { CalibrationError, checkPrinterProfileCompatibility, type PrinterProfile
 import { verifyPrinterProfileSnapshot } from "../persistence/printer-profiles/hash";
 import { MPC_MAX_REVALIDATION_CANDIDATES, type MpcCandidateRevalidationResult } from "../artwork/mpc-provider";
 import { createMpcDiagnosticReport } from "../artwork/mpc-diagnostic-report";
+import { extendPreviewBleed } from "./preview-bleed";
 
 const FORBIDDEN_PROPERTIES = new Set(["originalBytes", "bytes", "sourcePath", "localOriginalPath", "originalUri", "previewUri", "filePaths", "absolutePath", "filesystemPath"]);
 const SOURCES = new Set(["scryfall", "upload", "mpc", "url", "custom"]);
@@ -762,8 +763,42 @@ export async function handleArtworkPreview(request: Request, candidateId: string
     if (!/^(upload:[a-f0-9]{64}|scryfall:[a-f0-9-]{36}:(front|back)|mpc:[a-f0-9]{64})$/.test(candidateId)) throw new ApiRequestError(400, "INVALID_ID", "Artwork ID is invalid.");
     const preview = await workbench.getArtworkPreview(candidateId, request.signal);
     if (!preview) return Response.json({ code: "PREVIEW_UNAVAILABLE", message: "No local preview is available for this reference." }, { status: 404 });
-    return new Response(new Uint8Array(preview.bytes), {
-      headers: { "Content-Type": preview.contentType, "Cache-Control": "private, max-age=3600", "X-TCGPrint-Artwork-Role": "preview" },
+    const url = new URL(request.url);
+    const bleedValue = url.searchParams.get("bleedMm");
+    const trimWidthValue = url.searchParams.get("trimWidthMm");
+    const trimHeightValue = url.searchParams.get("trimHeightMm");
+    const roundedValue = url.searchParams.get("roundedCorners");
+    const cornerRadiusValue = url.searchParams.get("cornerRadiusMm");
+    let previewBytes = new Uint8Array(preview.bytes);
+    let contentType = preview.contentType;
+    if (bleedValue !== null || trimWidthValue !== null || trimHeightValue !== null || roundedValue !== null || cornerRadiusValue !== null) {
+      if (bleedValue === null || trimWidthValue === null || trimHeightValue === null) {
+        throw new ApiRequestError(400, "INVALID_PREVIEW_GEOMETRY", "Preview bleed requires bleed and physical trim dimensions.");
+      }
+      if (roundedValue !== null && roundedValue !== "true" && roundedValue !== "false") {
+        throw new ApiRequestError(400, "INVALID_PREVIEW_GEOMETRY", "roundedCorners must be true or false.");
+      }
+      if (cornerRadiusValue !== null && (roundedValue !== "true" || !Number.isFinite(Number(cornerRadiusValue)))) {
+        throw new ApiRequestError(400, "INVALID_PREVIEW_GEOMETRY", "A physical corner radius requires rounded corners.");
+      }
+      let result;
+      try {
+        result = await extendPreviewBleed(preview.bytes, preview.contentType, {
+          bleedMm: Number(bleedValue),
+          trimWidthMm: Number(trimWidthValue),
+          trimHeightMm: Number(trimHeightValue),
+          roundedCorners: roundedValue === "true",
+          ...(cornerRadiusValue !== null ? { cornerRadiusMm: Number(cornerRadiusValue) } : {}),
+        });
+      } catch (error) {
+        if (error instanceof RangeError) throw new ApiRequestError(400, "INVALID_PREVIEW_GEOMETRY", error.message);
+        throw error;
+      }
+      previewBytes = new Uint8Array(result.bytes);
+      contentType = result.contentType;
+    }
+    return new Response(previewBytes, {
+      headers: { "Content-Type": contentType, "Cache-Control": "private, max-age=3600", "X-TCGPrint-Artwork-Role": "preview" },
     });
   } catch (error) { return respondError(error); }
 }
@@ -1045,6 +1080,12 @@ export async function handleCardExport(
     if (result.contentMode === "front-back-separated") {
       const front = result.frontPdfBytes!;
       const back = result.backPdfBytes!;
+      if (new URL(request.url).searchParams.get("proof") === "final") {
+        return Response.json({
+          frontPdfBase64: Buffer.from(front).toString("base64"),
+          backPdfBase64: Buffer.from(back).toString("base64"),
+        }, { headers: sharedHeaders });
+      }
       const manifest = new TextEncoder().encode(JSON.stringify(result.manifest));
       const archive = createSeparatePdfArchive([
         { filename: "front.pdf", bytes: front },

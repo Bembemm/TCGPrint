@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
+import sharp from "sharp";
 import type { ArtworkOriginal } from "../artwork/storage/types";
 import { ArtworkStorageError } from "../artwork/storage/types";
 import { validateImageBytes } from "../artwork/storage/image-validation";
 import type { ArtworkOriginalStore } from "../artwork/storage/original-store";
+import type { ArtworkThumbnailStore } from "../artwork/storage/thumbnail-store";
 import type { BackLibraryAssetReference } from "../core/cards/types";
 import { BackLibraryRepository, type BackLibraryAssetRecord } from "../persistence/back-library/repository";
 
@@ -79,14 +81,18 @@ export class BackLibraryService {
   private readonly maximumBytes: number;
   private readonly maximumDimensionPixels: number;
   private readonly maximumPixels: number;
+  private readonly thumbnails: ArtworkThumbnailStore | undefined;
+  private readonly previewCache = new Map<string, { readonly bytes: Uint8Array; readonly contentType: string; readonly widthPx: number; readonly heightPx: number }>();
 
   constructor(
     repository: BackLibraryRepository,
     originals: ArtworkOriginalStore,
     options: { maximumBytes?: number; maximumDimensionPixels?: number; maximumPixels?: number } = {},
+    thumbnails?: ArtworkThumbnailStore,
   ) {
     this.repository = repository;
     this.originals = originals;
+    this.thumbnails = thumbnails;
     this.maximumBytes = options.maximumBytes ?? MAX_BACK_LIBRARY_UPLOAD_BYTES;
     this.maximumDimensionPixels = options.maximumDimensionPixels ?? MAX_BACK_DIMENSION_PIXELS;
     this.maximumPixels = options.maximumPixels ?? MAX_BACK_PIXELS;
@@ -114,7 +120,21 @@ export class BackLibraryService {
     }
     const assetId = `back:${sha256}`;
     try {
-      return this.repository.add({ assetId, sha256, format: image.format, name, widthPx: image.widthPx, heightPx: image.heightPx, metadata });
+      const record = this.repository.add({ assetId, sha256, format: image.format, name, widthPx: image.widthPx, heightPx: image.heightPx, metadata });
+      if (this.thumbnails) {
+        const thumbnail = sharp(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength), { limitInputPixels: this.maximumPixels })
+          .rotate().resize({ width: 640, height: 896, fit: "inside", withoutEnlargement: true });
+        const output = image.format === "png"
+          ? await thumbnail.png({ compressionLevel: 8 }).toBuffer({ resolveWithObject: true })
+          : await thumbnail.jpeg({ quality: 78, mozjpeg: true }).toBuffer({ resolveWithObject: true });
+        await this.thumbnails.putThumbnail(assetId, new Uint8Array(output.data), {
+          sourceArtworkId: sha256,
+          widthPx: output.info.width,
+          heightPx: output.info.height,
+          role: "back-library-preview",
+        });
+      }
+      return record;
     } catch (error) {
       throw new BackLibraryError("BACK_ORIGINAL_UNAVAILABLE", "Back Library metadata could not be stored.", error);
     }
@@ -151,5 +171,49 @@ export class BackLibraryService {
       }
       return original;
     } catch (error) { throw mappedStorageError(error); }
+  }
+
+  /** Returns a small validated preview derivative for the live compositor, never the original bytes. */
+  async resolvePreview(reference: BackLibraryAssetReference): Promise<{ readonly bytes: Uint8Array; readonly contentType: string; readonly widthPx: number; readonly heightPx: number }> {
+    const record = this.repository.get(reference.assetId);
+    if (!record) throw new BackLibraryError("BACK_ORIGINAL_UNAVAILABLE", "Referenced Back Library asset record is unavailable.");
+    if (reference.assetId !== `back:${reference.sha256}` || record.sha256 !== reference.sha256 || record.format !== reference.format) {
+      throw new BackLibraryError("BACK_REFERENCE_MISMATCH", "Project Back Library reference does not match its immutable asset record.");
+    }
+    const cached = this.previewCache.get(reference.sha256);
+    if (cached) {
+      this.previewCache.delete(reference.sha256);
+      this.previewCache.set(reference.sha256, cached);
+      return { ...cached, bytes: new Uint8Array(cached.bytes) };
+    }
+    const stored = await this.thumbnails?.getThumbnail(reference.assetId);
+    if (stored) {
+      const contentType = stored.extension === "jpg" || stored.extension === "jpeg" ? "image/jpeg" : "image/png";
+      const preview = { bytes: new Uint8Array(stored.bytes), contentType, widthPx: stored.widthPx, heightPx: stored.heightPx };
+      this.previewCache.delete(reference.sha256);
+      this.previewCache.set(reference.sha256, preview);
+      while (this.previewCache.size > 24) this.previewCache.delete(this.previewCache.keys().next().value!);
+      return { ...preview, bytes: new Uint8Array(preview.bytes) };
+    }
+    const original = await this.resolveOriginal(reference);
+    const image = sharp(Buffer.from(original.bytes.buffer, original.bytes.byteOffset, original.bytes.byteLength), { limitInputPixels: this.maximumPixels }).rotate().resize({ width: 640, height: 896, fit: "inside", withoutEnlargement: true });
+    const output = reference.format === "png"
+      ? await image.png({ compressionLevel: 8 }).toBuffer({ resolveWithObject: true })
+      : await image.jpeg({ quality: 78, mozjpeg: true }).toBuffer({ resolveWithObject: true });
+    const preview = {
+      bytes: new Uint8Array(output.data),
+      contentType: reference.format === "png" ? "image/png" : "image/jpeg",
+      widthPx: output.info.width,
+      heightPx: output.info.height,
+    };
+    await this.thumbnails?.putThumbnail(reference.assetId, preview.bytes, {
+      sourceArtworkId: reference.sha256,
+      widthPx: preview.widthPx,
+      heightPx: preview.heightPx,
+      role: "back-library-preview",
+    });
+    this.previewCache.set(reference.sha256, preview);
+    while (this.previewCache.size > 24) this.previewCache.delete(this.previewCache.keys().next().value!);
+    return { ...preview, bytes: new Uint8Array(preview.bytes) };
   }
 }

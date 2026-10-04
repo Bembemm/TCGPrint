@@ -158,7 +158,7 @@ describe("physical duplex page pairing", () => {
         bleedMm: 0,
         rows: 2,
         columns: 2,
-        reservedZonesMm: [{ xMm: 85, yMm: 118, widthMm: 20, heightMm: 30 }],
+        reservedZonesMm: [{ xMm: 5, yMm: 5, widthMm: 10, heightMm: 10 }],
       },
       count: 2,
     });

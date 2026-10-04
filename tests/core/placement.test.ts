@@ -14,8 +14,8 @@ describe("bleed-aware physical grid placement", () => {
 
     expect(layout).toMatchObject({ columns: 3, rows: 3, capacity: 9 });
     expect(layout.slots).toHaveLength(9);
-    expect(layout.slots[0].trim.xMm).toBeCloseTo(8.5, 10);
-    expect(layout.slots[0].trim.yMm).toBeCloseTo(13.9, 10);
+    expect(layout.slots[0].trim.xMm).toBeCloseTo(0.625, 10);
+    expect(layout.slots[0].trim.yMm).toBeCloseTo(0.625, 10);
     expect(layout.slots[0].trim.widthMm).toBe(63.5);
     expect(layout.slots[0].trim.heightMm).toBe(88.9);
     expect(layout.slots[1].trim.xMm - layout.slots[0].trim.xMm - 63.5).toBeCloseTo(1.25, 10);
@@ -68,34 +68,53 @@ describe("bleed-aware physical grid placement", () => {
     }
   });
 
-  it("does not reserve the maximum card bleed in every row and column for an unrelated reserved zone", () => {
+  it("reserves a blocked first slot and still fills the remaining capacity row-major", () => {
     const layout = calculateGridPlacement({
       paper: { name: "Letter", widthMm: 215.9, heightMm: 279.4 },
       card: MAGIC_STANDARD_CARD,
-      count: 9,
+      count: 8,
       bleedMm: 0,
-      bleedByCardMm: [3, 0, 0, 0, 0, 0, 0, 0, 0],
+      bleedByCardMm: [0, 0, 0, 0, 0, 0, 0, 0],
       reservedZonesMm: [{ xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }],
     });
 
-    expect(layout).toMatchObject({ columns: 3, rows: 3, capacity: 9 });
-    expect(layout.slots).toHaveLength(9);
+    expect(layout).toMatchObject({ columns: 3, rows: 3, capacity: 8 });
+    expect(layout.slots).toHaveLength(8);
+    expect(layout.gridSlots[0]).toMatchObject({ reserved: true });
+    expect(layout.gridSlots[0]?.cardIndex).toBeUndefined();
+    expect(layout.slots[0]).toMatchObject({ index: 1, cardIndex: 0 });
     expect(layout.slots[0]!.trim.widthMm).toBe(63.5);
     expect(layout.slots[0]!.trim.heightMm).toBe(88.9);
   });
 
-  it("centers the complete grid and does not move a single trim when symmetric bleed changes", () => {
-    const placements = [0, 0.625, 1, 2, 3].map((bleedMm) => calculateGridPlacement({
+  it("keeps one-card geometry on the same capacity grid as a full sheet", () => {
+    for (const bleedMm of [0, 0.625, 1, 2, 3]) {
+      const one = calculateGridPlacement({ paper: PAPER_FORMATS.A4, card: MAGIC_STANDARD_CARD, count: 1, bleedMm });
+      const full = calculateGridPlacement({ paper: PAPER_FORMATS.A4, card: MAGIC_STANDARD_CARD, count: 9, bleedMm });
+      expect(one.gridSlots.map(({ trim }) => [trim.xMm, trim.yMm])).toEqual(full.gridSlots.map(({ trim }) => [trim.xMm, trim.yMm]));
+      expect(one.slots[0]!.trim).toEqual(full.slots[0]!.trim);
+    }
+    const first = calculateGridPlacement({ paper: PAPER_FORMATS.A4, card: MAGIC_STANDARD_CARD, count: 1, bleedMm: 0.625 }).slots[0]!.trim;
+    expect(first.xMm).toBeCloseTo(0.625, 10);
+    expect(first.yMm).toBeCloseTo(0.625, 10);
+    expect(first).toMatchObject({ widthMm: 63.5, heightMm: 88.9 });
+  });
+
+  it("uses one stable auto-grid for one, two, and capacity card counts", () => {
+    const placements = [1, 2, 9].map((count) => calculateGridPlacement({
       paper: PAPER_FORMATS.A4,
       card: MAGIC_STANDARD_CARD,
-      count: 1,
-      bleedMm,
-    }).slots[0].trim);
+      count,
+      bleedMm: 0.625,
+    }));
+    const coordinates = (layout: typeof placements[number]) => layout.gridSlots.map(({ trim }) => [trim.xMm, trim.yMm]);
 
-    expect(placements.every((trim) =>
-      Math.abs(trim.xMm - placements[0].xMm) < 1e-10 && Math.abs(trim.yMm - placements[0].yMm) < 1e-10,
-    )).toBe(true);
-    expect(placements[0]).toMatchObject({ xMm: 73.25, yMm: 104.05, widthMm: 63.5, heightMm: 88.9 });
+    expect(placements.map(({ columns, rows, capacity }) => [columns, rows, capacity])).toEqual([
+      [3, 3, 9], [3, 3, 9], [3, 3, 9],
+    ]);
+    expect(coordinates(placements[0]!)).toEqual(coordinates(placements[1]!));
+    expect(coordinates(placements[1]!)).toEqual(coordinates(placements[2]!));
+    expect(placements[0]!.slots[0]!.trim).toEqual(placements[2]!.slots[0]!.trim);
   });
 
   it("rejects non-finite, negative, and non-integer placement inputs", () => {
@@ -140,7 +159,7 @@ describe("bleed-aware physical grid placement", () => {
     expect(portraitCards.slots[0].trim).toMatchObject({ widthMm: 63.5, heightMm: 88.9 });
   });
 
-  it("respects all physical page margins when centering fixed layout geometry", () => {
+  it("anchors fixed layout geometry to the configured top and left margins", () => {
     const layout = calculateGridPlacement({
       paper: { name: "Margins", widthMm: 100, heightMm: 100 },
       card: { id: "rect", name: "Rectangle", widthMm: 20, heightMm: 30 },
@@ -151,7 +170,7 @@ describe("bleed-aware physical grid placement", () => {
       marginsMm: { top: 10, right: 5, bottom: 20, left: 15 },
     });
 
-    expect(layout.slots[0]!.trim).toEqual({ xMm: 45, yMm: 30, widthMm: 20, heightMm: 30 });
+    expect(layout.slots[0]!.trim).toEqual({ xMm: 15, yMm: 10, widthMm: 20, heightMm: 30 });
   });
 
   it("places horizontal and vertical gaps independently without shrinking cards", () => {
@@ -169,10 +188,10 @@ describe("bleed-aware physical grid placement", () => {
     expect(layout.gridWidthMm).toBe(54);
     expect(layout.gridHeightMm).toBe(52);
     expect(layout.gridSlots.map(({ trim }) => [trim.xMm, trim.yMm, trim.widthMm, trim.heightMm])).toEqual([
-      [24, 25, 20, 20],
-      [56, 25, 20, 20],
-      [24, 55, 20, 20],
-      [56, 55, 20, 20],
+      [1, 1, 20, 20],
+      [33, 1, 20, 20],
+      [1, 31, 20, 20],
+      [33, 31, 20, 20],
     ]);
   });
 
@@ -380,11 +399,11 @@ describe("bleed-aware physical grid placement", () => {
     expect(() => calculateGridPlacement({
       paper: { name: "Test", widthMm: 100, heightMm: 60 },
       card: { id: "rect", name: "Rect", widthMm: 40, heightMm: 20 },
-      count: 1,
+      count: 2,
       bleedMm: 0,
       rows: 1,
       columns: 2,
-      reservedZonesMm: [{ xMm: 45, yMm: 20, widthMm: 10, heightMm: 20 }],
+      reservedZonesMm: [{ xMm: 45, yMm: 0, widthMm: 10, heightMm: 20 }],
     })).toThrow(/reserved zone/i);
   });
 
@@ -397,7 +416,7 @@ describe("bleed-aware physical grid placement", () => {
       rows: 1,
       columns: 2,
       skippedSlotIndices: [0],
-      reservedZonesMm: [{ xMm: 85, yMm: 133, widthMm: 5, heightMm: 5 }],
+      reservedZonesMm: [{ xMm: 1, yMm: 1, widthMm: 5, heightMm: 5 }],
     });
 
     expect(layout.slots.map(({ index, cardIndex }) => ({ index, cardIndex }))).toEqual([{ index: 1, cardIndex: 0 }]);

@@ -338,8 +338,10 @@ describe("minimal import workbench API", () => {
 
     const trimWidth = mmToPoints(63.5);
     const trimHeight = mmToPoints(88.9);
-    const trimX = mmToPoints((210 - 63.5) / 2);
-    const trimTop = (297 - 88.9) / 2;
+    // Count-independent canonical placement keeps a single card in the same
+    // row-major physical slot used by full and partial sheets.
+    const trimX = mmToPoints(0.625);
+    const trimTop = 0.625;
     const trimY = mmToPoints(297 - trimTop - 88.9);
     const expectedTrimTransforms: readonly PdfTransform[] = [
       [1, 0, 0, 1, trimX, trimY],
@@ -367,11 +369,12 @@ describe("minimal import workbench API", () => {
 
     const guides = getVectorSegments(parsed.rawContent);
     expect(guides).toHaveLength(4);
+    const trimBottom = trimY + trimHeight;
     const expectedGuides = [
-      [trimX, mmToPoints(192.95), trimX + trimWidth, mmToPoints(192.95)],
-      [trimX, mmToPoints(104.05), trimX + trimWidth, mmToPoints(104.05)],
-      [trimX, mmToPoints(192.95), trimX, mmToPoints(104.05)],
-      [trimX + trimWidth, mmToPoints(192.95), trimX + trimWidth, mmToPoints(104.05)],
+      [trimX, trimBottom, trimX + trimWidth, trimBottom],
+      [trimX, trimY, trimX + trimWidth, trimY],
+      [trimX, trimBottom, trimX, trimY],
+      [trimX + trimWidth, trimBottom, trimX + trimWidth, trimY],
     ];
     expect(guides.map(({ coordinates }) => coordinates.map((coordinate) => Number(coordinate.toFixed(8)))))
       .toEqual(expectedGuides.map((segment) => segment.map((coordinate) => Number(coordinate.toFixed(8)))));

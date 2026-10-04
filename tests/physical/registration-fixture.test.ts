@@ -25,6 +25,7 @@ describe("physical registration reference fixture", () => {
       bleedMm: 0,
       rows: 3,
       columns: 3,
+      marginsMm: { top: 35, right: 0, bottom: 0, left: 40 },
       skippedSlotIndices,
       reservedZonesMm: geometry.reservedZones,
     });
@@ -37,6 +38,7 @@ describe("physical registration reference fixture", () => {
       cardFormat: card,
       pageOrientation: "portrait",
       cardOrientation: "portrait",
+      marginsMm: { top: 35, right: 0, bottom: 0, left: 40 },
       registration,
       layoutRows: 3,
       layoutColumns: 3,
@@ -83,7 +85,7 @@ describe("physical registration reference fixture", () => {
       thickness: 0.75,
       color: rgb(0.08, 0.08, 0.08),
     });
-    topText("10 mm bar | margins 0 mm | gaps 0 mm", 39, 43, 6.5);
+    topText("10 mm bar | margins top 35 / left 40 mm | gaps 0 mm", 39, 43, 6.5);
 
     for (const zone of geometry.reservedZones) {
       page.drawRectangle({
@@ -161,7 +163,7 @@ describe("physical registration reference fixture", () => {
       templateNote: "Synthetic reference geometry. Import and select the exact real Silhouette template version before physical approval.",
       paper: { id: "a4", widthMm: 210, heightMm: 297, orientation: "portrait" },
       card: { orientation: "portrait", widthMm: 50, heightMm: 65 },
-      marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+      marginsMm: { top: 35, right: 0, bottom: 0, left: 40 },
       gapsMm: { horizontal: 0, vertical: 0 },
       registration,
       registrationReservedZonesMm: geometry.reservedZones,

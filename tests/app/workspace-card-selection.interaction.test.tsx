@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -93,7 +93,7 @@ describe("Cards and Artwork navigation", () => {
       if (url === "/api/cards/island-card") return Response.json({ identity: { id: "island", provider: "scryfall", name: "Island", resolutionMethod: "name", confidence: 1, relatedCards: [] } });
       if (url === "/api/cards/island-card/artworks") return Response.json({ candidates: [islandArtwork], catalogTotal: 1, catalogTotalComplete: true, providerHealth });
       if (url.includes("/api/cards/artworks/") && url.endsWith("/prepare")) return Response.json({ candidate: url.includes("island-front") ? islandArtwork : mountainArtwork });
-      if (url === "/api/cards/export") {
+      if (url === "/api/cards/export" || url === "/api/cards/export?proof=final") {
         exportCount += 1;
         if (exportCount === 1) return pendingFirstExport.promise;
         return new Response("%PDF-1.7 test", { headers: { "Content-Type": "application/pdf", "Content-Disposition": 'attachment; filename="tcgprint-m4.pdf"' } });
@@ -126,7 +126,9 @@ describe("Cards and Artwork navigation", () => {
     expect(activeMountain()).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Export" }));
-    const generate = screen.getByRole("button", { name: /Validar e gerar/ });
+    const composer = screen.getByRole("img", { name: /Compositor live frente/ });
+    const initialSlotX = composer.querySelector("g[data-slot-x-mm]")?.getAttribute("data-slot-x-mm");
+    const generate = screen.getByRole("button", { name: "Gerar PDF final" });
     expect(screen.getByText(/Project: sem Project aberto · Working Set local/)).toBeInTheDocument();
     expect(generate).toBeEnabled();
     await user.click(generate);
@@ -135,9 +137,28 @@ describe("Cards and Artwork navigation", () => {
     pendingFirstExport.resolve(new Response("%PDF-1.7 cancelled", { headers: { "Content-Type": "application/pdf" } }));
     await waitFor(() => expect(screen.getAllByText("Exportação cancelada.").length).toBeGreaterThan(0));
 
-    await user.click(screen.getByRole("button", { name: /Validar e gerar/ }));
+    await user.click(screen.getByRole("button", { name: "Gerar PDF final" }));
     expect(await screen.findByRole("link", { name: "Baixar tcgprint-m4.pdf" })).toHaveAttribute("download", "tcgprint-m4.pdf");
     expect(createObjectUrl).toHaveBeenCalledTimes(1);
     expect(exportCount).toBe(2);
+
+    await user.click(screen.getByRole("button", { name: "Conferir PDF final" }));
+    const proof = await screen.findByRole("dialog", { name: "Conferir PDF final" });
+    expect(within(proof).getByTitle("PDF final · front-only")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Compositor live frente/ })).toBe(composer);
+
+    await user.click(screen.getByRole("tab", { name: "Layout" }));
+    await user.click(screen.getByText("Grade, slots e margens avançados"));
+    const margin = screen.getByRole("spinbutton", { name: "Margem esquerda (mm)" });
+    await user.clear(margin);
+    await user.type(margin, "5");
+    expect(within(proof).getByRole("status")).toHaveTextContent("PDF conferido anteriormente está desatualizado");
+    expect(composer.querySelector("g[data-slot-x-mm]")?.getAttribute("data-slot-x-mm")).not.toBe(initialSlotX);
+    expect(screen.getByRole("dialog", { name: "Conferir PDF final" })).toBe(proof);
+    await user.click(within(proof).getByRole("button", { name: "Fechar conferência do PDF final" }));
+    expect(screen.queryByRole("dialog", { name: "Conferir PDF final" })).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Compositor live frente/ })).toBe(composer);
+    expect(exportCount).toBe(3);
+    expect(createObjectUrl).toHaveBeenCalledTimes(2);
   }, 15_000);
 });

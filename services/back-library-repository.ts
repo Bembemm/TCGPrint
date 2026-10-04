@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { appDataPaths } from "../artwork/storage/paths";
 import { ArtworkOriginalStore } from "../artwork/storage/original-store";
 import { ArtworkRepository } from "../artwork/storage/repository";
+import { ArtworkThumbnailStore } from "../artwork/storage/thumbnail-store";
 import { BackLibraryRepository } from "../persistence/back-library/repository";
 import { openArtworkDatabase } from "../persistence/sqlite";
 import { BackLibraryService } from "./back-library";
@@ -18,6 +19,7 @@ export function getBackLibraryService(): BackLibraryService {
   const database = openArtworkDatabase(paths.databaseFile);
   const artworkRepository = new ArtworkRepository(database);
   const originalStore = new ArtworkOriginalStore(paths.originalsDirectory, artworkRepository);
-  service = new BackLibraryService(new BackLibraryRepository(database), originalStore);
+  const thumbnailStore = new ArtworkThumbnailStore(paths.thumbnailsDirectory, artworkRepository);
+  service = new BackLibraryService(new BackLibraryRepository(database), originalStore, {}, thumbnailStore);
   return service;
 }

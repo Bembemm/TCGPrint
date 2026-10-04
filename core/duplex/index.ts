@@ -1,5 +1,5 @@
 export { createDuplexPagePairing } from "./page-pairing";
-export { calculateSharedPagePlacements } from "./shared-placement";
+export { buildCanonicalPrintPlan, calculateSharedPagePlacements } from "./shared-placement";
 export type { SharedPagePlacementResult, SharedPlacementOptions } from "./shared-placement";
 export {
   getDuplexPageReflectionMatrix,

@@ -21,4 +21,16 @@ describe("shared physical page placements", () => {
     expect(pages.at(-1)?.endCardIndex).toBe(100);
     expect(pages.every(({ placement: page }) => page.slots.length <= page.capacity)).toBe(true);
   });
+
+  it("keeps capacity and final partial pages on identical physical slot coordinates", () => {
+    const pages = calculateGridPagePlacements({ placement, count: 10 });
+    const first = pages[0]!.placement;
+    const last = pages[1]!.placement;
+    const coordinates = (page: typeof first) => page.gridSlots.map(({ trim }) => [trim.xMm, trim.yMm, trim.widthMm, trim.heightMm]);
+
+    expect(pages.map(({ startCardIndex, endCardIndex }) => [startCardIndex, endCardIndex])).toEqual([[0, 9], [9, 10]]);
+    expect([last.columns, last.rows, last.capacity]).toEqual([first.columns, first.rows, first.capacity]);
+    expect(coordinates(last)).toEqual(coordinates(first));
+    expect(last.slots[0]!.trim).toEqual(first.slots[0]!.trim);
+  });
 });

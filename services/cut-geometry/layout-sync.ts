@@ -1,6 +1,6 @@
-import { calculateGridPagePlacements, parseTemplateLayoutGeometry, type GridPlacementMm, type PageOrientation, type TemplateLayoutGeometryMm } from "../../core/geometry";
+import { parseTemplateLayoutGeometry, type GridPlacementMm, type PageOrientation, type TemplateLayoutGeometryMm } from "../../core/geometry";
+import { buildCanonicalPrintPlan } from "../../core/duplex";
 import { createCutGeometryMm, createRectangularCutPathMm, type CutGeometryMm, type CutPathMm, type CutPointMm, type CutSegmentMm } from "../../core/cut";
-import { generateRegistrationGeometry } from "../../core/registration";
 import type { ProjectSettingsV2 } from "../../persistence/projects/serializer";
 import { CutSourceError } from "./errors";
 
@@ -211,7 +211,6 @@ export interface CutPageLayoutResolution extends CutLayoutResolution {
 /** Builds the exact per-page placements shared by cut exports and PDF. */
 export function resolveCutLayoutPages(request: CutLayoutRequest): readonly CutPageLayoutResolution[] {
   const settings = request.settings;
-  const pageSizeMm = orientedDimensions(settings.paperFormat, settings.pageOrientation);
   const cardSizeMm = orientedDimensions(settings.cardFormat, settings.cardOrientation);
   let sourceGeometry = request.sourceGeometry;
   if (sourceGeometry && request.sourceOrientation && request.sourceOrientation !== settings.pageOrientation) {
@@ -221,25 +220,26 @@ export function resolveCutLayoutPages(request: CutLayoutRequest): readonly CutPa
   if (sourceGeometry && !settings.layout.templateGeometry) {
     derivedTemplateGeometry = deriveTemplateLayoutFromCutGeometry(sourceGeometry, cardSizeMm, settings.pageOrientation, settings.cardOrientation);
   }
-  const registration = generateRegistrationGeometry(settings.registration, pageSizeMm);
-  const placements = calculateGridPagePlacements({
-    placement: {
-      paper: settings.paperFormat,
-      pageOrientation: settings.pageOrientation,
-      card: settings.cardFormat,
-      cardOrientation: settings.cardOrientation,
-      bleedMm: 0,
-      marginsMm: settings.marginsMm,
-      horizontalGapMm: settings.horizontalGapMm,
-      verticalGapMm: settings.verticalGapMm,
-      ...(settings.layout.templateGeometry ? { templateGeometry: settings.layout.templateGeometry } : derivedTemplateGeometry ? { templateGeometry: derivedTemplateGeometry } : {}),
-      ...(settings.layout.rows !== undefined && settings.layout.columns !== undefined ? { rows: settings.layout.rows, columns: settings.layout.columns } : {}),
-      skippedSlotIndices: settings.layout.skippedSlotIndices,
-      reservedZonesMm: registration.reservedZones,
-    },
-    count: request.cardCount,
-    bleedByCardMm: request.bleedByCardMm ?? Array.from({ length: request.cardCount }, () => settings.bleedMm),
+  const printPlan = buildCanonicalPrintPlan(request.cardCount, {
+    bleedMm: settings.bleedMm,
+    paperFormat: settings.paperFormat,
+    cardFormat: settings.cardFormat,
+    pageOrientation: settings.pageOrientation,
+    cardOrientation: settings.cardOrientation,
+    marginsMm: settings.marginsMm,
+    horizontalGapMm: settings.horizontalGapMm,
+    verticalGapMm: settings.verticalGapMm,
+    registration: settings.registration,
+    duplexFlipMode: settings.duplexFlipMode,
+    ...(request.bleedByCardMm ? { bleedByCardMm: request.bleedByCardMm } : {}),
+    ...(settings.layout.templateGeometry ? { templateGeometry: settings.layout.templateGeometry } : derivedTemplateGeometry ? { templateGeometry: derivedTemplateGeometry } : {}),
+    ...(settings.layout.rows !== undefined && settings.layout.columns !== undefined
+      ? { layoutRows: settings.layout.rows, layoutColumns: settings.layout.columns }
+      : {}),
+    skippedSlotIndices: settings.layout.skippedSlotIndices,
   });
+  const placements = printPlan.pages;
+  const pageSizeMm = placements[0]!.placement.pageSizeMm;
   const manualSource = { kind: "project-layout" as const, projectId: request.projectId, projectRevision: request.projectRevision };
   return Object.freeze(placements.map(({ pageIndex, startCardIndex, endCardIndex, placement }): CutPageLayoutResolution => {
     if (sourceGeometry) {

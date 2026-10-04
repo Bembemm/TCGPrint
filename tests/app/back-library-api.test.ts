@@ -7,9 +7,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ArtworkOriginalStore } from "../../artwork/storage/original-store";
 import { appDataPaths } from "../../artwork/storage/paths";
 import { ArtworkRepository } from "../../artwork/storage/repository";
+import { ArtworkThumbnailStore } from "../../artwork/storage/thumbnail-store";
 import { BackLibraryRepository } from "../../persistence/back-library/repository";
 import { BackLibraryService } from "../../services/back-library";
-import { handleBackLibraryList, handleBackLibraryRetire, handleBackLibraryUpload } from "../../services/back-library-api";
+import { handleBackLibraryList, handleBackLibraryPreview, handleBackLibraryRetire, handleBackLibraryUpload } from "../../services/back-library-api";
 
 describe("Back Library API", () => {
   let directory: string | undefined;
@@ -27,9 +28,12 @@ describe("Back Library API", () => {
     const paths = appDataPaths(directory);
     database = new Database(":memory:");
     const artworkRepository = new ArtworkRepository(database);
+    const thumbnailStore = new ArtworkThumbnailStore(paths.thumbnailsDirectory, artworkRepository);
     const service = new BackLibraryService(
       new BackLibraryRepository(database),
       new ArtworkOriginalStore(paths.originalsDirectory, artworkRepository),
+      {},
+      thumbnailStore,
     );
     return service;
   }
@@ -66,6 +70,28 @@ describe("Back Library API", () => {
     expect((await retired.json()).asset.retired).toBe(true);
     expect(await (await handleBackLibraryList(service).then((response) => response.json())).assets).toMatchObject([{ assetId: asset.assetId, sha256: asset.sha256, retired: true, selectable: false }]);
     await expect(service.resolveOriginal({ assetId: asset.assetId, sha256: asset.sha256, format: "png" })).resolves.toMatchObject({ bytes });
+  });
+
+  it("serves only the bounded Back Library preview derivative", async () => {
+    const service = await setup();
+    const bytes = new Uint8Array(await sharp({ create: { width: 1200, height: 1800, channels: 3, background: "#aa7330" } }).png().toBuffer());
+    const asset = await service.add({ bytes, filename: "Gold.png" });
+    const response = await handleBackLibraryPreview(new Request(`http://localhost/api/back-library/${asset.assetId}/preview`), asset.assetId, service);
+    const body = new Uint8Array(await response.arrayBuffer());
+    const metadata = await sharp(body).metadata();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-tcgprint-artwork-role")).toBe("preview");
+    expect(response.headers.get("cache-control")).toContain("max-age");
+    expect(body.byteLength).toBeLessThan(bytes.byteLength);
+    expect(metadata.width).toBeLessThanOrEqual(640);
+    const extendedResponse = await handleBackLibraryPreview(new Request(`http://localhost/api/back-library/${asset.assetId}/preview?bleedMm=1&trimWidthMm=63.5&trimHeightMm=88.9&roundedCorners=false`), asset.assetId, service);
+    const extended = await sharp(new Uint8Array(await extendedResponse.arrayBuffer())).metadata();
+    expect(extendedResponse.status).toBe(200);
+    expect(extendedResponse.headers.get("content-type")).toBe("image/png");
+    expect(extended.width).toBeGreaterThan(metadata.width!);
+    expect(extended.height).toBeGreaterThan(metadata.height!);
+    await expect(handleBackLibraryPreview(new Request("http://localhost"), "back:invalid", service).then((result) => result.status)).resolves.toBe(404);
   });
 
   it("rejects malformed metadata and unsupported filename payloads with structured errors", async () => {

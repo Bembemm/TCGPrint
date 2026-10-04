@@ -32,7 +32,7 @@ describe("registration layout preview", () => {
       pageOrientation: "landscape" as const,
       cardOrientation: "portrait" as const,
       registration: createDefaultRegistrationConfig("three-point", "landscape"),
-      layout: { rows: 1, columns: 1, skippedSlotIndices: [] },
+      layout: { skippedSlotIndices: [] },
     };
     const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
       settings,
@@ -48,7 +48,7 @@ describe("registration layout preview", () => {
     expect(markup).toContain("stroke=\"#111827\"");
     expect(markup).toContain("fill=\"#fecaca\"");
     expect(markup).toContain("legend-reserved");
-    expect(markup).toContain('aria-label="Face do preview"');
+    expect(markup).toContain('aria-label="Face do compositor"');
     expect(markup).toContain('data-duplex-cut-overlay="front" transform="matrix(1 0 0 1 0 0)"');
   });
 
@@ -71,10 +71,10 @@ describe("registration layout preview", () => {
       onToggleSkippedSlot: vi.fn(),
     }));
 
-    expect(markup).toContain("Front ↔ Back · carta dupla-face");
-    expect(markup).toContain("carta dupla-face");
-    expect(markup).toContain("TOP ↑");
-    expect(markup).toContain("01F · Front // Back · DFC");
+    expect(markup).toContain('aria-label="Compositor live"');
+    expect(markup).toContain('aria-label="Face do compositor"');
+    expect(markup).toContain("Front // Back · DFC");
+    expect(markup).toContain('aria-label="Slot 1 carta física 1"');
   });
 
   it("renders exact template positions and skipped identities while registration none draws no marks", () => {
@@ -139,10 +139,10 @@ describe("registration layout preview", () => {
       onToggleSkippedSlot: vi.fn(),
     }));
 
-    expect(markup).toContain("página PDF 2/2 · cartas 10–10");
-    expect(markup).toContain("aria-label=\"Página PDF do preview físico\"");
+    expect(markup).toContain("Página 2 de 2");
+    expect(markup).toContain('aria-label="Compositor live frente A4 portrait, página 2 de 2"');
+    expect(markup).toContain("Página 2 · cartas 10–10");
     expect(markup).toContain('aria-label="Slot 1 carta física 10"');
-    expect(markup).toContain("10F");
-    expect(markup).toContain("TOP ↑");
+    expect(markup).toContain("10");
   });
 });

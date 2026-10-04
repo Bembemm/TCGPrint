@@ -99,7 +99,7 @@ describe("workspace shell interactions", () => {
     }
     render(<PreviewHarness />);
 
-    expect(screen.getByRole("main", { name: "Preview e compositor atual" })).toContainElement(screen.getByRole("region", { name: "Preview da folha" }));
+    expect(screen.getByRole("main", { name: "Preview e compositor atual" })).toContainElement(screen.getByRole("region", { name: "Compositor live" }));
     const firstSlot = screen.getByRole("button", { name: "Slot 1 carta física 1" });
     await user.click(firstSlot);
     expect(firstSlot).toHaveAttribute("aria-pressed", "true");

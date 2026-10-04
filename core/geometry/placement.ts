@@ -158,8 +158,13 @@ function candidateFor(
   const availableWidthMm = page.widthMm - margins.left - margins.right;
   const availableHeightMm = page.heightMm - margins.top - margins.bottom;
   const reservedGridIndices = new Set<number>();
-  const finalColumnBleeds = Array.from({ length: columns }, () => 0);
-  const finalRowBleeds = Array.from({ length: rows }, () => 0);
+  const gridXmm = margins.left;
+  const gridYmm = margins.top;
+  // Every position participates in the same physical grid even when the last
+  // page is partial. Configured bleed is the shared slot envelope; a larger
+  // per-card bleed may expand its row or column envelope.
+  const finalColumnBleeds = Array.from({ length: columns }, () => request.bleedMm);
+  const finalRowBleeds = Array.from({ length: rows }, () => request.bleedMm);
   // Physical slot geometry is anchored to the original row-major sequence,
   // independent of user skips or reserved-zone reassignment. A newly assigned
   // card whose bleed cannot fit those stable coordinates makes this candidate
@@ -179,8 +184,6 @@ function candidateFor(
     + Math.max(0, rows - 1) * verticalGapMm;
   const dimensionsFit = gridWidthMm <= availableWidthMm + PLACEMENT_EPSILON_MM
     && gridHeightMm <= availableHeightMm + PLACEMENT_EPSILON_MM;
-  const gridXmm = margins.left + (availableWidthMm - gridWidthMm) / 2;
-  const gridYmm = margins.top + (availableHeightMm - gridHeightMm) / 2;
   const columnOffsets = finalColumnBleeds.map((_bleed, column) =>
     gridXmm + finalColumnBleeds.slice(0, column).reduce((sum, value) => sum + card.widthMm + 2 * value + horizontalGapMm, 0));
   const rowOffsets = finalRowBleeds.map((_bleed, row) =>
@@ -197,7 +200,9 @@ function candidateFor(
       const column = gridIndex % columns;
       const row = Math.floor(gridIndex / columns);
       const cardIndex = assignments.get(gridIndex);
-      const bleed = cardIndex === undefined ? request.bleedMm : bleedByCardMm[cardIndex] ?? request.bleedMm;
+      const bleed = cardIndex === undefined
+        ? request.bleedMm
+        : Math.max(request.bleedMm, bleedByCardMm[cardIndex] ?? request.bleedMm);
       return zones.some((zone) => overlaps({
         xMm: columnOffsets[column]! + finalColumnBleeds[column]! - bleed,
         yMm: rowOffsets[row]! + finalRowBleeds[row]! - bleed,
@@ -265,8 +270,9 @@ function candidateFor(
 }
 
 /**
- * Makes a centered, row-major card grid while reserving external bleed. User
- * skips keep their stable grid index; physical reserved zones stay separate.
+ * Makes a top-left anchored, row-major capacity grid while reserving external bleed.
+ * Automatic grid shape and coordinates are independent of the current card
+ * count. User skips keep their stable grid index; reserved zones stay separate.
  */
 export function calculateGridPlacement(request: GridPlacementRequest): GridPlacementMm {
   const templateGeometry = request.templateGeometry === undefined ? undefined : parseTemplateLayoutGeometry(request.templateGeometry);
@@ -326,8 +332,6 @@ export function calculateGridPlacement(request: GridPlacementRequest): GridPlace
   if (maximumColumns < 1 || maximumRows < 1) {
     throw new RangeError("No physical card slot fits on the selected paper inside the requested margins with the requested bleed and gaps.");
   }
-  const skipPositions = skipped.length ? Math.max(...skipped) + 1 : 0;
-  const requiredPositions = Math.max(1, count + skipped.length, skipPositions);
   if (fixed && (!Number.isSafeInteger(request.rows) || request.rows! < 1
     || !Number.isSafeInteger(request.columns) || request.columns! < 1
     || request.rows! * request.columns! > MAX_AUTO_GRID_POSITIONS)) {
@@ -336,37 +340,26 @@ export function calculateGridPlacement(request: GridPlacementRequest): GridPlace
   if (fixed && skipped.some((index) => index >= request.rows! * request.columns!)) {
     throw new RangeError("A skipped slot index is outside the fixed grid.");
   }
-  if (count === 0 && !fixed) {
-    if (maximumRows * maximumColumns > MAX_AUTO_GRID_POSITIONS) {
-      throw new RangeError(`The physical grid exceeds the ${MAX_AUTO_GRID_POSITIONS}-position safety limit.`);
-    }
-    const emptyGrid = candidateFor(maximumColumns, maximumRows, request, page, card, margins, zones, skipSet, bleedByCardMm);
-    if (!emptyGrid) throw new RangeError("No physical card slot fits on the selected paper after applying reserved zones.");
-    return buildPlacement(emptyGrid, page, card, margins, zones, skipSet, 0, bleedByCardMm, bleedMm);
-  }
   const candidates: Candidate[] = [];
-  const firstPositionTarget = fixed ? request.rows! * request.columns! : requiredPositions;
-  const lastPositionTarget = fixed ? firstPositionTarget : MAX_AUTO_GRID_POSITIONS;
-  const evaluatedShapes = new Map<string, Candidate | undefined>();
-  for (let positionTarget = firstPositionTarget; positionTarget <= lastPositionTarget; positionTarget += 1) {
-    const columnOptions = fixed ? [request.columns!] : Array.from({ length: Math.min(positionTarget, maximumColumns) }, (_, index) => index + 1);
-    for (const columns of columnOptions) {
-      const rows = fixed ? request.rows! : Math.ceil(positionTarget / columns);
-      if (columns > maximumColumns || rows > maximumRows || columns * rows > MAX_AUTO_GRID_POSITIONS) continue;
-      const key = `${columns}:${rows}`;
-      const candidate = evaluatedShapes.has(key)
-        ? evaluatedShapes.get(key)
-        : candidateFor(columns, rows, request, page, card, margins, zones, skipSet, bleedByCardMm);
-      if (!evaluatedShapes.has(key)) evaluatedShapes.set(key, candidate);
+  const columnOptions = fixed ? [request.columns!] : Array.from({ length: maximumColumns }, (_, index) => index + 1);
+  for (const columns of columnOptions) {
+    const maximumCandidateRows = fixed
+      ? request.rows!
+      : Math.min(maximumRows, Math.floor(MAX_AUTO_GRID_POSITIONS / columns));
+    for (let rows = 1; rows <= maximumCandidateRows; rows += 1) {
+      const positions = columns * rows;
+      if (columns > maximumColumns || rows > maximumRows || positions > MAX_AUTO_GRID_POSITIONS) continue;
+      // Evaluate every possible shape but validate collisions only for the
+      // cards actually assigned on this page.
+      const candidate = candidateFor(columns, rows, request, page, card, margins, zones, skipSet, bleedByCardMm);
       if (candidate && candidate.capacity >= count) candidates.push(candidate);
     }
-    if (candidates.length > 0) break;
   }
   if (candidates.length === 0) {
     const reason = zones.length > 0 ? " after applying reserved zones" : "";
     throw new RangeError(`No physical card slot fits the requested ${count} card slots with the configured margins, bleed, and gaps${reason}; card size and bleed were preserved.`);
   }
-  candidates.sort((a, b) => a.aspectError - b.aspectError || (b.gridWidthMm * b.gridHeightMm) - (a.gridWidthMm * a.gridHeightMm));
+  candidates.sort((a, b) => b.capacity - a.capacity || a.aspectError - b.aspectError || (b.gridWidthMm * b.gridHeightMm) - (a.gridWidthMm * a.gridHeightMm));
   return buildPlacement(candidates[0], page, card, margins, zones, skipSet, count, bleedByCardMm, bleedMm);
 }
 
@@ -557,10 +550,8 @@ function buildPlacement(
   bleedByCardMm: readonly number[],
   bleedMm: number,
 ): GridPlacementMm {
-  const availableWidthMm = page.widthMm - margins.left - margins.right;
-  const availableHeightMm = page.heightMm - margins.top - margins.bottom;
-  const gridXmm = margins.left + (availableWidthMm - selected.gridWidthMm) / 2;
-  const gridYmm = margins.top + (availableHeightMm - selected.gridHeightMm) / 2;
+  const gridXmm = margins.left;
+  const gridYmm = margins.top;
   const columnOffsets = selected.columnBleeds.map((_bleed, column) =>
     gridXmm + selected.columnBleeds.slice(0, column).reduce((sum, value) => sum + card.widthMm + 2 * value + selected.horizontalGapMm, 0));
   const rowOffsets = selected.rowBleeds.map((_bleed, row) =>

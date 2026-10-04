@@ -1,0 +1,45 @@
+# Part 2 M5 — canonical compositor audit
+
+This audit records the M5 implementation and its verification points. It is review evidence, not a second product specification.
+
+## Visualization model
+
+**Primary visualization: Canonical live compositor.** `RegistrationLayoutPreview`, mounted in the M4 central workspace preview, is the one persistent physical-sheet viewer. It consumes the Project settings, ordered Working Set, selected artwork, cut preview and selected physical page. React updates it from canonical state changes; it does not generate a PDF to refresh the view.
+
+**Secondary verification: Final lossless PDF proof.** “Conferir PDF final” is an optional action. It invokes the same final export flow with validated originals, temporarily overlays the generated PDF, and leaves the live compositor mounted underneath. Separate front/back export mode returns two PDFs for the proof dialog rather than opening the ZIP. Changes to cards, Project settings or cut preview mark only the open proof as stale; the live compositor continues updating.
+
+The two outputs share physical geometry and semantics. They use different image assets: the live compositor uses artwork preview/thumbnail URLs and cached preview derivatives; final PDF export uses validated source originals and the lossless export pipeline. The compositor never supplies bitmap/canvas data to PDF generation.
+
+## Canonical physical plan
+
+`buildCanonicalPrintPlan()` in `core/duplex/shared-placement.ts` is the shared plan builder. It returns the fixed page placements, registration geometry and duplex pairing. The live compositor and cut-layout service consume it directly; Working Set PDF export consumes its page-placement projection. The low-level PDF engine receives those placements, while duplex and cut calculations share the same placements and pairing rules.
+
+Automatic grids choose a deterministic capacity shape, start at the configured top/left margins, and fill eligible positions row-major. Quantity and a partial final page do not recenter the sheet. Explicit rows/columns and immutable template geometry remain authoritative. Skipped/reserved positions retain their physical indexes. Geometry errors remain explicit; cards and bleed are not silently reduced.
+
+## Live compositor capabilities
+
+| Capability | Live representation | State / geometry owner | Evidence |
+|---|---|---|---|
+| Real front/back artwork, including DFC and effective physical backs | Preview thumbnail in the persistent sheet, with front/back controls | Working Card artwork selection and Project back policy; canonical page pairing | `tests/app/canonical-compositor.interaction.test.tsx`; `tests/app/workspace-card-selection.interaction.test.tsx`; `tests/app/card-api.test.ts` |
+| Position, trim size, paper/card orientation, margins, gaps, rows/columns, page capacity and pagination | SVG sheet placed from canonical page slots | `buildCanonicalPrintPlan()` | `tests/core/placement.test.ts`; `tests/core/page-placement.test.ts`; `tests/pdf-engine/pdf-engine.test.ts` |
+| Bleed and rounded corners | Preview-only raster derivative using immediate edge extension and the selected corner mask | Project bleed/corner settings; preview derivative service | `services/preview-bleed.ts`; `tests/app/canonical-compositor.interaction.test.tsx`; `tests/app/card-api.test.ts`; `tests/pdf-engine/pdf-engine.test.ts` |
+| Registration, skipped/reserved slots and duplex back orientation | SVG overlays and the paired physical page | Canonical registration geometry and duplex pairing | `tests/app/canonical-compositor.interaction.test.tsx`; `tests/app/registration-layout-preview.test.tsx`; `tests/pdf-engine/pdf-engine.test.ts` |
+| PDF cut guides and source Silhouette/SVG-DXF geometry | Independent preview-only layers; printed guides follow calibration, source cut paths remain nominal | Project cut settings and template/source cut geometry; no preview layer changes export state | `tests/app/canonical-compositor.interaction.test.tsx`; `tests/pdf-engine/pdf-engine.test.ts`; cut-geometry tests |
+| Calibration | Optional nominal/calibrated display transform plus exact profile name/version, printer mode and active-side offsets/rotation/scale/skew | Project printer-profile snapshot/version | `tests/app/canonical-compositor.interaction.test.tsx`; calibration and PDF engine tests |
+| Viewer side, page, zoom and layers | Local compositor controls; no Project revision change | Compositor UI state | `tests/app/canonical-compositor.interaction.test.tsx` |
+
+The Layers control covers Artwork, Bleed, Trim, Cut guides, Silhouette/SVG-DXF, Registration, Reserved zones, Margins and Calibration. It changes only the display. Cut-source paths sit outside the print calibration transform; registration and printed page content sit inside it. The physical paper border is not calibrated.
+
+## Preview asset pipeline
+
+Artwork preview URLs identify the selected candidate and request the physical trim dimensions, bleed and corner treatment. They resolve to the preview role/cache; the browser does not use the validated-original endpoint for the live sheet. Back Library thumbnails use stored preview derivatives, with an on-demand local fallback for legacy assets that predate stored thumbnails. The final PDF path independently resolves validated originals and retains existing fidelity behavior.
+
+## Final PDF proof
+
+The proof action calls `/api/cards/export?proof=final`; it shares validation, back resolution, calibration, duplex pairing, canonical placements and lossless PDF generation with final export. The proof does not modify Project or settings. Its overlay is temporary and closable back to the same mounted compositor. The current compositor fingerprint contains Working Cards, Project settings and cut preview, so those changes mark the proof stale without blocking recomposition.
+
+Evidence: `tests/app/workspace-card-selection.interaction.test.tsx` checks cancellation/download, secondary proof action, mounted compositor identity while proof is open, stale status after a settings change, and return to the compositor. `tests/app/card-api.test.ts` checks that separated proof mode returns two `%PDF-` artifacts instead of a ZIP.
+
+## Scope boundaries
+
+M5 adds no new composition engine or permanent second viewer. It does not add canvas drag/resize, artwork dragging, modal artwork redesign, or a new PDF renderer. Existing export, trim, bleed, duplex, registration, cut and calibration behavior remains owned by its existing domain/output paths; the compositor only consumes and draws the shared physical plan.

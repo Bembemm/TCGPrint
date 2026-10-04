@@ -82,6 +82,13 @@ interface IdentityDetails extends CardIdentity { readonly layout?: string; reado
 type ProviderHealth = Record<string, { available: boolean; degraded: boolean; message?: string }>;
 interface ArtworkCatalogResponse { readonly candidates: CandidateDto[]; readonly catalogTotal: number; readonly catalogTotalComplete?: boolean; readonly providerHealth: ProviderHealth; readonly mpcDiagnostic?: MpcArtworkProviderDiagnostic; }
 interface MpcFilterCatalogResult { readonly catalogs: MpcFilterCatalogs; readonly diagnostic?: MpcArtworkProviderDiagnostic; }
+interface FinalPdfProof {
+  readonly frontUrl: string;
+  readonly backUrl?: string;
+  readonly separated: boolean;
+  readonly contentMode: ExportContentMode;
+  readonly fingerprint: string;
+}
 
 async function jsonResponse<T>(response: Response): Promise<T> {
   let body: unknown;
@@ -593,7 +600,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const [templateGeometry, setTemplateGeometry] = useState<TemplateLayoutGeometryMm | undefined>();
   const [cutSourceSelection, setCutSourceSelection] = useState<CutSourceSelection | null>(null);
   const [busy, setBusy] = useState(false);
-  const [abortableOperation, setAbortableOperation] = useState<"add-cards" | "artwork" | "export" | null>(null);
+  const [abortableOperation, setAbortableOperation] = useState<"add-cards" | "artwork" | "export" | "pdf-proof" | null>(null);
   const [projectOpenPending, setProjectOpenPending] = useState(false);
   const [projectRestoreVersion, setProjectRestoreVersion] = useState(0);
   const [activeProjectSync, setActiveProjectSync] = useState<{ readonly projectId: string; readonly revision: number; readonly saved: boolean } | null>(null);
@@ -629,6 +636,8 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const projectRestoreLookupGate = useRef(createProjectRestoreLookupGate(-1));
   const [pdfUrl, setPdfUrl] = useState("");
   const [exportDownloadName, setExportDownloadName] = useState("tcgprint-cards.pdf");
+  const [pdfProof, setPdfProof] = useState<FinalPdfProof | null>(null);
+  const [pdfProofSide, setPdfProofSide] = useState<"front" | "back">("front");
   const activeOperationAbortController = useRef<AbortController | null>(null);
   const addCardsInFlight = useRef(false);
   const [lastImportReport, setLastImportReport] = useState<SafeImportReport | null>(null);
@@ -685,12 +694,22 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     };
   }, [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor, pageOrientation, cardOrientation, paperFormat, cardFormat, exportContentMode, missingBackPolicy, duplexFlipMode, projectDefaultBack, printerProfileSelection, printerDuplexMode, marginsMm, horizontalGapMm, verticalGapMm, registration, registrationOverride, cutSourceSelection, layoutRows, layoutColumns, skippedSlotIndices, templateGeometry]);
 
+  const compositorFingerprint = useMemo(() => JSON.stringify({ cards: workingCards, settings: projectSettings, cutPreview: cutGeometryPreview }), [workingCards, projectSettings, cutGeometryPreview]);
+  const pdfProofIsStale = Boolean(pdfProof && pdfProof.fingerprint !== compositorFingerprint);
+
+  useEffect(() => () => {
+    if (pdfProof) {
+      URL.revokeObjectURL(pdfProof.frontUrl);
+      if (pdfProof.backUrl) URL.revokeObjectURL(pdfProof.backUrl);
+    }
+  }, [pdfProof]);
+
   function clearProblem(cardId: string | null = null) {
     setProblem("");
     setProblemCardId(cardId);
   }
 
-  function beginAbortableOperation(operation: "add-cards" | "artwork" | "export"): AbortController {
+  function beginAbortableOperation(operation: "add-cards" | "artwork" | "export" | "pdf-proof"): AbortController {
     const controller = new AbortController();
     activeOperationAbortController.current = controller;
     setAbortableOperation(operation);
@@ -1060,11 +1079,11 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     dispatchEditor({ type: "replace-card", cardId: card.id, card: next });
   }
 
-  async function exportPdf() {
-    if (!workingCards.length) return;
+  function exportIsReady(): boolean {
+    if (!workingCards.length) return false;
     if (!projectCutSyncReady) {
       setProblem("Aguarde o autosave e a validação da geometria de corte do Project antes de gerar o PDF.");
-      return;
+      return false;
     }
     if (templateRegistrationRequiresUserChoice(templateRegistrationStatus)) {
       setProblem(templateRegistrationStatus === "legacy-custom-unconfigured"
@@ -1072,45 +1091,71 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         : templateRegistrationStatus === "legacy-physical-format-unconfigured"
           ? "O template legado não tem dimensões físicas de papel/carta. Selecione uma versão com geometria física explícita antes de exportar."
           : "A versão selecionada ainda não foi verificada. Revise ou desassocie o template antes de exportar.");
-      return;
+      return false;
     }
+    return true;
+  }
+
+  function exportRequestBody(contentMode: ExportContentMode) {
+    return JSON.stringify({ cards: workingCards, options: {
+      ...buildBleedExportOptions(
+        bleedMm,
+        buildCutGuideConfig(trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor),
+        roundedCorners,
+      ),
+      pageOrientation,
+      cardOrientation,
+      paperFormat,
+      cardFormat,
+      marginsMm,
+      horizontalGapMm,
+      verticalGapMm,
+      registration,
+      exportContentMode: contentMode,
+      missingBackPolicy,
+      duplexFlipMode,
+      projectDefaultBack,
+      printerProfileSelection,
+      printerDuplexMode,
+      ...(templateGeometry ? { templateGeometry } : {}),
+      ...(projectSettings.layout.rows !== undefined ? { layoutRows: projectSettings.layout.rows, layoutColumns: projectSettings.layout.columns } : {}),
+      skippedSlotIndices,
+      ...(activeProjectSync?.saved ? { projectId: activeProjectSync.projectId, expectedProjectRevision: activeProjectSync.revision } : {}),
+    } });
+  }
+
+  async function requestFinalExport(contentMode: ExportContentMode, signal: AbortSignal, proof: boolean): Promise<Response> {
+    const query = proof ? "?proof=final" : "";
+    return fetch(`/api/cards/export${query}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: exportRequestBody(contentMode),
+    });
+  }
+
+  function pdfUrlFromBase64(value: string): string {
+    const decoded = atob(value);
+    const bytes = new Uint8Array(decoded.length);
+    for (let index = 0; index < decoded.length; index += 1) bytes[index] = decoded.charCodeAt(index);
+    return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  }
+
+  async function readExportFailure(response: Response): Promise<Error> {
+    try {
+      const body = await response.json() as ApiErrorBody;
+      return new Error(body.message ?? `Export retornou HTTP ${response.status}.`);
+    } catch { return new Error(`Export retornou HTTP ${response.status}.`); }
+  }
+
+  async function exportPdf() {
+    if (!exportIsReady()) return;
     const controller = beginAbortableOperation("export");
     setBleedDiagnostics(null);
     setBusy(true); clearProblem(); setStatus(`Validando ${physicalCardCount} cartas físicas e compondo ${exportContentMode} ${paperFormat.name}…`);
     try {
-      const response = await fetch("/api/cards/export", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({ cards: workingCards, options: {
-          ...buildBleedExportOptions(
-            bleedMm,
-            buildCutGuideConfig(trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor),
-            roundedCorners,
-          ),
-          pageOrientation,
-          cardOrientation,
-          paperFormat,
-          cardFormat,
-          marginsMm,
-          horizontalGapMm,
-          verticalGapMm,
-          registration,
-          exportContentMode,
-          missingBackPolicy,
-          duplexFlipMode,
-          projectDefaultBack,
-          printerProfileSelection,
-          printerDuplexMode,
-          ...(templateGeometry ? { templateGeometry } : {}),
-          ...(projectSettings.layout.rows !== undefined ? { layoutRows: projectSettings.layout.rows, layoutColumns: projectSettings.layout.columns } : {}),
-          skippedSlotIndices,
-          ...(activeProjectSync?.saved ? { projectId: activeProjectSync.projectId, expectedProjectRevision: activeProjectSync.revision } : {}),
-        } }),
-      });
-      if (!response.ok) {
-        const body = await response.json() as ApiErrorBody;
-        throw new Error(body.message ?? "Não foi possível gerar o PDF.");
-      }
+      const response = await requestFinalExport(exportContentMode, controller.signal, false);
+      if (!response.ok) throw await readExportFailure(response);
       if (controller.signal.aborted) throw new DOMException("Exportação cancelada.", "AbortError");
       setBleedDiagnostics(decodeBleedDiagnostics(response.headers.get("x-tcgprint-bleed-diagnostics")));
       const calibrationWarnings = decodeCalibrationBoundsWarnings(response.headers.get("x-tcgprint-calibration-warnings"));
@@ -1127,8 +1172,49 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       setBleedDiagnostics(null);
       if (controller.signal.aborted) { setProblem(""); setStatus("Exportação cancelada."); }
       else { setProblem(error instanceof Error ? error.message : "Export falhou."); setStatus(""); }
+    } finally {
+      finishAbortableOperation(controller);
+      setBusy(false);
     }
-    finally {
+  }
+
+  async function proveFinalPdf() {
+    if (!exportIsReady()) return;
+    const contentMode = exportContentMode;
+    const fingerprint = compositorFingerprint;
+    const controller = beginAbortableOperation("pdf-proof");
+    setBleedDiagnostics(null);
+    setBusy(true); clearProblem(); setStatus(`Produzindo conferência lossless para ${contentMode}…`);
+    let frontUrl: string | undefined;
+    let backUrl: string | undefined;
+    try {
+      const response = await requestFinalExport(contentMode, controller.signal, true);
+      if (!response.ok) throw await readExportFailure(response);
+      if (controller.signal.aborted) throw new DOMException("Conferência cancelada.", "AbortError");
+      setBleedDiagnostics(decodeBleedDiagnostics(response.headers.get("x-tcgprint-bleed-diagnostics")));
+      if (contentMode === "front-back-separated") {
+        const result = await response.json() as { readonly frontPdfBase64?: unknown; readonly backPdfBase64?: unknown };
+        if (typeof result.frontPdfBase64 !== "string" || typeof result.backPdfBase64 !== "string") {
+          throw new Error("O resultado separado não contém os dois PDFs finais.");
+        }
+        frontUrl = pdfUrlFromBase64(result.frontPdfBase64);
+        backUrl = pdfUrlFromBase64(result.backPdfBase64);
+      } else {
+        const blob = await response.blob();
+        if (blob.type !== "application/pdf") throw new Error("A conferência final não retornou um PDF.");
+        frontUrl = URL.createObjectURL(blob);
+      }
+      if (controller.signal.aborted) throw new DOMException("Conferência cancelada.", "AbortError");
+      setPdfProof({ frontUrl, ...(backUrl ? { backUrl } : {}), separated: contentMode === "front-back-separated", contentMode, fingerprint });
+      setPdfProofSide("front");
+      setStatus("PDF final lossless pronto para conferência. O compositor live permanece sincronizado.");
+    } catch (error) {
+      if (frontUrl) URL.revokeObjectURL(frontUrl);
+      if (backUrl) URL.revokeObjectURL(backUrl);
+      setBleedDiagnostics(null);
+      if (controller.signal.aborted) { setProblem(""); setStatus("Conferência cancelada."); }
+      else { setProblem(error instanceof Error ? error.message : "Não foi possível conferir o PDF final."); setStatus(""); }
+    } finally {
       finishAbortableOperation(controller);
       setBusy(false);
     }
@@ -1508,6 +1594,12 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     </> : <section className="panel"><h3>Nenhuma carta selecionada</h3><p>Adicione e selecione uma carta na seção Cartas para escolher artwork.</p></section>}
   </div>;
 
+  const exportActionDisabled = interactionBusy
+    || templateRegistrationRequiresUserChoice(templateRegistrationStatus)
+    || !projectCutSyncReady
+    || (exportModeRequiresFrontArtwork(exportContentMode) && !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front)))
+    || (exportContentMode !== "front-only" && backValidation.blockers.length > 0);
+
   const exportSection = <div className="workspace-section-content workspace-export-content">
     <p className="status" aria-live="polite">{status}</p>
     {problem && <p className="error-message" role="alert">{problem}</p>}
@@ -1537,8 +1629,10 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           {templateRegistrationStatus === "legacy-custom-unconfigured" && <p className="error-message" role="alert">O template selecionado declara registration custom, mas a versão não contém geometria física. O PDF usará somente a configuração independente do Project após escolha explícita.</p>}
           {templateRegistrationStatus === "legacy-physical-format-unconfigured" && <p className="error-message" role="alert">A versão legada do template declara papel ou carta custom sem dimensões físicas. Os formatos atuais do Working Set não foram substituídos; exportação bloqueada até selecionar uma versão com geometria explícita.</p>}
           {templateRegistrationStatus === "unavailable" && <p className="error-message" role="alert">A versão exata do template não está disponível para validar registration. Revise ou desassocie o template.</p>}
-          <button className="button primary" type="button" disabled={interactionBusy || templateRegistrationRequiresUserChoice(templateRegistrationStatus) || !projectCutSyncReady || (exportModeRequiresFrontArtwork(exportContentMode) && !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front))) || (exportContentMode !== "front-only" && backValidation.blockers.length > 0)} onClick={() => void exportPdf()}>Validar e gerar {exportContentMode === "front-back-separated" ? "front.pdf + back.pdf" : exportContentMode}</button>
+          <button className="button primary" type="button" disabled={exportActionDisabled} onClick={() => void exportPdf()}>Gerar PDF final</button>
+          <button className="button secondary final-pdf-proof-action" type="button" disabled={exportActionDisabled} onClick={() => void proveFinalPdf()}>Conferir PDF final</button>
           {abortableOperation === "export" && <button className="button secondary" type="button" aria-label="Cancelar exportação do PDF" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar exportação</button>}
+          {abortableOperation === "pdf-proof" && <button className="button secondary" type="button" aria-label="Cancelar conferência do PDF final" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar conferência</button>}
           {pdfUrl && <a className="download-link" href={pdfUrl} download={exportDownloadName}>Baixar {exportDownloadName}</a>}
         </div>
         <p className="muted">Bleed estende somente os pixels da borda imediata de cada lado. Moldura preta continua preta; full-art continua a própria arte. O trim da carta permanece intacto. Cantos arredondados são uma opção separada.</p>
@@ -1594,15 +1688,29 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         </details>}
   </div>;
 
-  const preview = <RegistrationLayoutPreview
-    settings={projectSettings}
-    cardCount={physicalCardCount}
-    cards={workingCards}
-    cutPreview={cutGeometryPreview}
-    selectedPageNumber={cutPageNumber}
-    onSelectPage={setCutPageNumber}
-    onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))}
-  />;
+  const preview = <div className="workspace-preview-stack">
+    <RegistrationLayoutPreview
+      settings={projectSettings}
+      cardCount={physicalCardCount}
+      cards={workingCards}
+      cutPreview={cutGeometryPreview}
+      selectedPageNumber={cutPageNumber}
+      onSelectPage={setCutPageNumber}
+      onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))}
+    />
+    {pdfProof && <section className="compositor-proof-overlay" role="dialog" aria-label="Conferir PDF final" aria-modal="false">
+      <header className="compositor-proof-heading">
+        <div><h2>Conferir PDF final</h2><p>Arquivo lossless gerado pelo pipeline de impressão com originals validados.</p></div>
+        <button className="button secondary" type="button" aria-label="Fechar conferência do PDF final" onClick={() => setPdfProof(null)}>Voltar ao compositor</button>
+      </header>
+      {pdfProofIsStale && <p className="compositor-proof-stale" role="status" aria-live="polite">PDF conferido anteriormente está desatualizado. O compositor live continua atualizado; feche esta conferência para voltar a ele.</p>}
+      {pdfProof.separated && <div className="compositor-proof-side-controls" role="group" aria-label="PDFs finais separados">
+        <button className={`button ${pdfProofSide === "front" ? "primary" : "secondary"}`} type="button" aria-pressed={pdfProofSide === "front"} onClick={() => setPdfProofSide("front")}>Frente final</button>
+        <button className={`button ${pdfProofSide === "back" ? "primary" : "secondary"}`} type="button" aria-pressed={pdfProofSide === "back"} onClick={() => setPdfProofSide("back")}>Verso final</button>
+      </div>}
+      <iframe className="compositor-proof-frame" src={pdfProof.separated && pdfProofSide === "back" ? pdfProof.backUrl : pdfProof.frontUrl} title={pdfProof.separated ? `${pdfProofSide === "front" ? "Frente" : "Verso"} final em PDF` : `PDF final · ${pdfProof.contentMode}`} />
+    </section>}
+  </div>;
 
   return <WorkspaceShell
     preview={preview}

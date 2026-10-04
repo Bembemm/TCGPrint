@@ -9,7 +9,9 @@ import {
   type TemplateLayoutGeometryMm,
 } from "../geometry";
 import type { GridPlacementPage } from "../geometry/page-placement";
-import { generateRegistrationGeometry, type RegistrationConfig } from "../registration";
+import { generateRegistrationGeometry, type RegistrationConfig, type RegistrationGeometryMm } from "../registration";
+import { createDuplexPagePairing } from "./page-pairing";
+import type { DuplexFlipMode, DuplexPagePairingPlan } from "./types";
 
 export interface SharedPlacementOptions {
   readonly bleedMm: number;
@@ -25,15 +27,20 @@ export interface SharedPlacementOptions {
   readonly layoutRows?: number;
   readonly layoutColumns?: number;
   readonly skippedSlotIndices?: readonly number[];
+  /** Effective per-card bleed values, in physical card order. */
+  readonly bleedByCardMm?: readonly number[];
+  readonly duplexFlipMode?: DuplexFlipMode;
 }
 
 export interface SharedPagePlacementResult {
   readonly pages: readonly GridPlacementPage[];
   readonly pageOrientation: PageOrientation;
+  readonly registrationGeometry: RegistrationGeometryMm;
+  readonly duplexPairing: DuplexPagePairingPlan;
 }
 
-/** Builds the one physical front placement plan consumed by preview, PDF, cut and duplex pairing. */
-export function calculateSharedPagePlacements(count: number, options: SharedPlacementOptions): SharedPagePlacementResult {
+/** Builds the canonical physical plan consumed by live composition, PDF, cut, registration and duplex. */
+export function buildCanonicalPrintPlan(count: number, options: SharedPlacementOptions): SharedPagePlacementResult {
   const paper = options.paperFormat ?? PAPER_FORMATS.A4;
   const pageOrientation = options.pageOrientation ?? (paper.widthMm > paper.heightMm ? "landscape" : "portrait");
   const pageShouldBeLandscape = pageOrientation === "landscape";
@@ -51,7 +58,7 @@ export function calculateSharedPagePlacements(count: number, options: SharedPlac
       pageOrientation,
       card: options.cardFormat ?? MAGIC_STANDARD_CARD,
       cardOrientation: options.cardOrientation,
-      bleedMm: 0,
+      bleedMm: options.bleedMm,
       horizontalGapMm: options.horizontalGapMm,
       verticalGapMm: options.verticalGapMm,
       ...(options.marginsMm ? { marginsMm: options.marginsMm } : {}),
@@ -62,7 +69,20 @@ export function calculateSharedPagePlacements(count: number, options: SharedPlac
       ...(options.layoutColumns !== undefined ? { columns: options.layoutColumns } : {}),
     },
     count,
-    bleedByCardMm: Array.from({ length: count }, () => options.bleedMm),
+    bleedByCardMm: options.bleedByCardMm ?? Array.from({ length: count }, () => options.bleedMm),
   });
-  return { pages, pageOrientation };
+  const pageSizeMm = pages[0]?.placement.pageSizeMm;
+  if (!pageSizeMm) throw new RangeError("Canonical print plan has no physical page.");
+  const registrationGeometry = registration;
+  const duplexPairing = createDuplexPagePairing(pages, {
+    pageOrientation,
+    flipMode: options.duplexFlipMode ?? "long-edge",
+  });
+  return { pages, pageOrientation, registrationGeometry, duplexPairing };
+}
+
+/** Backwards-compatible page-only projection of the canonical print plan. */
+export function calculateSharedPagePlacements(count: number, options: SharedPlacementOptions): Pick<SharedPagePlacementResult, "pages" | "pageOrientation"> {
+  const plan = buildCanonicalPrintPlan(count, options);
+  return { pages: plan.pages, pageOrientation: plan.pageOrientation };
 }

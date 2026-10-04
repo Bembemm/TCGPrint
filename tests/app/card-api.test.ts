@@ -129,6 +129,23 @@ describe("card APIs", () => {
       totalPhysicalCards: 1,
       backs: { projectDefault: 1 },
     });
+
+    const proofResponse = await handleCardExport(jsonRequest("http://localhost/api/cards/export?proof=final", {
+      cards: [card],
+      options: { bleedMm: 0, cutGuides: NO_CUT_GUIDES, exportContentMode: "front-back-separated", projectDefaultBack, pageOrientation: "portrait", layoutRows: 1, layoutColumns: 1 },
+    }), workbench, undefined, undefined, {
+      resolveOriginal: vi.fn(async () => ({
+        artworkId: backHash, contentHash: backHash, extension: "png", format: "png", byteLength: backBytes.byteLength,
+        widthPx: 127, heightPx: 178, createdAt: new Date(0).toISOString(), bytes: backBytes, provenance: [],
+      })),
+    });
+    const proof = await proofResponse.json() as { frontPdfBase64: string; backPdfBase64: string };
+
+    expect(proofResponse.status).toBe(200);
+    expect(proofResponse.headers.get("content-type")).toContain("application/json");
+    expect(proofResponse.headers.get("content-type")).not.toContain("application/zip");
+    expect(Buffer.from(proof.frontPdfBase64, "base64").subarray(0, 5).toString("ascii")).toBe("%PDF-");
+    expect(Buffer.from(proof.backPdfBase64, "base64").subarray(0, 5).toString("ascii")).toBe("%PDF-");
   });
 
   it("rejects Project exports when submitted artwork differs from the exact autosaved revision", async () => {
@@ -180,7 +197,7 @@ describe("card APIs", () => {
         paperFormat: { id: "a4-landscape", name: "A4 landscape", widthMm: 297, heightMm: 210 },
         cardFormat: { id: "magic-standard", name: "Magic Standard", widthMm: 63.5, heightMm: 88.9, cornerRadiusMm: 3.175 },
         registration: { type: "three-point", orientation: "landscape" },
-        marginsMm: { top: 1, right: 2, bottom: 3, left: 4 },
+        marginsMm: { top: 40, right: 40, bottom: 40, left: 40 },
         horizontalGapMm: 5,
         verticalGapMm: 6,
         layoutRows: 1,
@@ -197,7 +214,7 @@ describe("card APIs", () => {
       paperFormat: { name: "A4 landscape", widthMm: 297, heightMm: 210 },
       cardFormat: { id: "magic-standard", name: "Magic Standard", widthMm: 63.5, heightMm: 88.9, cornerRadiusMm: 3.175 },
       registration: expect.objectContaining({ type: "three-point", orientation: "landscape" }),
-      marginsMm: { top: 1, right: 2, bottom: 3, left: 4 },
+      marginsMm: { top: 40, right: 40, bottom: 40, left: 40 },
       horizontalGapMm: 5,
       verticalGapMm: 6,
       layoutRows: 1,
@@ -825,6 +842,35 @@ describe("card APIs", () => {
     expect(new Uint8Array(await download.arrayBuffer())).toEqual(originalBytes);
     expect(workbench.getArtworkPreview).toHaveBeenCalledTimes(1);
     expect(workbench.getArtworkOriginal).toHaveBeenCalledTimes(2);
+  });
+
+  it("serves live bleed as a cached-thumbnail derivative without requesting the print original", async () => {
+    const sourceBytes = new Uint8Array(await sharp({
+      create: { width: 127, height: 178, channels: 4, background: { r: 35, g: 115, b: 205, alpha: 1 } },
+    }).png().toBuffer());
+    const workbench = testWorkbench({
+      getArtworkPreview: vi.fn(async () => ({ candidateId, source: "upload", bytes: sourceBytes, contentType: "image/png", widthPx: 127, heightPx: 178 })),
+    });
+    const response = await handleArtworkPreview(new Request("http://localhost/api/cards/artworks/preview?bleedMm=1&trimWidthMm=63.5&trimHeightMm=88.9&roundedCorners=false"), candidateId, workbench);
+    const outputBytes = new Uint8Array(await response.arrayBuffer());
+    const source = await sharp(sourceBytes).raw().toBuffer({ resolveWithObject: true });
+    const output = await sharp(outputBytes).raw().toBuffer({ resolveWithObject: true });
+    const sourceTopLeft = source.data.subarray(0, source.info.channels);
+    const outputTopLeft = output.data.subarray(0, output.info.channels);
+    const bleedX = Math.ceil(source.info.width * 1 / 63.5);
+    const bleedY = Math.ceil(source.info.height * 1 / 88.9);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-tcgprint-artwork-role")).toBe("preview");
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(output.info.width).toBe(source.info.width + bleedX * 2);
+    expect(output.info.height).toBe(source.info.height + bleedY * 2);
+    expect(outputTopLeft).toEqual(sourceTopLeft);
+    expect(workbench.getArtworkPreview).toHaveBeenCalledWith(candidateId, expect.anything());
+    expect(workbench.getArtworkOriginal).not.toHaveBeenCalled();
+
+    const invalid = await handleArtworkPreview(new Request("http://localhost/api/cards/artworks/preview?bleedMm=4&trimWidthMm=63.5&trimHeightMm=88.9"), candidateId, workbench);
+    expect(invalid.status).toBe(400);
   });
 
   it("selects a front candidate from the Artwork Picker through /api/cards/resolve", async () => {
