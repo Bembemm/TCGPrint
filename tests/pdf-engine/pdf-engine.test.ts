@@ -25,6 +25,23 @@ const A4_WIDTH_POINTS = 595.2755905511812;
 const A4_HEIGHT_POINTS = 841.8897637795276;
 const MAGIC_CARD_WIDTH_POINTS = 180;
 const MAGIC_CARD_HEIGHT_POINTS = 252;
+const SOURCE_QUALITY_JPEG_WIDTH = 1_500;
+const SOURCE_QUALITY_JPEG_HEIGHT = 2_100;
+
+async function createSourceQualityJpeg(seed: number): Promise<Buffer> {
+  return sharp({
+    create: {
+      width: SOURCE_QUALITY_JPEG_WIDTH,
+      height: SOURCE_QUALITY_JPEG_HEIGHT,
+      channels: 3,
+      background: {
+        r: (seed * 29 + 17) % 256,
+        g: (seed * 47 + 53) % 256,
+        b: (seed * 71 + 89) % 256,
+      },
+    },
+  }).jpeg().toBuffer();
+}
 
 function singleCardTrim(bleedMm = 0, cardOrientation?: "portrait" | "landscape", marginsMm = { top: 0, right: 0, bottom: 0, left: 0 }) {
   const page = calculateGridPagePlacements({
@@ -847,6 +864,34 @@ describe("LosslessPdfEngine", () => {
     expect(imageDraws[3].clip!.height).toBeCloseTo(requestedBleedPoints, 10);
   });
 
+  it.each([0, 0.625, 3])("retains the source JPEG trim at %s mm bleed without rounded-corner resampling", async (bleedMm) => {
+    const original = await createSourceQualityJpeg(12);
+    const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm });
+    const parsed = await parsePdf(await engine.generate({ images: [original], bleedResults: [bleed] }));
+    const jpegImages = parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"));
+    const jpegImage = jpegImages[0];
+    const jpegReference = [...parsed.document.context.enumerateIndirectObjects()]
+      .find(([, object]) => object === jpegImage!.raw)?.[0].toString();
+    const imageDraws = getImageDrawsWithClips(parsed.content);
+    const jpegDraws = imageDraws.filter((draw) => getImageResourceReference(parsed, draw.resourceName) === jpegReference);
+    const trimMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d]) =>
+      Math.abs(a - MAGIC_CARD_WIDTH_POINTS) < 1e-8
+        && Math.abs(b) < 1e-8
+        && Math.abs(c) < 1e-8
+        && Math.abs(d - MAGIC_CARD_HEIGHT_POINTS) < 1e-8,
+    );
+    expect(jpegImages).toHaveLength(1);
+    expect(jpegImage).toMatchObject({ width: SOURCE_QUALITY_JPEG_WIDTH, height: SOURCE_QUALITY_JPEG_HEIGHT });
+    expect(createHash("sha256").update(getPdfStreamBytes(jpegImage!)).digest("hex"))
+      .toBe(createHash("sha256").update(original).digest("hex"));
+    expect(jpegReference).toBeDefined();
+    expect(jpegDraws).toHaveLength(1);
+    expect(trimMatrices).toHaveLength(1);
+    if (bleedMm > 0) {
+      expect(parsed.images.some((image) => image.dictionary.includes("/FlateDecode"))).toBe(true);
+    }
+  });
+
   it("rotates bleed derivatives with the landscape card while keeping the original JPEG XObject", async () => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
@@ -1581,8 +1626,8 @@ describe("LosslessPdfEngine", () => {
       registration: {
         type: "custom",
         orientation: "portrait",
-        marks: [[{ type: "line", x1Mm: 205, y1Mm: 275, x2Mm: 207, y2Mm: 275, strokeWidthMm: 0.2 }]],
-        reservedZones: [{ xMm: 205, yMm: 275, widthMm: 2, heightMm: 2 }],
+        marks: [[{ type: "line", x1Mm: 212, y1Mm: 275, x2Mm: 214, y2Mm: 275, strokeWidthMm: 0.2 }]],
+        reservedZones: [{ xMm: 212, yMm: 275, widthMm: 2, heightMm: 2 }],
       },
     });
     const parsed = await parsePdf(pdf);
@@ -1630,6 +1675,19 @@ describe("LosslessPdfEngine", () => {
       .toBe(createHash("sha256").update(original).digest("hex"));
   });
 
+  it("preserves a 1500 × 2100 JPEG's source bytes and native dimensions for one physical card", async () => {
+    const original = await createSourceQualityJpeg(0);
+    const pdf = await engine.generate({ images: [original] });
+    const parsed = await parsePdf(pdf);
+    const jpegImage = parsed.images.find((image) => image.dictionary.includes("/DCTDecode"));
+    const sourceSha256 = createHash("sha256").update(original).digest("hex");
+
+    expect(jpegImage).toBeDefined();
+    expect(jpegImage).toMatchObject({ width: SOURCE_QUALITY_JPEG_WIDTH, height: SOURCE_QUALITY_JPEG_HEIGHT });
+    expect(createHash("sha256").update(getPdfStreamBytes(jpegImage!)).digest("hex")).toBe(sourceSha256);
+    assertMatrixContainsSize(parsed.content, MAGIC_CARD_WIDTH_POINTS, MAGIC_CARD_HEIGHT_POINTS);
+  });
+
   it("shares one exact JPEG image resource across 500 physical placements", async () => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const embedJpg = vi.spyOn(PDFDocument.prototype, "embedJpg");
@@ -1653,6 +1711,55 @@ describe("LosslessPdfEngine", () => {
     } finally {
       embedJpg.mockRestore();
     }
+  });
+
+  it("embeds one large JPEG XObject for nine identical cards and draws it nine times", async () => {
+    const original = await createSourceQualityJpeg(1);
+    const pdf = await engine.generate({ images: Array.from({ length: 9 }, () => original) });
+    const parsed = await parsePdf(pdf);
+    const jpegImages = parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"));
+    const cardMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d]) =>
+      Math.abs(a - MAGIC_CARD_WIDTH_POINTS) < 1e-8
+        && Math.abs(b) < 1e-8
+        && Math.abs(c) < 1e-8
+        && Math.abs(d - MAGIC_CARD_HEIGHT_POINTS) < 1e-8,
+    );
+
+    expect(jpegImages).toHaveLength(1);
+    expect(getImageDrawsWithClips(parsed.content)).toHaveLength(9);
+    expect(cardMatrices).toHaveLength(9);
+    expect(jpegImages[0]).toMatchObject({ width: SOURCE_QUALITY_JPEG_WIDTH, height: SOURCE_QUALITY_JPEG_HEIGHT });
+    expect(createHash("sha256").update(getPdfStreamBytes(jpegImages[0]!)).digest("hex"))
+      .toBe(createHash("sha256").update(original).digest("hex"));
+  });
+
+  it("keeps nine distinct large JPEG sources in nine byte-identical PDF XObjects", async () => {
+    const originals = await Promise.all(Array.from({ length: 9 }, (_, index) => createSourceQualityJpeg(index + 2)));
+    const sourceHashes = originals.map((bytes) => createHash("sha256").update(bytes).digest("hex"));
+    const pdf = await engine.generate({ images: originals });
+    const parsed = await parsePdf(pdf);
+    const jpegImages = parsed.images.filter((image) => image.dictionary.includes("/DCTDecode"));
+    const embeddedByHash = jpegImages.map((image) => ({
+      width: image.width,
+      height: image.height,
+      sha256: createHash("sha256").update(getPdfStreamBytes(image)).digest("hex"),
+    }));
+    const cardMatrices = getDrawMatrices(parsed.content).filter(([a, b, c, d]) =>
+      Math.abs(a - MAGIC_CARD_WIDTH_POINTS) < 1e-8
+        && Math.abs(b) < 1e-8
+        && Math.abs(c) < 1e-8
+        && Math.abs(d - MAGIC_CARD_HEIGHT_POINTS) < 1e-8,
+    );
+
+    expect(new Set(sourceHashes).size).toBe(9);
+    expect(jpegImages).toHaveLength(9);
+    expect(getImageDrawsWithClips(parsed.content)).toHaveLength(9);
+    expect(cardMatrices).toHaveLength(9);
+    expect(embeddedByHash).toEqual(expect.arrayContaining(sourceHashes.map((sha256) => ({
+      width: SOURCE_QUALITY_JPEG_WIDTH,
+      height: SOURCE_QUALITY_JPEG_HEIGHT,
+      sha256,
+    }))));
   });
 
   it("keeps distinct JPEG byte streams in distinct PDF image resources", async () => {

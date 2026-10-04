@@ -92,6 +92,8 @@ Antes de considerar o milestone pronto:
 
 # 3. Invariantes globais do Part 2
 
+> **Escopo normativo do Part 2:** este documento é um delta sobre `IMPLEMENTATION_PLAN.md` e os ADRs aceitos. Uma regra do Part 2 só substitui comportamento anterior quando essa substituição estiver explicitamente especificada; tudo que não estiver explicitamente substituído permanece normativo e deve ser preservado. Reorganização de UX não autoriza mudança de geometria, fidelidade, export, bleed, trim, duplex, calibration ou cut fora do delta declarado.
+
 ## 3.1 Qualidade final do PDF
 
 Nenhuma alteração do Part 2 pode reduzir a qualidade final do PDF.
@@ -1310,14 +1312,23 @@ Quantidade de cartas não deve determinar a origem física da grade.
 
 Para layout não-template:
 
-- calcular capacidade física máxima válida para papel/card/bleed/margins/gaps/registration;
-- usar tie-break determinístico;
-- ancorar grade no top/left das margins configuradas;
-- preencher slots elegíveis em row-major;
+- resolver a grade física canônica de maior capacidade válida para papel/card/bleed/margins/gaps/registration, com tie-break determinístico;
+- estabilizar o envelope documental e a reserved mask antes de calcular a origem;
+- calcular `gridWidth` e `gridHeight` finais com esse envelope e centralizar a grade física completa dentro da área útil:
+
+  ```text
+  availableWidth = pageWidth - marginLeft - marginRight
+  availableHeight = pageHeight - marginTop - marginBottom
+
+  gridX = marginLeft + (availableWidth - gridWidth) / 2
+  gridY = marginTop + (availableHeight - gridHeight) / 2
+  ```
+
+- congelar coordenadas e slots físicos antes de paginar; depois atribuir cartas em row-major;
+- não usar a quantidade de cartas para escolher uma grade menor ou recalcular/recentralizar sua origem; página parcial altera somente as atribuições;
 - esquerda → direita;
 - cima → baixo;
 - primeira carta ocupa primeiro slot físico elegível;
-- quantidade menor não recentraliza a grade;
 - última página preserva a mesma grade física.
 
 Rows/columns explícitos continuam autoridade quando configurados.

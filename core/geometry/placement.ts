@@ -144,6 +144,8 @@ interface Candidate {
   readonly positions: number;
   readonly columnBleeds: readonly number[];
   readonly rowBleeds: readonly number[];
+  readonly gridXmm: number;
+  readonly gridYmm: number;
   readonly gridWidthMm: number;
   readonly gridHeightMm: number;
   readonly aspectError: number;
@@ -171,8 +173,8 @@ function candidateFor(
   const availableWidthMm = page.widthMm - margins.left - margins.right;
   const availableHeightMm = page.heightMm - margins.top - margins.bottom;
   const reservedGridIndices = new Set<number>(request.stableReservedSlotIndices ?? []);
-  const gridXmm = margins.left;
-  const gridYmm = margins.top;
+  let gridXmm = margins.left;
+  let gridYmm = margins.top;
   // Resolve one document-wide slot envelope before pagination. Page-local
   // bleed slices may validate artwork bounds, but can never move another
   // physical trim by changing a row/column offset.
@@ -208,6 +210,8 @@ function candidateFor(
       + Math.max(0, rows - 1) * verticalGapMm;
     dimensionsFit = gridWidthMm <= availableWidthMm + PLACEMENT_EPSILON_MM
       && gridHeightMm <= availableHeightMm + PLACEMENT_EPSILON_MM;
+    gridXmm = margins.left + (availableWidthMm - gridWidthMm) / 2;
+    gridYmm = margins.top + (availableHeightMm - gridHeightMm) / 2;
     columnOffsets = finalColumnBleeds.map((_bleed, column) =>
       gridXmm + finalColumnBleeds.slice(0, column).reduce((sum, value) => sum + card.widthMm + 2 * value + horizontalGapMm, 0));
     rowOffsets = finalRowBleeds.map((_bleed, row) =>
@@ -336,6 +340,8 @@ function candidateFor(
     positions,
     columnBleeds: finalColumnBleeds,
     rowBleeds: finalRowBleeds,
+    gridXmm,
+    gridYmm,
     gridWidthMm,
     gridHeightMm,
     aspectError: Math.abs(Math.log((gridWidthMm / gridHeightMm) / (availableWidthMm / availableHeightMm))),
@@ -345,7 +351,7 @@ function candidateFor(
 }
 
 /**
- * Makes a top-left anchored, row-major capacity grid while reserving external bleed.
+ * Makes a centered, row-major capacity grid while reserving external bleed.
  * Automatic grid shape and coordinates are independent of the current card
  * count. User skips keep their stable grid index; reserved zones stay separate.
  */
@@ -456,7 +462,7 @@ export function calculateGridPlacement(request: GridPlacementRequest): GridPlace
     throw new RangeError(`No physical card slot fits the requested ${count} card slots with the configured margins, bleed, and gaps${reason}; card size and bleed were preserved.`);
   }
   candidates.sort((a, b) => b.capacity - a.capacity || a.aspectError - b.aspectError || (b.gridWidthMm * b.gridHeightMm) - (a.gridWidthMm * a.gridHeightMm));
-  return buildPlacement(candidates[0], page, card, margins, zones, skipSet, count, bleedByCardMm, bleedMm);
+  return buildPlacement(candidates[0], page, card, zones, skipSet, count, bleedByCardMm, bleedMm);
 }
 
 function buildTemplatePlacement(input: {
@@ -683,15 +689,14 @@ function buildPlacement(
   selected: Candidate,
   page: PaperFormat,
   card: CardFormat,
-  margins: PageMarginsMm,
   zones: readonly LayoutReservedZoneMm[],
   skipSet: ReadonlySet<number>,
   count: number,
   bleedByCardMm: readonly number[],
   bleedMm: number,
 ): GridPlacementMm {
-  const gridXmm = margins.left;
-  const gridYmm = margins.top;
+  const gridXmm = selected.gridXmm;
+  const gridYmm = selected.gridYmm;
   const columnOffsets = selected.columnBleeds.map((_bleed, column) =>
     gridXmm + selected.columnBleeds.slice(0, column).reduce((sum, value) => sum + card.widthMm + 2 * value + selected.horizontalGapMm, 0));
   const rowOffsets = selected.rowBleeds.map((_bleed, row) =>

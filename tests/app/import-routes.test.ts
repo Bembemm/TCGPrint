@@ -6,6 +6,8 @@ import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { POST as previewPost } from "../../src/app/api/import/preview/route";
 import { POST as pdfPost } from "../../src/app/api/import/pdf/route";
+import { calculateGridPagePlacements } from "../../core/geometry/page-placement";
+import { MAGIC_STANDARD_CARD, PAPER_FORMATS } from "../../core/geometry";
 import { mmToPoints, pointsToMm } from "../../core/units";
 
 const fixturePath = join(process.cwd(), "tests", "fixtures", "pdf");
@@ -336,13 +338,22 @@ describe("minimal import workbench API", () => {
     expect(bleedResource).toBe(bleedRaster!.reference);
     expect(getImageResourceReference(parsed.pdf, trimDraw.resourceName)).toBe(dct!.reference);
 
-    const trimWidth = mmToPoints(63.5);
-    const trimHeight = mmToPoints(88.9);
-    // Count-independent canonical placement keeps a single card in the same
-    // row-major physical slot used by full and partial sheets.
-    const trimX = mmToPoints(0.625);
-    const trimTop = 0.625;
-    const trimY = mmToPoints(297 - trimTop - 88.9);
+    // Resolve the same physical plan the PDF engine uses for one image and
+    // its validated 0.625 mm bleed result.
+    const canonicalPlacement = calculateGridPagePlacements({
+      placement: { paper: PAPER_FORMATS.A4, card: MAGIC_STANDARD_CARD, bleedMm: 0 },
+      count: 1,
+      bleedByCardMm: [0.625],
+    })[0]!.placement;
+    const canonicalTrim = canonicalPlacement.gridSlots[0]!.trim;
+    const trimWidth = mmToPoints(canonicalTrim.widthMm);
+    const trimHeight = mmToPoints(canonicalTrim.heightMm);
+    const trimX = mmToPoints(canonicalTrim.xMm);
+    const trimY = mmToPoints(canonicalPlacement.pageSizeMm.heightMm - canonicalTrim.yMm - canonicalTrim.heightMm);
+    expect(canonicalTrim.widthMm).toBe(63.5);
+    expect(canonicalTrim.heightMm).toBe(88.9);
+    expect(pointsToMm(trimWidth)).toBe(63.5);
+    expect(pointsToMm(trimHeight)).toBe(88.9);
     const expectedTrimTransforms: readonly PdfTransform[] = [
       [1, 0, 0, 1, trimX, trimY],
       [1, 0, 0, 1, 0, 0],

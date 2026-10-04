@@ -28,11 +28,101 @@ describe("shared physical page placements", () => {
     const first = pages[0]!.placement;
     const last = pages[1]!.placement;
     const coordinates = (page: typeof first) => page.gridSlots.map(({ trim }) => [trim.xMm, trim.yMm, trim.widthMm, trim.heightMm]);
+    const geometry = (page: typeof first) => ({
+      columns: page.columns,
+      rows: page.rows,
+      capacity: page.capacity,
+      gridXmm: page.gridXmm,
+      gridYmm: page.gridYmm,
+      gridWidthMm: page.gridWidthMm,
+      gridHeightMm: page.gridHeightMm,
+      gridSlots: coordinates(page),
+    });
+    const one = calculateGridPagePlacements({ placement, count: 1 })[0]!.placement;
+    const two = calculateGridPagePlacements({ placement, count: 2 })[0]!.placement;
+    const capacity = calculateGridPagePlacements({ placement, count: first.capacity })[0]!.placement;
+    const expected = geometry(one);
 
     expect(pages.map(({ startCardIndex, endCardIndex }) => [startCardIndex, endCardIndex])).toEqual([[0, 9], [9, 10]]);
     expect([last.columns, last.rows, last.capacity]).toEqual([first.columns, first.rows, first.capacity]);
     expect(coordinates(last)).toEqual(coordinates(first));
     expect(last.slots[0]!.trim).toEqual(first.slots[0]!.trim);
+    expect([one.columns, one.rows, one.capacity]).toEqual([3, 3, 9]);
+    for (const canonical of [two, capacity, first, last]) {
+      expect(geometry(canonical)).toEqual(expected);
+    }
+    expect(one.gridXmm).toBeCloseTo(7.875, 10);
+    expect(one.gridYmm).toBeCloseTo(13.275, 10);
+    expect(one.gridWidthMm).toBeCloseTo(194.25, 10);
+    expect(one.gridHeightMm).toBeCloseTo(270.45, 10);
+    const expectedCoordinates = [
+      [8.5, 13.9], [73.25, 13.9], [138, 13.9],
+      [8.5, 104.05], [73.25, 104.05], [138, 104.05],
+      [8.5, 194.2], [73.25, 194.2], [138, 194.2],
+    ];
+    const actualCoordinates = coordinates(one);
+    expect(actualCoordinates).toHaveLength(expectedCoordinates.length);
+    for (const [index, [expectedX, expectedY]] of expectedCoordinates.entries()) {
+      expect(actualCoordinates[index]![0]).toBeCloseTo(expectedX, 10);
+      expect(actualCoordinates[index]![1]).toBeCloseTo(expectedY, 10);
+    }
+  });
+
+  it("keeps one centered fixed 3×3 lattice for 1, 2, 8, 9, and 10 cards", () => {
+    const fixedPlacement = {
+      paper: PAPER_FORMATS.A4,
+      card: MAGIC_STANDARD_CARD,
+      bleedMm: 0.625,
+      rows: 3,
+      columns: 3,
+      marginsMm: { top: 5, right: 4, bottom: 12, left: 8 },
+    };
+    const byCount = new Map([1, 2, 8, 9, 10].map((count) => [
+      count,
+      calculateGridPagePlacements({ placement: fixedPlacement, count }),
+    ]));
+    const one = byCount.get(1)![0]!.placement;
+    const geometry = (page: typeof one) => ({
+      columns: page.columns,
+      rows: page.rows,
+      capacity: page.capacity,
+      gridXmm: page.gridXmm,
+      gridYmm: page.gridYmm,
+      gridWidthMm: page.gridWidthMm,
+      gridHeightMm: page.gridHeightMm,
+      gridSlots: page.gridSlots.map(({ index, column, row, slotXmm, slotYmm, trim }) => [
+        index, column, row, slotXmm, slotYmm, trim.xMm, trim.yMm, trim.widthMm, trim.heightMm,
+      ]),
+    });
+    const expectedGeometry = geometry(one);
+
+    expect([one.columns, one.rows, one.capacity]).toEqual([3, 3, 9]);
+    expect(one.gridXmm).toBeCloseTo(9.875, 10);
+    expect(one.gridYmm).toBeCloseTo(9.775, 10);
+    for (const pages of byCount.values()) {
+      expect(geometry(pages[0]!.placement)).toEqual(expectedGeometry);
+    }
+    expect(byCount.get(1)![0]!.placement.gridSlots.map(({ cardIndex }) => cardIndex))
+      .toEqual([0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
+    expect(byCount.get(8)![0]!.placement.gridSlots.map(({ cardIndex }) => cardIndex))
+      .toEqual([0, 1, 2, 3, 4, 5, 6, 7, undefined]);
+    expect(byCount.get(9)![0]!.placement.gridSlots.map(({ cardIndex }) => cardIndex))
+      .toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(byCount.get(10)!.map(({ startCardIndex, endCardIndex }) => [startCardIndex, endCardIndex]))
+      .toEqual([[0, 9], [9, 10]]);
+    expect(geometry(byCount.get(10)![1]!.placement)).toEqual(expectedGeometry);
+    expect(byCount.get(10)![1]!.placement.gridSlots.map(({ cardIndex }) => cardIndex))
+      .toEqual([0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
+    expect(one.gridSlots[0]!.trim.xMm).toBeCloseTo(10.5, 10);
+    expect(one.gridSlots[0]!.trim.yMm).toBeCloseTo(10.4, 10);
+    expect(one.gridSlots[0]!.trim).toMatchObject({ widthMm: 63.5, heightMm: 88.9 });
+
+    const leftFreeSpace = one.gridXmm - fixedPlacement.marginsMm.left;
+    const rightFreeSpace = PAPER_FORMATS.A4.widthMm - fixedPlacement.marginsMm.right - (one.gridXmm + one.gridWidthMm);
+    const topFreeSpace = one.gridYmm - fixedPlacement.marginsMm.top;
+    const bottomFreeSpace = PAPER_FORMATS.A4.heightMm - fixedPlacement.marginsMm.bottom - (one.gridYmm + one.gridHeightMm);
+    expect(leftFreeSpace).toBeCloseTo(rightFreeSpace, 10);
+    expect(topFreeSpace).toBeCloseTo(bottomFreeSpace, 10);
   });
 
   it("discovers the count-independent capacity grid with configured bleed", () => {
@@ -65,11 +155,17 @@ describe("shared physical page placements", () => {
 
     expect(capacity).toBe(6);
     expect([one[0]!.placement.columns, one[0]!.placement.rows]).toEqual([2, 3]);
-    expect(one[0]!.placement.gridSlots.map(({ trim }) => [trim.xMm, trim.yMm])).toEqual([
-      [8.625, 13.625], [73.375, 13.625],
-      [8.625, 103.775], [73.375, 103.775],
-      [8.625, 193.925], [73.375, 193.925],
-    ]);
+    const oneCoordinates = one[0]!.placement.gridSlots.map(({ trim }) => [trim.xMm, trim.yMm]);
+    const expectedCoordinates = [
+      [40.875, 13.9], [105.625, 13.9],
+      [40.875, 104.05], [105.625, 104.05],
+      [40.875, 194.2], [105.625, 194.2],
+    ];
+    expect(oneCoordinates).toHaveLength(expectedCoordinates.length);
+    for (const [index, [expectedX, expectedY]] of expectedCoordinates.entries()) {
+      expect(oneCoordinates[index]![0]).toBeCloseTo(expectedX, 10);
+      expect(oneCoordinates[index]![1]).toBeCloseTo(expectedY, 10);
+    }
     expect(geometry(two[0]!.placement)).toEqual(expected);
     expect(geometry(full[0]!.placement)).toEqual(expected);
     expect(partial).toHaveLength(2);
@@ -126,7 +222,7 @@ describe("shared physical page placements", () => {
         ...placement,
         bleedMm: 0.625,
         marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
-        reservedZonesMm: [{ xMm: 1, yMm: 1, widthMm: 1, heightMm: 1 }],
+        reservedZonesMm: [{ xMm: 10, yMm: 15, widthMm: 1, heightMm: 1 }],
       },
       count: bleeds.length,
       bleedByCardMm: bleeds,
@@ -179,16 +275,16 @@ describe("shared physical page placements", () => {
 
   it.each([
     ["large bleed on the first card", [3, ...Array.from({ length: 10 }, () => 0.625)], [
-      [0, 0.625, 3], [1, 67.75, 3], [2, 134.875, 3],
-      [3, 0.625, 95.525], [4, 67.75, 95.525], [5, 134.875, 95.525],
+      [0, 1.125, 5.475], [1, 68.25, 5.475], [2, 135.375, 5.475],
+      [3, 1.125, 98], [4, 68.25, 98], [5, 135.375, 98],
     ]],
     ["large bleed only on the last card", [...Array.from({ length: 10 }, () => 0.625), 3], [
-      [0, 0.625, 3], [1, 67.75, 3], [2, 134.875, 3],
-      [3, 0.625, 95.525], [4, 67.75, 95.525], [5, 134.875, 95.525],
+      [0, 1.125, 5.475], [1, 68.25, 5.475], [2, 135.375, 5.475],
+      [3, 1.125, 98], [4, 68.25, 98], [5, 135.375, 98],
     ]],
     ["large bleed immediately after the reserved slot", [0.625, 3, ...Array.from({ length: 9 }, () => 0.625)], [
-      [0, 0.625, 3], [1, 65.375, 3], [2, 132.5, 3],
-      [3, 0.625, 95.525], [4, 65.375, 95.525], [5, 132.5, 95.525],
+      [0, 1.125, 5.475], [1, 65.875, 5.475], [2, 133, 5.475],
+      [3, 1.125, 98], [4, 65.875, 98], [5, 133, 98],
     ]],
   ] as const)("chooses a larger stable reserved-zone capacity than max-everywhere for %s", (_caseName, bleeds, expectedCoordinates) => {
     const constrained = {
@@ -196,7 +292,7 @@ describe("shared physical page placements", () => {
       card: MAGIC_STANDARD_CARD,
       bleedMm: 0.625,
       marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
-      reservedZonesMm: [{ xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }],
+      reservedZonesMm: [{ xMm: 31, yMm: 3, widthMm: 2, heightMm: 2 }],
     };
     const pages = calculateGridPagePlacements({
       placement: constrained,
@@ -239,6 +335,11 @@ describe("shared physical page placements", () => {
       .toEqual([[0], [0], [0]]);
     expect(pages.slice(1).map(({ placement: page }) => geometry(page))).toEqual(pages.slice(1).map(() => expected));
     expect(pages.at(-1)!.placement.slots.map(({ cardIndex }) => cardIndex)).toEqual([0]);
-    expect(pages[0]!.placement.gridSlots.map(({ index, trim }) => [index, trim.xMm, trim.yMm])).toEqual(expectedCoordinates);
+    const firstPageSlots = pages[0]!.placement.gridSlots;
+    expect(firstPageSlots.map(({ index }) => index)).toEqual(expectedCoordinates.map(([index]) => index));
+    for (const [slotIndex, expectedX, expectedY] of expectedCoordinates) {
+      expect(firstPageSlots[slotIndex]!.trim.xMm).toBeCloseTo(expectedX, 10);
+      expect(firstPageSlots[slotIndex]!.trim.yMm).toBeCloseTo(expectedY, 10);
+    }
   });
 });

@@ -151,21 +151,54 @@ describe("physical duplex page pairing", () => {
     expect(skipped.cardIndex).toBeUndefined();
     expect(skipped.backSlotIndex).toBe(0);
 
+    const fixedGrid = { paper: PAPER_FORMATS.A4, card: smallCard, bleedMm: 0, rows: 2, columns: 2 } as const;
+    const unreservedPlacement = calculateGridPagePlacements({ placement: fixedGrid, count: 2 })[0]!.placement;
+    const slot0 = unreservedPlacement.gridSlots[0]!.trim;
+    const reservedZone = { xMm: slot0.xMm, yMm: slot0.yMm, widthMm: 10, heightMm: 10 };
     const reservedPages = calculateGridPagePlacements({
-      placement: {
-        paper: PAPER_FORMATS.A4,
-        card: smallCard,
-        bleedMm: 0,
-        rows: 2,
-        columns: 2,
-        reservedZonesMm: [{ xMm: 5, yMm: 5, widthMm: 10, heightMm: 10 }],
-      },
+      placement: { ...fixedGrid, reservedZonesMm: [reservedZone] },
       count: 2,
     });
-    const reservedPage = createDuplexPagePairing(reservedPages, { pageOrientation: "portrait", flipMode: "long-edge" }).pagePairs[0]!;
+    const oneCardReservedPages = calculateGridPagePlacements({
+      placement: { ...fixedGrid, reservedZonesMm: [reservedZone] },
+      count: 1,
+    });
+    const reservedPlan = createDuplexPagePairing(reservedPages, { pageOrientation: "portrait", flipMode: "long-edge" });
+    const reservedPage = reservedPlan.pagePairs[0]!;
+    const oneCardPlacement = oneCardReservedPages[0]!.placement;
+    const twoCardPlacement = reservedPage.frontPlacement.placement;
+    const coordinates = (placement: typeof twoCardPlacement) => placement.gridSlots.map(({ index, trim }) => [
+      index, trim.xMm, trim.yMm, trim.widthMm, trim.heightMm,
+    ]);
+    expect(coordinates(twoCardPlacement)).toEqual(coordinates(unreservedPlacement));
+    expect(coordinates(oneCardPlacement)).toEqual(coordinates(twoCardPlacement));
+    expect([oneCardPlacement.gridXmm, oneCardPlacement.gridYmm])
+      .toEqual([twoCardPlacement.gridXmm, twoCardPlacement.gridYmm]);
+    expect(twoCardPlacement.gridSlots.map(({ index, cardIndex, reserved }) => [index, cardIndex, reserved])).toEqual([
+      [0, undefined, true],
+      [1, 0, false],
+      [2, 1, false],
+      [3, undefined, false],
+    ]);
+
     const reserved = reservedPage.slots.find(({ frontSlotIndex }) => frontSlotIndex === 0)!;
     expect(reserved.reserved).toBe(true);
     expect(reserved.cardIndex).toBeUndefined();
+    expect(reserved.backSlotIndex).toBe(1);
+    expect(reserved.back.reserved).toBe(true);
+    expect(reservedPage.reflectionAxis).toBe("x");
+    expect([reservedPage.frontPageNumber, reservedPage.backPageNumber]).toEqual([1, 1]);
+
+    const firstCard = reservedPage.slots.find(({ physicalCardIndex }) => physicalCardIndex === 0)!;
+    expect(firstCard).toMatchObject({ frontSlotIndex: 1, backSlotIndex: 0, cardIndex: 0, physicalCardIndex: 0 });
+    expect(firstCard.front.trim).toEqual(twoCardPlacement.gridSlots[1]!.trim);
+    expect(firstCard.back.trim.xMm).toBeCloseTo(
+      twoCardPlacement.pageSizeMm.widthMm - firstCard.front.trim.xMm - firstCard.front.trim.widthMm,
+      10,
+    );
+    expect(firstCard.back.trim.yMm).toBe(firstCard.front.trim.yMm);
+    expect(firstCard.back.trim.widthMm).toBe(firstCard.front.trim.widthMm);
+    expect(firstCard.back.trim.heightMm).toBe(firstCard.front.trim.heightMm);
   });
 
   it("maps asymmetric registration marks and reserved zones with the back sheet coordinate frame", () => {
