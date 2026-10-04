@@ -65,6 +65,7 @@ describe("Cards and Artwork navigation", () => {
     const islandArtwork = { ...mountainArtwork, id: "scryfall:island-front", identityId: "island-card", faceName: "Island print" } as const;
     const pendingFirstExport = deferred<Response>();
     let exportCount = 0;
+    const exportRequests: Array<{ url: string; body: BodyInit | null | undefined }> = [];
     const createObjectUrl = vi.fn(() => "blob:tcgprint-export");
     const revokeObjectUrl = vi.fn();
     const NativeURL = URL;
@@ -95,6 +96,7 @@ describe("Cards and Artwork navigation", () => {
       if (url.includes("/api/cards/artworks/") && url.endsWith("/prepare")) return Response.json({ candidate: url.includes("island-front") ? islandArtwork : mountainArtwork });
       if (url === "/api/cards/export" || url === "/api/cards/export?proof=final") {
         exportCount += 1;
+        exportRequests.push({ url, body: init?.body });
         if (exportCount === 1) return pendingFirstExport.promise;
         return new Response("%PDF-1.7 test", { headers: { "Content-Type": "application/pdf", "Content-Disposition": 'attachment; filename="tcgprint-m4.pdf"' } });
       }
@@ -141,11 +143,32 @@ describe("Cards and Artwork navigation", () => {
     expect(await screen.findByRole("link", { name: "Baixar tcgprint-m4.pdf" })).toHaveAttribute("download", "tcgprint-m4.pdf");
     expect(createObjectUrl).toHaveBeenCalledTimes(1);
     expect(exportCount).toBe(2);
+    const generatedPdfRequestBody = exportRequests[1]?.body;
+    await user.click(screen.getByRole("button", { name: "Aumentar zoom" }));
+    expect(composer).toHaveAttribute("data-compositor-zoom-mode", "manual");
 
     await user.click(screen.getByRole("button", { name: "Conferir PDF final" }));
+    const firstProof = await screen.findByRole("dialog", { name: "Conferir PDF final" });
+    expect(within(firstProof).getByTitle("PDF final · front-only")).toBeInTheDocument();
+    expect(exportRequests[2]?.url).toBe("/api/cards/export?proof=final");
+    expect(exportRequests[2]?.body).toBe(generatedPdfRequestBody);
+    const liveCompositor = composer.closest(".workspace-live-compositor");
+    expect(liveCompositor).toHaveAttribute("inert");
+    expect(liveCompositor).toHaveAttribute("aria-hidden", "true");
+    expect(liveCompositor).toContainElement(composer);
+    const closeProof = within(firstProof).getByRole("button", { name: "Fechar conferência do PDF final" });
+    expect(document.activeElement).toBe(closeProof);
+
+    await user.click(closeProof);
+    expect(screen.queryByRole("dialog", { name: "Conferir PDF final" })).not.toBeInTheDocument();
+    const proofTrigger = screen.getByRole("button", { name: "Conferir PDF final" });
+    expect(document.activeElement).toBe(proofTrigger);
+    await user.click(proofTrigger);
     const proof = await screen.findByRole("dialog", { name: "Conferir PDF final" });
-    expect(within(proof).getByTitle("PDF final · front-only")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /Compositor live frente/ })).toBe(composer);
+    expect(exportRequests[3]?.body).toBe(generatedPdfRequestBody);
+    expect(document.activeElement).toBe(within(proof).getByRole("button", { name: "Fechar conferência do PDF final" }));
+    await user.tab();
+    expect(liveCompositor?.contains(document.activeElement)).toBe(false);
 
     await user.click(screen.getByRole("tab", { name: "Layout" }));
     await user.click(screen.getByText("Grade, slots e margens avançados"));
@@ -155,10 +178,12 @@ describe("Cards and Artwork navigation", () => {
     expect(within(proof).getByRole("status")).toHaveTextContent("PDF conferido anteriormente está desatualizado");
     expect(composer.querySelector("g[data-slot-x-mm]")?.getAttribute("data-slot-x-mm")).not.toBe(initialSlotX);
     expect(screen.getByRole("dialog", { name: "Conferir PDF final" })).toBe(proof);
-    await user.click(within(proof).getByRole("button", { name: "Fechar conferência do PDF final" }));
+    await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Conferir PDF final" })).not.toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /Compositor live frente/ })).toBe(composer);
-    expect(exportCount).toBe(3);
-    expect(createObjectUrl).toHaveBeenCalledTimes(2);
+    expect(document.querySelector(".workspace-live-compositor")).toBe(liveCompositor);
+    expect(liveCompositor).not.toHaveAttribute("inert");
+    expect(document.activeElement).toBe(liveCompositor);
+    expect(exportCount).toBe(4);
+    expect(createObjectUrl).toHaveBeenCalledTimes(3);
   }, 15_000);
 });

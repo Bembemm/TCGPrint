@@ -638,6 +638,10 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const [exportDownloadName, setExportDownloadName] = useState("tcgprint-cards.pdf");
   const [pdfProof, setPdfProof] = useState<FinalPdfProof | null>(null);
   const [pdfProofSide, setPdfProofSide] = useState<"front" | "back">("front");
+  const pdfProofTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const pdfProofCloseRef = useRef<HTMLButtonElement | null>(null);
+  const liveCompositorRef = useRef<HTMLDivElement | null>(null);
+  const proofWasOpenRef = useRef(false);
   const activeOperationAbortController = useRef<AbortController | null>(null);
   const addCardsInFlight = useRef(false);
   const [lastImportReport, setLastImportReport] = useState<SafeImportReport | null>(null);
@@ -702,6 +706,33 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       URL.revokeObjectURL(pdfProof.frontUrl);
       if (pdfProof.backUrl) URL.revokeObjectURL(pdfProof.backUrl);
     }
+  }, [pdfProof]);
+
+  useEffect(() => {
+    if (pdfProof) {
+      if (!proofWasOpenRef.current) {
+        proofWasOpenRef.current = true;
+        pdfProofCloseRef.current?.focus();
+      }
+      return;
+    }
+    if (proofWasOpenRef.current) {
+      proofWasOpenRef.current = false;
+      const trigger = pdfProofTriggerRef.current;
+      if (trigger && !trigger.disabled && !trigger.closest("[hidden]")) trigger.focus();
+      else liveCompositorRef.current?.focus();
+    }
+  }, [pdfProof]);
+
+  useEffect(() => {
+    if (!pdfProof) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      setPdfProof(null);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
   }, [pdfProof]);
 
   function clearProblem(cardId: string | null = null) {
@@ -1630,7 +1661,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           {templateRegistrationStatus === "legacy-physical-format-unconfigured" && <p className="error-message" role="alert">A versão legada do template declara papel ou carta custom sem dimensões físicas. Os formatos atuais do Working Set não foram substituídos; exportação bloqueada até selecionar uma versão com geometria explícita.</p>}
           {templateRegistrationStatus === "unavailable" && <p className="error-message" role="alert">A versão exata do template não está disponível para validar registration. Revise ou desassocie o template.</p>}
           <button className="button primary" type="button" disabled={exportActionDisabled} onClick={() => void exportPdf()}>Gerar PDF final</button>
-          <button className="button secondary final-pdf-proof-action" type="button" disabled={exportActionDisabled} onClick={() => void proveFinalPdf()}>Conferir PDF final</button>
+          <button ref={pdfProofTriggerRef} className="button secondary final-pdf-proof-action" type="button" disabled={exportActionDisabled} onClick={() => void proveFinalPdf()}>Conferir PDF final</button>
           {abortableOperation === "export" && <button className="button secondary" type="button" aria-label="Cancelar exportação do PDF" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar exportação</button>}
           {abortableOperation === "pdf-proof" && <button className="button secondary" type="button" aria-label="Cancelar conferência do PDF final" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar conferência</button>}
           {pdfUrl && <a className="download-link" href={pdfUrl} download={exportDownloadName}>Baixar {exportDownloadName}</a>}
@@ -1689,19 +1720,21 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   </div>;
 
   const preview = <div className="workspace-preview-stack">
-    <RegistrationLayoutPreview
-      settings={projectSettings}
-      cardCount={physicalCardCount}
-      cards={workingCards}
-      cutPreview={cutGeometryPreview}
-      selectedPageNumber={cutPageNumber}
-      onSelectPage={setCutPageNumber}
-      onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))}
-    />
+    <div ref={liveCompositorRef} className="workspace-live-compositor" tabIndex={-1} inert={pdfProof ? true : undefined} aria-hidden={pdfProof ? true : undefined}>
+      <RegistrationLayoutPreview
+        settings={projectSettings}
+        cardCount={physicalCardCount}
+        cards={workingCards}
+        cutPreview={cutGeometryPreview}
+        selectedPageNumber={cutPageNumber}
+        onSelectPage={setCutPageNumber}
+        onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))}
+      />
+    </div>
     {pdfProof && <section className="compositor-proof-overlay" role="dialog" aria-label="Conferir PDF final" aria-modal="false">
       <header className="compositor-proof-heading">
         <div><h2>Conferir PDF final</h2><p>Arquivo lossless gerado pelo pipeline de impressão com originals validados.</p></div>
-        <button className="button secondary" type="button" aria-label="Fechar conferência do PDF final" onClick={() => setPdfProof(null)}>Voltar ao compositor</button>
+        <button ref={pdfProofCloseRef} className="button secondary" type="button" aria-label="Fechar conferência do PDF final" onClick={() => setPdfProof(null)}>Voltar ao compositor</button>
       </header>
       {pdfProofIsStale && <p className="compositor-proof-stale" role="status" aria-live="polite">PDF conferido anteriormente está desatualizado. O compositor live continua atualizado; feche esta conferência para voltar a ele.</p>}
       {pdfProof.separated && <div className="compositor-proof-side-controls" role="group" aria-label="PDFs finais separados">

@@ -9,6 +9,13 @@ export interface LayoutReservedZoneMm {
   readonly heightMm: number;
 }
 
+export interface StableGridEnvelopeMm {
+  /** Maximum physical bleed assigned to each fixed column for the document. */
+  readonly columnBleedsMm: readonly number[];
+  /** Maximum physical bleed assigned to each fixed row for the document. */
+  readonly rowBleedsMm: readonly number[];
+}
+
 export interface CardSlotMm {
   /** Stable zero-based row-major slot identity, including skipped and reserved slots. */
   readonly index: number;
@@ -43,6 +50,10 @@ export interface GridPlacementRequest {
   readonly verticalGapMm?: number;
   /** Optional per-card bleed amounts in the same row-major active-slot order. */
   readonly bleedByCardMm?: readonly number[];
+  /** Internal document-wide envelope input used only while resolving a canonical paginated grid. */
+  readonly documentBleedByCardMm?: readonly number[];
+  /** Fixed document envelope reused by every page after capacity resolution. */
+  readonly stableGridEnvelopeMm?: StableGridEnvelopeMm;
   readonly marginsMm?: PageMarginsMm;
   /** Pair of fixed dimensions for a template-defined stable grid. */
   readonly rows?: number;
@@ -160,34 +171,83 @@ function candidateFor(
   const reservedGridIndices = new Set<number>();
   const gridXmm = margins.left;
   const gridYmm = margins.top;
-  // Every position participates in the same physical grid even when the last
-  // page is partial. Configured bleed is the shared slot envelope; a larger
-  // per-card bleed may expand its row or column envelope.
-  const finalColumnBleeds = Array.from({ length: columns }, () => request.bleedMm);
-  const finalRowBleeds = Array.from({ length: rows }, () => request.bleedMm);
-  // Physical slot geometry is anchored to the original row-major sequence,
-  // independent of user skips or reserved-zone reassignment. A newly assigned
-  // card whose bleed cannot fit those stable coordinates makes this candidate
-  // invalid; it never moves the other trims to make room.
-  for (let cardIndex = 0; cardIndex < Math.min(request.count, positions); cardIndex += 1) {
-    const bleed = bleedByCardMm[cardIndex] ?? request.bleedMm;
-    const column = cardIndex % columns;
-    const row = Math.floor(cardIndex / columns);
-    finalColumnBleeds[column] = Math.max(finalColumnBleeds[column]!, bleed);
-    finalRowBleeds[row] = Math.max(finalRowBleeds[row]!, bleed);
+  // Resolve one document-wide slot envelope before pagination. Page-local
+  // bleed slices may validate artwork bounds, but can never move another
+  // physical trim by changing a row/column offset.
+  const stableEnvelope = request.stableGridEnvelopeMm;
+  if (stableEnvelope && (stableEnvelope.columnBleedsMm.length !== columns || stableEnvelope.rowBleedsMm.length !== rows)) return undefined;
+  const finalColumnBleeds = stableEnvelope
+    ? stableEnvelope.columnBleedsMm.map((bleed) => Math.max(request.bleedMm, bleed))
+    : Array.from({ length: columns }, () => request.bleedMm);
+  const finalRowBleeds = stableEnvelope
+    ? stableEnvelope.rowBleedsMm.map((bleed) => Math.max(request.bleedMm, bleed))
+    : Array.from({ length: rows }, () => request.bleedMm);
+  if (!stableEnvelope) {
+    // For discovery, distribute every physical card over the same row-major
+    // active slots used by each full page. This makes the envelope independent
+    // of where a page boundary happens to fall.
+    const documentBleeds = request.documentBleedByCardMm ?? [];
+    for (let cardIndex = 0; cardIndex < Math.min(request.count, positions); cardIndex += 1) {
+      const bleed = bleedByCardMm[cardIndex] ?? request.bleedMm;
+      const column = cardIndex % columns;
+      const row = Math.floor(cardIndex / columns);
+      finalColumnBleeds[column] = Math.max(finalColumnBleeds[column]!, bleed);
+      finalRowBleeds[row] = Math.max(finalRowBleeds[row]!, bleed);
+    }
+    if (documentBleeds.length > 0 && activeGridIndices.length > 0) {
+      for (let cardIndex = 0; cardIndex < documentBleeds.length; cardIndex += 1) {
+        const gridIndex = activeGridIndices[cardIndex % activeGridIndices.length]!;
+        const column = gridIndex % columns;
+        const row = Math.floor(gridIndex / columns);
+        const bleed = documentBleeds[cardIndex]!;
+        finalColumnBleeds[column] = Math.max(finalColumnBleeds[column]!, bleed);
+        finalRowBleeds[row] = Math.max(finalRowBleeds[row]!, bleed);
+      }
+    }
   }
-  const gridWidthMm = columns * card.widthMm
-    + 2 * finalColumnBleeds.reduce((sum, value) => sum + value, 0)
-    + Math.max(0, columns - 1) * horizontalGapMm;
-  const gridHeightMm = rows * card.heightMm
-    + 2 * finalRowBleeds.reduce((sum, value) => sum + value, 0)
-    + Math.max(0, rows - 1) * verticalGapMm;
-  const dimensionsFit = gridWidthMm <= availableWidthMm + PLACEMENT_EPSILON_MM
-    && gridHeightMm <= availableHeightMm + PLACEMENT_EPSILON_MM;
-  const columnOffsets = finalColumnBleeds.map((_bleed, column) =>
-    gridXmm + finalColumnBleeds.slice(0, column).reduce((sum, value) => sum + card.widthMm + 2 * value + horizontalGapMm, 0));
-  const rowOffsets = finalRowBleeds.map((_bleed, row) =>
-    gridYmm + finalRowBleeds.slice(0, row).reduce((sum, value) => sum + card.heightMm + 2 * value + verticalGapMm, 0));
+  let gridWidthMm = 0;
+  let gridHeightMm = 0;
+  let dimensionsFit = false;
+  let columnOffsets: number[] = [];
+  let rowOffsets: number[] = [];
+  const resolveOffsets = () => {
+    gridWidthMm = columns * card.widthMm
+      + 2 * finalColumnBleeds.reduce((sum, value) => sum + value, 0)
+      + Math.max(0, columns - 1) * horizontalGapMm;
+    gridHeightMm = rows * card.heightMm
+      + 2 * finalRowBleeds.reduce((sum, value) => sum + value, 0)
+      + Math.max(0, rows - 1) * verticalGapMm;
+    dimensionsFit = gridWidthMm <= availableWidthMm + PLACEMENT_EPSILON_MM
+      && gridHeightMm <= availableHeightMm + PLACEMENT_EPSILON_MM;
+    columnOffsets = finalColumnBleeds.map((_bleed, column) =>
+      gridXmm + finalColumnBleeds.slice(0, column).reduce((sum, value) => sum + card.widthMm + 2 * value + horizontalGapMm, 0));
+    rowOffsets = finalRowBleeds.map((_bleed, row) =>
+      gridYmm + finalRowBleeds.slice(0, row).reduce((sum, value) => sum + card.heightMm + 2 * value + verticalGapMm, 0));
+  };
+  resolveOffsets();
+  const documentBleeds = request.documentBleedByCardMm ?? [];
+  if (!stableEnvelope && documentBleeds.length > 0 && zones.length > 0 && activeGridIndices.length > 0) {
+    const collidesWithZone = documentBleeds.some((requestedBleed) => activeGridIndices.some((gridIndex) => {
+      const column = gridIndex % columns;
+      const row = Math.floor(gridIndex / columns);
+      const bleed = Math.max(request.bleedMm, requestedBleed);
+      return zones.some((zone) => overlaps({
+        xMm: columnOffsets[column]! + finalColumnBleeds[column]! - bleed,
+        yMm: rowOffsets[row]! + finalRowBleeds[row]! - bleed,
+        widthMm: card.widthMm + 2 * bleed,
+        heightMm: card.heightMm + 2 * bleed,
+      }, zone));
+    }));
+    if (collidesWithZone) {
+      // Any possible reserved-slot reassignment can move a later physical
+      // card into another slot. Use the document maximum in every row/column
+      // so that no page can exceed the fixed envelope after that remapping.
+      const maximumDocumentBleed = Math.max(request.bleedMm, ...documentBleeds);
+      finalColumnBleeds.fill(maximumDocumentBleed);
+      finalRowBleeds.fill(maximumDocumentBleed);
+      resolveOffsets();
+    }
+  }
   let capacity = 0;
 
   // A zone can remove a slot and change which card occupies later positions.
@@ -294,6 +354,16 @@ export function calculateGridPlacement(request: GridPlacementRequest): GridPlace
   if (horizontalGapMm > 2_000 || verticalGapMm > 2_000) throw new RangeError("Layout gaps must not exceed 2000 mm.");
   if (request.bleedByCardMm && request.bleedByCardMm.length !== count) {
     throw new RangeError("Per-card bleed values must contain one value per requested card.");
+  }
+  for (const value of request.documentBleedByCardMm ?? []) {
+    assertNonNegative(value, "Document per-card bleed");
+    if (value > 3) throw new RangeError("Bleed must not exceed 3 mm.");
+  }
+  if (request.stableGridEnvelopeMm) {
+    for (const value of [...request.stableGridEnvelopeMm.columnBleedsMm, ...request.stableGridEnvelopeMm.rowBleedsMm]) {
+      assertNonNegative(value, "Stable grid envelope bleed");
+      if (value > 3) throw new RangeError("Bleed must not exceed 3 mm.");
+    }
   }
   const bleedByCardMm = request.bleedByCardMm ?? Array.from({ length: count }, () => bleedMm);
   for (const value of bleedByCardMm) {

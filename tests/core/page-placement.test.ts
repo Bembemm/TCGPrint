@@ -81,19 +81,62 @@ describe("shared physical page placements", () => {
     expect(partial[1]!.placement.gridSlots.map(({ cardIndex }) => cardIndex)).toEqual([0, undefined, undefined, undefined, undefined, undefined]);
   });
 
-  it("keeps the discovered grid shape across partial pages when per-card bleed values differ", () => {
-    const bleeds = [2, 0.625, 0.625, 1.25, 0.625, 0.625, 0.625, 0.625, 0.625, 0.625];
+  it.each([
+    ["large bleed on the first page", [2, 0.625, 0.625, 1.25, 0.625, 0.625, 0.625, 0.625, 0.625, 0.625]],
+    ["large bleed only on the last page", [0.625, 0.625, 0.625, 1.25, 0.625, 0.625, 0.625, 0.625, 0.625, 2]],
+    ["large bleeds in different columns and rows", [0.625, 2, 0.625, 0.625, 0.625, 1.25, 0.625, 0.625, 0.625, 0.625]],
+  ] as const)("keeps every page on one stable envelope with %s", (_caseName, bleeds) => {
     const pages = calculateGridPagePlacements({
-      placement: { ...placement, bleedMm: 0, marginsMm: { top: 0, right: 0, bottom: 0, left: 0 } },
+      placement: { ...placement, bleedMm: 0.625, marginsMm: { top: 0, right: 0, bottom: 0, left: 0 } },
       count: bleeds.length,
       bleedByCardMm: bleeds,
     });
 
     expect(pages.length).toBeGreaterThan(1);
-    const fixedShape = [pages[0]!.placement.rows, pages[0]!.placement.columns];
+    const geometry = (page: (typeof pages)[number]["placement"]) => ({
+      rows: page.rows,
+      columns: page.columns,
+      gridXmm: page.gridXmm,
+      gridYmm: page.gridYmm,
+      gridWidthMm: page.gridWidthMm,
+      gridHeightMm: page.gridHeightMm,
+      gridSlots: page.gridSlots.map(({ slotXmm, slotYmm, trim }) => ({
+        slotXmm,
+        slotYmm,
+        trimXmm: trim.xMm,
+        trimYmm: trim.yMm,
+        trimWidthMm: trim.widthMm,
+        trimHeightMm: trim.heightMm,
+      })),
+    });
+    const expected = geometry(pages[0]!.placement);
 
-    for (const { placement: page } of pages.slice(1)) {
-      expect([page.rows, page.columns]).toEqual(fixedShape);
-    }
+    expect(pages.slice(1).map(({ placement: page }) => geometry(page))).toEqual(
+      pages.slice(1).map(() => expected),
+    );
+    expect(pages.at(-1)!.placement.gridSlots.map(({ trim }) => [trim.xMm, trim.yMm])).toEqual(
+      pages[0]!.placement.gridSlots.map(({ trim }) => [trim.xMm, trim.yMm]),
+    );
+  });
+
+  it("keeps one document envelope when a reserved zone changes per-page slot assignments", () => {
+    const bleeds = [2, 0.625, 0.625, 1.25, 0.625, 0.625, 0.625, 0.625, 0.625, 0.625];
+    const pages = calculateGridPagePlacements({
+      placement: {
+        ...placement,
+        bleedMm: 0.625,
+        marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+        reservedZonesMm: [{ xMm: 1, yMm: 1, widthMm: 1, heightMm: 1 }],
+      },
+      count: bleeds.length,
+      bleedByCardMm: bleeds,
+    });
+    const coordinates = (page: (typeof pages)[number]["placement"]) => page.gridSlots.map(({ slotXmm, slotYmm, trim }) => [
+      slotXmm, slotYmm, trim.xMm, trim.yMm, trim.widthMm, trim.heightMm,
+    ]);
+
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.map(({ placement: page }) => coordinates(page))).toEqual(pages.map(() => coordinates(pages[0]!.placement)));
+    expect(pages.every(({ placement: page }) => page.gridSlots.find(({ index }) => index === 0)?.reserved)).toBe(true);
   });
 });

@@ -1470,14 +1470,15 @@ describe("LosslessPdfEngine", () => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 3 });
     const paperFormat = { name: "Letter", widthMm: 215.9, heightMm: 279.4 } as const;
-    const bleedByCardMm = [3, 0, 0, 0, 0, 0, 0, 0, 0];
+    const bleedByCardMm = [3, 0, 3, 0, 0, 0, 3, 0, 0];
+    const bleedResults = bleedByCardMm.map((value) => value > 0 ? bleed : undefined);
     const cutGuides = {
       trim: { enabled: false, extentMm: 1 as const, color: "blue" as const },
       external: { enabled: true, strokeWidthPt, color: "black" as const },
     };
     const pdf = await engine.generate({
       images: Array.from({ length: 9 }, () => original),
-      bleedResults: [bleed, ...Array.from({ length: 8 }, () => undefined)],
+      bleedResults,
       paperFormat,
       cutGuides,
     });

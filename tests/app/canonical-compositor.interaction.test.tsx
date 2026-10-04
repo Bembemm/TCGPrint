@@ -368,6 +368,9 @@ describe("canonical live compositor interactions", () => {
     await user.click(screen.getByRole("checkbox", { name: "Calibration" }));
     expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
     const compositor = screen.getByRole("img", { name: /Compositor live/ });
+    const physicalPlanSignature = Array.from(compositor.querySelectorAll("[data-slot-x-mm]"))
+      .map((slot) => [slot.getAttribute("data-slot-x-mm"), slot.getAttribute("data-slot-y-mm")]);
+    const physicalViewBox = compositor.getAttribute("viewBox");
     expect(compositor.querySelector("image[data-compositor-artwork]")).not.toBeInTheDocument();
     expect(compositor.querySelector("[data-compositor-layer='bleed']")).not.toBeInTheDocument();
     expect(compositor.querySelector("[data-compositor-layer='cut']")).not.toBeInTheDocument();
@@ -378,6 +381,14 @@ describe("canonical live compositor interactions", () => {
 
     await user.click(screen.getByRole("button", { name: "Aumentar zoom" }));
     expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
+    expect(Array.from(compositor.querySelectorAll("[data-slot-x-mm]"))
+      .map((slot) => [slot.getAttribute("data-slot-x-mm"), slot.getAttribute("data-slot-y-mm")])).toEqual(physicalPlanSignature);
+    expect(compositor).toHaveAttribute("viewBox", physicalViewBox);
+    await user.click(screen.getByRole("button", { name: "100%" }));
+    expect(compositor).toHaveAttribute("data-compositor-zoom-scale", "1");
+    expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
+    expect(Array.from(compositor.querySelectorAll("[data-slot-x-mm]"))
+      .map((slot) => [slot.getAttribute("data-slot-x-mm"), slot.getAttribute("data-slot-y-mm")])).toEqual(physicalPlanSignature);
     expect(screen.getByRole("button", { name: "Fit Page" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryAllByTitle(/PDF/)).toHaveLength(0);
     expect(screen.queryByRole("dialog", { name: "Conferir PDF final" })).not.toBeInTheDocument();

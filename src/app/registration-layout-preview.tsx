@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { CutGuideEngine } from "../../core/geometry";
 import type { CardSlotMm } from "../../core/geometry/placement";
 import { buildCanonicalPrintPlan, getDuplexPreviewOverlayMatrix } from "../../core/duplex";
@@ -12,6 +12,7 @@ import type { ProjectSettingsV2 } from "../../persistence/projects/serializer";
 import { cutPathToSvgD } from "../../core/cut";
 import type { CutPreviewDto } from "../../services/cut-api";
 import { transformRegistrationGeometry, type RegistrationPrimitive } from "../../core/registration";
+import { calculateCompositorScale, COMPOSITOR_CSS_PX_PER_MM, stepCompositorScale, type CompositorViewportSize, type CompositorZoomMode } from "./compositor-zoom";
 
 interface RegistrationLayoutPreviewProps {
   readonly settings: ProjectSettingsV2;
@@ -76,8 +77,10 @@ function calibrationSvgMatrix(matrix: { readonly a: number; readonly b: number; 
 export default function RegistrationLayoutPreview({ settings, cardCount, cards, cutPreview = null, selectedPageNumber, onSelectPage, onToggleSkippedSlot }: RegistrationLayoutPreviewProps) {
   const [previewSide, setPreviewSide] = useState<"front" | "back">("front");
   const [selectedPhysicalCardIndex, setSelectedPhysicalCardIndex] = useState<number | null>(null);
-  const [zoomScale, setZoomScale] = useState(1);
-  const [zoomMode, setZoomMode] = useState<"fit-page" | "fit-width" | "100%">("fit-page");
+  const [manualZoomScale, setManualZoomScale] = useState(1);
+  const [zoomMode, setZoomMode] = useState<CompositorZoomMode>("fit-page");
+  const sheetViewportRef = useRef<HTMLDivElement | null>(null);
+  const [viewportSize, setViewportSize] = useState<CompositorViewportSize>({ widthPx: 0, heightPx: 0 });
   const [layers, setLayers] = useState<Record<CompositorLayer, boolean>>({
     artwork: true, bleed: true, trim: true, cut: true, silhouette: true, registration: true, reserved: true, margins: true, calibration: true,
   });
@@ -138,6 +141,30 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     }
   }, [selectedPhysicalCardIndex, activePage?.startCardIndex, activePage?.endCardIndex]);
 
+  useEffect(() => {
+    const viewport = sheetViewportRef.current;
+    if (!viewport) return;
+    const measure = (width?: number, height?: number) => {
+      const rect = viewport.getBoundingClientRect();
+      setViewportSize({
+        widthPx: width || viewport.clientWidth || rect.width,
+        heightPx: height || viewport.clientHeight || rect.height,
+      });
+    };
+    measure();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver((entries) => {
+        const entry = entries.find(({ target }) => target === viewport);
+        if (entry) measure(entry.contentRect.width, entry.contentRect.height);
+      });
+      observer.observe(viewport);
+      return () => observer.disconnect();
+    }
+    const handleWindowResize = () => measure();
+    window.addEventListener("resize", handleWindowResize);
+    return () => window.removeEventListener("resize", handleWindowResize);
+  }, [Boolean(result.pages)]);
+
   if (!result.pages || !result.geometry) {
     return <section className="registration-preview canonical-compositor" aria-label="Compositor live">
       <h2>Compositor live</h2><p className="error-message" role="alert">Layout inválido: {result.error}</p>
@@ -160,6 +187,9 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   const cutOverlayTransform = `matrix(${cutOverlayMatrix.a} ${cutOverlayMatrix.b} ${cutOverlayMatrix.c} ${cutOverlayMatrix.d} ${cutOverlayMatrix.e} ${cutOverlayMatrix.f})`;
   const cutPreviewPage = cutPreview?.pages.find(({ pageNumber: sourcePage }) => sourcePage === activePageIndex + 1);
   const page = placement.pageSizeMm;
+  const zoomScale = zoomMode === "fit-page" || zoomMode === "fit-width"
+    ? calculateCompositorScale(zoomMode, viewportSize, page)
+    : zoomMode === "100%" ? 1 : manualZoomScale;
   const fontSize = Math.min(7, page.widthMm / 35);
   const skipped = new Set(placement.gridSlots.filter(({ skippedByUser }) => skippedByUser).map(({ index }) => index));
   const assigned = new Set(placement.slots.map(({ index }) => index));
@@ -178,9 +208,14 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   const requestedCardIsLandscape = settings.cardOrientation === undefined ? sourceCardIsLandscape : settings.cardOrientation === "landscape";
   const artworkRotationDegrees = sourceCardIsLandscape === requestedCardIsLandscape ? 0 : sourceCardIsLandscape ? -90 : 90;
 
-  function changeZoom(mode: "fit-page" | "fit-width" | "100%") {
+  function changeZoom(mode: Exclude<CompositorZoomMode, "manual">) {
     setZoomMode(mode);
-    setZoomScale(mode === "fit-page" ? 0.82 : mode === "fit-width" ? 1 : 1.08);
+    if (mode === "100%") setManualZoomScale(1);
+  }
+
+  function stepZoom(direction: -1 | 1) {
+    setZoomMode("manual");
+    setManualZoomScale(stepCompositorScale(zoomScale, direction));
   }
 
   function previewArtwork(cardEntry: WorkingCard | undefined) {
@@ -237,8 +272,8 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       </div>
       <div className="compositor-zoom-controls" role="group" aria-label="Zoom do compositor">
         {([ ["fit-page", "Fit Page"], ["fit-width", "Fit Width"], ["100%", "100%"] ] as const).map(([mode, label]) => <button key={mode} type="button" className={`button ${zoomMode === mode ? "primary" : "secondary"}`} aria-pressed={zoomMode === mode} onClick={() => changeZoom(mode)}>{label}</button>)}
-        <button type="button" className="button secondary" aria-label="Reduzir zoom" onClick={() => { setZoomMode("100%"); setZoomScale((scale) => Math.max(0.5, Number((scale - 0.1).toFixed(2)))); }}>−</button>
-        <button type="button" className="button secondary" aria-label="Aumentar zoom" onClick={() => { setZoomMode("100%"); setZoomScale((scale) => Math.min(2, Number((scale + 0.1).toFixed(2)))); }}>+</button>
+        <button type="button" className="button secondary" aria-label="Reduzir zoom" onClick={() => stepZoom(-1)}>−</button>
+        <button type="button" className="button secondary" aria-label="Aumentar zoom" onClick={() => stepZoom(1)}>+</button>
       </div>
       <details className="compositor-layers">
         <summary>Layers</summary>
@@ -261,8 +296,8 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
         ? <>Perfil {settings.printerProfileSelection.name} v{settings.printerProfileSelection.version} · {settings.printerDuplexMode} · {previewSide === "front" ? "frente" : "verso"}: ΔX {settings.printerProfileSelection[previewSide].offsetXUm} µm, ΔY {settings.printerProfileSelection[previewSide].offsetYUm} µm, rotação {settings.printerProfileSelection[previewSide].rotationDeg}°, escala {settings.printerProfileSelection[previewSide].scaleX}/{settings.printerProfileSelection[previewSide].scaleY}, skew {settings.printerProfileSelection[previewSide].skewXDeg ?? 0}°/{settings.printerProfileSelection[previewSide].skewYDeg ?? 0}° · {calibrationTransform ? layers.calibration ? "transformação calibrada visível" : "geometria nominal visível" : "transformação identidade"}.</>
         : <>Sem perfil de calibração selecionado; geometria nominal visível.</>} Conteúdo impresso segue a calibração; paths SVG/DXF de Silhouette permanecem nominais.
     </p>
-    <div className="compositor-sheet-scroll">
-      <svg className="registration-sheet-preview compositor-sheet" style={{ width: `${zoomScale * 100}%`, maxWidth: zoomScale > 1 ? "none" : "760px", maxHeight: "none" }} viewBox={`0 0 ${page.widthMm} ${page.heightMm}`} role="img" aria-label={`Compositor live ${previewSide === "front" ? "frente" : "verso"} ${settings.paperFormat.name} ${settings.pageOrientation}, página ${activePageIndex + 1} de ${pageCount}`} data-compositor-page={activePageIndex + 1} data-selected-physical-card-index={visibleSelectedPhysicalCardIndex ?? "none"} data-compositor-bleed-mm={settings.bleedMm} data-compositor-calibration-matrix={visibleCalibrationMatrix ?? "identity"} data-compositor-profile-version={settings.printerProfileSelection?.version ?? "none"} data-compositor-printer-mode={settings.printerDuplexMode}>
+    <div className="compositor-sheet-scroll" ref={sheetViewportRef}>
+      <svg className="registration-sheet-preview compositor-sheet" style={{ width: `${page.widthMm * COMPOSITOR_CSS_PX_PER_MM * zoomScale}px`, height: `${page.heightMm * COMPOSITOR_CSS_PX_PER_MM * zoomScale}px`, maxWidth: "none", maxHeight: "none" }} viewBox={`0 0 ${page.widthMm} ${page.heightMm}`} role="img" aria-label={`Compositor live ${previewSide === "front" ? "frente" : "verso"} ${settings.paperFormat.name} ${settings.pageOrientation}, página ${activePageIndex + 1} de ${pageCount}`} data-compositor-page={activePageIndex + 1} data-selected-physical-card-index={visibleSelectedPhysicalCardIndex ?? "none"} data-compositor-bleed-mm={settings.bleedMm} data-compositor-calibration-matrix={visibleCalibrationMatrix ?? "identity"} data-compositor-profile-version={settings.printerProfileSelection?.version ?? "none"} data-compositor-printer-mode={settings.printerDuplexMode} data-compositor-zoom-mode={zoomMode} data-compositor-zoom-scale={zoomScale}>
         <defs>
           {placement.gridSlots.filter(({ cardIndex }) => cardIndex !== undefined).map((slot) => {
             const centerX = slot.trim.xMm + slot.trim.widthMm / 2;
@@ -381,9 +416,8 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
             {skipped.has(slot.index) && <>
               <line x1={slot.trim.xMm} y1={slot.trim.yMm} x2={slot.trim.xMm + slot.trim.widthMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
               <line x1={slot.trim.xMm + slot.trim.widthMm} y1={slot.trim.yMm} x2={slot.trim.xMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
-              <text x={slot.trim.xMm + slot.trim.widthMm / 2} y={slot.trim.yMm + slot.trim.heightMm / 2} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#581c87">SKIP {slot.index + 1}</text>
             </>}
-            {!assigned.has(slot.index) && !skipped.has(slot.index) && <text x={slot.trim.xMm + slot.trim.widthMm / 2} y={slot.trim.yMm + slot.trim.heightMm / 2} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#64748b">{slot.index + 1}</text>}
+            {!assigned.has(slot.index) && !skipped.has(slot.index) && <rect x={slot.trim.xMm} y={slot.trim.yMm} width={slot.trim.widthMm} height={slot.trim.heightMm} fill="#f8fafc" stroke="#cbd5e1" strokeWidth="0.35" strokeDasharray="1 1" data-compositor-empty-slot="true" />}
             </g>;
           })}
           {layers.cut && <g data-compositor-layer="cut" data-duplex-cut-overlay={previewSide} transform={cutOverlayTransform}>

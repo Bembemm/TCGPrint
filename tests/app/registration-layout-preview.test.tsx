@@ -102,14 +102,17 @@ describe("registration layout preview", () => {
     };
     const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
       settings,
-      cardCount: 2,
-      cards: cards(2),
+      cardCount: 1,
+      cards: cards(1),
       selectedPageNumber: 1,
       onSelectPage: vi.fn(),
       onToggleSkippedSlot: vi.fn(),
     }));
 
-    expect(markup).toContain("SKIP 2");
+    expect(markup).toContain('aria-label="Slot 2 desativado"');
+    expect(markup).not.toContain(">SKIP 2<");
+    expect(markup).not.toMatch(/<text[^>]*>\s*2\s*<\/text>/);
+    expect(markup).toContain('aria-label="Slot 3 vazio"');
     expect(markup).toContain("x1=\"40\" y1=\"35\"");
     expect(markup).toContain("capacidade 2");
     expect(markup).not.toContain("stroke=\"#111827\"");

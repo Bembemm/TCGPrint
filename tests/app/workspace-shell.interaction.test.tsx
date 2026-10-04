@@ -104,7 +104,7 @@ describe("workspace shell interactions", () => {
     await user.click(firstSlot);
     expect(firstSlot).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Desativar slot da carta selecionada" }));
-    expect(screen.getByText("SKIP 1")).toBeInTheDocument();
+    expect(screen.queryByText("SKIP 1")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Artwork" }));
     expect(screen.getByRole("button", { name: "Slot 1 desativado" })).toHaveAttribute("aria-pressed", "true");
   });
