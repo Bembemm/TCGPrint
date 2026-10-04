@@ -12,16 +12,17 @@ export interface GridPlacementPage {
 }
 
 export interface GridPagePlacementRequest {
-  readonly placement: Omit<GridPlacementRequest, "count" | "bleedByCardMm" | "documentBleedByCardMm" | "stableGridEnvelopeMm">;
+  readonly placement: Omit<GridPlacementRequest, "count" | "bleedByCardMm" | "documentBleedByCardMm" | "stableGridEnvelopeMm" | "stableReservedSlotIndices">;
   readonly count: number;
   /** Effective per-card bleed in PDF card order; defaults to placement.bleedMm. */
   readonly bleedByCardMm?: readonly number[];
 }
 
 /**
- * Resolves one capacity shape and document-wide per-row/per-column bleed
- * envelope before pagination. Page slices only assign cards to those fixed
- * physical slots; they cannot recalculate offsets from a subset of bleeds.
+ * Resolves one capacity shape, document-wide row/column bleed envelope, and
+ * reserved-slot mask before pagination. Page slices only assign cards to
+ * those fixed physical slots; they cannot recalculate offsets or reservations
+ * from a subset of bleeds.
  */
 export function calculateGridPagePlacements(request: GridPagePlacementRequest): readonly GridPlacementPage[] {
   if (!Number.isSafeInteger(request.count) || request.count < 0 || request.count > MAX_PHYSICAL_CARDS_PER_EXPORT) {
@@ -68,6 +69,7 @@ export function calculateGridPagePlacements(request: GridPagePlacementRequest): 
     rowBleedsMm[slot.row] = Math.max(rowBleedsMm[slot.row]!, (slot.slotHeightMm - capacityGrid.cardSizeMm.heightMm) / 2);
   }
   const documentEnvelope = { columnBleedsMm, rowBleedsMm };
+  const stableReservedSlotIndices = capacityGrid.gridSlots.filter(({ reserved }) => reserved).map(({ index }) => index);
   let startCardIndex = 0;
   while (startCardIndex < request.count) {
     const remaining = request.count - startCardIndex;
@@ -81,6 +83,7 @@ export function calculateGridPagePlacements(request: GridPagePlacementRequest): 
           ...gridPlacement,
           count: candidateCount,
           stableGridEnvelopeMm: documentEnvelope,
+          stableReservedSlotIndices,
           bleedByCardMm: bleedByCardMm.slice(startCardIndex, startCardIndex + candidateCount),
         });
         selectedCount = candidateCount;
@@ -98,6 +101,7 @@ export function calculateGridPagePlacements(request: GridPagePlacementRequest): 
         ...gridPlacement,
         count: 1,
         stableGridEnvelopeMm: documentEnvelope,
+        stableReservedSlotIndices,
         bleedByCardMm: [bleedByCardMm[startCardIndex]!],
       });
       throw new RangeError("No physical card slot fits on the selected paper.");

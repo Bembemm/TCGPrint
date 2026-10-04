@@ -139,4 +139,106 @@ describe("shared physical page placements", () => {
     expect(pages.map(({ placement: page }) => coordinates(page))).toEqual(pages.map(() => coordinates(pages[0]!.placement)));
     expect(pages.every(({ placement: page }) => page.gridSlots.find(({ index }) => index === 0)?.reserved)).toBe(true);
   });
+
+  it("keeps template reserved indexes and capacity stable when a document bleed reserves a slot", () => {
+    const templateGeometry = {
+      orientation: "landscape" as const,
+      cardOrientation: "portrait" as const,
+      pageSizeMm: { widthMm: 240, heightMm: 200 },
+      cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+      rows: 1,
+      columns: 3,
+      slots: [
+        { index: 0, row: 0, column: 0, xMm: 10, yMm: 12 },
+        { index: 1, row: 0, column: 1, xMm: 85, yMm: 12 },
+        { index: 2, row: 0, column: 2, xMm: 160, yMm: 12 },
+      ],
+    };
+    const pages = calculateGridPagePlacements({
+      placement: {
+        paper: { name: "240 × 200 mm", widthMm: 240, heightMm: 200 },
+        pageOrientation: "landscape",
+        card: MAGIC_STANDARD_CARD,
+        cardOrientation: "portrait",
+        bleedMm: 0.625,
+        marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+        reservedZonesMm: [{ xMm: 8, yMm: 12, widthMm: 1, heightMm: 1 }],
+        templateGeometry,
+      },
+      count: 4,
+      bleedByCardMm: [3, 0.625, 0.625, 0.625],
+    });
+    const trimCoordinates = (page: (typeof pages)[number]["placement"]) =>
+      page.gridSlots.map(({ index, trim }) => [index, trim.xMm, trim.yMm, trim.widthMm, trim.heightMm]);
+
+    expect(pages.map(({ startCardIndex, endCardIndex }) => [startCardIndex, endCardIndex])).toEqual([[0, 2], [2, 4]]);
+    expect(pages.map(({ placement: page }) => [page.rows, page.columns, page.capacity])).toEqual([[1, 3, 2], [1, 3, 2]]);
+    expect(pages.map(({ placement: page }) => page.gridSlots.filter(({ reserved }) => reserved).map(({ index }) => index))).toEqual([[0], [0]]);
+    expect(trimCoordinates(pages[1]!.placement)).toEqual(trimCoordinates(pages[0]!.placement));
+  });
+
+  it.each([
+    ["large bleed on the first card", [3, ...Array.from({ length: 10 }, () => 0.625)], [
+      [0, 0.625, 3], [1, 67.75, 3], [2, 134.875, 3],
+      [3, 0.625, 95.525], [4, 67.75, 95.525], [5, 134.875, 95.525],
+    ]],
+    ["large bleed only on the last card", [...Array.from({ length: 10 }, () => 0.625), 3], [
+      [0, 0.625, 3], [1, 67.75, 3], [2, 134.875, 3],
+      [3, 0.625, 95.525], [4, 67.75, 95.525], [5, 134.875, 95.525],
+    ]],
+    ["large bleed immediately after the reserved slot", [0.625, 3, ...Array.from({ length: 9 }, () => 0.625)], [
+      [0, 0.625, 3], [1, 65.375, 3], [2, 132.5, 3],
+      [3, 0.625, 95.525], [4, 65.375, 95.525], [5, 132.5, 95.525],
+    ]],
+  ] as const)("chooses a larger stable reserved-zone capacity than max-everywhere for %s", (_caseName, bleeds, expectedCoordinates) => {
+    const constrained = {
+      paper: { name: "200 × 190 mm", widthMm: 200, heightMm: 190 },
+      card: MAGIC_STANDARD_CARD,
+      bleedMm: 0.625,
+      marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+      reservedZonesMm: [{ xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }],
+    };
+    const pages = calculateGridPagePlacements({
+      placement: constrained,
+      count: bleeds.length,
+      bleedByCardMm: bleeds,
+    });
+    const maxEverywhere = calculateGridPlacement({
+      ...constrained,
+      count: 0,
+      bleedMm: 3,
+    });
+    const geometry = (page: (typeof pages)[number]["placement"]) => ({
+      rows: page.rows,
+      columns: page.columns,
+      capacity: page.capacity,
+      bleedMm: page.bleedMm,
+      gridXmm: page.gridXmm,
+      gridYmm: page.gridYmm,
+      gridWidthMm: page.gridWidthMm,
+      gridHeightMm: page.gridHeightMm,
+      reserved: page.gridSlots.filter(({ reserved }) => reserved).map(({ index }) => index),
+      slots: page.gridSlots.map(({ index, slotXmm, slotYmm, trim }) => ({
+        index,
+        slotXmm,
+        slotYmm,
+        trimXmm: trim.xMm,
+        trimYmm: trim.yMm,
+        trimWidthMm: trim.widthMm,
+        trimHeightMm: trim.heightMm,
+      })),
+    });
+    const expected = geometry(pages[0]!.placement);
+
+    expect(maxEverywhere.capacity).toBe(3);
+    expect(pages[0]!.placement.capacity).toBe(5);
+    expect(pages[0]!.placement.capacity).toBeGreaterThan(maxEverywhere.capacity);
+    expect([pages[0]!.placement.rows, pages[0]!.placement.columns]).toEqual([2, 3]);
+    expect(pages.map(({ placement: page }) => page.capacity)).toEqual([5, 5, 5]);
+    expect(pages.map(({ placement: page }) => page.gridSlots.filter(({ reserved }) => reserved).map(({ index }) => index)))
+      .toEqual([[0], [0], [0]]);
+    expect(pages.slice(1).map(({ placement: page }) => geometry(page))).toEqual(pages.slice(1).map(() => expected));
+    expect(pages.at(-1)!.placement.slots.map(({ cardIndex }) => cardIndex)).toEqual([0]);
+    expect(pages[0]!.placement.gridSlots.map(({ index, trim }) => [index, trim.xMm, trim.yMm])).toEqual(expectedCoordinates);
+  });
 });

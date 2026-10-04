@@ -1510,6 +1510,66 @@ describe("LosslessPdfEngine", () => {
     expectExternalPdfSegmentsClear(guides, cards, paperFormat.heightMm, strokeWidthPt);
   });
 
+  it("uses the document-wide reserved mask for variable-bleed PDF pages without explicit placements", async () => {
+    const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
+    const bleed625 = await new BleedEngine().generate({ imageBytes: original, bleedMm: 0.625 });
+    const bleed3 = await new BleedEngine().generate({ imageBytes: original, bleedMm: 3 });
+    const paperFormat = { name: "200 × 190 mm", widthMm: 200, heightMm: 190 } as const;
+    const bleedByCardMm = [3, ...Array.from({ length: 10 }, () => 0.625)];
+    const registration = {
+      type: "custom" as const,
+      orientation: "landscape" as const,
+      marks: [[{ type: "line" as const, x1Mm: 1, y1Mm: 1, x2Mm: 2, y2Mm: 1, strokeWidthMm: 0.1 }]],
+      reservedZones: [{ xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }],
+    };
+    const cutGuides = {
+      trim: { enabled: false, extentMm: 1 as const, color: "blue" as const },
+      external: { enabled: true, strokeWidthPt: 0.3, color: "black" as const },
+    };
+    const plan = buildCanonicalPrintPlan(bleedByCardMm.length, {
+      bleedMm: 0,
+      paperFormat,
+      pageOrientation: "landscape",
+      cardFormat: MAGIC_STANDARD_CARD,
+      cardOrientation: "portrait",
+      registration,
+      bleedByCardMm,
+    });
+    const pdf = await engine.generate({
+      images: Array.from({ length: bleedByCardMm.length }, () => original),
+      bleedResults: bleedByCardMm.map((bleed) => bleed === 3 ? bleed3 : bleed625),
+      paperFormat,
+      pageOrientation: "landscape",
+      cardFormat: MAGIC_STANDARD_CARD,
+      cardOrientation: "portrait",
+      registration,
+      cutGuides,
+    });
+    const parsed = await parsePdf(pdf);
+    const actualSegments = getVectorSegments(parsed.content).map(([x1, y1, x2, y2]) =>
+      [pointsToMm(x1), pointsToMm(y1), pointsToMm(x2), pointsToMm(y2)].map((value) => Number(value.toFixed(8))));
+    const expectedSegments = plan.pages.flatMap((page) => {
+      const cards = page.placement.slots.map((slot) => ({
+        trim: slot.trim,
+        bleedMm: bleedByCardMm[page.startCardIndex + slot.cardIndex!],
+      }));
+      return new CutGuideEngine().generate({ cards, pageSizeMm: page.placement.pageSizeMm, config: cutGuides })
+        .externalSegments
+        .map(({ x1Mm, y1Mm, x2Mm, y2Mm }) => [
+          x1Mm,
+          paperFormat.heightMm - y1Mm,
+          x2Mm,
+          paperFormat.heightMm - y2Mm,
+        ].map((value) => Number(value.toFixed(8))));
+    });
+
+    expect(parsed.document.getPages()).toHaveLength(3);
+    expect(plan.pages.map(({ placement }) => [placement.rows, placement.columns, placement.capacity])).toEqual([
+      [2, 3, 5], [2, 3, 5], [2, 3, 5],
+    ]);
+    for (const segment of expectedSegments) expect(actualSegments).toContainEqual(segment);
+  });
+
   it("keeps mixed-bleed Letter export on one page when a registration zone misses every card", async () => {
     const original = new Uint8Array(await readFile(join(FIXTURES, "synthetic-gradient.jpg")));
     const bleed = await new BleedEngine().generate({ imageBytes: original, bleedMm: 3 });

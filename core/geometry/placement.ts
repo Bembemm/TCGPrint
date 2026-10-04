@@ -54,6 +54,8 @@ export interface GridPlacementRequest {
   readonly documentBleedByCardMm?: readonly number[];
   /** Fixed document envelope reused by every page after capacity resolution. */
   readonly stableGridEnvelopeMm?: StableGridEnvelopeMm;
+  /** Fixed registration-reserved slots reused by every page after capacity resolution. */
+  readonly stableReservedSlotIndices?: readonly number[];
   readonly marginsMm?: PageMarginsMm;
   /** Pair of fixed dimensions for a template-defined stable grid. */
   readonly rows?: number;
@@ -168,7 +170,7 @@ function candidateFor(
   const verticalGapMm = request.verticalGapMm ?? 0;
   const availableWidthMm = page.widthMm - margins.left - margins.right;
   const availableHeightMm = page.heightMm - margins.top - margins.bottom;
-  const reservedGridIndices = new Set<number>();
+  const reservedGridIndices = new Set<number>(request.stableReservedSlotIndices ?? []);
   const gridXmm = margins.left;
   const gridYmm = margins.top;
   // Resolve one document-wide slot envelope before pagination. Page-local
@@ -182,27 +184,14 @@ function candidateFor(
   const finalRowBleeds = stableEnvelope
     ? stableEnvelope.rowBleedsMm.map((bleed) => Math.max(request.bleedMm, bleed))
     : Array.from({ length: rows }, () => request.bleedMm);
-  if (!stableEnvelope) {
-    // For discovery, distribute every physical card over the same row-major
-    // active slots used by each full page. This makes the envelope independent
-    // of where a page boundary happens to fall.
-    const documentBleeds = request.documentBleedByCardMm ?? [];
+  const documentBleeds = request.documentBleedByCardMm;
+  if (!stableEnvelope && documentBleeds === undefined) {
     for (let cardIndex = 0; cardIndex < Math.min(request.count, positions); cardIndex += 1) {
       const bleed = bleedByCardMm[cardIndex] ?? request.bleedMm;
       const column = cardIndex % columns;
       const row = Math.floor(cardIndex / columns);
       finalColumnBleeds[column] = Math.max(finalColumnBleeds[column]!, bleed);
       finalRowBleeds[row] = Math.max(finalRowBleeds[row]!, bleed);
-    }
-    if (documentBleeds.length > 0 && activeGridIndices.length > 0) {
-      for (let cardIndex = 0; cardIndex < documentBleeds.length; cardIndex += 1) {
-        const gridIndex = activeGridIndices[cardIndex % activeGridIndices.length]!;
-        const column = gridIndex % columns;
-        const row = Math.floor(gridIndex / columns);
-        const bleed = documentBleeds[cardIndex]!;
-        finalColumnBleeds[column] = Math.max(finalColumnBleeds[column]!, bleed);
-        finalRowBleeds[row] = Math.max(finalRowBleeds[row]!, bleed);
-      }
     }
   }
   let gridWidthMm = 0;
@@ -224,92 +213,118 @@ function candidateFor(
     rowOffsets = finalRowBleeds.map((_bleed, row) =>
       gridYmm + finalRowBleeds.slice(0, row).reduce((sum, value) => sum + card.heightMm + 2 * value + verticalGapMm, 0));
   };
-  resolveOffsets();
-  const documentBleeds = request.documentBleedByCardMm ?? [];
-  if (!stableEnvelope && documentBleeds.length > 0 && zones.length > 0 && activeGridIndices.length > 0) {
-    const collidesWithZone = documentBleeds.some((requestedBleed) => activeGridIndices.some((gridIndex) => {
-      const column = gridIndex % columns;
-      const row = Math.floor(gridIndex / columns);
-      const bleed = Math.max(request.bleedMm, requestedBleed);
-      return zones.some((zone) => overlaps({
-        xMm: columnOffsets[column]! + finalColumnBleeds[column]! - bleed,
-        yMm: rowOffsets[row]! + finalRowBleeds[row]! - bleed,
-        widthMm: card.widthMm + 2 * bleed,
-        heightMm: card.heightMm + 2 * bleed,
-      }, zone));
-    }));
-    if (collidesWithZone) {
-      // Any possible reserved-slot reassignment can move a later physical
-      // card into another slot. Use the document maximum in every row/column
-      // so that no page can exceed the fixed envelope after that remapping.
-      const maximumDocumentBleed = Math.max(request.bleedMm, ...documentBleeds);
-      finalColumnBleeds.fill(maximumDocumentBleed);
-      finalRowBleeds.fill(maximumDocumentBleed);
-      resolveOffsets();
-    }
-  }
   let capacity = 0;
-
-  // A zone can remove a slot and change which card occupies later positions.
-  // Recompute stable row-major assignments until every remaining card clears
-  // the zones; slot envelopes and trim coordinates stay fixed throughout.
-  for (let iteration = 0; iteration <= activeGridIndices.length; iteration += 1) {
-    const eligibleIndices = activeGridIndices.filter((index) => !reservedGridIndices.has(index));
-    const assignments = new Map(eligibleIndices.slice(0, request.count).map((index, cardIndex) => [index, cardIndex] as const));
-    const newlyReserved = eligibleIndices.filter((gridIndex) => {
-      const column = gridIndex % columns;
-      const row = Math.floor(gridIndex / columns);
-      const cardIndex = assignments.get(gridIndex);
-      const bleed = cardIndex === undefined
-        ? request.bleedMm
-        : Math.max(request.bleedMm, bleedByCardMm[cardIndex] ?? request.bleedMm);
-      return zones.some((zone) => overlaps({
-        xMm: columnOffsets[column]! + finalColumnBleeds[column]! - bleed,
-        yMm: rowOffsets[row]! + finalRowBleeds[row]! - bleed,
-        widthMm: card.widthMm + 2 * bleed,
-        heightMm: card.heightMm + 2 * bleed,
-      }, zone));
-    });
-    if (newlyReserved.length === 0) {
-      if (!dimensionsFit) return undefined;
-      const assignedBounds = [...assignments].map(([gridIndex, cardIndex]) => {
+  if (!stableEnvelope && documentBleeds !== undefined) {
+    // Resolve slot reservations and row/column envelopes as one document-wide
+    // fixed point. Physical cards repeat through the same eligible row-major
+    // sequence on every page, so a page boundary cannot change a slot mask.
+    let resolved = false;
+    for (let iteration = 0; iteration <= activeGridIndices.length; iteration += 1) {
+      const eligibleIndices = activeGridIndices.filter((index) => !reservedGridIndices.has(index));
+      if (eligibleIndices.length === 0) return undefined;
+      finalColumnBleeds.fill(request.bleedMm);
+      finalRowBleeds.fill(request.bleedMm);
+      const bleedsBySlot = new Map<number, number[]>();
+      for (let cardIndex = 0; cardIndex < documentBleeds.length; cardIndex += 1) {
+        const gridIndex = eligibleIndices[cardIndex % eligibleIndices.length]!;
+        const bleed = Math.max(request.bleedMm, documentBleeds[cardIndex]!);
+        const slotBleeds = bleedsBySlot.get(gridIndex) ?? [];
+        slotBleeds.push(bleed);
+        bleedsBySlot.set(gridIndex, slotBleeds);
         const column = gridIndex % columns;
         const row = Math.floor(gridIndex / columns);
-        const bleed = bleedByCardMm[cardIndex] ?? request.bleedMm;
-        const trimXmm = columnOffsets[column]! + finalColumnBleeds[column]!;
-        const trimYmm = rowOffsets[row]! + finalRowBleeds[row]!;
-        return {
-          gridIndex,
-          column,
-          row,
-          bounds: {
-            xMm: trimXmm - bleed,
-            yMm: trimYmm - bleed,
-            widthMm: card.widthMm + 2 * bleed,
-            heightMm: card.heightMm + 2 * bleed,
-          },
-        };
-      });
-      if (assignedBounds.some(({ bounds }) => bounds.xMm < margins.left - PLACEMENT_EPSILON_MM
-        || bounds.yMm < margins.top - PLACEMENT_EPSILON_MM
-        || bounds.xMm + bounds.widthMm > page.widthMm - margins.right + PLACEMENT_EPSILON_MM
-        || bounds.yMm + bounds.heightMm > page.heightMm - margins.bottom + PLACEMENT_EPSILON_MM)) return undefined;
-      for (let firstIndex = 0; firstIndex < assignedBounds.length; firstIndex += 1) {
-        const first = assignedBounds[firstIndex]!;
-        for (let secondIndex = firstIndex + 1; secondIndex < assignedBounds.length; secondIndex += 1) {
-          const second = assignedBounds[secondIndex]!;
-          if (overlaps(first.bounds, second.bounds)) return undefined;
-          if (second.row === first.row && second.column === first.column + 1
-            && second.bounds.xMm - (first.bounds.xMm + first.bounds.widthMm) < horizontalGapMm - PLACEMENT_EPSILON_MM) return undefined;
-          if (second.column === first.column && second.row === first.row + 1
-            && second.bounds.yMm - (first.bounds.yMm + first.bounds.heightMm) < verticalGapMm - PLACEMENT_EPSILON_MM) return undefined;
-        }
+        finalColumnBleeds[column] = Math.max(finalColumnBleeds[column]!, bleed);
+        finalRowBleeds[row] = Math.max(finalRowBleeds[row]!, bleed);
       }
+      resolveOffsets();
+      const newlyReserved = eligibleIndices.filter((gridIndex) => {
+        const column = gridIndex % columns;
+        const row = Math.floor(gridIndex / columns);
+        const assignedBleeds = bleedsBySlot.get(gridIndex) ?? [request.bleedMm];
+        return assignedBleeds.some((bleed) => zones.some((zone) => overlaps({
+          xMm: columnOffsets[column]! + finalColumnBleeds[column]! - bleed,
+          yMm: rowOffsets[row]! + finalRowBleeds[row]! - bleed,
+          widthMm: card.widthMm + 2 * bleed,
+          heightMm: card.heightMm + 2 * bleed,
+        }, zone)));
+      });
+      if (newlyReserved.length > 0) {
+        newlyReserved.forEach((index) => reservedGridIndices.add(index));
+        if (iteration === activeGridIndices.length) return undefined;
+        continue;
+      }
+      if (!dimensionsFit) return undefined;
       capacity = eligibleIndices.length;
+      resolved = true;
       break;
     }
-    newlyReserved.forEach((index) => reservedGridIndices.add(index));
-    if (iteration === activeGridIndices.length) return undefined;
+    if (!resolved) return undefined;
+  } else {
+    resolveOffsets();
+    // For page-local placements, a document-wide mask and envelope have
+    // already been resolved. This loop is the ordinary standalone placement
+    // path and keeps its existing reserved-zone reassignment behavior.
+    for (let iteration = 0; iteration <= activeGridIndices.length; iteration += 1) {
+      const eligibleIndices = activeGridIndices.filter((index) => !reservedGridIndices.has(index));
+      const assignments = new Map(eligibleIndices.slice(0, request.count).map((index, cardIndex) => [index, cardIndex] as const));
+      const newlyReserved = eligibleIndices.filter((gridIndex) => {
+        const column = gridIndex % columns;
+        const row = Math.floor(gridIndex / columns);
+        const cardIndex = assignments.get(gridIndex);
+        const bleed = cardIndex === undefined
+          ? request.bleedMm
+          : Math.max(request.bleedMm, bleedByCardMm[cardIndex] ?? request.bleedMm);
+        return zones.some((zone) => overlaps({
+          xMm: columnOffsets[column]! + finalColumnBleeds[column]! - bleed,
+          yMm: rowOffsets[row]! + finalRowBleeds[row]! - bleed,
+          widthMm: card.widthMm + 2 * bleed,
+          heightMm: card.heightMm + 2 * bleed,
+        }, zone));
+      });
+      if (newlyReserved.length === 0) {
+        if (!dimensionsFit) return undefined;
+        const assignedBounds = [...assignments].map(([gridIndex, cardIndex]) => {
+          const column = gridIndex % columns;
+          const row = Math.floor(gridIndex / columns);
+          const bleed = bleedByCardMm[cardIndex] ?? request.bleedMm;
+          const trimXmm = columnOffsets[column]! + finalColumnBleeds[column]!;
+          const trimYmm = rowOffsets[row]! + finalRowBleeds[row]!;
+          return {
+            gridIndex,
+            column,
+            row,
+            bounds: {
+              xMm: trimXmm - bleed,
+              yMm: trimYmm - bleed,
+              widthMm: card.widthMm + 2 * bleed,
+              heightMm: card.heightMm + 2 * bleed,
+            },
+          };
+        });
+        if (assignedBounds.some(({ bounds }) => bounds.xMm < margins.left - PLACEMENT_EPSILON_MM
+          || bounds.yMm < margins.top - PLACEMENT_EPSILON_MM
+          || bounds.xMm + bounds.widthMm > page.widthMm - margins.right + PLACEMENT_EPSILON_MM
+          || bounds.yMm + bounds.heightMm > page.heightMm - margins.bottom + PLACEMENT_EPSILON_MM)) return undefined;
+        for (let firstIndex = 0; firstIndex < assignedBounds.length; firstIndex += 1) {
+          const first = assignedBounds[firstIndex]!;
+          for (let secondIndex = firstIndex + 1; secondIndex < assignedBounds.length; secondIndex += 1) {
+            const second = assignedBounds[secondIndex]!;
+            if (overlaps(first.bounds, second.bounds)) return undefined;
+            if (second.row === first.row && second.column === first.column + 1
+              && second.bounds.xMm - (first.bounds.xMm + first.bounds.widthMm) < horizontalGapMm - PLACEMENT_EPSILON_MM) return undefined;
+            if (second.column === first.column && second.row === first.row + 1
+              && second.bounds.yMm - (first.bounds.yMm + first.bounds.heightMm) < verticalGapMm - PLACEMENT_EPSILON_MM) return undefined;
+          }
+        }
+        capacity = eligibleIndices.length;
+        break;
+      }
+      if (request.stableReservedSlotIndices !== undefined) {
+        throw new RangeError("Resolved document reserved-slot mask does not cover a page-local registration collision.");
+      }
+      newlyReserved.forEach((index) => reservedGridIndices.add(index));
+      if (iteration === activeGridIndices.length) return undefined;
+    }
   }
   if (capacity === 0 && activeGridIndices.length > 0 && reservedGridIndices.size < activeGridIndices.length) return undefined;
 
@@ -389,6 +404,17 @@ export function calculateGridPlacement(request: GridPlacementRequest): GridPlace
   const fixed = request.rows !== undefined && request.columns !== undefined;
   if (skipped.length > 0 && !fixed && !templateGeometry) {
     throw new RangeError("Skipped slots require a fixed grid or exact template geometry so other slot positions remain stable.");
+  }
+  if (request.stableReservedSlotIndices) {
+    const stablePositionCount = fixed
+      ? request.rows! * request.columns!
+      : templateGeometry ? templateGeometry.rows * templateGeometry.columns : undefined;
+    if (stablePositionCount === undefined || !Number.isSafeInteger(stablePositionCount)
+      || request.stableReservedSlotIndices.length > 1_128
+      || request.stableReservedSlotIndices.some((index) => !Number.isSafeInteger(index) || index < 0 || index >= stablePositionCount)
+      || new Set(request.stableReservedSlotIndices).size !== request.stableReservedSlotIndices.length) {
+      throw new RangeError("Stable reserved slot indices must be unique indexes within a fixed grid or template geometry.");
+    }
   }
   if (templateGeometry) {
     return buildTemplatePlacement({ request, geometry: templateGeometry, page, card, margins, zones, skipSet, bleedByCardMm, bleedMm, horizontalGapMm, verticalGapMm });
@@ -488,11 +514,50 @@ function buildTemplatePlacement(input: {
     return { ...templateSlot, xMm, yMm };
   });
   const assignedSlotIndices: number[] = [];
-  const reservedSlotIndices = new Set<number>();
+  const reservedSlotIndices = new Set<number>(request.stableReservedSlotIndices ?? []);
+  const documentBleeds = request.documentBleedByCardMm;
+  if (documentBleeds !== undefined && request.stableReservedSlotIndices === undefined) {
+    let resolved = false;
+    for (let iteration = 0; iteration <= slots.length; iteration += 1) {
+      const eligibleSlots = slots.filter((slot) => !skipSet.has(slot.index) && !reservedSlotIndices.has(slot.index));
+      if (eligibleSlots.length === 0) {
+        resolved = true;
+        break;
+      }
+      const bleedsBySlot = new Map<number, number[]>();
+      for (let documentCardIndex = 0; documentCardIndex < documentBleeds.length; documentCardIndex += 1) {
+        const slot = eligibleSlots[documentCardIndex % eligibleSlots.length]!;
+        const requestedBleed = Math.max(bleedMm, documentBleeds[documentCardIndex]!);
+        const slotBleeds = bleedsBySlot.get(slot.index) ?? [];
+        slotBleeds.push(requestedBleed);
+        bleedsBySlot.set(slot.index, slotBleeds);
+      }
+      const newlyReserved = eligibleSlots.filter((slot) => {
+        const assignedBleeds = bleedsBySlot.get(slot.index) ?? [bleedMm];
+        return assignedBleeds.some((requestedBleed) => {
+          const bounds = {
+            xMm: slot.xMm - requestedBleed,
+            yMm: slot.yMm - requestedBleed,
+            widthMm: card.widthMm + 2 * requestedBleed,
+            heightMm: card.heightMm + 2 * requestedBleed,
+          };
+          return zones.some((zone) => overlaps(bounds, zone));
+        });
+      });
+      if (newlyReserved.length === 0) {
+        resolved = true;
+        break;
+      }
+      newlyReserved.forEach((slot) => reservedSlotIndices.add(slot.index));
+      if (iteration === slots.length) break;
+    }
+    if (!resolved) throw new RangeError("Unable to resolve stable registration-reserved template slots.");
+  }
   const perSlotBleed = new Map<number, number>();
   let cardIndex = 0;
   for (const slot of slots) {
     if (skipSet.has(slot.index)) continue;
+    if (reservedSlotIndices.has(slot.index)) continue;
     const slotBleed = bleedByCardMm[cardIndex] ?? bleedMm;
     const bounds = {
       xMm: slot.xMm - slotBleed,
@@ -501,7 +566,12 @@ function buildTemplatePlacement(input: {
       heightMm: card.heightMm + 2 * slotBleed,
     };
     const reserved = zones.some((zone) => overlaps(bounds, zone));
-    if (reserved) reservedSlotIndices.add(slot.index);
+    if (reserved) {
+      if (request.stableReservedSlotIndices !== undefined || documentBleeds !== undefined) {
+        throw new RangeError(`Template slot ${slot.index + 1} collides with a registration zone after document-wide bleed resolution.`);
+      }
+      reservedSlotIndices.add(slot.index);
+    }
     else {
       perSlotBleed.set(slot.index, slotBleed);
       if (assignedSlotIndices.length < request.count) assignedSlotIndices.push(slot.index);
@@ -701,7 +771,7 @@ function buildPlacement(
     gridYmm,
     gridWidthMm: selected.gridWidthMm,
     gridHeightMm: selected.gridHeightMm,
-    bleedMm: Math.max(bleedMm, ...bleedByCardMm),
+    bleedMm: Math.max(bleedMm, ...selected.columnBleeds, ...selected.rowBleeds),
     pageSizeMm: Object.freeze({ widthMm: page.widthMm, heightMm: page.heightMm }),
     cardSizeMm: Object.freeze({ widthMm: card.widthMm, heightMm: card.heightMm }),
     slots: Object.freeze(slots),

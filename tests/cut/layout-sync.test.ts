@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 import { createCutGeometryMm, createRectangularCutPathMm, type CutSourceIdentity } from "../../core/cut";
+import { MAGIC_STANDARD_CARD } from "../../core/geometry";
+import { buildCanonicalPrintPlan } from "../../core/duplex";
 import { resolveCutLayout, resolveCutLayoutPages } from "../../services/cut-geometry/layout-sync";
 
 const source: CutSourceIdentity = {
@@ -160,6 +162,59 @@ describe("cut/layout synchronization", () => {
         expect(path.boundsMm.heightMm).toBeCloseTo(trim.heightMm, 8);
       }
     }
+  });
+
+  it("shares the stable variable-bleed reserved mask across canonical, cut, and duplex pages", () => {
+    const paperFormat = { name: "200 × 190 mm", widthMm: 200, heightMm: 190 };
+    const registration = {
+      type: "custom" as const,
+      orientation: "landscape" as const,
+      marks: [[{ type: "line" as const, x1Mm: 10, y1Mm: 10, x2Mm: 20, y2Mm: 10, strokeWidthMm: 0.5 }]],
+      reservedZones: [{ xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }],
+    };
+    const bleedByCardMm = [3, ...Array.from({ length: 10 }, () => 0.625)];
+    const projectSettings = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      paperFormat,
+      cardFormat: MAGIC_STANDARD_CARD,
+      pageOrientation: "landscape" as const,
+      cardOrientation: "portrait" as const,
+      bleedMm: 0.625,
+      marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+      registration,
+      layout: { skippedSlotIndices: [] },
+    };
+    const cutPages = resolveCutLayoutPages({
+      projectId: "stable-variable-bleed",
+      projectRevision: 1,
+      settings: projectSettings,
+      cardCount: bleedByCardMm.length,
+      bleedByCardMm,
+    });
+    const canonical = buildCanonicalPrintPlan(bleedByCardMm.length, {
+      paperFormat,
+      cardFormat: MAGIC_STANDARD_CARD,
+      pageOrientation: "landscape",
+      cardOrientation: "portrait",
+      bleedMm: 0.625,
+      marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+      registration,
+      bleedByCardMm,
+    });
+    const reservedIndexes = (page: (typeof canonical.pages)[number]) =>
+      page.placement.gridSlots.filter(({ reserved }) => reserved).map(({ index }) => index);
+
+    expect(cutPages.map(({ placement }) => placement)).toEqual(canonical.pages.map(({ placement }) => placement));
+    expect(canonical.pages.map(({ placement }) => [placement.rows, placement.columns, placement.capacity])).toEqual([
+      [2, 3, 5], [2, 3, 5], [2, 3, 5],
+    ]);
+    expect(canonical.pages.map(reservedIndexes)).toEqual([[0], [0], [0]]);
+    expect(cutPages.map(({ slotPaths }) => slotPaths.filter(({ state }) => state === "reserved").map(({ slotIndex }) => slotIndex)))
+      .toEqual([[0], [0], [0]]);
+    expect(canonical.duplexPairing.pagePairs.map(({ frontPlacement }) => frontPlacement.placement))
+      .toEqual(canonical.pages.map(({ placement }) => placement));
+    expect(canonical.duplexPairing.pagePairs.map(({ slots }) => slots.filter(({ reserved }) => reserved).map(({ frontSlotIndex }) => frontSlotIndex)))
+      .toEqual([[0], [0], [0]]);
   });
 
   it("does not silently project a multi-page Project into a single cut layout", () => {
