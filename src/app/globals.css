@@ -294,11 +294,10 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .registration-preview-heading h4, .registration-preview > h4 { margin: 0 0 3px; color: #263544; font-size: 12px; }
 .registration-preview-heading p { margin: 0; }
 .duplex-preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; color: #4a5865; font-size: 10px; }
-.registration-preview-slot.is-back { cursor: default; }
-.registration-preview-slot.is-back:focus-visible { outline: none; }
 .registration-sheet-preview { display: block; width: min(100%, 760px); max-height: 72vh; margin: auto; border: 1px solid #cbd5df; background: #fff; box-shadow: 0 2px 8px #17212b20; }
 .registration-preview-slot { cursor: pointer; }
 .registration-preview-slot:focus-visible { outline: 2px solid #7e22ce; outline-offset: 1px; }
+.compositor-selection-outline { pointer-events: none; }
 .registration-preview-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; color: #4a5865; font-size: 10px; }
 .registration-preview-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .registration-preview-legend i { display: inline-block; width: 12px; height: 8px; border: 1px solid; }
@@ -327,6 +326,7 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .compositor-layers > div { position: absolute; z-index: 8; top: 100%; right: 0; display: grid; min-width: 165px; gap: 6px; margin-top: 3px; border: 1px solid #bbc6d0; border-radius: 4px; padding: 9px; background: #fff; box-shadow: 0 4px 16px #17212a24; }
 .compositor-layers label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .compositor-side-context { flex: none; margin: 0; color: #536171; font-size: 10px; }
+.compositor-selected-card { display: flex; flex: none; align-items: center; gap: 8px; margin: 0; color: #263544; font-size: 10px; font-weight: 650; }
 .compositor-sheet-scroll { display: grid; min-width: 0; min-height: 0; flex: 1; place-items: center; overflow: auto; overscroll-behavior: contain; }
 .compositor-sheet { flex: none; width: 100%; max-height: calc(100dvh - 270px); }
 .canonical-compositor .registration-preview-legend { flex: none; margin-top: 0; }

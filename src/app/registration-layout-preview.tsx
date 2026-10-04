@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { CutGuideEngine } from "../../core/geometry";
 import type { CardSlotMm } from "../../core/geometry/placement";
 import { buildCanonicalPrintPlan, getDuplexPreviewOverlayMatrix } from "../../core/duplex";
@@ -24,6 +24,14 @@ interface RegistrationLayoutPreviewProps {
 }
 
 type CompositorLayer = "artwork" | "bleed" | "trim" | "cut" | "silhouette" | "registration" | "reserved" | "margins" | "calibration";
+interface PhysicalCardInstance {
+  readonly physicalCardIndex: number;
+  readonly workingCardId: string;
+  readonly copyNumber: number;
+  readonly totalCopies: number;
+  readonly card: WorkingCard;
+}
+
 const COMPOSITOR_LAYERS: readonly { readonly id: CompositorLayer; readonly label: string }[] = [
   { id: "artwork", label: "Artwork" },
   { id: "bleed", label: "Bleed" },
@@ -67,6 +75,7 @@ function calibrationSvgMatrix(matrix: { readonly a: number; readonly b: number; 
 
 export default function RegistrationLayoutPreview({ settings, cardCount, cards, cutPreview = null, selectedPageNumber, onSelectPage, onToggleSkippedSlot }: RegistrationLayoutPreviewProps) {
   const [previewSide, setPreviewSide] = useState<"front" | "back">("front");
+  const [selectedPhysicalCardIndex, setSelectedPhysicalCardIndex] = useState<number | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
   const [zoomMode, setZoomMode] = useState<"fit-page" | "fit-width" | "100%">("fit-page");
   const [layers, setLayers] = useState<Record<CompositorLayer, boolean>>({
@@ -74,7 +83,17 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   });
   const paper = settings.paperFormat;
   const card = settings.cardFormat;
-  const physicalCards = useMemo(() => cards.slice().sort((left, right) => left.order - right.order).flatMap((entry) => Array.from({ length: entry.quantity }, () => entry)), [cards]);
+  const physicalCards = useMemo(() => {
+    let physicalCardIndex = 0;
+    return cards.slice().sort((left, right) => left.order - right.order).flatMap((entry) =>
+      Array.from({ length: entry.quantity }, (_, copyIndex) => ({
+        physicalCardIndex: physicalCardIndex++,
+        workingCardId: entry.id,
+        copyNumber: copyIndex + 1,
+        totalCopies: entry.quantity,
+        card: entry,
+      } satisfies PhysicalCardInstance)));
+  }, [cards]);
   const result = useMemo(() => {
     try {
       const templateGeometry = settings.layout.templateGeometry ?? cutPreview?.derivedTemplateGeometry;
@@ -101,14 +120,30 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     }
   }, [settings, cardCount, paper, card, cutPreview?.derivedTemplateGeometry]);
 
+  const pageCount = result.pages?.length ?? 1;
+  const activePageIndex = Math.min(Math.max(selectedPageNumber, 1), pageCount) - 1;
+  const activePage = result.pages?.[activePageIndex];
+  const visibleSelectedPhysicalCardIndex = activePage
+    && selectedPhysicalCardIndex !== null
+    && selectedPhysicalCardIndex >= activePage.startCardIndex
+    && selectedPhysicalCardIndex < activePage.endCardIndex
+    ? selectedPhysicalCardIndex
+    : null;
+  useEffect(() => {
+    if (selectedPhysicalCardIndex === null) return;
+    if (!activePage
+      || selectedPhysicalCardIndex < activePage.startCardIndex
+      || selectedPhysicalCardIndex >= activePage.endCardIndex) {
+      setSelectedPhysicalCardIndex(null);
+    }
+  }, [selectedPhysicalCardIndex, activePage?.startCardIndex, activePage?.endCardIndex]);
+
   if (!result.pages || !result.geometry) {
     return <section className="registration-preview canonical-compositor" aria-label="Compositor live">
       <h2>Compositor live</h2><p className="error-message" role="alert">Layout inválido: {result.error}</p>
     </section>;
   }
   const { geometry } = result;
-  const pageCount = result.pages.length;
-  const activePageIndex = Math.min(Math.max(selectedPageNumber, 1), pageCount) - 1;
   const pagePair = result.pairing!.pagePairs[activePageIndex]!;
   const pagePlacement = previewSide === "front" ? pagePair.frontPlacement : pagePair.backPlacement;
   const registrationForPage = previewSide === "front"
@@ -164,9 +199,23 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     const back = resolveBackForMissingPolicy(cardEntry, settings.projectDefaultBack, settings.missingBackPolicy);
     if (back.status !== "available") return { url: undefined, label: back.status === "intentional-none" ? "Verso intencionalmente em branco" : "Verso sem artwork disponível", available: false };
     if (back.artwork) return { url: artworkPreviewUrl(back.artwork.candidateId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm), label: `${cardEntry.identity?.name ?? cardEntry.identityHints.name ?? "Carta"} · verso`, available: true };
-    if (back.asset) return { url: backPreviewUrl(back.asset.assetId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm), label: "Verso padrão do Project", available: true };
+    if (back.asset) return {
+      url: backPreviewUrl(back.asset.assetId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm),
+      label: back.mode === "project-default" ? "Verso padrão do Project" : "Verso da Back Library",
+      available: true,
+    };
     return { url: undefined, label: "Verso sem artwork disponível", available: false };
   }
+
+  const selectedInstance = visibleSelectedPhysicalCardIndex === null
+    ? undefined
+    : physicalCards[visibleSelectedPhysicalCardIndex];
+  const selectedPageSlot = visibleSelectedPhysicalCardIndex === null
+    ? undefined
+    : placement.slots.find((slot) => pagePlacement.startCardIndex + slot.cardIndex! === visibleSelectedPhysicalCardIndex);
+  const selectedCardName = selectedInstance
+    ? selectedInstance.card.identity?.name ?? selectedInstance.card.identityHints.name ?? selectedInstance.card.importSource.filename ?? "Carta custom"
+    : undefined;
 
   return <section className="registration-preview canonical-compositor" aria-label="Compositor live">
     <div className="registration-preview-heading compositor-heading">
@@ -201,13 +250,19 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     <p className="compositor-side-context">{previewSide === "front"
       ? "Frente física · artwork da face selecionada"
       : `Verso físico · ${pagePair.flipMode} · grade duplex pareada em coordenadas físicas`} · registration {settings.registration.type}/{settings.registration.orientation}</p>
+    <p className="compositor-selected-card" aria-live="polite" data-testid="selected-physical-card" data-selected-physical-card-index={visibleSelectedPhysicalCardIndex ?? "none"}>
+      {selectedInstance
+        ? `Carta física ${selectedInstance.physicalCardIndex + 1} · ${selectedCardName} · cópia ${selectedInstance.copyNumber}/${selectedInstance.totalCopies}`
+        : "Selecione uma carta física no compositor"}
+      {selectedPageSlot && slotsCanBeSkipped && previewSide === "front" && <button type="button" className="link-button" onClick={() => toggle(selectedPageSlot.index)}>Desativar slot da carta selecionada</button>}
+    </p>
     <p className="muted compositor-calibration-context" data-calibration-profile-version={settings.printerProfileSelection?.version ?? "none"}>
       {settings.printerProfileSelection
         ? <>Perfil {settings.printerProfileSelection.name} v{settings.printerProfileSelection.version} · {settings.printerDuplexMode} · {previewSide === "front" ? "frente" : "verso"}: ΔX {settings.printerProfileSelection[previewSide].offsetXUm} µm, ΔY {settings.printerProfileSelection[previewSide].offsetYUm} µm, rotação {settings.printerProfileSelection[previewSide].rotationDeg}°, escala {settings.printerProfileSelection[previewSide].scaleX}/{settings.printerProfileSelection[previewSide].scaleY}, skew {settings.printerProfileSelection[previewSide].skewXDeg ?? 0}°/{settings.printerProfileSelection[previewSide].skewYDeg ?? 0}° · {calibrationTransform ? layers.calibration ? "transformação calibrada visível" : "geometria nominal visível" : "transformação identidade"}.</>
         : <>Sem perfil de calibração selecionado; geometria nominal visível.</>} Conteúdo impresso segue a calibração; paths SVG/DXF de Silhouette permanecem nominais.
     </p>
     <div className="compositor-sheet-scroll">
-      <svg className="registration-sheet-preview compositor-sheet" style={{ width: `${zoomScale * 100}%`, maxWidth: zoomScale > 1 ? "none" : "760px", maxHeight: "none" }} viewBox={`0 0 ${page.widthMm} ${page.heightMm}`} role="img" aria-label={`Compositor live ${previewSide === "front" ? "frente" : "verso"} ${settings.paperFormat.name} ${settings.pageOrientation}, página ${activePageIndex + 1} de ${pageCount}`} data-compositor-page={activePageIndex + 1} data-compositor-bleed-mm={settings.bleedMm} data-compositor-calibration-matrix={visibleCalibrationMatrix ?? "identity"} data-compositor-profile-version={settings.printerProfileSelection?.version ?? "none"} data-compositor-printer-mode={settings.printerDuplexMode}>
+      <svg className="registration-sheet-preview compositor-sheet" style={{ width: `${zoomScale * 100}%`, maxWidth: zoomScale > 1 ? "none" : "760px", maxHeight: "none" }} viewBox={`0 0 ${page.widthMm} ${page.heightMm}`} role="img" aria-label={`Compositor live ${previewSide === "front" ? "frente" : "verso"} ${settings.paperFormat.name} ${settings.pageOrientation}, página ${activePageIndex + 1} de ${pageCount}`} data-compositor-page={activePageIndex + 1} data-selected-physical-card-index={visibleSelectedPhysicalCardIndex ?? "none"} data-compositor-bleed-mm={settings.bleedMm} data-compositor-calibration-matrix={visibleCalibrationMatrix ?? "identity"} data-compositor-profile-version={settings.printerProfileSelection?.version ?? "none"} data-compositor-printer-mode={settings.printerDuplexMode}>
         <defs>
           {placement.gridSlots.filter(({ cardIndex }) => cardIndex !== undefined).map((slot) => {
             const centerX = slot.trim.xMm + slot.trim.widthMm / 2;
@@ -239,24 +294,52 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
           return <path key={`source-cut-${path.id}`} d={cutPathToSvgD(path)} fill="none" stroke={active ? "#dc2626" : skippedPath ? "#7e22ce" : state === "reserved" ? "#ea5800" : "#64748b"} strokeWidth={active ? "0.65" : "0.4"} strokeDasharray={active ? undefined : "1.5 1"} opacity={active ? "0.95" : "0.75"} data-cut-slot-state={state} aria-label={`Cut path ${path.id}: ${state}`} />;
         })}</g>}
         <g transform={visibleCalibrationMatrix} data-calibrated-print-content={layers.calibration ? "true" : "false"}>
-          {placement.gridSlots.map((slot) => <g
-            key={`slot-${slot.index}`}
-            {...(slotsCanBeSkipped && previewSide === "front" ? { role: "button", tabIndex: 0 } : {})}
-            aria-label={`Slot ${slot.index + 1}${skipped.has(slot.index) ? " desativado" : reserved.has(slot.index) ? " reservado" : assigned.has(slot.index) ? ` carta física ${pagePlacement.startCardIndex + slot.cardIndex! + 1}` : " vazio"}`}
-            aria-pressed={skipped.has(slot.index)}
-            data-slot-x-mm={slot.trim.xMm}
-            data-slot-y-mm={slot.trim.yMm}
-            {...(slotsCanBeSkipped && previewSide === "front" ? {
-              onClick: () => toggle(slot.index),
-              onKeyDown: (event: KeyboardEvent<SVGGElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(slot.index); } },
-            } : {})}
-            className={`registration-preview-slot ${previewSide === "back" ? "is-back" : ""}`}
-          >
+          {placement.gridSlots.map((slot) => {
+            const physicalCardIndex = slot.cardIndex === undefined ? undefined : pagePlacement.startCardIndex + slot.cardIndex;
+            const physicalInstance = physicalCardIndex === undefined ? undefined : physicalCards[physicalCardIndex];
+            const isSelected = physicalCardIndex !== undefined && visibleSelectedPhysicalCardIndex === physicalCardIndex;
+            const cardName = physicalInstance
+              ? physicalInstance.card.identity?.name ?? physicalInstance.card.identityHints.name ?? physicalInstance.card.importSource.filename ?? "Carta custom"
+              : undefined;
+            const canToggleSkippedSlot = slotsCanBeSkipped
+              && previewSide === "front"
+              && !physicalInstance
+              && !reserved.has(slot.index);
+            const canSelectCard = Boolean(physicalInstance);
+            const role = canSelectCard || canToggleSkippedSlot ? "button" : undefined;
+            const label = physicalInstance
+              ? `Slot ${slot.index + 1} · carta física ${physicalCardIndex! + 1} · ${cardName} · cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`
+              : `Slot ${slot.index + 1}${skipped.has(slot.index) ? " desativado" : reserved.has(slot.index) ? " reservado" : " vazio"}`;
+            const activate = () => {
+              if (physicalCardIndex !== undefined && physicalInstance) setSelectedPhysicalCardIndex(physicalCardIndex);
+              else if (canToggleSkippedSlot) toggle(slot.index);
+            };
+            return <g
+              key={`slot-${slot.index}`}
+              {...(role ? { role, tabIndex: 0 } : {})}
+              aria-label={label}
+              {...(role ? { "aria-pressed": physicalInstance ? isSelected : skipped.has(slot.index) } : {})}
+              data-physical-card-index={physicalCardIndex}
+              data-working-card-id={physicalInstance?.workingCardId}
+              data-copy-number={physicalInstance?.copyNumber}
+              data-copy-count={physicalInstance?.totalCopies}
+              data-slot-x-mm={slot.trim.xMm}
+              data-slot-y-mm={slot.trim.yMm}
+              {...(role ? {
+                onClick: activate,
+                onKeyDown: (event: KeyboardEvent<SVGGElement>) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    activate();
+                  }
+                },
+              } : {})}
+              className={`registration-preview-slot ${previewSide === "back" ? "is-back" : ""} ${isSelected ? "is-selected" : ""}`}
+            >
             {layers.bleed && <rect x={slot.slotXmm} y={slot.slotYmm} width={slot.slotWidthMm} height={slot.slotHeightMm} fill="#dbeafe" fillOpacity="0.72" stroke="#2563eb" strokeWidth="0.25" strokeDasharray="1.2 0.8" data-compositor-layer="bleed" />}
             {skipped.has(slot.index) && <rect x={slot.trim.xMm} y={slot.trim.yMm} width={slot.trim.widthMm} height={slot.trim.heightMm} fill="#f3e8ff" stroke="#7e22ce" strokeWidth={layers.trim ? "0.6" : "0"} />}
             {assigned.has(slot.index) && (() => {
-              const physicalIndex = pagePlacement.startCardIndex + slot.cardIndex!;
-              const physicalCard = physicalCards[physicalIndex];
+              const physicalCard = physicalInstance?.card;
               const centerX = slot.trim.xMm + slot.trim.widthMm / 2;
               const centerY = slot.trim.yMm + slot.trim.heightMm / 2;
               const artwork = previewArtwork(physicalCard);
@@ -294,13 +377,15 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               </>;
             })()}
             {layers.trim && assigned.has(slot.index) && <rect x={slot.trim.xMm} y={slot.trim.yMm} width={slot.trim.widthMm} height={slot.trim.heightMm} fill="none" stroke="#1d4ed8" strokeWidth="0.45" data-compositor-layer="trim" />}
+            {isSelected && <rect className="compositor-selection-outline" x={slot.trim.xMm - 0.35} y={slot.trim.yMm - 0.35} width={slot.trim.widthMm + 0.7} height={slot.trim.heightMm + 0.7} fill="none" stroke="#7e22ce" strokeWidth="1.1" pointerEvents="none" data-compositor-selection-outline={physicalCardIndex} />}
             {skipped.has(slot.index) && <>
               <line x1={slot.trim.xMm} y1={slot.trim.yMm} x2={slot.trim.xMm + slot.trim.widthMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
               <line x1={slot.trim.xMm + slot.trim.widthMm} y1={slot.trim.yMm} x2={slot.trim.xMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
               <text x={slot.trim.xMm + slot.trim.widthMm / 2} y={slot.trim.yMm + slot.trim.heightMm / 2} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#581c87">SKIP {slot.index + 1}</text>
             </>}
             {!assigned.has(slot.index) && !skipped.has(slot.index) && <text x={slot.trim.xMm + slot.trim.widthMm / 2} y={slot.trim.yMm + slot.trim.heightMm / 2} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#64748b">{slot.index + 1}</text>}
-          </g>)}
+            </g>;
+          })}
           {layers.cut && <g data-compositor-layer="cut" data-duplex-cut-overlay={previewSide} transform={cutOverlayTransform}>
             {cutGeometry.trimSegments.map((segment, index) => <line key={`cut-${index}`} x1={segment.x1Mm} y1={segment.y1Mm} x2={segment.x2Mm} y2={segment.y2Mm} stroke="#2563eb" strokeWidth="0.2" />)}
             {cutGeometry.externalSegments.map((segment, index) => <line key={`external-cut-${index}`} x1={segment.x1Mm} y1={segment.y1Mm} x2={segment.x2Mm} y2={segment.y2Mm} stroke="#111827" strokeWidth="0.2" />)}

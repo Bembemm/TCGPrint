@@ -14,7 +14,13 @@ The two outputs share physical geometry and semantics. They use different image 
 
 `buildCanonicalPrintPlan()` in `core/duplex/shared-placement.ts` is the shared plan builder. It returns the fixed page placements, registration geometry and duplex pairing. The live compositor and cut-layout service consume it directly; Working Set PDF export consumes its page-placement projection. The low-level PDF engine receives those placements, while duplex and cut calculations share the same placements and pairing rules.
 
-Automatic grids choose a deterministic capacity shape, start at the configured top/left margins, and fill eligible positions row-major. Quantity and a partial final page do not recenter the sheet. Explicit rows/columns and immutable template geometry remain authoritative. Skipped/reserved positions retain their physical indexes. Geometry errors remain explicit; cards and bleed are not silently reduced.
+Automatic grids choose a deterministic capacity shape using the configured physical bleed, start at the configured top/left margins, and fill eligible positions row-major. Capacity discovery does not use a zero-bleed approximation. Rows and columns are fixed from that one discovery before pages are split, so a partial final page cannot choose another grid shape. Per-card bleed remains attached to each physical placement and is validated within the fixed shape. Immutable template geometry keeps its exact slots and validates each card's actual bleed there. Quantity and a partial final page do not recenter the sheet. Explicit rows/columns and immutable template geometry remain authoritative. Skipped/reserved positions retain their physical indexes. Geometry errors remain explicit; cards and bleed are not silently reduced.
+
+### Selected physical instance
+
+The live compositor owns a UI-only selectedPhysicalCardIndex (zero-based over ordered physical copies). Every assigned slot exposes that index together with its workingCardId, one-based copy number and total copies. Selecting a slot by click, tap, Enter or Space changes only compositor UI state and does not update the Project revision.
+
+Front and Back controls retain the same physical index. The duplex pair maps that copy to its reflected back-side slot. A DFC back uses that Working Card's selectedArtworkByFace.back and never falls back to Project Default Back; a simple card resolves its effective manual, Project Default, blank or missing back policy. Changing to a page whose [startCardIndex, endCardIndex) range excludes the selected instance clears the selection; no other copy is selected in its place.
 
 ## Live compositor capabilities
 
@@ -26,9 +32,11 @@ Automatic grids choose a deterministic capacity shape, start at the configured t
 | Registration, skipped/reserved slots and duplex back orientation | SVG overlays and the paired physical page | Canonical registration geometry and duplex pairing | `tests/app/canonical-compositor.interaction.test.tsx`; `tests/app/registration-layout-preview.test.tsx`; `tests/pdf-engine/pdf-engine.test.ts` |
 | PDF cut guides and source Silhouette/SVG-DXF geometry | Independent preview-only layers; printed guides follow calibration, source cut paths remain nominal | Project cut settings and template/source cut geometry; no preview layer changes export state | `tests/app/canonical-compositor.interaction.test.tsx`; `tests/pdf-engine/pdf-engine.test.ts`; cut-geometry tests |
 | Calibration | Optional nominal/calibrated display transform plus exact profile name/version, printer mode and active-side offsets/rotation/scale/skew | Project printer-profile snapshot/version | `tests/app/canonical-compositor.interaction.test.tsx`; calibration and PDF engine tests |
-| Viewer side, page, zoom and layers | Local compositor controls; no Project revision change | Compositor UI state | `tests/app/canonical-compositor.interaction.test.tsx` |
+| Viewer side, page, zoom, layers and selected physical instance | Selectable slot, selected-slot outline and compact copy summary; no Project revision change | Compositor UI state | `tests/app/canonical-compositor.interaction.test.tsx` |
 
 The Layers control covers Artwork, Bleed, Trim, Cut guides, Silhouette/SVG-DXF, Registration, Reserved zones, Margins and Calibration. It changes only the display. Cut-source paths sit outside the print calibration transform; registration and printed page content sit inside it. The physical paper border is not calibrated.
+
+Capacity-bleed and coordinate parity are covered by tests/core/page-placement.test.ts, including the A4/194 mm usable-width case where 3 Magic Standard cards fit at zero bleed, fail at 0.625 mm bleed, and the stable valid capacity is 2 columns × 3 rows. The same file checks 1 card, 2 cards, exact capacity, capacity + 1, and fixed shape with per-card bleed across a partial page. Physical copy selection, duplex-side continuity, keyboard selection, DFC/default/manual (including a core-validated MPC CARDBACK)/Back Library/blank/missing backs, and page-change clearing are covered by the DOM-real tests/app/canonical-compositor.interaction.test.tsx.
 
 ## Preview asset pipeline
 

@@ -74,7 +74,7 @@ describe("registration layout preview", () => {
     expect(markup).toContain('aria-label="Compositor live"');
     expect(markup).toContain('aria-label="Face do compositor"');
     expect(markup).toContain("Front // Back · DFC");
-    expect(markup).toContain('aria-label="Slot 1 carta física 1"');
+    expect(markup).toContain('aria-label="Slot 1 · carta física 1 · Front // Back · cópia 1 de 1"');
   });
 
   it("renders exact template positions and skipped identities while registration none draws no marks", () => {
@@ -115,7 +115,7 @@ describe("registration layout preview", () => {
     expect(markup).not.toContain("stroke=\"#111827\"");
   });
 
-  it("keeps automatically sized slots non-interactive until a fixed grid is chosen", () => {
+  it("keeps automatic empty slots non-interactive while assigned physical cards remain selectable", () => {
     const markup = renderToStaticMarkup(createElement(RegistrationLayoutPreview, {
       settings: DEFAULT_PROJECT_SETTINGS,
       cardCount: 1,
@@ -126,7 +126,9 @@ describe("registration layout preview", () => {
     }));
 
     expect(markup).toContain("Defina linhas e colunas antes de desativar slots");
-    expect(markup).not.toContain("role=\"button\"");
+    expect(markup).toContain('role="button"');
+    expect(markup).toContain('data-physical-card-index="0"');
+    expect(markup).toContain('data-copy-number="1"');
   });
 
   it("previews the selected PDF page for a multi-page card list", () => {
@@ -142,7 +144,7 @@ describe("registration layout preview", () => {
     expect(markup).toContain("Página 2 de 2");
     expect(markup).toContain('aria-label="Compositor live frente A4 portrait, página 2 de 2"');
     expect(markup).toContain("Página 2 · cartas 10–10");
-    expect(markup).toContain('aria-label="Slot 1 carta física 10"');
+    expect(markup).toContain('aria-label="Slot 1 · carta física 10 · Page card · cópia 10 de 10"');
     expect(markup).toContain("10");
   });
 });

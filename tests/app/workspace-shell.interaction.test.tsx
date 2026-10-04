@@ -78,7 +78,7 @@ describe("workspace shell interactions", () => {
     expect(screen.getByLabelText("preview draft")).toHaveValue("physical preview stays mounted");
   });
 
-  it("keeps skipped-slot interaction active in the central physical preview while navigating", async () => {
+  it("keeps skipped-slot editing active through the selected-copy action while navigating", async () => {
     const user = userEvent.setup();
     const cards = [previewCard("Island", 0), previewCard("Mountain", 1)];
     const sections = Object.fromEntries(WORKSPACE_SECTIONS.map(({ id }) => [id, <p key={id}>{id}</p>])) as Record<WorkspaceSection, ReactNode>;
@@ -100,9 +100,10 @@ describe("workspace shell interactions", () => {
     render(<PreviewHarness />);
 
     expect(screen.getByRole("main", { name: "Preview e compositor atual" })).toContainElement(screen.getByRole("region", { name: "Compositor live" }));
-    const firstSlot = screen.getByRole("button", { name: "Slot 1 carta física 1" });
+    const firstSlot = screen.getByRole("button", { name: /Slot 1 · carta física 1/ });
     await user.click(firstSlot);
     expect(firstSlot).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Desativar slot da carta selecionada" }));
     expect(screen.getByText("SKIP 1")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Artwork" }));
     expect(screen.getByRole("button", { name: "Slot 1 desativado" })).toHaveAttribute("aria-pressed", "true");
