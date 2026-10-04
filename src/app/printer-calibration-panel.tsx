@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   CalibrationError,
   CALIBRATION_POINT_IDS,
@@ -130,6 +130,7 @@ export default function PrinterCalibrationPanel({
   const [side, setSide] = useState<"front" | "back">("back");
   const [mode, setMode] = useState<"simple" | "advanced">("simple");
   const [step, setStep] = useState<WizardStep>(1);
+  const stageTabRefs = useRef<Record<WizardStep, HTMLButtonElement | null>>({ 1: null, 2: null, 3: null, 4: null });
   const [previewMode, setPreviewMode] = useState<PreviewMode>("calibrated");
   const [draftCalibration, setDraftCalibration] = useState<SideCalibration>(SIMPLE_IDENTITY);
   const [xText, setXText] = useState("0.000");
@@ -546,7 +547,17 @@ export default function PrinterCalibrationPanel({
     </div>
 
     <nav className="calibration-wizard-steps" aria-label="Etapas do Calibration Wizard" role="tablist">
-      {([1, 2, 3, 4] as const).map((item) => <button key={item} id={`calibration-stage-tab-${item}`} type="button" role="tab" aria-selected={step === item} aria-controls="calibration-stage-panel" tabIndex={step === item ? 0 : -1} className={step === item ? "button primary" : "button secondary"} onClick={() => setStep(item)}>
+      {([1, 2, 3, 4] as const).map((item) => <button key={item} id={`calibration-stage-tab-${item}`} ref={(element) => { stageTabRefs.current[item] = element; }} type="button" role="tab" aria-selected={step === item} aria-controls="calibration-stage-panel" tabIndex={step === item ? 0 : -1} className={step === item ? "button primary" : "button secondary"} onClick={() => setStep(item)} onKeyDown={(event) => {
+        let nextStep: WizardStep | undefined;
+        if (event.key === "ArrowRight" || event.key === "ArrowDown") nextStep = item === 4 ? 1 : (item + 1) as WizardStep;
+        if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextStep = item === 1 ? 4 : (item - 1) as WizardStep;
+        if (event.key === "Home") nextStep = 1;
+        if (event.key === "End") nextStep = 4;
+        if (nextStep === undefined) return;
+        event.preventDefault();
+        setStep(nextStep);
+        stageTabRefs.current[nextStep]?.focus();
+      }}>
         {(["Profile", "Ajuste", "Medições", "Verificação"] as const)[item - 1]}
       </button>)}
     </nav>

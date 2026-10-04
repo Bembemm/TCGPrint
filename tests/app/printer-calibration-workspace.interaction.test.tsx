@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -48,6 +48,69 @@ function calibrationWorkspace() {
 }
 
 describe("calibration wizard stages", () => {
+  it("supports keyboard stage navigation, preserves calibration drafts, and tabs into the active panel", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ profiles: [profile] }), { status: 200 })));
+    render(calibrationWorkspace());
+    await user.click(screen.getByRole("tab", { name: "Calibração" }));
+
+    const profileStage = screen.getByRole("tab", { name: "Profile" });
+    profileStage.focus();
+    expect(profileStage).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+
+    const adjustmentStage = screen.getByRole("tab", { name: "Ajuste" });
+    expect(adjustmentStage).toHaveFocus();
+    expect(adjustmentStage).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Ajuste" })).toHaveAttribute("data-stage", "2");
+    expect(within(screen.getByRole("tablist", { name: "Etapas do Calibration Wizard" })).getAllByRole("tab").filter((tab) => tab.getAttribute("tabindex") === "0")).toHaveLength(1);
+    await user.clear(screen.getByLabelText("X offset (mm)"));
+    await user.type(screen.getByLabelText("X offset (mm)"), "1.234");
+
+    adjustmentStage.focus();
+    await user.keyboard("{ArrowRight}");
+    const measurementsStage = screen.getByRole("tab", { name: "Medições" });
+    expect(measurementsStage).toHaveFocus();
+    expect(screen.getByRole("tabpanel", { name: "Medições" })).toHaveAttribute("data-stage", "3");
+    const sessionId = (screen.getByLabelText("Fixture session ID") as HTMLInputElement).value;
+    await user.type(screen.getAllByLabelText("X (mm)")[0], "0.125");
+
+    measurementsStage.focus();
+    await user.keyboard("{End}");
+    const verificationStage = screen.getByRole("tab", { name: "Verificação" });
+    expect(verificationStage).toHaveFocus();
+    expect(verificationStage).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Verificação" })).toHaveAttribute("data-stage", "4");
+    expect(screen.getByRole("button", { name: /Gerar Verification PDF/ })).toBeInTheDocument();
+
+    verificationStage.focus();
+    await user.keyboard("{Home}");
+    expect(profileStage).toHaveFocus();
+    expect(profileStage).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Profile" })).toHaveAttribute("data-stage", "1");
+    expect(screen.getByRole("combobox", { name: "Printer profile" })).toHaveValue(profile.id);
+
+    await user.keyboard("{ArrowLeft}");
+    expect(verificationStage).toHaveFocus();
+    expect(screen.getByRole("tabpanel", { name: "Verificação" })).toHaveAttribute("data-stage", "4");
+    expect(within(screen.getByRole("tablist", { name: "Etapas do Calibration Wizard" })).getAllByRole("tab").filter((tab) => tab.getAttribute("tabindex") === "0")).toHaveLength(1);
+
+    await user.keyboard("{ArrowLeft}");
+    await user.keyboard("{ArrowLeft}");
+    expect(adjustmentStage).toHaveFocus();
+    expect(screen.getByLabelText("X offset (mm)")).toHaveValue("1.234");
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getAllByLabelText("X (mm)")[0]).toHaveValue("0.125");
+    expect((screen.getByLabelText("Fixture session ID") as HTMLInputElement).value).toBe(sessionId);
+
+    await user.keyboard("{ArrowLeft}");
+    await user.tab();
+    expect(screen.getByRole("tabpanel", { name: "Ajuste" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Simple · X/Y/Rotation" })).toHaveFocus();
+    expect(document.activeElement).not.toBe(adjustmentStage);
+  });
+
   it("shows distinct Profile, Ajuste, Medições, and Verificação content", async () => {
     const user = userEvent.setup();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ profiles: [profile] }), { status: 200 })));
