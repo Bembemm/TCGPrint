@@ -464,16 +464,23 @@ Não reintroduzir zoom manual ou Layers.
 
 A toolbar deve ser compacta e consumir o mínimo de altura possível.
 
-#### 3.4. Clique direto na carta abre o fluxo de artwork existente
+#### 3.4. Clique direto na carta abre o popup de artwork; seleção múltipla fica exclusivamente no checkbox
 
 O botão textual `Selecionar arte` deixa de ser necessário.
 
+A semântica deve ser inequívoca:
+
+- **checkbox** = selecionar/desmarcar a instância no multi-selection set;
+- **clique normal no corpo da carta** = abrir o `ArtworkPickerDialog`;
+- clicar no corpo **não** adiciona/remove a carta da seleção múltipla.
+
 Ao clicar normalmente no corpo de uma carta física:
 
-1. tornar aquela instância a **active/focused instance**;
-2. sincronizar o card lógico selecionado somente na medida necessária para o fluxo existente;
-3. abrir diretamente o **`ArtworkPickerDialog` já existente** para a **instância física correta** e para a **face que está sendo exibida/inspecionada**;
-4. fornecer ao picker o mesmo contexto que hoje é fornecido por `onSelectArtwork(...)`:
+1. definir aquela instância como **active/focused instance** apenas para o contexto da ação single-target;
+2. **não** alterar `selectedPhysicalInstanceIds`;
+3. sincronizar o card lógico selecionado somente na medida necessária para o fluxo existente;
+4. abrir diretamente o **`ArtworkPickerDialog` já existente** para a **instância física correta** e para a **face que está sendo exibida/inspecionada**;
+5. fornecer ao picker o mesmo contexto que hoje é fornecido por `onSelectArtwork(...)`:
    - `cardId`;
    - `instanceId`;
    - `physicalCardIndex`;
@@ -489,7 +496,7 @@ A carta passará a concentrar várias interações. A implementação deve separ
 
 - **checkbox no canto superior esquerdo:** somente adiciona/remove a instância do multi-selection set; não abre picker;
 - **botão de flip no canto superior direito:** somente alterna inspeção local Front/Back; não abre picker;
-- **clique no corpo da carta:** abre o artwork picker;
+- **clique no corpo da carta:** abre o artwork picker e não altera o multi-selection set;
 - **drag:** continua reordenando instâncias físicas e não deve abrir o picker ao terminar um arrasto;
 - **teclado:** Enter/Space sobre o corpo interativo deve oferecer caminho equivalente de abertura sem interferir nos controles filhos.
 
@@ -1144,7 +1151,7 @@ Não remover a semântica de seleção junto com o outline. A seleção passa a 
 
 A seleção de múltiplas cartas acontece **exclusivamente pelo checkbox sobreposto no canto superior esquerdo da carta**.
 
-Não usar clique no corpo da carta como toggle de seleção, porque o corpo permanece reservado para abrir o Artwork Picker.
+Não usar clique no corpo da carta como toggle de seleção. O corpo da carta é reservado para abrir imediatamente o popup `ArtworkPickerDialog` da instância/face correspondente.
 
 Comportamento:
 
@@ -1222,9 +1229,108 @@ O objetivo é reduzir a barra ao mínimo necessário para operações globais de
 - `Selecionar tudo` marca todas as instâncias físicas do projeto;
 - `Desmarcar` limpa todas;
 - ao limpar tudo, a barra some;
-- clicar no corpo da carta continua abrindo Artwork Picker;
+- clicar no corpo da carta continua abrindo Artwork Picker e não marca/desmarca o checkbox;
 - clicar no checkbox nunca abre Artwork Picker;
 - seleção não altera exportação, ordem física ou conteúdo do projeto.
+
+---
+
+
+### 8. Separar explicitamente "seleção" de "abertura do Artwork Picker"
+
+**Status:** especificado, ainda não implementado.
+
+#### Estado atual do código
+
+Hoje o `RegistrationLayoutPreview` trata o grupo SVG da carta como elemento selecionável. O handler de clique chama `activate()`, que para cartas físicas chama `selectInstance(physicalInstance)`.
+
+Isso faz o clique no corpo da carta atuar como seleção/ativação visual, comportamento que deve ser substituído.
+
+O componente já possui o callback `onSelectArtwork(...)`, e o pai já possui `openArtworkPicker(...)` + `ArtworkPickerDialog`. Portanto, não é necessário criar um novo popup: o correto é reutilizar esse fluxo existente diretamente a partir da carta.
+
+#### Novo comportamento obrigatório
+
+Para uma carta física renderizada no compositor:
+
+**Clique no checkbox**
+- adiciona/remove a `physicalInstanceId` de `selectedPhysicalInstanceIds`;
+- não abre picker;
+- não muda a artwork;
+- não muda a face global;
+- não chama o comportamento de clique do corpo.
+
+**Clique normal no corpo da carta**
+- não altera `selectedPhysicalInstanceIds`;
+- define a instância como active/focused somente para contexto single-target;
+- chama o fluxo de `onSelectArtwork(...)`;
+- abre o `ArtworkPickerDialog` existente;
+- passa:
+  - `cardId`;
+  - `instanceId`;
+  - `physicalCardIndex`;
+  - face efetivamente exibida;
+  - `copyNumber`;
+  - `totalCopies`;
+  - opener/ref adequado para restauração de foco.
+
+O popup deve abrir imediatamente, sem uma etapa intermediária de “selecionar carta”.
+
+#### Popup
+
+Não criar:
+
+- painel inline;
+- sidebar;
+- nova tela;
+- segundo artwork picker.
+
+Reutilizar o `ArtworkPickerDialog` atual, que já funciona como modal/popup sobre o compositor.
+
+A abertura deve preservar:
+
+- foco acessível;
+- restauração de foco ao fechar;
+- bloqueio/inert do conteúdo atrás do modal conforme implementação existente;
+- contexto exato da instância física.
+
+#### Relação com active instance
+
+`activePhysicalInstanceId` pode ser atualizado no clique do corpo porque ele representa o alvo single-target atual.
+
+Isso **não** significa seleção múltipla.
+
+Regra:
+
+- active/focused = contexto para picker/menu/ação individual;
+- selected = checkbox marcado.
+
+Uma carta pode estar ativa sem estar selecionada.
+Uma carta pode estar selecionada sem ser a carta ativa.
+
+#### Teclado
+
+Quando o corpo da carta tiver foco:
+
+- `Enter` abre o Artwork Picker;
+- `Space` pode abrir o picker se seguir o padrão de botão adotado;
+- teclado no checkbox altera somente seleção;
+- teclado no flip altera somente inspeção local;
+- teclado no menu contextual abre somente o menu.
+
+#### Testes obrigatórios
+
+Adicionar/ajustar testes para provar:
+
+- clique no corpo chama `onSelectArtwork`;
+- clique no corpo não altera selection set;
+- clique no checkbox altera selection set;
+- checkbox não chama `onSelectArtwork`;
+- contexto enviado ao picker corresponde à instância física clicada;
+- face enviada ao picker corresponde à face efetivamente exibida;
+- cópias da mesma carta abrem o picker com `instanceId`/copyNumber corretos;
+- fechar o popup restaura foco corretamente;
+- drag não dispara picker no drop;
+- botão direito abre menu contextual, não picker.
 
 ---
 
