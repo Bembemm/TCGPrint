@@ -204,19 +204,24 @@ Interação esperada, alinhada à referência:
 
 Adicionar uma barra contextual/sticky semelhante à referência, preferencialmente na parte inferior do viewport do compositor.
 
-Ela deve mostrar pelo menos:
+A barra deve ser mínima e conter somente:
 
-- quantidade total de páginas;
-- quantidade de cartas físicas selecionadas;
 - ação `Selecionar tudo`;
 - ação `Desmarcar`.
 
-Semântica proposta:
+Não exibir:
+
+- quantidade de páginas;
+- quantidade de cartas selecionadas;
+- texto de status redundante.
+
+Semântica:
 
 - `Selecionar tudo` seleciona todas as instâncias físicas do working set, inclusive em outras páginas;
-- `Desmarcar` limpa o conjunto;
-- a barra aparece quando houver seleção ou permanece discretamente disponível conforme decisão visual final;
-- por enquanto, ações destrutivas/bulk sobre várias cartas não devem ser inventadas. Primeiro estabelecer seleção múltipla correta. Ações atuais que dependem de um único alvo continuam vinculadas à instância ativa.
+- `Desmarcar` limpa o conjunto inteiro;
+- a barra aparece somente quando houver pelo menos uma carta selecionada;
+- ao zerar a seleção, a barra desaparece;
+- por enquanto, ações destrutivas/bulk sobre várias cartas não devem ser inventadas. Ações single-target continuam vinculadas à active instance.
 
 Isso evita quebrar o artwork picker, HUD e ações de quantidade enquanto prepara o compositor para operações em lote futuras.
 
@@ -308,6 +313,7 @@ Multi-seleção:
 - selecionar cópias diferentes da mesma carta independentemente;
 - mudar de página e voltar sem perder a seleção;
 - `Selecionar tudo` e `Desmarcar` funcionam;
+- a barra contextual não exibe contagem de páginas nem contagem de seleção;
 - remover uma carta elimina IDs órfãos do selection set;
 - ações single-target continuam operando apenas sobre a active instance.
 
@@ -1126,6 +1132,99 @@ O executor deve remover ou deixar de renderizar o bloco atual equivalente a:
 e revisar testes que afirmem a presença desse retângulo.
 
 Não remover a semântica de seleção junto com o outline. A seleção passa a ser representada pelo novo selection set + checkbox.
+
+---
+
+
+### 7. Comportamento definitivo da multi-seleção no compositor
+
+**Status:** especificado, ainda não implementado.
+
+#### Regra de interação
+
+A seleção de múltiplas cartas acontece **exclusivamente pelo checkbox sobreposto no canto superior esquerdo da carta**.
+
+Não usar clique no corpo da carta como toggle de seleção, porque o corpo permanece reservado para abrir o Artwork Picker.
+
+Comportamento:
+
+- clicar no checkbox desmarcado adiciona aquela `physicalInstanceId` ao selection set;
+- clicar novamente remove aquela instância do selection set;
+- selecionar uma nova carta pelo checkbox não limpa as seleções anteriores;
+- cartas iguais em cópias diferentes continuam independentes;
+- checkbox marcado permanece claramente visível mesmo sem hover;
+- nenhuma moldura colorida é desenhada ao redor da carta.
+
+#### Barra contextual inferior
+
+Ao existir pelo menos uma carta selecionada, mostrar uma barra flutuante/sticky compacta na parte inferior do viewport do compositor.
+
+A barra contém **somente**:
+
+- `Selecionar tudo`;
+- `Desmarcar`.
+
+Não exibir na barra:
+
+- quantidade de páginas;
+- quantidade de cartas selecionadas;
+- nome da carta;
+- número da cópia;
+- qualquer informação de diagnóstico ou status.
+
+O objetivo é reduzir a barra ao mínimo necessário para operações globais de seleção.
+
+#### Semântica das ações
+
+**Selecionar tudo**
+
+- seleciona todas as instâncias físicas do working set;
+- inclui cartas em páginas não visíveis;
+- usa `physicalInstanceId` estável;
+- não altera active instance;
+- não muda página atual;
+- não abre picker;
+- não altera ordem física.
+
+**Desmarcar**
+
+- limpa todo o selection set;
+- não altera active instance;
+- não altera página;
+- não altera artwork/back;
+- faz a barra desaparecer imediatamente após a seleção ficar vazia.
+
+#### Posicionamento e aparência
+
+- barra sobreposta ao viewport, sem empurrar a folha;
+- centralizada horizontalmente ou posicionada de forma consistente no rodapé do compositor;
+- altura pequena;
+- aparência discreta;
+- não cobrir permanentemente conteúdo crítico da última linha de cartas;
+- respeitar safe spacing do viewport;
+- permanecer acima da folha e abaixo de modais.
+
+#### Acessibilidade
+
+- ambos os controles são botões reais;
+- labels explícitos;
+- foco visível;
+- seleção individual continua acessível pelo checkbox;
+- a barra não precisa anunciar contagens porque elas não serão exibidas.
+
+#### Critérios de aceite
+
+- marcar um checkbox mantém seleções anteriores;
+- vários checkboxes podem ficar marcados simultaneamente;
+- nenhuma borda roxa/colorida aparece;
+- a barra surge após a primeira seleção;
+- a barra contém apenas `Selecionar tudo` e `Desmarcar`;
+- `Selecionar tudo` marca todas as instâncias físicas do projeto;
+- `Desmarcar` limpa todas;
+- ao limpar tudo, a barra some;
+- clicar no corpo da carta continua abrindo Artwork Picker;
+- clicar no checkbox nunca abre Artwork Picker;
+- seleção não altera exportação, ordem física ou conteúdo do projeto.
 
 ---
 
