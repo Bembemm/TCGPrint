@@ -1,6 +1,24 @@
-# TCGPrint — Mudanças planejadas
+# TCGPrint — Especificação aprovada de UX e fluxo
 
-Documento vivo para registrar, com nível de especificação de implementação, as mudanças discutidas diretamente durante a revisão do produto.
+**Status geral: APROVADO PARA IMPLEMENTAÇÃO INCREMENTAL.**
+
+Este documento consolida as decisões finais aprovadas para o redesenho do fluxo principal do TCGPrint. Ele substitui interpretações anteriores baseadas apenas nos mockups e deve ser tratado como a fonte de verdade para esta rodada de mudanças.
+
+## Como interpretar os mockups
+
+Os mockups produzidos durante a discussão foram usados **somente para validar fluxo, hierarquia e padrão de interação**.
+
+Eles **não são especificação visual literal** e não autorizam o executor a criar funcionalidades, campos, botões, filtros ou configurações que não existam no domínio atual ou que não estejam explicitamente aprovados neste documento.
+
+Regras obrigatórias:
+
+- referências externas serviram para demonstrar comportamento, não para copiar identidade visual;
+- o design final deve ser próprio do TCGPrint;
+- direção visual aprovada: **preto, branco, grafite e cinzas**, com cor ficando principalmente no conteúdo das cartas;
+- não copiar layout, cores, branding ou detalhes decorativos de outro produto;
+- não adicionar feature porque apareceu em mockup ilustrativo;
+- qualquer controle novo precisa mapear para uma capability existente ou para um requisito explicitamente descrito aqui;
+- quando houver conflito entre uma imagem conceitual e o texto deste documento, **o texto vence**.
 
 ## Regra geral para execução
 
@@ -194,8 +212,8 @@ Interação esperada, alinhada à referência:
 
 - checkbox/controle de seleção no canto superior esquerdo de cada carta;
 - clicar no checkbox alterna aquela instância no conjunto sem destruir as outras;
-- clicar diretamente na carta pode torná-la ativa/focada;
-- Ctrl/Cmd+click pode ser aceito como atalho para toggle, desde que não prejudique acessibilidade;
+- clicar diretamente no corpo da carta torna a instância ativa apenas para a ação single-target e abre o Artwork Picker;
+- **não** usar clique no corpo, Ctrl/Cmd+click ou qualquer atalho implícito como toggle de multi-seleção; a seleção múltipla acontece exclusivamente pelo checkbox;
 - não implementar Shift-range de forma improvisada; se for feito, deve seguir a ordem física canônica;
 - carta selecionada **não deve receber moldura roxa/colorida grossa**; o estado selecionado é comunicado pelo checkbox marcado;
 - a active/focused instance deve ser distinguível de forma discreta e não intrusiva (por exemplo, foco semântico/controle ativo), sem pintar uma borda grossa sobre toda a carta.
@@ -282,7 +300,7 @@ Porém:
 - flip local deve ser botão real ou controle com semântica equivalente, com `aria-label` e `aria-pressed` quando aplicável;
 - seleção visual não pode depender somente de cor;
 - foco por teclado deve ser claramente visível;
-- barra contextual deve anunciar mudança de contagem sem gerar spam de live region;
+- a barra contextual não exibe contagem; mudanças de seleção devem permanecer acessíveis pelos estados dos próprios checkboxes, sem live region de contagem obrigatória;
 - active instance e selection set devem ser distinguíveis também semanticamente.
 
 #### 2.8. Riscos que o executor deve evitar
@@ -329,7 +347,7 @@ Regressões:
 
 - drag/reorder continua funcionando;
 - artwork picker continua abrindo para a instância correta;
-- HUD continua ligado à instância correta;
+- menu contextual e ações single-target continuam ligados à instância física correta;
 - Frente/Verso global continua correto;
 - export PDF permanece byte/geometry-equivalent para o mesmo projeto, exceto onde já existam timestamps/metadados não determinísticos;
 - SVG/DXF/cut/calibration não mudam.
@@ -637,21 +655,28 @@ Não mover, redimensionar ou recalcular a geometria física da carta para acomod
 
 #### Ações
 
-Reutilizar os handlers e reducers existentes sempre que possível. O menu deve conter apenas ações que tenham semântica válida no TCGPrint:
+Reutilizar os handlers/reducers existentes. Não copiar ações da referência externa nem criar comandos que o TCGPrint não possui.
 
-- **Selecionar/Trocar artwork** — abre o Artwork Picker da instância/face correta;
+O menu contextual deve expor somente operações já pertencentes ao domínio e úteis como ação single-target:
+
+- **Trocar artwork** — abre o Artwork Picker da instância/face correta;
 - **Configurar verso / face** — abre o fluxo canônico de back/face;
-- **Aumentar quantidade**;
-- **Remover uma cópia**;
+- **Aumentar quantidade**, quando aplicável;
+- **Remover uma cópia**, quando aplicável;
 - **Duplicar como entrada independente**;
-- **Configurações completas**;
+- **Configurações completas**, se ainda houver configuração por carta que não esteja disponível no fluxo principal;
 - **Remover carta inteira** como ação destrutiva visualmente separada.
 
-Não incluir `Mover antes` / `Mover depois` no menu contextual. Reordenação passa a ser uma interação direta por drag-and-drop no compositor.
+Não incluir por padrão:
 
-Não copiar ações da referência que não pertencem ao domínio do TCGPrint, como `Set as Cover`, `Edit Tags` ou rotação arbitrária, sem requisito próprio.
+- `Girar 90°`;
+- `Set as Cover`;
+- `Edit Tags`;
+- `Mover antes`;
+- `Mover depois`;
+- `Mover` genérico.
 
-`Desativar slot` só deve aparecer se a feature continuar suportada e o slot atual for elegível; não expor comando desabilitado sem necessidade.
+A reordenação física é feita por drag-and-drop direto no compositor. Se algum comando legado de movimento precisar continuar por acessibilidade, ele deve existir apenas como fallback de teclado/menu acessível e não como fluxo principal.
 
 #### Convivência com outras interações
 
@@ -703,8 +728,10 @@ O fluxo normal deve ser:
 4. opcionalmente filtrar;
 5. clicar na arte desejada;
 6. o TCGPrint faz revalidação/preparo/download/validação necessários internamente;
-7. a escolha é aplicada;
+7. a escolha é aplicada automaticamente no escopo ativo;
 8. mostrar feedback curto de sucesso.
+
+No fluxo comum de Front, não exigir um botão extra `Aplicar arte` depois do clique. Um botão de confirmação só pode existir em fluxos que realmente exijam decisão adicional de escopo/back e deve reutilizar semântica já existente.
 
 O usuário não deve executar manualmente etapas internas do pipeline para conseguir selecionar uma arte.
 
@@ -765,6 +792,8 @@ Para seleção de **Front artwork** de uma carta com identidade resolvida, a nav
 
 - **Scryfall**;
 - **MPC Autofill**.
+
+Essa decisão é final para o fluxo principal de Front.
 
 Remover da superfície principal de Front:
 
@@ -1645,6 +1674,8 @@ Substituir a grade atual de dez tabs por somente três destinos primários:
 2. **Configurações**
 3. **Exportar**
 
+Essa navegação existe **uma única vez** na interface principal. Não repetir `Cartas / Configurações / Exportar` dentro de sidebar, painel secundário ou conteúdo da própria aba.
+
 Não manter como tabs de primeiro nível:
 
 - Artwork;
@@ -1671,6 +1702,8 @@ O fluxo canônico passa a ser:
 A seção atual `artworkSection`, que apenas resume a carta e oferece outro botão `Selecionar arte`, deve ser eliminada.
 
 Não criar outro atalho equivalente em `Configurações`, pois isso reintroduziria redundância.
+
+Também não criar uma lista lateral redundante do tipo `Cartas desta página` apenas para espelhar o que já está visível na folha. A própria folha é a representação principal das instâncias físicas. Uma lista adicional só pode existir se cumprir uma função que não seja resolvida pelo compositor e for aprovada separadamente.
 
 #### 10.3. Project deixa de ser aba e vira contexto persistente do workspace
 
@@ -1800,6 +1833,16 @@ Características:
 Não copiar cores/branding da referência; copiar a hierarquia e densidade de interação.
 
 #### 11.1. Ordem dos grupos
+
+Os grupos abaixo são **categorias de organização**, não autorização para inventar novos settings.
+
+Antes de renderizar qualquer controle, o executor deve mapear o campo para:
+- `ProjectSettings` existente;
+- painel/configuração já suportado;
+- capability de Template/Cut/Calibration já implementada;
+- ou requisito explícito deste documento.
+
+Se um controle aparecia somente em mockup conceitual e não existe no domínio real, **não implementá-lo**.
 
 A seção `Configurações` deve conter, nesta ordem aproximada:
 
@@ -2047,6 +2090,16 @@ Regra: diagnóstico existe para investigar problema, não para configurar o docu
 
 A implementação visual deve corrigir a aparência atual dos formulários.
 
+#### Identidade visual aprovada
+
+- interface predominantemente **preta, branca, grafite e cinza**;
+- evitar azul forte como cor estrutural dominante;
+- usar contraste, tipografia, bordas, preenchimentos e ícones para hierarquia;
+- cores fortes ficam principalmente nas próprias cartas/artworks e, quando indispensável, em estados semânticos como erro;
+- o visual deve ser original do TCGPrint, não uma reprodução dos exemplos fornecidos;
+- preferir superfícies simples e densidade controlada a grandes cards decorativos;
+- não sacrificar legibilidade, foco ou acessibilidade para manter monocromia.
+
 #### Segmented controls
 
 Usar para escolhas pequenas e mutuamente exclusivas, por exemplo:
@@ -2153,6 +2206,189 @@ Ao concluir:
 - typecheck;
 - testes completos relevantes;
 - build.
+
+---
+
+
+## Baseline final aprovada
+
+Esta é a leitura final que deve orientar o executor:
+
+### Fluxo principal
+
+- navegação única: **Cartas / Configurações / Exportar**;
+- Project aparece no header como contexto persistente, não como aba;
+- Artwork não possui aba própria;
+- Diagnostics não é fluxo principal;
+- a folha/compositor é o centro da experiência de Cartas.
+
+### Compositor
+
+- remover controles manuais `Fit Page / Fit Width / 100% / - / +` da UI;
+- remover `Layers`/seletor de layers da superfície principal;
+- remover textos técnicos, legenda e HUD horizontal permanente;
+- manter somente Frente/Verso global + paginação compacta como controles persistentes necessários;
+- renderizar artworks com fonte de alta fidelidade apropriada ao display;
+- checkbox no canto superior esquerdo = **única forma de multi-seleção**;
+- flip no canto superior direito = inspeção local Front/Back;
+- clique no corpo da carta = abre diretamente o Artwork Picker;
+- clique direito / gatilho `…` = menu contextual flutuante da instância;
+- drag do corpo = reordenação física real via `physicalOrder`;
+- reorder chega ao PDF final e preserva duplex;
+- sem outline roxo ou borda colorida grossa de seleção;
+- controles sobre a carta ficam discretos em idle e claros em hover/focus;
+- barra de seleção contém somente **Selecionar tudo** e **Desmarcar/Limpar seleção**.
+
+### Artwork Picker
+
+- modal/popup existente reutilizado;
+- Front oferece somente **Scryfall** e **MPC Autofill**;
+- `Meus uploads` fica fora do fluxo normal de Front e permanece onde fizer sentido para Back/custom;
+- catálogo abre e carrega automaticamente;
+- remover da UI normal `Atualizar resultados MPC`, `Revalidar metadata` e `Validar original e calcular DPI`;
+- metadata/original/DPI continuam sendo validados internamente;
+- cards de resultado mostram principalmente artwork + badge compacto de DPI/qualidade;
+- filtros principais compactos; filtros raros recolhidos;
+- clicar na artwork aplica automaticamente no escopo ativo após o pipeline obrigatório de validação;
+- não baixar originais pesados de todo o catálogo ao abrir o picker.
+
+### Project e Configurações
+
+- Project representa o documento completo;
+- autosave continua sendo o comportamento normal;
+- `Salvar como projeto` salva o Working Set atual completo;
+- `Novo projeto` inicia documento realmente novo;
+- Configurações consolida capacidades existentes em grupos compactos;
+- Template é preset/referência dentro de Configurações, não aba principal;
+- Cut/Calibration/PDF settings deixam de ser ilhas de navegação;
+- não inventar settings para reproduzir mockup.
+
+### Exportar
+
+- concentra intenção de saída e ações finais;
+- PDF, SVG Cut e DXF Cut ficam aqui;
+- mostrar apenas validações e resumo acionáveis;
+- detalhes de debug/hashes/revisions ficam fora do fluxo principal.
+
+### Identidade visual
+
+- original do TCGPrint;
+- preto/branco/grafite/cinza como base;
+- cor principalmente nas cartas;
+- referências fornecidas validam **funções e padrões de interação**, não design para cópia.
+
+---
+
+## Ordem de implementação aprovada
+
+A implementação deve ser feita em slices verificáveis. Não executar um “big bang” visual.
+
+### Slice 0 — Baseline e segurança
+Antes de alterar comportamento:
+- sincronizar `main`;
+- working tree limpa;
+- registrar testes relevantes existentes;
+- executar typecheck/testes direcionados/build baseline;
+- mapear componentes e reducers atingidos;
+- não alterar schema/persistência sem necessidade.
+
+**Gate:** baseline verde ou problemas pré-existentes documentados.
+
+### Slice 1 — Estrutura do workspace
+Implementar primeiro:
+- navegação única `Cartas / Configurações / Exportar`;
+- remover tabs redundantes;
+- Project no header;
+- remover Artwork como seção;
+- mover Diagnostics para área avançada;
+- nenhuma mudança ainda na semântica de impressão.
+
+**Gate:** navegação, Project open/save/recovery e testes de workspace verdes.
+
+### Slice 2 — Limpeza do compositor + interação direta
+Implementar:
+- remover zoom manual e Layers da superfície principal;
+- remover textos/HUD/legendas permanentes;
+- clique no corpo → Artwork Picker;
+- checkbox multi-select;
+- flip local;
+- menu contextual;
+- barra `Selecionar tudo / Desmarcar`;
+- hover/focus minimalista;
+- sem outline roxo.
+
+**Gate:** interaction tests + nenhuma regressão de geometria/export.
+
+### Slice 3 — Drag-and-drop canônico
+Implementar/revisar drag:
+- threshold clique vs drag;
+- preview/target visual;
+- atualização de `physicalOrder`;
+- reorder entre páginas quando suportado;
+- undo/redo;
+- duplex e export final refletindo a ordem.
+
+**Gate:** testes de reorder + export/duplex.
+
+### Slice 4 — Alta fidelidade do compositor
+Implementar display asset de alta resolução:
+- separado do thumbnail de catálogo;
+- cache/buckets;
+- loading/fallback;
+- sem alterar asset canônico de export.
+
+**Gate:** testes de endpoint/cache + smoke visual DPR alto.
+
+### Slice 5 — Artwork Picker
+Implementar:
+- Scryfall + MPC Autofill no Front;
+- auto-load/refresh;
+- pipeline técnico automático;
+- cards simplificados;
+- filtros compactos;
+- aplicação por clique;
+- uploads preservados apenas nos contextos válidos.
+
+**Gate:** provider/cache/offline/prepare/selection tests.
+
+### Slice 6 — Configurações consolidadas
+Reorganizar somente os settings reais existentes:
+- accordions/grupos;
+- controles adequados ao domínio;
+- Project continua sendo fonte de persistência;
+- nenhuma feature inventada.
+
+**Gate:** Project round-trip + settings/export equivalence.
+
+### Slice 7 — Exportar + acabamento
+Consolidar:
+- modos de export;
+- PDF;
+- SVG/DXF;
+- resumo/erros acionáveis;
+- remover resíduos de UI antiga;
+- smoke visual final.
+
+**Gate final:** typecheck + testes completos relevantes + build + smoke manual Front/Back/duplex/reorder/picker/project reopen.
+
+---
+
+## Regra de execução para o Codex
+
+Para cada slice, o executor deve:
+
+1. investigar o código antes de editar;
+2. listar arquivos/componentes afetados;
+3. identificar invariantes e testes existentes;
+4. implementar o menor diff coerente;
+5. não refatorar áreas adjacentes sem necessidade;
+6. não inventar feature para “completar” design;
+7. rodar testes direcionados;
+8. rodar typecheck;
+9. rodar build;
+10. reportar mudanças, testes, riscos e qualquer lacuna antes de avançar ao próximo slice.
+
+Não avançar automaticamente para todos os slices em um único lote. Cada slice deve poder ser revisado antes do próximo.
 
 ---
 
