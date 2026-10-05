@@ -513,7 +513,7 @@ As capacidades de domínio não devem ser deletadas:
 - duplicar como entrada independente;
 - remover carta inteira;
 - configurações completas;
-- mover antes/depois.
+- reordenação física por drag-and-drop.
 
 Porém elas **não precisam permanecer como HUD permanente no viewer**.
 
@@ -645,8 +645,9 @@ Reutilizar os handlers e reducers existentes sempre que possível. O menu deve c
 - **Remover uma cópia**;
 - **Duplicar como entrada independente**;
 - **Configurações completas**;
-- **Mover antes** / **Mover depois**, se essas ações continuarem úteis após o drag/reorder;
 - **Remover carta inteira** como ação destrutiva visualmente separada.
+
+Não incluir `Mover antes` / `Mover depois` no menu contextual. Reordenação passa a ser uma interação direta por drag-and-drop no compositor.
 
 Não copiar ações da referência que não pertencem ao domínio do TCGPrint, como `Set as Cover`, `Edit Tags` ou rotação arbitrária, sem requisito próprio.
 
@@ -1331,6 +1332,236 @@ Adicionar/ajustar testes para provar:
 - fechar o popup restaura foco corretamente;
 - drag não dispara picker no drop;
 - botão direito abre menu contextual, não picker.
+
+---
+
+
+### 9. Reordenação física direta por drag-and-drop, refletida no PDF final
+
+**Status:** especificado, ainda não implementado.
+
+#### Decisão de produto
+
+Remover da experiência normal os botões `Mover antes` e `Mover depois`.
+
+A reordenação deve acontecer **diretamente sobre a folha**:
+
+- usuário pressiona e arrasta uma carta;
+- a carta ganha estado visual de “levantada”;
+- o compositor mostra claramente onde ela será inserida;
+- ao soltar, a ordem física muda;
+- o compositor recompõe imediatamente;
+- o PDF/SVG/fluxos derivados usam a nova ordem.
+
+Isto é edição real do projeto/working set, não transformação visual temporária.
+
+#### Estado técnico atual confirmado
+
+O projeto já possui a infraestrutura canônica correta:
+
+- `RegistrationLayoutPreview` já emite `onReorderPhysicalInstance(instanceId, targetInstanceId, placement)`;
+- o pai despacha `reorder-physical-instance`;
+- `reorderWorkingCardPhysicalInstance(...)` delega a `movePhysicalInstance(...)`;
+- o reducer altera `state.physicalOrder`;
+- `reorder-physical-instance` é uma ação editorial e portanto participa de undo/redo;
+- `exportRequestBody(...)` envia explicitamente `physicalOrder` para `/api/cards/export`.
+
+Logo, o executor **não deve criar uma ordem visual paralela**. Deve melhorar a interação/feedback do drag existente e manter `physicalOrder` como fonte de verdade.
+
+#### 9.1. Semântica do drop
+
+Usar **reorder por inserção**, compatível com o modelo canônico já existente.
+
+Ao arrastar a instância A para a posição da instância B:
+
+- determinar se o cursor está na metade anterior ou posterior do alvo;
+- emitir `placement: "before"` ou `"after"`;
+- remover A de sua posição antiga;
+- inserir A na posição escolhida;
+- as demais cartas deslocam-se na sequência.
+
+Isso produz uma ordem física determinística e funciona melhor que uma troca artificial de apenas dois slots quando há várias cartas/páginas.
+
+Visualmente, para o usuário, a carta “vai para aquele lugar” e as demais se rearranjam.
+
+#### 9.2. Aparência durante o drag
+
+A experiência deve se aproximar da referência fornecida:
+
+**Origem**
+- ao iniciar drag, a carta original pode ficar discretamente atenuada;
+- não desaparecer de forma que o usuário perca referência da origem;
+- checkbox/flip/context menu não devem ser acionados pelo gesto de drag.
+
+**Drag preview**
+- exibir uma cópia visual da própria carta seguindo o ponteiro;
+- leve elevação visual (sombra neutra/pequena escala) é aceitável;
+- não usar moldura roxa;
+- preservar proporção da carta;
+- preview não altera o layout físico.
+
+**Destino**
+- mostrar indicador de inserção claro antes/depois do alvo;
+- cartas podem deslocar/animar visualmente para comunicar a futura posição, desde que a animação seja somente visual até o drop;
+- não usar overlays técnicos de trim/cut como feedback de reorder;
+- destino inválido deve ser reconhecível sem poluir a folha.
+
+**Drop**
+- aplicar `physicalOrder` uma única vez;
+- recompor a folha usando o estado canônico;
+- remover imediatamente drag ghost/feedback;
+- não abrir Artwork Picker após soltar.
+
+#### 9.3. Não confundir drag com clique
+
+Como o corpo da carta abre Artwork Picker, usar limiar explícito de movimento.
+
+Exemplo de regra:
+
+- pointer down inicia estado potencial;
+- somente após deslocamento suficiente (ex.: 4–8 CSS px) considerar drag;
+- se não ultrapassar o limiar, pointer up é clique e abre picker;
+- se ultrapassar, pointer up finaliza reorder e **suprime o click** subsequente.
+
+Não depender apenas do comportamento implícito do browser para evitar `click-after-drag`.
+
+#### 9.4. Não confundir drag com checkbox, flip ou menu
+
+O drag deve iniciar apenas a partir do corpo arrastável da carta.
+
+Não iniciar drag ao pressionar:
+
+- checkbox;
+- botão de flip;
+- botão `…`/menu;
+- qualquer controle interativo sobreposto.
+
+Esses controles devem impedir propagação de início de drag quando necessário.
+
+Clique direito continua abrindo menu contextual e não inicia drag.
+
+#### 9.5. Persistência e exportação
+
+A mudança deve atualizar `physicalOrder.instances` no estado editorial.
+
+Após o drop, a nova ordem deve alimentar:
+
+- compositor Front;
+- compositor Back/duplex;
+- paginação;
+- seleção por instância;
+- export PDF;
+- proof/final PDF;
+- SVG/DXF/cut quando estes dependerem da ordem de slots físicos;
+- autosave/Project persistence onde `physicalOrder` já for serializado;
+- undo/redo.
+
+É proibido implementar reorder apenas com:
+
+- CSS `transform`;
+- estado local do `RegistrationLayoutPreview`;
+- uma lista visual que não chega a `physicalOrder`.
+
+#### 9.6. Duplex
+
+Reordenar uma instância física deve mover o **par físico da carta**, não apenas sua imagem de frente.
+
+Depois do reorder:
+
+- Front ocupa a nova posição;
+- o verso correspondente continua pareado com essa mesma instância;
+- long-edge/short-edge e transforms de duplex continuam corretos;
+- a nova posição deve ser refletida no PDF de verso exatamente como determina o plano canônico.
+
+Nunca reordenar Front e Back de forma independente.
+
+#### 9.7. Entre páginas
+
+Reordenação deve poder afetar cartas em páginas diferentes.
+
+Direção:
+
+- manter suporte existente de drag sobre controles de página para navegar durante um drag, ou implementar mecanismo equivalente;
+- ao mudar de página durante drag, conservar `dragSourceId`;
+- soltar na nova página altera a posição global em `physicalOrder`;
+- paginação é consequência da ordem global, não uma propriedade fixa da carta.
+
+Não criar um campo separado “page number” na carta apenas para suportar drag.
+
+#### 9.8. Slots vazios, skipped e reserved
+
+Respeitar as restrições atuais:
+
+- skipped slot não recebe carta;
+- reserved zone/slot não recebe carta;
+- slot vazio intermediário que não representa posição legal não deve criar buraco arbitrário em `physicalOrder`;
+- no final da sequência, um slot elegível pode representar drop para o fim quando a geometria permitir.
+
+Se a UI indicar destino inválido, o drop não altera estado.
+
+#### 9.9. Multi-seleção
+
+Primeira implementação de reorder continua **single-drag**:
+
+- arrastar uma carta move somente aquela `physicalInstanceId`;
+- o fato de outras cartas estarem marcadas no checkbox não faz todas se moverem em grupo;
+- não inventar group drag nesta etapa.
+
+Isso evita semântica ambígua e mantém o modelo atual seguro.
+
+#### 9.10. Remover controles redundantes de movimento
+
+Remover da UI principal e do menu contextual:
+
+- `Mover antes`;
+- `Mover depois`.
+
+Os reducers/helpers internos podem permanecer se ainda forem usados por testes, acessibilidade ou outros fluxos, mas não manter botões redundantes só por legado.
+
+Para acessibilidade por teclado, se a remoção desses botões deixar usuários de teclado sem forma de reordenar, implementar uma alternativa explícita e discreta (por exemplo comandos no menu contextual `Mover uma posição para trás/frente` acessíveis só como fallback) sem reintroduzir o painel horizontal permanente.
+
+#### 9.11. Critérios de aceite
+
+Cenário mínimo:
+
+1. projeto com cartas A, B, C, D;
+2. arrastar D para antes de B;
+3. ordem visual torna-se A, D, B, C;
+4. `physicalOrder.instances` apresenta exatamente essa ordem;
+5. navegar Front/Back preserva o pareamento;
+6. gerar PDF final apresenta A, D, B, C nos slots correspondentes;
+7. undo restaura A, B, C, D;
+8. redo reaplica A, D, B, C.
+
+Também provar:
+
+- arrastar cópia 2 de uma carta com quantidade >1 move somente aquela instância;
+- ID físico da instância é preservado;
+- seleção por checkbox sobrevive ao reorder;
+- active instance continua apontando para a mesma instância;
+- drag não abre picker;
+- drag não abre menu;
+- drop inválido não muda `physicalOrder`;
+- reorder entre páginas chega ao export final;
+- PDF de verso permanece pareado;
+- reload de Project preserva a ordem quando a persistência já suportar `physicalOrder`.
+
+#### 9.12. Testes
+
+Obrigatórios:
+
+- unit tests de `movePhysicalInstance` / `reorderWorkingCardPhysicalInstance`;
+- interaction test de drag before/after;
+- interaction test de click vs drag threshold;
+- drag de cópia repetida;
+- drag para página diferente;
+- invalid skipped/reserved target;
+- undo/redo;
+- export request contém a ordem pós-drag;
+- integração de export comprovando slot order no PDF/print plan;
+- duplex pairing após reorder;
+- typecheck;
+- build.
 
 ---
 
