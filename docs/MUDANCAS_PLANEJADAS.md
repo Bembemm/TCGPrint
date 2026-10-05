@@ -197,8 +197,8 @@ Interação esperada, alinhada à referência:
 - clicar diretamente na carta pode torná-la ativa/focada;
 - Ctrl/Cmd+click pode ser aceito como atalho para toggle, desde que não prejudique acessibilidade;
 - não implementar Shift-range de forma improvisada; se for feito, deve seguir a ordem física canônica;
-- carta selecionada deve ter outline visual claro;
-- carta ativa dentro de uma multi-seleção deve ter estado distinguível daquelas apenas selecionadas.
+- carta selecionada **não deve receber moldura roxa/colorida grossa**; o estado selecionado é comunicado pelo checkbox marcado;
+- a active/focused instance deve ser distinguível de forma discreta e não intrusiva (por exemplo, foco semântico/controle ativo), sem pintar uma borda grossa sobre toda a carta.
 
 #### 2.4. Barra contextual de seleção
 
@@ -254,10 +254,10 @@ A referência visual deve influenciar o compositor nos seguintes pontos:
 - carta ocupando a maior área útil permitida pelo layout físico;
 - artwork nítida;
 - overlays de interação sobre a carta sem deslocar a geometria;
-- checkbox no topo esquerdo;
-- flip/face action no topo direito;
-- outline de seleção de alto contraste;
-- hover/focus estados claros;
+- checkbox no topo esquerdo, sobreposto à carta;
+- flip/face action no topo direito, sobreposto à carta;
+- seleção comunicada principalmente pelo checkbox sobre a carta, sem moldura colorida permanente ao redor da artwork;
+- hover/focus estados claros nos controles sobrepostos;
 - barra contextual inferior;
 - controles de página compactos;
 - remover o seletor de Layers da superfície principal; a apresentação normal deve ter um conjunto de camadas definido pelo produto, sem exigir configuração manual do usuário;
@@ -969,6 +969,163 @@ Cobrir obrigatoriamente:
 - undo/redo continua correto;
 - project serialization não recebe estado efêmero de UI;
 - build/typecheck/testes direcionados passam.
+
+---
+
+
+### 6. Seleção visual minimalista: remover outline roxo e usar controles sobrepostos com revelação por hover
+
+**Status:** especificado, ainda não implementado.
+
+#### Problema atual confirmado
+
+Em `src/app/registration-layout-preview.tsx`, a instância atualmente selecionada recebe um retângulo SVG:
+
+- classe `.compositor-selection-outline`;
+- `stroke="#7e22ce"`;
+- `strokeWidth="2"`;
+- cobrindo todo o trim da carta.
+
+Esse outline roxo é visualmente pesado, compete com a artwork e não é necessário quando a seleção passa a ter um checkbox explícito.
+
+#### Decisão de produto
+
+Remover completamente a moldura roxa/colorida de seleção ao redor da carta.
+
+O estado normal da carta deve preservar a artwork o máximo possível. Os únicos controles persistentes sobre a carta serão:
+
+- **checkbox de seleção** no canto superior esquerdo;
+- **flip/inspeção Front/Back** no canto superior direito.
+
+Não adicionar uma nova borda grossa em outra cor como substituição.
+
+#### 6.1. Checkbox de seleção
+
+O checkbox deve:
+
+- ser um controle real e acessível, não apenas um ícone decorativo;
+- ficar visualmente sobreposto no canto superior esquerdo da carta, sem alterar o tamanho/posição física da carta;
+- operar sobre `physicalInstanceId`;
+- marcar/desmarcar somente aquela instância no selection set;
+- não abrir Artwork Picker;
+- não iniciar drag;
+- não abrir menu contextual;
+- usar `stopPropagation`/tratamento equivalente apenas para isolar essa ação.
+
+Estado:
+
+- não selecionado: quadrado discreto;
+- selecionado: checkmark claramente visível;
+- o checkmark, e não uma moldura em volta da carta, é a principal indicação de seleção.
+
+#### 6.2. Controle de flip
+
+O flip deve:
+
+- ficar no canto superior direito;
+- usar o estado efêmero de inspeção local definido no item 2.5;
+- não alterar a face global da folha;
+- não alterar o projeto/export;
+- não abrir picker/menu;
+- possuir label acessível indicando a ação, por exemplo `Ver verso de Forest · cópia 2`.
+
+#### 6.3. Opacidade e comportamento de hover
+
+Em desktop com ponteiro preciso:
+
+**Estado idle — mouse fora da carta**
+
+- checkbox desmarcado e botão de flip ficam visíveis, porém discretos;
+- usar opacidade reduzida, suficiente para descoberta sem competir com a artwork;
+- alvo clicável não deve encolher junto com a opacidade.
+
+**Hover sobre a carta**
+
+- checkbox e flip transitam para opacidade total;
+- transição curta e suave, sem atraso perceptível;
+- não alterar escala da carta;
+- não adicionar overlay escuro sobre toda a artwork.
+
+**Carta selecionada**
+
+- checkbox marcado permanece em opacidade alta mesmo quando o mouse sai;
+- o botão de flip pode voltar ao estado discreto quando não houver hover/focus;
+- nenhuma moldura colorida deve aparecer ao redor da carta.
+
+**Keyboard focus**
+
+- o controle focado deve ficar em opacidade total;
+- usar focus ring localizado no próprio controle;
+- não usar o outline roxo antigo sobre a carta inteira.
+
+#### 6.4. Touch e dispositivos sem hover
+
+Não depender exclusivamente de `:hover`.
+
+Para `(hover: none)` / touch:
+
+- controles devem ficar permanentemente legíveis;
+- podem usar opacidade intermediária/alta;
+- primeiro toque no corpo da carta continua obedecendo ao fluxo definido para abrir artwork; não exigir “primeiro toque só para revelar controles”;
+- hit targets devem ser adequados para toque e podem ultrapassar visualmente o pequeno ícone sem deslocar a carta.
+
+#### 6.5. Estado ativo vs seleção múltipla
+
+Separar novamente:
+
+- **selected** = checkbox marcado e membro de `selectedPhysicalInstanceIds`;
+- **active/focused** = instância que receberá ações single-target/picker/menu.
+
+Não usar borda roxa para representar nenhum dos dois.
+
+Se for necessário comunicar active/focused visualmente além do foco do controle:
+
+- usar tratamento mínimo, por exemplo sombra neutra muito sutil ou pequeno indicador localizado;
+- não usar stroke grosso sobre o perímetro da carta;
+- nunca alterar pixels da artwork nem confundir active com selected.
+
+#### 6.6. Relação com overlays físicos
+
+A remoção da moldura roxa não deve interferir com:
+
+- bleed;
+- trim;
+- cut geometry;
+- registration;
+- skipped slots;
+- reserved zones;
+- drag/drop feedback.
+
+Estados de drag/drop podem continuar usando feedback temporário próprio, porque representam uma ação em andamento, não seleção persistente.
+
+No viewer normal, conforme item 3, os overlays técnicos permanecem ocultos ou condicionais conforme definido.
+
+#### 6.7. Critérios de aceite
+
+- selecionar uma carta não desenha qualquer retângulo roxo/colorido grosso ao redor dela;
+- checkbox marcado identifica claramente a seleção;
+- várias cartas podem mostrar checkboxes marcados ao mesmo tempo;
+- checkbox e flip aparecem discretos no idle;
+- hover de uma carta torna seus controles claramente visíveis;
+- mover o mouse para fora reduz novamente a presença dos controles não persistentes;
+- checkbox de carta selecionada continua claramente marcado fora do hover;
+- teclado revela/foca os controles corretamente;
+- touch não depende de hover;
+- clicar checkbox não abre picker;
+- clicar flip não abre picker;
+- clicar corpo continua seguindo o fluxo de artwork;
+- drag/reorder continua funcional;
+- exportação e geometria física não mudam.
+
+#### 6.8. Remoção técnica esperada
+
+O executor deve remover ou deixar de renderizar o bloco atual equivalente a:
+
+`{isSelected && <rect className="compositor-selection-outline" ... stroke="#7e22ce" ... />}`
+
+e revisar testes que afirmem a presença desse retângulo.
+
+Não remover a semântica de seleção junto com o outline. A seleção passa a ser representada pelo novo selection set + checkbox.
 
 ---
 
