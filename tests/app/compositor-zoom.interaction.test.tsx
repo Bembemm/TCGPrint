@@ -56,7 +56,7 @@ describe("compositor zoom interactions", () => {
       />
     </Profiler>);
 
-    const sheet = screen.getByRole("img", { name: /Compositor live/ });
+    const sheet = screen.getByRole("group", { name: /Compositor live/ });
     const scale = () => Number(sheet.getAttribute("data-compositor-zoom-scale"));
     const baseWidthPx = 210 * 96 / 25.4;
     const baseHeightPx = 297 * 96 / 25.4;
@@ -146,7 +146,7 @@ describe("compositor zoom interactions", () => {
       onSelectPage={vi.fn()}
       onToggleSkippedSlot={vi.fn()}
     />);
-    const sheet = screen.getByRole("img", { name: /Compositor live/ });
+    const sheet = screen.getByRole("group", { name: /Compositor live/ });
     const scale = () => Number(sheet.getAttribute("data-compositor-zoom-scale"));
     const fitWidthScale = (width: number) => (width - 32) / (210 * 96 / 25.4);
 

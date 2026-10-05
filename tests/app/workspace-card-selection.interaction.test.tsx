@@ -47,6 +47,7 @@ describe("Cards and Artwork navigation", () => {
   it("keeps the selected Working Card when navigating from Cartas to Artwork and back", async () => {
     const user = userEvent.setup();
     const imported = [card("island-card", "Island", 0), card("mountain-card", "Mountain", 1)];
+    let cardsReturnedByImport = imported;
     const mountainArtwork = {
       id: "scryfall:mountain-front",
       source: "scryfall",
@@ -76,7 +77,7 @@ describe("Cards and Artwork navigation", () => {
     vi.stubGlobal("URL", TestURL);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/cards/import") return Response.json({ workingCards: imported, report: { summary: {}, sources: [], selectedImporters: [], warnings: [], errors: [], pairings: [] }, providerHealth });
+      if (url === "/api/cards/import") return Response.json({ workingCards: cardsReturnedByImport, report: { summary: {}, sources: [], selectedImporters: [], warnings: [], errors: [], pairings: [] }, providerHealth });
       if (url === "/api/cards/resolve") {
         const body = JSON.parse(String(init?.body)) as { action: string; cards?: WorkingCard[]; targetCardId?: string; faceId?: "front" | "back"; candidateId?: string };
         if (body.action === "apply-artwork-scope" && body.cards && body.targetCardId && body.faceId && body.candidateId) {
@@ -142,7 +143,7 @@ describe("Cards and Artwork navigation", () => {
     await user.click(within(await picker).getByRole("button", { name: "Fechar seletor de arte" }));
 
     await user.click(screen.getByRole("tab", { name: "Export" }));
-    const composer = screen.getByRole("img", { name: /Compositor live frente/ });
+    const composer = screen.getByRole("group", { name: /Compositor live frente/ });
     const initialSlotX = composer.querySelector("g[data-slot-x-mm]")?.getAttribute("data-slot-x-mm");
     const generate = screen.getByRole("button", { name: "Gerar PDF final" });
     expect(screen.getByText(/Project: sem Project aberto · Working Set local/)).toBeInTheDocument();
@@ -220,5 +221,15 @@ describe("Cards and Artwork navigation", () => {
     expect(document.activeElement).toBe(liveCompositor);
     expect(exportCount).toBe(4);
     expect(createObjectUrl).toHaveBeenCalledTimes(3);
+
+    cardsReturnedByImport = [card("swamp-card", "Swamp", 0), card("forest-card", "Forest", 1)];
+    await user.click(screen.getByRole("tab", { name: "Cartas" }));
+    const decklist = screen.getByRole("textbox", { name: "Cole uma decklist ou URL" });
+    await user.clear(decklist);
+    await user.type(decklist, "1 Swamp\n1 Forest");
+    await user.click(screen.getByRole("button", { name: "Adicionar cartas" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /2\/2 · Forest/ })).toBeInTheDocument());
+    expect(composer.querySelector('g[data-physical-card-index="1"]')).toHaveAttribute("data-physical-instance-id", "instance-2");
+    expect(composer.querySelector('g[data-physical-card-index="1"]')).toHaveAttribute("aria-pressed", "false");
   }, 15_000);
 });

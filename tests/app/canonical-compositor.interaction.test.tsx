@@ -163,7 +163,7 @@ const settingsWithProjectBack = {
 };
 
 function sheet() {
-  return screen.getByRole("img", { name: /Compositor live/ });
+  return screen.getByRole("group", { name: /Compositor live/ });
 }
 
 describe("canonical live compositor interactions", () => {
@@ -172,7 +172,8 @@ describe("canonical live compositor interactions", () => {
     render(compositorWorkspace());
 
     const main = screen.getByRole("main", { name: "Preview e compositor atual" });
-    expect(within(main).getByRole("img", { name: /Compositor live frente/ })).toBeInTheDocument();
+    expect(within(main).getByRole("group", { name: /Compositor live frente/ })).toBeInTheDocument();
+    expect(within(sheet()).getByRole("button", { name: /Slot 1 · carta física 1/ })).toBeInTheDocument();
     expect(main.querySelectorAll("image[data-compositor-source='preview-thumbnail']")).toHaveLength(9);
     expect(main.querySelector("image[data-compositor-artwork]")).toHaveAttribute("data-compositor-artwork", artworkFront.candidateId);
     expect(screen.queryByRole("button", { name: /Atualizar preview/i })).not.toBeInTheDocument();
@@ -563,7 +564,7 @@ describe("canonical live compositor interactions", () => {
     await user.click(screen.getByRole("button", { name: /carta física 2.*cópia 2 de 10/i }));
     expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
     await user.click(screen.getByRole("button", { name: "Próxima página" }));
-    expect(screen.getByRole("img", { name: /Compositor live frente.*página 2 de 2/ })).toHaveAttribute("data-selected-physical-card-index", "none");
+    expect(screen.getByRole("group", { name: /Compositor live frente.*página 2 de 2/ })).toHaveAttribute("data-selected-physical-card-index", "none");
     expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
     expect(screen.queryByRole("button", { name: /carta física 2.*cópia 2 de 10/i })).not.toBeInTheDocument();
 
@@ -638,7 +639,7 @@ describe("canonical live compositor interactions", () => {
     await user.click(screen.getByRole("checkbox", { name: "Margins" }));
     await user.click(screen.getByRole("checkbox", { name: "Calibration" }));
     expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
-    const compositor = screen.getByRole("img", { name: /Compositor live/ });
+    const compositor = screen.getByRole("group", { name: /Compositor live/ });
     const physicalPlanSignature = Array.from(compositor.querySelectorAll("[data-slot-x-mm]"))
       .map((slot) => [slot.getAttribute("data-slot-x-mm"), slot.getAttribute("data-slot-y-mm")]);
     const physicalViewBox = compositor.getAttribute("viewBox");

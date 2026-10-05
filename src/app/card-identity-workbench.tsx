@@ -1072,6 +1072,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       setArtworkCatalogRevision((revision) => revision + 1);
       setArtworkCatalogState(null);
       setArtworkProblem(null);
+      setSelectedPhysicalInstanceId(null);
       dispatchEditor({ type: "load-cards", cards: result.workingCards });
       setArtworkFilter("all"); setManualIdentities([]);
       setProviderHealth(result.providerHealth);
