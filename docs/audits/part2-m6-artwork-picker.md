@@ -87,4 +87,21 @@ npm run typecheck
 passed
 ```
 
-O gate completo obrigatório (`npm test`, typecheck, build e diff-check) será executado após todos os commits desta branch. Os resultados também constam no relatório final.
+Gates completos executados após os commits de implementação:
+
+```text
+npm test
+116 test files passed · 1 skipped
+1270 tests passed · 1 skipped
+
+npm run typecheck
+passed
+
+npm run build
+passed · Next.js 16.3.6 / Turbopack
+
+git diff --check
+passed
+```
+
+O build regenerou `next-env.d.ts`; o conteúdo local conhecido foi restaurado byte a byte e permaneceu fora dos commits. A suíte também regenerou PDFs/manifests de referência; esses artefatos foram restaurados ao conteúdo do baseline.
