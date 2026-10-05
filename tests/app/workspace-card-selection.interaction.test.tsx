@@ -139,11 +139,18 @@ describe("Cards and Artwork navigation", () => {
     pendingFirstExport.resolve(new Response("%PDF-1.7 cancelled", { headers: { "Content-Type": "application/pdf" } }));
     await waitFor(() => expect(screen.getAllByText("Exportação cancelada.").length).toBeGreaterThan(0));
 
+    const exportRequestBeforePhysicalSelection = exportRequests[0]?.body;
+    const secondPhysicalCard = composer.querySelector('g[data-physical-card-index="1"]');
+    if (!secondPhysicalCard) throw new Error("The second physical card is not rendered in the live compositor.");
+    await user.click(secondPhysicalCard);
+    expect(secondPhysicalCard).toHaveAttribute("aria-pressed", "true");
+
     await user.click(screen.getByRole("button", { name: "Gerar PDF final" }));
     expect(await screen.findByRole("link", { name: "Baixar tcgprint-m4.pdf" })).toHaveAttribute("download", "tcgprint-m4.pdf");
     expect(createObjectUrl).toHaveBeenCalledTimes(1);
     expect(exportCount).toBe(2);
     const generatedPdfRequestBody = exportRequests[1]?.body;
+    expect(generatedPdfRequestBody).toBe(exportRequestBeforePhysicalSelection);
     await user.click(screen.getByRole("button", { name: "Aumentar zoom" }));
     expect(composer).toHaveAttribute("data-compositor-zoom-mode", "manual");
 

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { cleanup, render, screen, within } from "@testing-library/react";
@@ -247,6 +248,100 @@ describe("canonical live compositor interactions", () => {
     await user.keyboard(" ");
     expect(secondCopy).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
+  });
+
+  it("renders one zoom-stable selection indicator without changing the artwork, trim, or Project state", async () => {
+    const user = userEvent.setup();
+    render(compositorWorkspace([{ ...card(), quantity: 2 }]));
+    const revision = screen.getByTestId("project-revision").textContent;
+    const firstSlot = slotForPhysicalIndex(0);
+    const secondSlot = slotForPhysicalIndex(1);
+    const originalViewBox = sheet().getAttribute("viewBox");
+    const originalTrim = firstSlot.querySelector('[data-compositor-layer="trim"]');
+    const originalTrimGeometry = ["x", "y", "width", "height"].map((attribute) => originalTrim?.getAttribute(attribute));
+    const originalSelectedArtwork = secondSlot.querySelector("image[data-compositor-artwork]")?.outerHTML;
+
+    expect(sheet().querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(0);
+    await user.click(secondSlot);
+
+    expect(secondSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
+    expect(firstSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(0);
+    expect(sheet().querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
+    const outline = secondSlot.querySelector("[data-compositor-selection-outline]");
+    const trim = secondSlot.querySelector('[data-compositor-layer="trim"]');
+    expect(outline).toHaveAttribute("fill", "none");
+    expect(outline).toHaveAttribute("stroke", "#7e22ce");
+    expect(outline).toHaveAttribute("stroke-width", "2");
+    expect(outline).toHaveAttribute("vector-effect", "non-scaling-stroke");
+    expect(outline).toHaveAttribute("rx", "0");
+    expect(["x", "y", "width", "height"].map((attribute) => outline?.getAttribute(attribute)))
+      .toEqual(["x", "y", "width", "height"].map((attribute) => trim?.getAttribute(attribute)));
+    expect(["x", "y", "width", "height"].map((attribute) => firstSlot.querySelector('[data-compositor-layer="trim"]')?.getAttribute(attribute)))
+      .toEqual(originalTrimGeometry);
+    expect(secondSlot.querySelector("image[data-compositor-artwork]")?.outerHTML).toBe(originalSelectedArtwork);
+    expect(sheet()).toHaveAttribute("viewBox", originalViewBox);
+    expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
+
+    const selectedOutlineGeometry = ["x", "y", "width", "height"].map((attribute) => outline?.getAttribute(attribute));
+    await user.click(screen.getByText("Layers"));
+    const trimToggle = screen.getByRole("checkbox", { name: "Trim" });
+    await user.click(trimToggle);
+    expect(secondSlot.querySelector('[data-compositor-layer="trim"]')).toBeNull();
+    expect(secondSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
+    expect(["x", "y", "width", "height"].map((attribute) => secondSlot.querySelector("[data-compositor-selection-outline]")?.getAttribute(attribute)))
+      .toEqual(selectedOutlineGeometry);
+    await user.click(trimToggle);
+    expect(secondSlot.querySelector('[data-compositor-layer="trim"]')).toBeInTheDocument();
+
+    const bleedToggle = screen.getByRole("checkbox", { name: "Bleed" });
+    const bleedMm = sheet().getAttribute("data-compositor-bleed-mm");
+    await user.click(bleedToggle);
+    expect(secondSlot.querySelector('[data-compositor-layer="bleed"]')).toBeNull();
+    expect(secondSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
+    expect(sheet()).toHaveAttribute("data-compositor-bleed-mm", bleedMm);
+    await user.click(bleedToggle);
+    expect(secondSlot.querySelector('[data-compositor-layer="bleed"]')).toBeInTheDocument();
+
+    await user.click(firstSlot);
+    expect(firstSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
+    expect(secondSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(0);
+    expect(sheet().querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
+    await user.click(secondSlot);
+    expect(secondSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
+    expect(firstSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(0);
+    expect(sheet().querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
+
+    for (const label of ["Fit Page", "Fit Width", "100%", "Reduzir zoom", "Aumentar zoom"]) {
+      await user.click(screen.getByRole("button", { name: label }));
+      const zoomedOutline = slotForPhysicalIndex(1).querySelector("[data-compositor-selection-outline]");
+      expect(zoomedOutline).toHaveAttribute("stroke-width", "2");
+      expect(zoomedOutline).toHaveAttribute("vector-effect", "non-scaling-stroke");
+    }
+    await user.click(screen.getByRole("button", { name: "Aumentar zoom" }));
+    expect(Number(sheet().getAttribute("data-compositor-zoom-scale"))).toBeGreaterThan(1);
+    expect(slotForPhysicalIndex(1).querySelector("[data-compositor-selection-outline]"))
+      .toHaveAttribute("vector-effect", "non-scaling-stroke");
+    expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
+  });
+
+  it("follows rounded card corners while preserving mobile tap and keyboard focus affordances", async () => {
+    const user = userEvent.setup();
+    render(compositorWorkspace([{ ...card(), quantity: 1 }], {
+      ...DEFAULT_PROJECT_SETTINGS,
+      roundedCorners: true,
+      layout: { skippedSlotIndices: [] },
+    }));
+
+    await user.click(slotForPhysicalIndex(0));
+    expect(slotForPhysicalIndex(0).querySelector("[data-compositor-selection-outline]"))
+      .toHaveAttribute("rx", "3.175");
+
+    const css = readFileSync("src/app/globals.css", "utf8");
+    expect(css).toMatch(/\.registration-preview-slot\s*\{[^}]*-webkit-tap-highlight-color:\s*transparent/s);
+    expect(css).toMatch(/\.registration-preview-slot:focus:not\(:focus-visible\)\s*\{[^}]*outline:\s*none/s);
+    expect(css).toMatch(/\.registration-preview-slot:focus-visible\s*\{[^}]*outline:\s*2px solid #145c92/s);
+    expect(css).toMatch(/\.registration-preview-slot:focus-visible\.is-selected\s*\{[^}]*outline:\s*none/s);
+    expect(css).toMatch(/\.registration-preview-slot:focus-visible\.is-selected \.compositor-selection-outline\s*\{[^}]*stroke:\s*#145c92/s);
   });
 
   it("uses DFC faces and each simple card's effective physical back", async () => {

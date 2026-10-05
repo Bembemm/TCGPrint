@@ -412,7 +412,21 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               </>;
             })()}
             {layers.trim && assigned.has(slot.index) && <rect x={slot.trim.xMm} y={slot.trim.yMm} width={slot.trim.widthMm} height={slot.trim.heightMm} fill="none" stroke="#1d4ed8" strokeWidth="0.45" data-compositor-layer="trim" />}
-            {isSelected && <rect className="compositor-selection-outline" x={slot.trim.xMm - 0.35} y={slot.trim.yMm - 0.35} width={slot.trim.widthMm + 0.7} height={slot.trim.heightMm + 0.7} fill="none" stroke="#7e22ce" strokeWidth="1.1" pointerEvents="none" data-compositor-selection-outline={physicalCardIndex} />}
+            {isSelected && <rect
+              className="compositor-selection-outline"
+              x={slot.trim.xMm}
+              y={slot.trim.yMm}
+              width={slot.trim.widthMm}
+              height={slot.trim.heightMm}
+              rx={settings.roundedCorners ? settings.cardFormat.cornerRadiusMm ?? 3.175 : 0}
+              ry={settings.roundedCorners ? settings.cardFormat.cornerRadiusMm ?? 3.175 : 0}
+              fill="none"
+              stroke="#7e22ce"
+              strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
+              pointerEvents="none"
+              data-compositor-selection-outline={physicalCardIndex}
+            />}
             {skipped.has(slot.index) && <>
               <line x1={slot.trim.xMm} y1={slot.trim.yMm} x2={slot.trim.xMm + slot.trim.widthMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
               <line x1={slot.trim.xMm + slot.trim.widthMm} y1={slot.trim.yMm} x2={slot.trim.xMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
