@@ -2305,6 +2305,43 @@ Implementar primeiro:
 
 **Gate:** navegação, Project open/save/recovery e testes de workspace verdes.
 
+#### Subdivisão obrigatória após auditoria do Slice 0
+
+A auditoria da baseline confirmou acoplamentos de lifecycle que tornam inseguro tratar o Slice 1 como uma única troca de UI.
+
+Implementar o Slice 1 em duas subetapas revisáveis:
+
+**Slice 1A — Navegação e composição sem alterar semântica de Project**
+- reduzir a navegação principal para `Cartas / Configurações / Exportar`;
+- remover `Artwork` como tab sem perder acesso ao picker existente;
+- consolidar Layout/PDF/Corte/Templates/Calibração sob Configurações mantendo os componentes/controladores montados quando seus efeitos forem necessários;
+- consolidar ações finais sob Exportar;
+- mover a escolha de importer ambíguo hoje exposta em Diagnostics para o fluxo de Cartas/importação;
+- mover Diagnostics para uma entrada avançada;
+- manter `ProjectsPanel`/session/autosave/cut-preview/template-registration lifecycle vivo; não desmontar controladores por causa da nova IA;
+- preservar recovery/conflito em superfície acessível temporária se o header de Project ainda não estiver pronto;
+- não alterar ainda a semântica de `createProject()`.
+
+**Gate 1A:** navegação, teclado/foco, import ambíguo, autosave, template registration status, cut preview e acesso às capabilities antigas continuam verdes.
+
+**Slice 1B — Project no header + semântica Novo/Salvar como**
+- expor nome/status do Project no header usando a mesma sessão existente, sem criar um segundo controller;
+- tornar recovery/conflito acessível a partir dessa nova superfície;
+- implementar `Salvar como projeto` a partir do snapshot atual completo;
+- fazer `Novo projeto` realmente iniciar Working Set/documento novo e limpo;
+- preservar open/duplicate/delete/recovery/autosave;
+- não alterar schema/serializer se não houver necessidade comprovada.
+
+**Gate 1B:** save-as nasce salvo com o Working Set atual; new-project não herda cards; recovery/conflito continuam funcionais; autosave permanece único e consistente.
+
+Achados vinculantes do Slice 0:
+- `ProjectsPanel` executa autosave e cut preview mesmo oculto: não desmontar esse lifecycle;
+- `TemplateLibraryPanel` publica `registrationStatus` consumido como gate de export: preservar o efeito;
+- a escolha de importer ambíguo hoje mora em Diagnostics, mas é funcional e precisa ser realocada antes de remover a tab;
+- drafts de settings/template/calibration sobrevivem hoje porque painéis ficam montados; a nova composição não pode perder esse comportamento;
+- Project header deve consumir a sessão existente, nunca duplicá-la.
+
+
 ### Slice 2 — Limpeza do compositor + interação direta
 Implementar:
 - remover zoom manual e Layers da superfície principal;
