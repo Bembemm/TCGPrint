@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { WorkingCard } from "../../core/cards/types";
 import { mpcArtworkCandidateId } from "../../core/cards/ids";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
+import { applyArtworkSelectionScope } from "../../core/cards/artwork-selection-scope";
 import {
   DEFAULT_PROJECT_SETTINGS,
   MAX_PROJECT_SNAPSHOT_BYTES,
@@ -111,6 +112,50 @@ describe("project snapshot serializer", () => {
         layout: { skippedSlotIndices: [] },
       },
     });
+  });
+
+  it("round-trips a physical-copy artwork split with sequence, Back Library references, and DFC faces", () => {
+    const identity = { id: "scryfall:oracle:island", provider: "scryfall", name: "Island", resolutionMethod: "manual" as const, confidence: 1 };
+    const backHash = "f".repeat(64);
+    const source: WorkingCard = {
+      ...singleFaceCard(), id: "island-x4", quantity: 4, order: 0,
+      identity, identityResolution: { status: "resolved", candidates: [], confirmed: true },
+      selectedArtworkByFace: { front: { candidateId: "scryfall:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb:front", source: "scryfall", identityId: identity.id, faceId: "front" } },
+      backMode: "manual", backModeSelectionPolicy: "explicit",
+      manualBackAsset: { assetId: `back:${backHash}`, sha256: backHash, format: "png" },
+      faceAssociations: [{ slot: "front", frontAssetId: "local-front", confidence: 0.9, accepted: true }],
+    };
+    const dfcIdentity = {
+      id: "scryfall:oracle:delver", provider: "scryfall", name: "Delver of Secrets // Insectile Aberration",
+      resolutionMethod: "manual" as const, confidence: 1,
+      metadata: { layout: "transform", faces: [{ name: "Delver of Secrets" }, { name: "Insectile Aberration" }] },
+    };
+    const dfc: WorkingCard = {
+      ...singleFaceCard(), id: "delver", quantity: 1, order: 1, identity: dfcIdentity,
+      identityResolution: { status: "resolved", candidates: [], confirmed: true },
+      faces: [{ id: "front", side: "front", name: "Delver of Secrets" }, { id: "back", side: "back", name: "Insectile Aberration" }],
+      selectedArtworkByFace: {
+        front: { candidateId: "scryfall:cccccccc-cccc-4ccc-8ccc-cccccccccccc:front", source: "scryfall", identityId: dfcIdentity.id, faceId: "front" },
+        back: { candidateId: "scryfall:cccccccc-cccc-4ccc-8ccc-cccccccccccc:back", source: "scryfall", identityId: dfcIdentity.id, faceId: "back" },
+      },
+      backMode: "auto", backModeSelectionPolicy: "automatic",
+    };
+    const split = applyArtworkSelectionScope({
+      cards: [source, dfc], targetCardId: source.id, faceId: "front",
+      artwork: { candidateId: "scryfall:dddddddd-dddd-4ddd-8ddd-dddddddddddd:front", source: "scryfall", identityId: identity.id, faceId: "front", selectionPolicy: "user-selected" },
+      scope: "physical-copy", physicalCardIndex: 2,
+    });
+    const loaded = deserializeProjectSnapshot(serializeProjectSnapshot(split, DEFAULT_PROJECT_SETTINGS));
+
+    expect(loaded.cards.map(({ id, quantity, order }) => ({ id, quantity, order }))).toEqual(split.map(({ id, quantity, order }) => ({ id, quantity, order })));
+    expect(loaded.cards.slice(0, 3).map((card) => card.selectedArtworkByFace.front?.candidateId)).toEqual([
+      source.selectedArtworkByFace.front?.candidateId,
+      "scryfall:dddddddd-dddd-4ddd-8ddd-dddddddddddd:front",
+      source.selectedArtworkByFace.front?.candidateId,
+    ]);
+    expect(loaded.cards.slice(0, 3).map((card) => card.quantity)).toEqual([2, 1, 1]);
+    expect(loaded.cards.slice(0, 3).every((card) => card.manualBackAsset?.sha256 === backHash)).toBe(true);
+    expect(loaded.cards[3]).toMatchObject({ identity: dfcIdentity, selectedArtworkByFace: dfc.selectedArtworkByFace, backMode: "auto", quantity: 1, order: 3 });
   });
 
   it("migrates a legacy v1 project deterministically to v4 defaults", () => {

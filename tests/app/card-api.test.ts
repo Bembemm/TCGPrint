@@ -425,6 +425,142 @@ describe("card APIs", () => {
     expect(() => parseWorkingCards([{ ...dfc, backMode: "bogus" }])).toThrow(/backMode is invalid/);
   });
 
+  it("enforces generic project-wide back protection in the API and preserves real DFC face selections", async () => {
+    const dfcBack = { candidateId: "scryfall:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb:back", source: "scryfall" as const, identityId: identity.id, faceId: "back" as const };
+    const dfc: WorkingCard = {
+      ...card,
+      id: "dfc-api", order: 1,
+      identity: { ...identity, id: "scryfall:oracle:delver", name: "Delver of Secrets // Insectile Aberration", metadata: { layout: "transform", faces: [{ name: "Delver of Secrets" }, { name: "Insectile Aberration" }] } },
+      faces: [{ id: "front", side: "front", name: "Delver of Secrets" }, { id: "back", side: "back", name: "Insectile Aberration" }],
+      selectedArtworkByFace: { front: card.selectedArtworkByFace.front!, back: dfcBack },
+      backMode: "auto", backModeSelectionPolicy: "automatic",
+    };
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "apply-generic-back-scope", cards: [{ ...card, quantity: 2 }, dfc], targetCardId: card.id,
+      scope: "all-simple-project", choiceMode: "none",
+    }), testWorkbench());
+    const result = await response.json() as { workingCards: WorkingCard[]; impact: { affectedPhysicalCards: number; preservedDfcPhysicalCards: number } };
+
+    expect(response.status).toBe(200);
+    expect(result.impact).toEqual({ affectedEntries: 1, affectedPhysicalCards: 2, preservedDfcEntries: 1, preservedDfcPhysicalCards: 1 });
+    expect(result.workingCards[0]).toMatchObject({ backMode: "none", quantity: 2 });
+    expect(result.workingCards[1]).toMatchObject({ backMode: "auto", selectedArtworkByFace: { back: dfcBack } });
+  });
+
+  it("applies a physical-copy generic back through the API without changing physical sequence", async () => {
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "apply-generic-back-scope", cards: [{ ...card, quantity: 4 }], targetCardId: card.id,
+      scope: "physical-copy", physicalCardIndex: 2, choiceMode: "none",
+    }), testWorkbench());
+    const result = await response.json() as { workingCards: WorkingCard[]; impact: { affectedPhysicalCards: number } };
+
+    expect(response.status).toBe(200);
+    expect(result.workingCards.map((item) => item.quantity)).toEqual([2, 1, 1]);
+    expect(result.workingCards.map((item) => item.backMode)).toEqual([card.backMode, "none", card.backMode]);
+    expect(result.impact.affectedPhysicalCards).toBe(1);
+  });
+
+  it("rejects an API request that targets a DFC with a generic physical back choice", async () => {
+    const dfc: WorkingCard = {
+      ...card,
+      id: "dfc-api", identity: { ...identity, metadata: { layout: "transform", faces: [{ name: "Front" }, { name: "Back" }] } },
+      faces: [{ id: "front", side: "front", name: "Front" }, { id: "back", side: "back", name: "Back" }],
+      selectedArtworkByFace: { front: card.selectedArtworkByFace.front!, back: { candidateId: "scryfall:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb:back", source: "scryfall", identityId: identity.id, faceId: "back" } },
+      backMode: "auto", backModeSelectionPolicy: "automatic",
+    };
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "apply-generic-back-scope", cards: [dfc], targetCardId: dfc.id,
+      scope: "all-simple-project", choiceMode: "none",
+    }), testWorkbench());
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_PHYSICAL_BACK_SELECTION" });
+  });
+
+  it("applies a physical-copy artwork scope through the API as one ordered split", async () => {
+    const alternative = { ...candidate, id: `upload:${"d".repeat(64)}` };
+    const workbench = testWorkbench({
+      getArtworkCandidate: vi.fn(async () => alternative),
+      selectArtwork: vi.fn((workingCard: WorkingCard, side: "front" | "back", selected: ArtworkCandidate) => selectWorkingCardArtwork(workingCard, side, {
+        candidateId: selected.id, source: selected.source, identityId: workingCard.identity?.id ?? null, faceId: side, selectionPolicy: "user-selected",
+      })),
+    });
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "apply-artwork-scope", cards: [{ ...card, quantity: 4 }], targetCardId: card.id,
+      faceId: "front", candidateId: alternative.id, scope: "physical-copy", physicalCardIndex: 2,
+    }), workbench);
+    const result = await response.json() as { workingCards: WorkingCard[] };
+
+    expect(response.status).toBe(200);
+    expect(result.workingCards.map((item) => item.quantity)).toEqual([2, 1, 1]);
+    expect(result.workingCards.map((item) => item.order)).toEqual([0, 1, 2]);
+    expect(result.workingCards.map((item) => item.selectedArtworkByFace.front?.candidateId)).toEqual([
+      candidateId, alternative.id, candidateId,
+    ]);
+    expect(result.workingCards[1]?.identity).toEqual(card.identity);
+    expect(result.workingCards[1]?.manualBackArtwork).toEqual(card.manualBackArtwork);
+    expect(result.workingCards[1]?.mpcReferences).toEqual(card.mpcReferences);
+  });
+
+  it("rejects a new simple-card Scryfall back through the M6 scoped API before provider lookup", async () => {
+    const forbidden = { ...candidate, id: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:back", source: "scryfall" as const, faceId: "back" as const };
+    const getArtworkCandidate = vi.fn(async () => forbidden);
+    const selectArtwork = vi.fn((workingCard: WorkingCard) => workingCard);
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "apply-artwork-scope", cards: [card], targetCardId: card.id, faceId: "back",
+      scope: "entry", candidateId: forbidden.id,
+    }), testWorkbench({ getArtworkCandidate, selectArtwork }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_PHYSICAL_BACK_SELECTION" });
+    expect(getArtworkCandidate).not.toHaveBeenCalled();
+    expect(selectArtwork).not.toHaveBeenCalled();
+  });
+
+  it("updates MPC back provenance only on entries included in the chosen scope", async () => {
+    const manualCandidate: ArtworkCandidate = {
+      id: `mpc:${"f".repeat(64)}`, source: "mpc", identityId: null, faceId: "back",
+      providerAssetId: "scoped-cardback", originalAvailable: true, metadata: { cardType: "CARDBACK" },
+    };
+    const alreadySelectedElsewhere = {
+      ...card, id: "outside-scope", order: 1,
+      manualBackArtwork: { candidateId: manualCandidate.id, source: "mpc" as const, identityId: null, faceId: "back" as const, providerAssetId: manualCandidate.providerAssetId, selectionPolicy: "user-selected" as const },
+      backMode: "manual" as const,
+    };
+    const selectManualBackArtwork = vi.fn((workingCard: WorkingCard) => ({ ...workingCard, provenanceUpdated: true }));
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "apply-generic-back-scope", cards: [card, alreadySelectedElsewhere], targetCardId: card.id,
+      scope: "entry", choiceMode: "mpc", candidateId: manualCandidate.id,
+    }), testWorkbench({ getArtworkCandidate: vi.fn(async () => manualCandidate), selectManualBackArtwork }));
+    const result = await response.json() as { workingCards: Array<WorkingCard & { provenanceUpdated?: boolean }> };
+
+    expect(response.status).toBe(200);
+    expect(selectManualBackArtwork).toHaveBeenCalledTimes(1);
+    expect(selectManualBackArtwork).toHaveBeenCalledWith(expect.objectContaining({ id: card.id }), manualCandidate);
+    expect(result.workingCards[1]).not.toHaveProperty("provenanceUpdated");
+  });
+
+  it("applies all-equal artwork by provider and CardIdentity ID rather than by name", async () => {
+    const alternative = { ...candidate, id: `upload:${"e".repeat(64)}` };
+    const otherIdentityCard = { ...card, id: "same-name-other-identity", order: 2, identity: { ...identity, id: "scryfall:oracle:different", name: identity.name } };
+    const workbench = testWorkbench({
+      getArtworkCandidate: vi.fn(async () => alternative),
+      selectArtwork: vi.fn((workingCard: WorkingCard, side: "front" | "back", selected: ArtworkCandidate) => selectWorkingCardArtwork(workingCard, side, {
+        candidateId: selected.id, source: selected.source, identityId: workingCard.identity?.id ?? null, faceId: side, selectionPolicy: "user-selected",
+      })),
+    });
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "apply-artwork-scope", cards: [card, { ...card, id: "same-identity-copy", order: 1 }, otherIdentityCard],
+      targetCardId: card.id, faceId: "front", candidateId: alternative.id, scope: "same-identity",
+    }), workbench);
+    const result = await response.json() as { workingCards: WorkingCard[] };
+
+    expect(response.status).toBe(200);
+    expect(result.workingCards.map((item) => item.selectedArtworkByFace.front?.candidateId)).toEqual([
+      alternative.id, alternative.id, candidateId,
+    ]);
+  });
+
   it.each([
     { label: "Scryfall", candidate: { ...candidate, id: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", source: "scryfall" as const, faceId: "front" } },
     { label: "upload", candidate },

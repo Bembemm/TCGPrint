@@ -4,6 +4,7 @@ import type { ArtworkCatalogSource } from "../artwork/types";
 import type { ArtworkCandidate, BackLibraryAssetReference, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardBackMode, WorkingCardBackModeSelectionPolicy, WorkingCardMpcReference } from "../core/cards/types";
 import { isSafeArtworkCandidateId } from "../core/cards/ids";
 import { BackSelectionPolicyError, isDoubleFacedIdentity, isEligibleGenericPhysicalBack, isEligibleIdentityFaceSelection } from "../core/cards/back-selection";
+import { applyArtworkSelectionScope, applyGenericBackScope, ArtworkSelectionScopeError, type ArtworkSelectionScope, type GenericBackSelectionScope, type GenericBackChoice } from "../core/cards/artwork-selection-scope";
 import { sanitizeCardIdentityMetadata } from "../core/cards/safe-identity-metadata";
 import type { UniversalImportRequest } from "../import-engine/types";
 import { sanitizeRelativeImportPath } from "../import-engine/source-path";
@@ -372,6 +373,7 @@ function noStore(response: Response): Response {
 function respondError(error: unknown): Response {
   if (error instanceof ApiRequestError) return Response.json({ code: error.code, message: error.message }, { status: error.status });
   if (error instanceof BackSelectionPolicyError) return Response.json({ code: "INVALID_PHYSICAL_BACK_SELECTION", message: error.message }, { status: 400 });
+  if (error instanceof ArtworkSelectionScopeError) return Response.json({ code: error.code, message: error.message }, { status: 400 });
   if (error instanceof MpcArtworkFilterValidationError) return Response.json({ code: "INVALID_MPC_FILTERS", message: error.message }, { status: 400 });
   if (error instanceof CalibrationError) {
     const status = error.code === "PROFILE_NOT_FOUND" ? 404
@@ -593,6 +595,24 @@ export async function handleCardSearch(request: Request, workbench: CardWorkbenc
   } catch (error) { return respondError(error); }
 }
 
+function artworkSelectionScope(value: unknown): ArtworkSelectionScope {
+  if (value === "entry" || value === "physical-copy" || value === "same-identity") return value;
+  throw new ApiRequestError(400, "INVALID_SCOPE", "Artwork scope must be entry, physical-copy, or same-identity.");
+}
+
+function genericBackSelectionScope(value: unknown): GenericBackSelectionScope {
+  if (value === "entry" || value === "physical-copy" || value === "same-identity" || value === "all-simple-project") return value;
+  throw new ApiRequestError(400, "INVALID_SCOPE", "Back scope must be entry, physical-copy, same-identity, or all-simple-project.");
+}
+
+function physicalCardIndex(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) >= 500) {
+    throw new ApiRequestError(400, "INVALID_PHYSICAL_INDEX", "physicalCardIndex must be a zero-based index between 0 and 499.");
+  }
+  return value as number;
+}
+
 export async function handleResolve(request: Request, workbench: CardWorkbench): Promise<Response> {
   try {
     const body = await parseJsonRequest(request);
@@ -661,9 +681,89 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
       const updated = workbench.selectManualBackArtwork(card, candidate);
       return Response.json({ workingCards: [updated], providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
     }
+    if (action === "apply-artwork-scope") {
+      const cards = parseWorkingCards(body.cards);
+      const targetCardId = requiredString(body.targetCardId, "targetCardId", 180);
+      const target = cards.find((card) => card.id === targetCardId);
+      if (!target) throw new ApiRequestError(404, "CARD_NOT_FOUND", "The selected WorkingCard is not present in the submitted project state.");
+      const faceId = body.faceId === "back" ? "back" : body.faceId === "front" ? "front" : undefined;
+      if (!faceId) throw new ApiRequestError(400, "INVALID_FACE", "Face must be front or back.");
+      if (!isEligibleIdentityFaceSelection(target, faceId) || !target.faces.some((face) => face.side === faceId)) {
+        throw new ApiRequestError(400, "INVALID_PHYSICAL_BACK_SELECTION", "A simple card's back artwork must use Back Library or a verified MPC cardback.");
+      }
+      const scope = artworkSelectionScope(body.scope);
+      const selectedPhysicalCardIndex = physicalCardIndex(body.physicalCardIndex);
+      const candidateId = requiredString(body.candidateId, "candidateId", 128);
+      const candidate = await workbench.getArtworkCandidate(candidateId, {
+        mpcReferences: target.mpcReferences,
+        ...(target.identity ? { identity: target.identity } : {}),
+        signal: request.signal,
+      });
+      if (!candidate) throw new ApiRequestError(404, "ARTWORK_CANDIDATE_NOT_FOUND", "Artwork candidate is not available in the local catalog.");
+      const selected = workbench.selectArtwork(target, faceId, candidate).selectedArtworkByFace[faceId];
+      if (!selected) throw new ApiRequestError(409, "ARTWORK_SELECTION_FAILED", "The artwork candidate could not be turned into a durable selection reference.");
+      const updatedCards = applyArtworkSelectionScope({
+        cards,
+        targetCardId,
+        faceId,
+        artwork: selected,
+        scope,
+        ...(selectedPhysicalCardIndex === undefined ? {} : { physicalCardIndex: selectedPhysicalCardIndex }),
+      });
+      return Response.json({ workingCards: updatedCards, providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
+    }
+    if (action === "apply-generic-back-scope") {
+      const cards = parseWorkingCards(body.cards);
+      const targetCardId = requiredString(body.targetCardId, "targetCardId", 180);
+      const target = cards.find((card) => card.id === targetCardId);
+      if (!target) throw new ApiRequestError(404, "CARD_NOT_FOUND", "The selected WorkingCard is not present in the submitted project state.");
+      if (isDoubleFacedIdentity(target.identity)) throw new ApiRequestError(400, "INVALID_PHYSICAL_BACK_SELECTION", "A double-faced card's Back tab edits its real face and cannot use generic cardback actions.");
+      const scope = genericBackSelectionScope(body.scope);
+      const choiceMode = body.choiceMode;
+      let choice: GenericBackChoice;
+      let candidate: ArtworkCandidate | undefined;
+      if (choiceMode === "none" || choiceMode === "project-default") {
+        choice = { mode: choiceMode };
+      } else if (choiceMode === "library") {
+        const asset = parseBackLibraryReference(body.asset, "asset");
+        if (!asset) throw new ApiRequestError(400, "INVALID_REQUEST", "A library back selection requires an immutable Back Library asset reference.");
+        choice = { mode: "library", asset };
+      } else if (choiceMode === "mpc") {
+        const candidateId = requiredString(body.candidateId, "candidateId", 128);
+        candidate = await workbench.getArtworkCandidate(candidateId, {
+          mpcReferences: target.mpcReferences,
+          ...(target.identity ? { identity: target.identity } : {}),
+          signal: request.signal,
+        });
+        if (!candidate || !isEligibleGenericPhysicalBack(target, candidate)) {
+          throw new ApiRequestError(400, "INVALID_PHYSICAL_BACK_SELECTION", "A simple card's physical back must be a verified MPC cardback.");
+        }
+        choice = { mode: "mpc", candidate };
+      } else {
+        throw new ApiRequestError(400, "INVALID_BACK_CHOICE", "Generic back choice must be a Back Library asset, MPC cardback, Project Default, or none.");
+      }
+      const selectedPhysicalCardIndex = physicalCardIndex(body.physicalCardIndex);
+      const result = applyGenericBackScope({
+        cards,
+        targetCardId,
+        choice,
+        scope,
+        ...(selectedPhysicalCardIndex === undefined ? {} : { physicalCardIndex: selectedPhysicalCardIndex }),
+      });
+      const targetCardIds = new Set(result.targetCardIds);
+      const updatedCards = candidate
+        ? result.cards.map((card) => targetCardIds.has(card.id) && card.manualBackArtwork?.candidateId === candidate!.id ? workbench.selectManualBackArtwork(card, candidate!) : card)
+        : result.cards;
+      return Response.json({ workingCards: updatedCards, impact: {
+        affectedEntries: result.affectedEntries,
+        affectedPhysicalCards: result.affectedPhysicalCards,
+        preservedDfcEntries: result.preservedDfcEntries,
+        preservedDfcPhysicalCards: result.preservedDfcPhysicalCards,
+      }, providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
+    }
     const cards = parseWorkingCards(body.cards);
     if (action === "custom") return Response.json({ workingCards: cards.map((card) => workbench.keepWorkingCardCustom(card)), providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
-    if (action !== "resolve") throw new ApiRequestError(400, "INVALID_ACTION", "Action must be resolve, reresolve, confirm, select, select-manual-back-artwork, restore-default-artwork or custom.");
+    if (action !== "resolve") throw new ApiRequestError(400, "INVALID_ACTION", "Action must be resolve, reresolve, confirm, select, select-manual-back-artwork, apply-artwork-scope, apply-generic-back-scope, restore-default-artwork or custom.");
     const result = await workbench.resolveWorkingCards(cards, { signal: request.signal });
     return Response.json({ ...result, providerHealth: safeProviderHealth(result.providerHealth) });
   } catch (error) { return respondError(error); }

@@ -5,6 +5,7 @@ import { editorHistoryReducer, WorkingCardList, workingCardEditorReducer, type E
 import * as workbenchModule from "../../../src/app/card-identity-workbench";
 import { artworkWindowLimitForRequest, ArtworkCandidateGrid, type ArtworkCandidateView } from "../../../src/app/artwork-candidate-grid";
 import { createWorkingCardEditorState } from "../../../core/cards/working-card-editor";
+import { applyArtworkSelectionScope } from "../../../core/cards/artwork-selection-scope";
 import { createEditorHistoryState } from "../../../core/cards/editor-history";
 import { projectSnapshotKey } from "../../../src/app/project-session";
 import { DEFAULT_PROJECT_SETTINGS } from "../../../persistence/projects/serializer";
@@ -626,6 +627,24 @@ describe("working card editor list UI", () => {
     expect(edited.past).toHaveLength(1);
     const undone = editorHistoryReducer(edited, { type: "undo" });
     expect(undone.present.cards).toEqual([card, second]);
+  });
+
+  it("undoes and redoes a physical-copy artwork split as one edit", () => {
+    const source = { ...card, quantity: 4 };
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState([source]), face: "front" });
+    const splitCards = applyArtworkSelectionScope({
+      cards: [source], targetCardId: source.id, faceId: "front", scope: "physical-copy", physicalCardIndex: 2,
+      artwork: { candidateId: `upload:${"9".repeat(64)}`, source: "upload", identityId: null, faceId: "front", selectionPolicy: "user-selected" },
+    });
+    const edited = editorHistoryReducer(initial, { type: "apply-resolve-all-result", cards: splitCards });
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    const redone = editorHistoryReducer(undone, { type: "redo" });
+
+    expect(edited.past).toHaveLength(1);
+    expect(edited.present.cards.map(({ quantity }) => quantity)).toEqual([2, 1, 1]);
+    expect(undone.present.cards).toEqual([source]);
+    expect(redone.present.cards.map(({ quantity }) => quantity)).toEqual([2, 1, 1]);
+    expect(redone.present.cards[1]?.selectedArtworkByFace.front?.candidateId).toBe(`upload:${"9".repeat(64)}`);
   });
 
   it("undoes and redoes a manually confirmed identity without changing the WorkingCard ID", () => {
