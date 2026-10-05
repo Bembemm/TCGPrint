@@ -480,6 +480,7 @@ describe("card APIs", () => {
   it("applies a physical-copy artwork scope through the API as one ordered split", async () => {
     const alternative = { ...candidate, id: `upload:${"d".repeat(64)}` };
     const workbench = testWorkbench({
+      listArtworkCandidates: vi.fn(async () => [alternative]),
       getArtworkCandidate: vi.fn(async () => alternative),
       selectArtwork: vi.fn((workingCard: WorkingCard, side: "front" | "back", selected: ArtworkCandidate) => selectWorkingCardArtwork(workingCard, side, {
         candidateId: selected.id, source: selected.source, identityId: workingCard.identity?.id ?? null, faceId: side, selectionPolicy: "user-selected",
@@ -500,6 +501,141 @@ describe("card APIs", () => {
     expect(result.workingCards[1]?.identity).toEqual(card.identity);
     expect(result.workingCards[1]?.manualBackArtwork).toEqual(card.manualBackArtwork);
     expect(result.workingCards[1]?.mpcReferences).toEqual(card.mpcReferences);
+  });
+
+  it.each([
+    {
+      label: "legacy select rejects another identity even when its face matches",
+      action: "select" as const,
+      target: card,
+      faceId: "front" as const,
+      artwork: { ...candidate, id: "scryfall:other:front", source: "scryfall" as const, identityId: "scryfall:oracle:other" },
+    },
+    {
+      label: "scoped select rejects the same DFC identity's Front as Back",
+      action: "apply-artwork-scope" as const,
+      target: {
+        ...card,
+        id: "delver-face-target",
+        identity: { ...identity, id: "scryfall:oracle:delver", name: "Delver of Secrets // Insectile Aberration", metadata: { layout: "transform", faces: [{ name: "Delver of Secrets" }, { name: "Insectile Aberration" }] } },
+        faces: [{ id: "front", side: "front" as const, name: "Delver of Secrets" }, { id: "back", side: "back" as const, name: "Insectile Aberration" }],
+        selectedArtworkByFace: {},
+      },
+      faceId: "back" as const,
+      artwork: { ...candidate, id: "scryfall:delver:front", source: "scryfall" as const, identityId: "scryfall:oracle:delver", faceId: "front" as const },
+    },
+    {
+      label: "scoped select rejects another identity's Back for a DFC",
+      action: "apply-artwork-scope" as const,
+      target: {
+        ...card,
+        id: "delver-other-identity-target",
+        identity: { ...identity, id: "scryfall:oracle:delver", name: "Delver of Secrets // Insectile Aberration", metadata: { layout: "transform", faces: [{ name: "Delver of Secrets" }, { name: "Insectile Aberration" }] } },
+        faces: [{ id: "front", side: "front" as const, name: "Delver of Secrets" }, { id: "back", side: "back" as const, name: "Insectile Aberration" }],
+        selectedArtworkByFace: {},
+      },
+      faceId: "back" as const,
+      artwork: { ...candidate, id: "scryfall:other:back", source: "scryfall" as const, identityId: "scryfall:oracle:other", faceId: "back" as const },
+    },
+  ])("$label", async ({ action, target, faceId, artwork }) => {
+    const before = structuredClone(target);
+    const getArtworkCandidate = vi.fn(async () => artwork);
+    const selectArtwork = vi.fn((workingCard: WorkingCard) => workingCard);
+    const workbench = testWorkbench({ getArtworkCandidate, selectArtwork });
+    const requestBody = action === "select"
+      ? { action, card: target, faceId, candidateId: artwork.id }
+      : { action, cards: [target], targetCardId: target.id, faceId, candidateId: artwork.id, scope: "entry" };
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", requestBody), workbench);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_ARTWORK_IDENTITY" });
+    expect(workbench.selectArtwork).not.toHaveBeenCalled();
+    expect(target).toEqual(before);
+  });
+
+  it.each([
+    { label: "Scryfall", source: "scryfall" as const, id: "scryfall:correct:front", action: "select" as const },
+    { label: "MPC", source: "mpc" as const, id: `mpc:${"9".repeat(64)}`, action: "apply-artwork-scope" as const },
+  ])("accepts a correctly bound $label candidate", async ({ source, id, action }) => {
+    const valid: ArtworkCandidate = { ...candidate, id, source, identityId: identity.id, faceId: "front" };
+    const selectArtwork = vi.fn((workingCard: WorkingCard, faceId: "front" | "back", selected: ArtworkCandidate) => selectWorkingCardArtwork(workingCard, faceId, {
+      candidateId: selected.id, source: selected.source, identityId: workingCard.identity?.id ?? null, faceId,
+    }));
+    const workbench = testWorkbench({ getArtworkCandidate: vi.fn(async () => valid), selectArtwork });
+    const requestBody = action === "select"
+      ? { action, card, faceId: "front", candidateId: id }
+      : { action, cards: [card], targetCardId: card.id, faceId: "front", candidateId: id, scope: "entry" };
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", requestBody), workbench);
+    const body = await response.json() as { workingCards: WorkingCard[] };
+
+    expect(response.status).toBe(200);
+    expect(selectArtwork).toHaveBeenCalledWith(card, "front", valid);
+    expect(body.workingCards[0]?.selectedArtworkByFace.front).toMatchObject({ candidateId: id, identityId: identity.id, faceId: "front" });
+  });
+
+  it("accepts an upload only after resolving its real identity and face association", async () => {
+    const unlinked: ArtworkCandidate = { ...candidate, identityId: null, faceId: "front" };
+    const linked: ArtworkCandidate = { ...unlinked, identityId: identity.id, faceId: "front" };
+    const listArtworkCandidates = vi.fn(async (identityId: string, faceId: "front" | "back", source: string) =>
+      identityId === identity.id && faceId === "front" && source === "upload" ? [linked] : []);
+    const selectArtwork = vi.fn((workingCard: WorkingCard, faceId: "front" | "back", selected: ArtworkCandidate) => selectWorkingCardArtwork(workingCard, faceId, {
+      candidateId: selected.id, source: selected.source, identityId: workingCard.identity?.id ?? null, faceId,
+    }));
+    const workbench = testWorkbench({ getArtworkCandidate: vi.fn(async () => unlinked), listArtworkCandidates, selectArtwork });
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "select", card, faceId: "front", candidateId: unlinked.id,
+    }), workbench);
+    const body = await response.json() as { workingCards: WorkingCard[] };
+
+    expect(response.status).toBe(200);
+    expect(listArtworkCandidates).toHaveBeenCalledWith(identity.id, "front", "upload", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(selectArtwork).toHaveBeenCalledWith(card, "front", linked);
+    expect(body.workingCards[0]?.selectedArtworkByFace.front).toMatchObject({ candidateId: unlinked.id, identityId: identity.id, faceId: "front" });
+  });
+
+  it("rejects an unlinked upload for a resolved identity instead of treating null identity as a wildcard", async () => {
+    const unlinked: ArtworkCandidate = { ...candidate, id: `upload:${"c".repeat(64)}`, identityId: null, faceId: "front" };
+    const selectArtwork = vi.fn((workingCard: WorkingCard) => workingCard);
+    const listArtworkCandidates = vi.fn(async () => []);
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "select", card, faceId: "front", candidateId: unlinked.id,
+    }), testWorkbench({ getArtworkCandidate: vi.fn(async () => unlinked), listArtworkCandidates, selectArtwork }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_ARTWORK_IDENTITY" });
+    expect(listArtworkCandidates).toHaveBeenCalledWith(identity.id, "front", "upload", expect.any(Object));
+    expect(selectArtwork).not.toHaveBeenCalled();
+    expect(card.selectedArtworkByFace.front?.candidateId).toBe(candidateId);
+  });
+
+  it("preserves M1 custom uploads with a real custom-catalog face association", async () => {
+    const custom: WorkingCard = {
+      ...card,
+      identity: null,
+      identityResolution: { status: "custom", method: "custom", candidates: [], confirmed: true },
+      faces: [{ id: "front", side: "front", name: "Custom front" }, { id: "back", side: "back", name: "Custom back" }],
+      selectedArtworkByFace: {},
+      importSource: { sourceId: "custom-import", importKind: "image", entryKind: "custom-card" },
+    };
+    const unlinked: ArtworkCandidate = { ...candidate, identityId: null, faceId: "front" };
+    const customCatalogCandidate: ArtworkCandidate = { ...unlinked, identityId: "custom:artwork-picker", faceId: "back" };
+    const selectArtwork = vi.fn((workingCard: WorkingCard, faceId: "front" | "back", selected: ArtworkCandidate) => selectWorkingCardArtwork(workingCard, faceId, {
+      candidateId: selected.id, source: selected.source, identityId: workingCard.identity?.id ?? null, faceId,
+    }));
+    const workbench = testWorkbench({
+      getArtworkCandidate: vi.fn(async () => unlinked),
+      listArtworkCandidates: vi.fn(async (identityId: string, faceId: "front" | "back", source: string) =>
+        identityId === "custom:artwork-picker" && faceId === "back" && source === "upload" ? [customCatalogCandidate] : []),
+      selectArtwork,
+    });
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "select", card: custom, faceId: "back", candidateId: unlinked.id,
+    }), workbench);
+    const body = await response.json() as { workingCards: WorkingCard[] };
+
+    expect(response.status).toBe(200);
+    expect(selectArtwork).toHaveBeenCalledWith(expect.objectContaining({ id: custom.id, identity: null }), "back", customCatalogCandidate);
+    expect(body.workingCards[0]?.selectedArtworkByFace.back).toMatchObject({ candidateId: unlinked.id, identityId: null, faceId: "back" });
   });
 
   it("rejects a new simple-card Scryfall back through the M6 scoped API before provider lookup", async () => {
@@ -544,6 +680,7 @@ describe("card APIs", () => {
     const alternative = { ...candidate, id: `upload:${"e".repeat(64)}` };
     const otherIdentityCard = { ...card, id: "same-name-other-identity", order: 2, identity: { ...identity, id: "scryfall:oracle:different", name: identity.name } };
     const workbench = testWorkbench({
+      listArtworkCandidates: vi.fn(async () => [alternative]),
       getArtworkCandidate: vi.fn(async () => alternative),
       selectArtwork: vi.fn((workingCard: WorkingCard, side: "front" | "back", selected: ArtworkCandidate) => selectWorkingCardArtwork(workingCard, side, {
         candidateId: selected.id, source: selected.source, identityId: workingCard.identity?.id ?? null, faceId: side, selectionPolicy: "user-selected",

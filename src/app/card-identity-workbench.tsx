@@ -1701,9 +1701,24 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         : pickerCard?.quantity ?? 0;
   const plannedBackDfcCount = pickerScope === "all-simple-project" ? preservedDfcCards.reduce((sum, card) => sum + card.quantity, 0) : 0;
   const selectedBackAssetId = pickerCard?.manualBackAsset?.assetId;
+  const currentSimpleBack = manualPhysicalBackPicker && pickerCard
+    ? pickerCard.backMode === "none"
+      ? { mode: "none" as const, label: "Sem verso" }
+      : pickerCard.backMode === "project-default"
+        ? { mode: "project-default" as const, label: "Project Default Back" }
+        : pickerCard.backMode === "manual" && pickerCard.manualBackAsset
+          ? {
+            mode: "library" as const,
+            assetId: pickerCard.manualBackAsset.assetId,
+            label: `Back Library · ${backLibraryAssets.find((asset) => asset.assetId === pickerCard.manualBackAsset?.assetId)?.name ?? pickerCard.manualBackAsset.assetId}`,
+          }
+          : pickerCard.backMode === "manual" && pickerCard.manualBackArtwork
+            ? { mode: "artwork" as const, candidateId: pickerCard.manualBackArtwork.candidateId, label: `${labelSource(pickerCard.manualBackArtwork.source)} · ${pickerCard.manualBackArtwork.candidateId}` }
+            : { mode: "auto" as const, label: "Verso automático" }
+    : null;
   const pendingBackChoiceLabel = pendingBackChoice?.mode === "none" ? "Sem verso"
     : pendingBackChoice?.mode === "project-default" ? "Project Default Back"
-      : pendingBackChoice?.mode === "library" ? `Back Library · ${pendingBackChoice.asset.assetId}`
+      : pendingBackChoice?.mode === "library" ? `Back Library · ${backLibraryAssets.find((asset) => asset.assetId === pendingBackChoice.asset.assetId)?.name ?? pendingBackChoice.asset.assetId}`
         : "";
   const pickerBackLibraryAssets = backLibraryAssets.filter((asset) =>
     (asset.selectable !== false && !asset.retired) || asset.assetId === selectedBackAssetId,
@@ -1762,19 +1777,24 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
 
     {manualPhysicalBackPicker && <section className="simple-back-options" aria-label="Opções de verso para carta simples">
       <h3>Verso da carta simples</h3>
+      {currentSimpleBack && <p className="simple-back-current" role="status" aria-label="Estado atual do verso">Estado atual do verso: {currentSimpleBack.label}</p>}
       <div className="simple-back-semantic-options">
-        <button type="button" className={`button ${pendingBackChoice?.mode === "none" ? "primary" : "secondary"}`} disabled={interactionBusy} onClick={() => chooseSemanticBack({ mode: "none" })}>Sem verso</button>
-        {projectDefaultBack && <button type="button" className={`button ${pendingBackChoice?.mode === "project-default" ? "primary" : "secondary"}`} disabled={interactionBusy} onClick={() => chooseSemanticBack({ mode: "project-default" })}>Project Default Back · {backLibraryAssets.find((asset) => asset.assetId === projectDefaultBack.assetId)?.name ?? "configurado"}</button>}
+        <button type="button" aria-current={currentSimpleBack?.mode === "none" ? "true" : undefined} aria-pressed={pendingBackChoice?.mode === "none"} className={`button ${pendingBackChoice?.mode === "none" || currentSimpleBack?.mode === "none" ? "primary" : "secondary"}`} disabled={interactionBusy} onClick={() => chooseSemanticBack({ mode: "none" })}>Sem verso{currentSimpleBack?.mode === "none" ? " · Atual" : ""}</button>
+        {projectDefaultBack && <button type="button" aria-current={currentSimpleBack?.mode === "project-default" ? "true" : undefined} aria-pressed={pendingBackChoice?.mode === "project-default"} className={`button ${pendingBackChoice?.mode === "project-default" || currentSimpleBack?.mode === "project-default" ? "primary" : "secondary"}`} disabled={interactionBusy} onClick={() => chooseSemanticBack({ mode: "project-default" })}>Project Default Back · {backLibraryAssets.find((asset) => asset.assetId === projectDefaultBack.assetId)?.name ?? "configurado"}{currentSimpleBack?.mode === "project-default" ? " · Atual" : ""}</button>}
       </div>
       <div className="picker-back-library">
         <h4>Back Library</h4>
         {pickerBackLibraryAssets.length === 0 && <p className="muted">A Back Library ainda não tem imagens disponíveis. Adicione uma pela seção Exportar → Back Library.</p>}
         <div className="picker-back-library-grid">
-          {pickerBackLibraryAssets.map((asset) => <button key={asset.assetId} type="button" className={`picker-back-asset ${pendingBackChoice?.mode === "library" && pendingBackChoice.asset.assetId === asset.assetId ? "is-selected" : ""}`} disabled={interactionBusy || asset.retired} onClick={() => chooseSemanticBack({ mode: "library", asset: { assetId: asset.assetId, sha256: asset.sha256, format: asset.format } })}>
+          {pickerBackLibraryAssets.map((asset) => {
+            const currentAsset = currentSimpleBack?.mode === "library" && currentSimpleBack.assetId === asset.assetId;
+            const pendingAsset = pendingBackChoice?.mode === "library" && pendingBackChoice.asset.assetId === asset.assetId;
+            return <button key={asset.assetId} type="button" aria-current={currentAsset ? "true" : undefined} aria-pressed={pendingAsset} className={`picker-back-asset ${pendingAsset || currentAsset ? "is-selected" : ""} ${currentAsset ? "is-current" : ""}`} disabled={interactionBusy || asset.retired} onClick={() => chooseSemanticBack({ mode: "library", asset: { assetId: asset.assetId, sha256: asset.sha256, format: asset.format } })}>
             <Image src={`/api/back-library/${encodeURIComponent(asset.assetId)}/preview`} alt={`Preview do verso ${asset.name}`} width={200} height={280} unoptimized loading="lazy" />
-            <strong>{asset.name}{asset.retired ? " · arquivado" : ""}</strong>
+            <strong>{asset.name}{asset.retired ? " · arquivado" : ""}{currentAsset ? " · Atual" : ""}</strong>
             <span>{asset.widthPx} × {asset.heightPx}px · {asset.format.toUpperCase()} · SHA-256 {asset.sha256.slice(0, 12)}</span>
-          </button>)}
+          </button>;
+          })}
         </div>
       </div>
       <p className="muted">Cardbacks MPC precisam ser do tipo CARDBACK. Imagens próprias são selecionadas pela Back Library existente.</p>

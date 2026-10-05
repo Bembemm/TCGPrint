@@ -184,8 +184,16 @@ describe("M6 Artwork Picker face context", () => {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown> & { cards?: WorkingCard[]; targetCardId?: string; choiceMode?: string; scope?: string };
         requests.push(body);
         let nextCards = body.cards ?? [simple, dfc];
-        if (body.action === "apply-generic-back-scope" && body.scope === "all-simple-project") {
-          nextCards = nextCards.map((item) => item.id === simple.id ? { ...item, backMode: "none" } : item);
+        if (body.action === "apply-generic-back-scope") {
+          nextCards = nextCards.map((item) => {
+            const shouldApply = body.scope === "all-simple-project" ? item.id === simple.id : item.id === body.targetCardId;
+            if (!shouldApply) return item;
+            if (body.choiceMode === "none") return { ...item, backMode: "none", manualBackAsset: undefined, manualBackArtwork: undefined };
+            if (body.choiceMode === "project-default") return { ...item, backMode: "project-default", manualBackAsset: undefined, manualBackArtwork: undefined };
+            if (body.choiceMode === "library") return { ...item, backMode: "manual", backModeSelectionPolicy: "explicit", manualBackAsset: body.asset as WorkingCard["manualBackAsset"], manualBackArtwork: undefined };
+            if (body.choiceMode === "mpc") return { ...item, backMode: "manual", backModeSelectionPolicy: "explicit", manualBackAsset: undefined, manualBackArtwork: { candidateId: String(body.candidateId), source: "mpc", identityId: null, faceId: "back", selectionPolicy: "user-selected" } };
+            return item;
+          });
         }
         return Response.json({ workingCards: nextCards, impact: { affectedEntries: 1, affectedPhysicalCards: 2, preservedDfcEntries: 1, preservedDfcPhysicalCards: 1 }, providerHealth });
       }
@@ -220,15 +228,29 @@ describe("M6 Artwork Picker face context", () => {
     expect(within(dialog).getByRole("button", { name: "Sem verso" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Project Default Back · Blue cardback/ })).toBeInTheDocument();
     expect(within(dialog).getByRole("heading", { name: "Back Library" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Project Default Back");
+    expect(within(dialog).getByRole("button", { name: /Project Default Back · Blue cardback/ })).toHaveAttribute("aria-current", "true");
     expect(dialog.querySelector(".picker-back-asset")).toBeInTheDocument();
     expect(await within(dialog).findByText("MPC cardbacks")).toBeInTheDocument();
     expect(requests).toContainEqual(expect.objectContaining({ faceId: "front", source: "mpc", physicalBackArtwork: true }));
 
+    await user.click(within(dialog).getByRole("button", { name: "Sem verso" }));
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Project Default Back");
+    expect(within(dialog).getByText("Nova escolha: Sem verso")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Sem verso" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar seleção" }));
+
     await user.click(within(dialog).getByRole("button", { name: /Project Default Back · Blue cardback/ }));
     await user.click(within(dialog).getByRole("button", { name: "Aplicar seleção" }));
     await waitFor(() => expect(requests.filter((request) => request.action === "apply-generic-back-scope").at(-1)).toMatchObject({ choiceMode: "project-default", scope: "entry" }));
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Project Default Back");
 
-    dialog = screen.getByRole("dialog", { name: /Island/ });
+    await user.click(within(dialog).getByRole("button", { name: "Fechar seletor de arte" }));
+    await user.click(screen.getByRole("button", { name: "Selecionar arte" }));
+    dialog = await screen.findByRole("dialog", { name: /Island/ });
+    await user.click(within(dialog).getByRole("tab", { name: "Back" }));
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Project Default Back");
+    expect(within(dialog).getByRole("button", { name: /Project Default Back · Blue cardback/ })).toHaveAttribute("aria-current", "true");
 
     await user.click(within(dialog).getByRole("button", { name: "Sem verso" }));
     await user.click(within(dialog).getByRole("radio", { name: "Todas as cartas simples do Project" }));
@@ -237,16 +259,41 @@ describe("M6 Artwork Picker face context", () => {
     expect(bulkImpact).toHaveTextContent("1 carta(s) dupla-face serão preservadas");
     await user.click(within(dialog).getByRole("button", { name: "Aplicar seleção" }));
     await waitFor(() => expect(requests.filter((request) => request.action === "apply-generic-back-scope").at(-1)).toMatchObject({ choiceMode: "none", scope: "all-simple-project" }));
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Sem verso");
 
-    dialog = screen.getByRole("dialog", { name: /Island/ });
+    await user.click(within(dialog).getByRole("button", { name: "Fechar seletor de arte" }));
+    await user.click(screen.getByRole("button", { name: "Selecionar arte" }));
+    dialog = await screen.findByRole("dialog", { name: /Island/ });
+    await user.click(within(dialog).getByRole("tab", { name: "Back" }));
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Sem verso");
+    expect(within(dialog).getByRole("button", { name: /Sem verso · Atual/ })).toHaveAttribute("aria-current", "true");
     await user.click(dialog.querySelector(".picker-back-asset")!);
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Sem verso");
+    expect(within(dialog).getByText("Nova escolha: Back Library · Blue cardback")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Aplicar seleção" }));
     await waitFor(() => expect(requests.filter((request) => request.action === "apply-generic-back-scope").at(-1)).toMatchObject({ choiceMode: "library", scope: "entry", asset: { assetId: backAsset.assetId, sha256: hash, format: "png" } }));
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Back Library · Blue cardback");
 
-    dialog = screen.getByRole("dialog", { name: /Island/ });
+    await user.click(within(dialog).getByRole("button", { name: "Fechar seletor de arte" }));
+    await user.click(screen.getByRole("button", { name: "Selecionar arte" }));
+    dialog = await screen.findByRole("dialog", { name: /Island/ });
+    await user.click(within(dialog).getByRole("tab", { name: "Back" }));
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Back Library · Blue cardback");
+    expect(dialog.querySelector(".picker-back-asset")).toHaveAttribute("aria-current", "true");
+    expect(dialog.querySelector(".picker-back-asset")).toHaveClass("is-selected", "is-current");
     const mpcCard = within(dialog).getByText("MPC cardbacks").closest<HTMLElement>(".artwork-candidate")!;
     await user.click(within(mpcCard).getByRole("button", { name: "Selecionar arte" }));
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Back Library · Blue cardback");
+    expect(within(dialog).getByText("Nova escolha: MPC cardbacks · MPC Autofill")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Aplicar seleção" }));
     await waitFor(() => expect(requests.filter((request) => request.action === "apply-generic-back-scope").at(-1)).toMatchObject({ choiceMode: "mpc", scope: "entry", candidateId: simpleBackCandidate.id }));
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent(`MPC Autofill · ${simpleBackCandidate.id}`);
+
+    await user.click(within(dialog).getByRole("button", { name: "Fechar seletor de arte" }));
+    await user.click(screen.getByRole("button", { name: "Selecionar arte" }));
+    dialog = await screen.findByRole("dialog", { name: /Island/ });
+    await user.click(within(dialog).getByRole("tab", { name: "Back" }));
+    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent(`MPC Autofill · ${simpleBackCandidate.id}`);
+    expect(within(dialog).getByRole("button", { name: "Selecionada" })).toBeInTheDocument();
   }, 15_000);
 });

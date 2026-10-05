@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyArtworkSelectionScope, applyGenericBackScope, ArtworkSelectionScopeError } from "../../../core/cards/artwork-selection-scope";
-import type { SelectedArtwork, WorkingCard } from "../../../core/cards/types";
+import { applyArtworkSelectionScope, applyGenericBackScope, ArtworkSelectionScopeError, validateArtworkCandidateForCard } from "../../../core/cards/artwork-selection-scope";
+import type { ArtworkCandidate, SelectedArtwork, WorkingCard } from "../../../core/cards/types";
 
 const identity = { id: "scryfall:oracle:island", provider: "scryfall", name: "Island", resolutionMethod: "manual" as const, confidence: 1 };
 const sameNameDifferentIdentity = { ...identity, id: "scryfall:oracle:other-island", name: "Island" };
@@ -27,6 +27,20 @@ const dfc = card("delver", 1, {
 });
 
 describe("M6 artwork selection scopes", () => {
+  it("requires the real candidate identity and face to match the requested card face", () => {
+    const candidate: ArtworkCandidate = {
+      id: "scryfall:printing:front", source: "scryfall", identityId: identity.id, faceId: "front", originalAvailable: true,
+    };
+
+    expect(() => validateArtworkCandidateForCard(card("target", 0), "front", { ...candidate, identityId: sameNameDifferentIdentity.id }))
+      .toThrow(expect.objectContaining({ code: "INVALID_ARTWORK_IDENTITY" }));
+    expect(() => validateArtworkCandidateForCard(dfc, "back", candidate))
+      .toThrow(expect.objectContaining({ code: "INVALID_ARTWORK_IDENTITY" }));
+    expect(() => validateArtworkCandidateForCard(dfc, "back", { ...candidate, identityId: sameNameDifferentIdentity.id, faceId: "back" }))
+      .toThrow(expect.objectContaining({ code: "INVALID_ARTWORK_IDENTITY" }));
+    expect(validateArtworkCandidateForCard(card("target", 0), "front", candidate)).toBe(candidate);
+  });
+
   it("matches all equal cards by CardIdentity and face, never by display name", () => {
     const cards = [card("one", 0), card("same-identity", 1), card("same-name", 2, { identity: sameNameDifferentIdentity })];
     const next = applyArtworkSelectionScope({ cards, targetCardId: "one", faceId: "front", artwork: secondArtwork, scope: "same-identity" });

@@ -5,7 +5,7 @@ import type { ArtworkCandidate, BackLibraryAssetReference, CardFaceSide, CardIde
 import { isSafeArtworkCandidateId } from "../core/cards/ids";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../core/cards/limits";
 import { BackSelectionPolicyError, isDoubleFacedIdentity, isEligibleGenericPhysicalBack, isEligibleIdentityFaceSelection } from "../core/cards/back-selection";
-import { applyArtworkSelectionScope, applyGenericBackScope, ArtworkSelectionScopeError, type ArtworkSelectionScope, type GenericBackSelectionScope, type GenericBackChoice } from "../core/cards/artwork-selection-scope";
+import { applyArtworkSelectionScope, applyGenericBackScope, ArtworkSelectionScopeError, validateArtworkCandidateForCard, type ArtworkSelectionScope, type GenericBackSelectionScope, type GenericBackChoice } from "../core/cards/artwork-selection-scope";
 import { sanitizeCardIdentityMetadata } from "../core/cards/safe-identity-metadata";
 import type { UniversalImportRequest } from "../import-engine/types";
 import { sanitizeRelativeImportPath } from "../import-engine/source-path";
@@ -614,6 +614,39 @@ function physicalCardIndex(value: unknown): number | undefined {
   return value as number;
 }
 
+async function getSelectableArtworkCandidate(
+  workbench: CardWorkbench,
+  card: WorkingCard,
+  faceId: CardFaceSide,
+  candidateId: string,
+  signal: AbortSignal,
+): Promise<ArtworkCandidate> {
+  let candidate = await workbench.getArtworkCandidate(candidateId, {
+    mpcReferences: card.mpcReferences,
+    ...(card.identity ? { identity: card.identity } : {}),
+    signal,
+  });
+  if (!candidate) throw new ApiRequestError(404, "ARTWORK_CANDIDATE_NOT_FOUND", "Artwork candidate is not available in the local catalog.");
+  if (candidate.id !== candidateId) {
+    throw new ArtworkSelectionScopeError("INVALID_ARTWORK_IDENTITY", "The resolved artwork candidate does not match the requested candidate ID.");
+  }
+
+  if (candidate.source === "upload") {
+    const identityId = card.identity?.id ?? "custom:artwork-picker";
+    const scopedUploads = await workbench.listArtworkCandidates(identityId, faceId, "upload", {
+      mpcReferences: card.mpcReferences,
+      signal,
+    });
+    const associated = scopedUploads.find((item) => item.id === candidateId);
+    if (!associated) {
+      throw new ArtworkSelectionScopeError("INVALID_ARTWORK_IDENTITY", "The uploaded artwork is not associated with the requested WorkingCard identity and face.");
+    }
+    candidate = associated;
+  }
+
+  return validateArtworkCandidateForCard(card, faceId, candidate);
+}
+
 export async function handleResolve(request: Request, workbench: CardWorkbench): Promise<Response> {
   try {
     const body = await parseJsonRequest(request);
@@ -658,12 +691,7 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
         throw new ApiRequestError(400, "INVALID_PHYSICAL_BACK_SELECTION", "A simple card's back artwork must use Back Library or a verified MPC cardback.");
       }
       const candidateId = requiredString(body.candidateId, "candidateId", 128);
-      const candidate = await workbench.getArtworkCandidate(candidateId, {
-        mpcReferences: card.mpcReferences,
-        ...(card.identity ? { identity: card.identity } : {}),
-        signal: request.signal,
-      });
-      if (!candidate) throw new ApiRequestError(404, "ARTWORK_CANDIDATE_NOT_FOUND", "Artwork candidate is not available in the local catalog.");
+      const candidate = await getSelectableArtworkCandidate(workbench, card, faceId, candidateId, request.signal);
       const updated = workbench.selectArtwork(card, faceId, candidate);
       return Response.json({ workingCards: [updated], providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
     }
@@ -695,12 +723,7 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
       const scope = artworkSelectionScope(body.scope);
       const selectedPhysicalCardIndex = physicalCardIndex(body.physicalCardIndex);
       const candidateId = requiredString(body.candidateId, "candidateId", 128);
-      const candidate = await workbench.getArtworkCandidate(candidateId, {
-        mpcReferences: target.mpcReferences,
-        ...(target.identity ? { identity: target.identity } : {}),
-        signal: request.signal,
-      });
-      if (!candidate) throw new ApiRequestError(404, "ARTWORK_CANDIDATE_NOT_FOUND", "Artwork candidate is not available in the local catalog.");
+      const candidate = await getSelectableArtworkCandidate(workbench, target, faceId, candidateId, request.signal);
       const selected = workbench.selectArtwork(target, faceId, candidate).selectedArtworkByFace[faceId];
       if (!selected) throw new ApiRequestError(409, "ARTWORK_SELECTION_FAILED", "The artwork candidate could not be turned into a durable selection reference.");
       const updatedCards = applyArtworkSelectionScope({

@@ -1,5 +1,6 @@
 import { isDoubleFacedIdentity, isEligibleIdentityFaceSelection, selectManualBackArtwork, selectManualBackLibraryAsset, setWorkingCardBackMode } from "./back-selection";
 import { normalizeWorkingCardOrder } from "./working-card-editor";
+import { mpcArtworkCandidateId } from "./ids";
 import { selectArtwork } from "./working-set";
 import type { ArtworkCandidate, BackLibraryAssetReference, CardFaceSide, SelectedArtwork, WorkingCard } from "./types";
 
@@ -53,6 +54,25 @@ function requireTarget(cards: readonly WorkingCard[], targetCardId: string): Wor
   const card = cards.find((item) => item.id === targetCardId);
   if (!card) throw new ArtworkSelectionScopeError("CARD_NOT_FOUND", `WorkingCard ${targetCardId} was not found.`);
   return card;
+}
+
+/** Checks the provider candidate itself before any selection code can bind it to a target. */
+export function validateArtworkCandidateForCard(card: WorkingCard, faceId: CardFaceSide, candidate: ArtworkCandidate): ArtworkCandidate {
+  const faceExists = card.faces.some((face) => face.side === faceId);
+  const faceMatches = candidate.faceId === faceId;
+  let identityMatches = candidate.identityId === card.identity?.id;
+  if (!card.identity) {
+    const sharedCustomCatalog = candidate.identityId === "custom:artwork-picker";
+    const referencedMpcCandidate = candidate.source === "mpc"
+      && candidate.identityId === "local:mpc-reference"
+      && card.mpcReferences.some((reference) => reference.faceId === faceId
+        && mpcArtworkCandidateId(reference.importedAssetId, reference.faceId) === candidate.id);
+    identityMatches = candidate.identityId === null || sharedCustomCatalog || referencedMpcCandidate;
+  }
+  if (!faceExists || !faceMatches || !identityMatches) {
+    throw new ArtworkSelectionScopeError("INVALID_ARTWORK_IDENTITY", "The artwork candidate's catalog identity and face must match the requested WorkingCard face.");
+  }
+  return candidate;
 }
 
 function physicalTargetIndex(cards: readonly WorkingCard[], targetCardId: string, physicalCardIndex: number | undefined): { cardIndex: number; copyIndex: number } {

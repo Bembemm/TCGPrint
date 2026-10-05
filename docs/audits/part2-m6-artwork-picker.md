@@ -34,15 +34,21 @@ O picker mantém somente estado de apresentação/rascunho: face, filtro, busca,
 
 Usa o catálogo atual M3 para Todas, Scryfall, MPC Autofill e Meus uploads. A busca e ordenação são executadas sobre o array lógico completo antes da paginação. Filtros MPC avançados, atualização, revalidação e diagnósticos existentes continuam no picker. Seleção exige escopo explícito e aplica uma referência durável de candidate à face Front.
 
+O ID enviado pelo cliente não autoriza a seleção por si só. Antes da mutação, a API resolve o candidate real e confere sua face com a face solicitada e, em carta identificada, seu `identityId` com `card.identity.id`. A UI filtrada não é uma fronteira de segurança. Upload é validado pela busca existente para a identidade e face alvo, que retorna o vínculo real antes de `selectArtwork`.
+
 ### Back de carta simples
 
 Back simples tem fluxo semântico separado. Mostra opções configuradas de Project Default Back, Sem verso, assets da Back Library existente e MPC apenas quando o provider confirmou um documento `CARDBACK`. Não mostra Scryfall nem upload local como escolha genérica. Um upload destinado a cardback continua passando pela seção Back Library existente.
 
 O endpoint antigo e a nova ação por escopo rejeitam uma nova seleção Scryfall/upload como verso genérico. Parser, serializer, `resolveEffectiveCardBack` e export continuam aceitando referência Scryfall simples legada; não há migração silenciosa.
 
+O estado atual do picker vem de `WorkingCard.backMode`, `manualBackAsset` e `manualBackArtwork`, e permanece visível após aplicar, fechar e reabrir. Esse estado atual é separado da escolha pendente: o primeiro continua mostrando o verso persistido até a confirmação, enquanto “Nova escolha” mostra o rascunho. `aria-current`, `aria-pressed` e o rótulo “Atual” expõem esses estados sem depender de cor. Um asset retired que já está referenciado continua mostrado como atual, mas permanece indisponível para novas escolhas.
+
 ### DFC
 
 Front e Back selecionam `selectedArtworkByFace.front` e `.back` da mesma `CardIdentity`. O picker mostra “Carta dupla-face” e os nomes reais das faces. Ambas as faces consultam o catálogo de identidade para Scryfall, MPC e uploads compatíveis. Não renderiza ações genéricas de verso.
+
+A política compartilhada valida o candidate real nos dois caminhos da API (`select` legado e `apply-artwork-scope` M6). Candidate da Front não pode ser reetiquetado como Back, mesmo para a mesma DFC; candidate de outra identidade também é rejeitado antes de chamar `selectArtwork`. Para cartas sem identidade, upload usa a busca do catálogo custom M1 e candidates MPC de referência precisam corresponder à referência e face persistidas. Upload associado a identidade resolve o candidate pelo catálogo daquela identidade/face antes da seleção.
 
 `applyGenericBackScope` rejeita um alvo DFC e exclui DFCs de operações de projeto. A API também faz o guard antes de buscar candidato. Testes chamam domínio e API diretamente e comparam a arte Back real preservada.
 
@@ -77,22 +83,30 @@ O resultado de aplicação substitui o Working Set pelo retorno da API em uma ú
 
 ## Evidências
 
-Rodada focada executada após a implementação, cobrindo catálogo/quality/back library, Workbench/reducer/history, compositor M5, APIs, persistência/export, regras M1/M3 e os testes novos de M6:
+### Correção da revisão independente
+
+- `validateArtworkCandidateForCard` concentra a regra candidate → WorkingCard/face; a API chama a mesma função compartilhada antes da mutação em `select` legado e `apply-artwork-scope` M6.
+- O candidate deve corresponder ao ID requisitado e à face exata. Para identidade resolvida, seu `identityId` precisa ser idêntico a `card.identity.id`. Candidate com `identityId: null` só é aceito em target sem identidade; candidates upload são primeiro resolvidos pela busca do catálogo da identidade/face ou do catálogo custom M1. Uma identidade resolvida nunca recebe candidate desvinculado nem candidate de outra identidade.
+- Testes de API provam rejeição sem chamar `selectArtwork` para identidade diferente, DFC Front em Back e identidade diferente em Back. Scryfall/MPC válidos, upload realmente associado à identidade e upload custom M1 continuam aceitos.
+- O picker mostra o verso canônico derivado do `WorkingCard`: `none`, `project-default`, `manual + manualBackAsset` e `manual + manualBackArtwork`. Estado atual e pendência recebem semântica e texto separados; testes aplicam, fecham e reabrem para Sem verso, Project Default, Back Library e MPC.
+- Essa checagem acontece no endpoint/domínio, não depende dos filtros ou cards renderizados no picker.
+
+Rodada focada executada nesta correção, cobrindo catálogo/quality/back library, Workbench/reducer/history, compositor M5, APIs, persistência/export, regras M1/M3 e os testes novos de M6:
 
 ```text
-npx vitest run tests/app/artwork-catalog-flow.integration.test.tsx tests/app/artwork-quality-hydration.test.ts tests/app/back-library-controls.test.tsx tests/app/working-card-editor-ui.test.tsx tests/app/workspace-card-selection.interaction.test.tsx tests/app/canonical-compositor.interaction.test.tsx tests/app/card-api.test.ts tests/persistence/project-serializer.test.ts tests/services/project-api.test.ts tests/services/card-export.test.ts tests/core/cards/back-selection.test.ts tests/core/cards/artwork-selection-scope.test.ts tests/app/artwork-picker-dialog.test.tsx tests/app/artwork-picker-context.interaction.test.tsx tests/artwork/catalog.test.ts tests/artwork/mpc-provider-advanced.test.ts tests/artwork/providers.test.ts --maxWorkers=2
-16 test files passed · 218 tests passed
+npm test -- --run tests/app/card-api.test.ts tests/core/cards/artwork-selection-scope.test.ts tests/app/artwork-picker-context.interaction.test.tsx tests/app/artwork-picker-dialog.test.tsx tests/app/workspace-card-selection.interaction.test.tsx tests/core/cards/working-card-editor-ui.test.tsx tests/persistence/project-serializer.test.ts tests/app/artwork-catalog-flow.integration.test.tsx tests/app/artwork-quality-hydration.test.ts tests/app/back-library-controls.test.tsx tests/app/canonical-compositor.interaction.test.tsx tests/services/project-api.test.ts tests/services/card-export.test.ts tests/core/cards/back-selection.test.ts tests/artwork/catalog.test.ts tests/artwork/mpc-provider-advanced.test.ts tests/artwork/providers.test.ts
+17 test files passed · 275 tests passed
 
 npm run typecheck
 passed
 ```
 
-Gates completos executados após os commits de implementação:
+Gates completos executados sobre o delta corretivo antes do commit:
 
 ```text
 npm test
 116 test files passed · 1 skipped
-1270 tests passed · 1 skipped
+1279 tests passed · 1 skipped
 
 npm run typecheck
 passed
@@ -104,4 +118,4 @@ git diff --check
 passed
 ```
 
-O build regenerou `next-env.d.ts`; o conteúdo local conhecido foi restaurado byte a byte e permaneceu fora dos commits. A suíte também regenerou PDFs/manifests de referência; esses artefatos foram restaurados ao conteúdo do baseline.
+O build regenerou `next-env.d.ts`; o conteúdo local conhecido foi restaurado byte a byte e permaneceu fora dos commits. A suíte/build também regeneraram PDFs/manifests de referência; esses artefatos foram restaurados ao conteúdo do baseline. Os gates completos acima foram executados no delta corretivo antes do commit; o mesmo conjunto é repetido sobre o estado commitado.
