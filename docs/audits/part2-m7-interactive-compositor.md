@@ -43,6 +43,8 @@ O Workbench preserva a instância selecionada. Se reorder, repaginação ou alte
 
 Após revisão independente, o SVG do compositor usa `role="group"` para que os slots filhos mantenham sua semântica interativa de botão na árvore de acessibilidade. Recarregar o Working Set pelo fluxo de adicionar cartas limpa a seleção física UI antes de instalar as novas instâncias, evitando que IDs determinísticos reutilizados selecionem outra carta do conjunto novo.
 
+A HUD mantém seu alvo como o par `{ instanceId, workingCardId }`; as ações, inclusive Mover antes/depois, usam a instância derivada desse contexto, sem consultar a seleção global. Selecionar explicitamente outra cópia fecha a HUD; contextmenu seleciona e abre a HUD para o novo alvo em uma ação. Se a referência some ou passa a apontar para outra entrada durante remoção, replace ou reconciliação, o contexto é limpo. Assim undo que restaure o mesmo ID não reabre uma HUD antiga. O alvo da HUD permanece estado local e não é persistido.
+
 ## PDF, duplex e fidelidade
 
 O `handleCardExport` valida referências antes de qualquer leitura de artwork. O serviço exporta cópias ordenadas a partir do mesmo `PhysicalOrder`; a geometria recebe a sequência global antes de paginação. O Back duplex é montado a partir dos mesmos índices e consome o plano compartilhado, sem paginador independente. A cobertura M7 inclui ordem customizada PDF, cartas simples + DFC, long-edge e short-edge.
@@ -56,6 +58,7 @@ Cobertura focada:
 - `tests/core/cards/physical-instance-order.test.ts`: migração legacy determinística, IDs estáveis, reorder sem split, aumento/redução, remoção exata, cópia independente, delete e undo/redo.
 - `tests/core/cards/artwork-selection-scope.test.ts`: split de artwork e generic back preserva posição intercalada M6.
 - `tests/app/canonical-compositor.interaction.test.tsx`: seleção por ID, lado pareado, M6 no contexto físico customizado, clique secundário, fallback `…`, teclado, drag entre páginas, busy, skipped/reserved e ordem do preview.
+- `tests/app/canonical-compositor.interaction.test.tsx`: regressões HUD A→seleção B fecha e seleciona B; reorder explícito da instância B; contextmenu A→B substitui o único contexto HUD e move B; remover a cópia da HUD fecha suas ações, e restaurar seu ID não reabre a HUD.
 - `tests/app/compositor-zoom.interaction.test.tsx`: grupo acessível do compositor preserva o comportamento de zoom.
 - `tests/app/workspace-card-selection.interaction.test.tsx`: recarregar outro Working Set enquanto `instance-2` estava selecionada deixa a cópia homóloga do conjunto novo desmarcada; o teste falha sem limpar a seleção no fluxo `load-cards`.
 - `tests/persistence/project-serializer.test.ts`, `project-repository.test.ts`, `project-session.test.ts`, `project-autosave-persistence.test.ts`: v1–v5, round-trip v6, Project save/reopen, duplicate e recovery da ordem física.

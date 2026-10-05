@@ -44,6 +44,11 @@ interface PhysicalCardInstance {
   readonly card: WorkingCard;
 }
 
+interface ContextualHudTarget {
+  readonly instanceId: string;
+  readonly workingCardId: string;
+}
+
 const COMPOSITOR_LAYERS: readonly { readonly id: CompositorLayer; readonly label: string }[] = [
   { id: "artwork", label: "Artwork" },
   { id: "bleed", label: "Bleed" },
@@ -91,7 +96,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   const previewSide = face ?? uncontrolledSide;
   const [uncontrolledSelectedInstanceId, setUncontrolledSelectedInstanceId] = useState<string | null>(null);
   const selectedInstanceId = selectedPhysicalInstanceId === undefined ? uncontrolledSelectedInstanceId : selectedPhysicalInstanceId;
-  const [hudInstanceId, setHudInstanceId] = useState<string | null>(null);
+  const [hudTarget, setHudTarget] = useState<ContextualHudTarget | null>(null);
   const [dragSourceId, setDragSourceId] = useState<string | null>(null);
   const [dropFeedback, setDropFeedback] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -284,7 +289,12 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   const selectedInstance = selectedInstanceId === null
     ? undefined
     : physicalCards.find(({ id }) => id === selectedInstanceId);
-  const hudInstance = hudInstanceId === null ? undefined : physicalCards.find(({ id }) => id === hudInstanceId);
+  const hudInstance = hudTarget === null
+    ? undefined
+    : physicalCards.find(({ id, workingCardId }) => id === hudTarget.instanceId && workingCardId === hudTarget.workingCardId);
+  useEffect(() => {
+    if (hudTarget !== null && !hudInstance) setHudTarget(null);
+  }, [hudTarget, hudInstance]);
   const selectedPageSlot = visibleSelectedPhysicalCardIndex === null
     ? undefined
     : placement.slots.find((slot) => pagePlacement.startCardIndex + slot.cardIndex! === visibleSelectedPhysicalCardIndex);
@@ -295,6 +305,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
 
   function selectInstance(instance: PhysicalCardInstance) {
     setUncontrolledSelectedInstanceId(instance.id);
+    setHudTarget(null);
     onSelectPhysicalInstance?.(instance.id, instance.workingCardId, previewSide);
   }
 
@@ -342,12 +353,13 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     setDropTargetId(null);
   }
 
-  function moveSelectedRelative(direction: "before" | "after") {
-    if (!selectedInstance || !onReorderPhysicalInstance || interactionBusy) return;
-    const index = physicalCards.findIndex(({ id }) => id === selectedInstance.id);
+  function moveInstanceRelative(instance: PhysicalCardInstance, direction: "before" | "after") {
+    if (!onReorderPhysicalInstance || interactionBusy) return;
+    const index = physicalCards.findIndex(({ id, workingCardId }) => id === instance.id && workingCardId === instance.workingCardId);
+    if (index < 0) return;
     const neighbor = direction === "before" ? physicalCards[index - 1] : physicalCards[index + 1];
     if (!neighbor) return;
-    onReorderPhysicalInstance(selectedInstance.id, neighbor.id, direction);
+    onReorderPhysicalInstance(instance.id, neighbor.id, direction);
   }
 
   return <section className="registration-preview canonical-compositor" aria-label="Compositor live">
@@ -393,7 +405,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
         data-testid="compositor-select-artwork"
         onClick={(event) => onSelectArtwork(selectedInstance.workingCardId, selectedInstance.id, selectedInstance.physicalCardIndex, previewSide, event.currentTarget, selectedInstance.copyNumber, selectedInstance.totalCopies)}
       >Selecionar arte</button>}
-      {selectedInstance && onPhysicalAction && <button type="button" className="button secondary compositor-hud-open" aria-label={`Mais ações para ${selectedCardName}, cópia ${selectedInstance.copyNumber}`} aria-expanded={hudInstanceId === selectedInstance.id} onClick={() => setHudInstanceId((current) => current === selectedInstance.id ? null : selectedInstance.id)}>…</button>}
+      {selectedInstance && onPhysicalAction && <button type="button" className="button secondary compositor-hud-open" aria-label={`Mais ações para ${selectedCardName}, cópia ${selectedInstance.copyNumber}`} aria-expanded={hudInstance?.id === selectedInstance.id && hudInstance.workingCardId === selectedInstance.workingCardId} onClick={() => setHudTarget((current) => current?.instanceId === selectedInstance.id && current.workingCardId === selectedInstance.workingCardId ? null : { instanceId: selectedInstance.id, workingCardId: selectedInstance.workingCardId })}>…</button>}
       {selectedPageSlot && slotsCanBeSkipped && previewSide === "front" && <button type="button" className="link-button" onClick={() => toggle(selectedPageSlot.index)}>Desativar slot da carta selecionada</button>}
     </p>
     {dropFeedback && <p role="status" className="compositor-drop-feedback">{dropFeedback}</p>}
@@ -407,9 +419,9 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
         <button type="button" disabled={interactionBusy} onClick={() => onPhysicalAction("duplicate-copy", hudInstance.id, hudInstance.workingCardId)}>Duplicar como entrada independente</button>
         <button type="button" disabled={interactionBusy} onClick={() => onPhysicalAction("delete-entry", hudInstance.id, hudInstance.workingCardId)}>Remover carta inteira ({hudInstance.totalCopies} cópia(s))</button>
         <button type="button" disabled={interactionBusy} onClick={() => onPhysicalAction("open-settings", hudInstance.id, hudInstance.workingCardId)}>Configurações completas</button>
-        <button type="button" disabled={interactionBusy || hudInstance.physicalCardIndex === 0} onClick={() => moveSelectedRelative("before")}>Mover antes</button>
-        <button type="button" disabled={interactionBusy || hudInstance.physicalCardIndex >= physicalCards.length - 1} onClick={() => moveSelectedRelative("after")}>Mover depois</button>
-        <button type="button" onClick={() => setHudInstanceId(null)}>Fechar ações</button>
+        <button type="button" disabled={interactionBusy || hudInstance.physicalCardIndex === 0} onClick={() => moveInstanceRelative(hudInstance, "before")}>Mover antes</button>
+        <button type="button" disabled={interactionBusy || hudInstance.physicalCardIndex >= physicalCards.length - 1} onClick={() => moveInstanceRelative(hudInstance, "after")}>Mover depois</button>
+        <button type="button" onClick={() => setHudTarget(null)}>Fechar ações</button>
       </div>
     </section>}
     <p className="muted compositor-calibration-context" data-calibration-profile-version={settings.printerProfileSelection?.version ?? "none"}>
@@ -513,7 +525,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
                 if (!physicalInstance || !onPhysicalAction) return;
                 event.preventDefault();
                 selectInstance(physicalInstance);
-                setHudInstanceId(physicalInstance.id);
+                setHudTarget({ instanceId: physicalInstance.id, workingCardId: physicalInstance.workingCardId });
               }}
               className={`registration-preview-slot ${previewSide === "back" ? "is-back" : ""} ${isSelected ? "is-selected" : ""} ${dropTargetId === physicalInstance?.id || dropTargetId === "end" && canDropAtEnd ? "is-drop-target" : ""} ${dropTargetId === invalidDropTargetId ? "is-invalid-drop" : ""} ${dragSourceId === physicalInstance?.id ? "is-drag-source" : ""}`}
             >

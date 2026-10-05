@@ -65,6 +65,7 @@ function compositorWorkspace(
   initialPhysicalOrder?: PhysicalOrder,
   onPhysicalAction?: (action: "increase" | "remove-copy" | "duplicate-copy" | "delete-entry" | "open-settings", instanceId: string, cardId: string) => void,
   interactionBusy = false,
+  simulateRemoveCopy = false,
 ) {
   function Harness() {
     const [settings, setSettings] = useState(initialSettings);
@@ -87,6 +88,7 @@ function compositorWorkspace(
             : <p key={id}>{id}</p>])) as Record<WorkspaceSection, ReactNode>;
     return <>
       <output data-testid="project-revision">{projectRevision}</output>
+      {simulateRemoveCopy && <button type="button" onClick={() => { setCards([...initialCards]); setPhysicalOrder(initialPhysicalOrder ?? createPhysicalOrder(initialCards)); }}>Undo test removal</button>}
       <WorkspaceShell
         hasCards
         sections={sections}
@@ -99,7 +101,13 @@ function compositorWorkspace(
           selectedPageNumber={pageNumber}
           onSelectPage={setPageNumber}
           onSelectArtwork={onSelectArtwork}
-          onPhysicalAction={onPhysicalAction}
+          onPhysicalAction={onPhysicalAction ? (action, instanceId, cardId) => {
+            onPhysicalAction(action, instanceId, cardId);
+            if (simulateRemoveCopy && action === "remove-copy") {
+              setCards((current) => current.map((entry) => entry.id === cardId ? { ...entry, quantity: entry.quantity - 1 } : entry));
+              setPhysicalOrder((current) => ({ ...current, instances: current.instances.filter((reference) => reference.id !== instanceId) }));
+            }
+          } : undefined}
           onReorderPhysicalInstance={enableReorder ? (instanceId, targetInstanceId, placement) => setPhysicalOrder((current) => movePhysicalInstance(current, instanceId, targetInstanceId, placement)) : undefined}
           onToggleSkippedSlot={(index) => {
             if (!enableSkippedSlotChanges) return;
@@ -309,6 +317,73 @@ describe("canonical live compositor interactions", () => {
     expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", "instance-1", 0, "back", configureBack, 1, 2);
     expect(onPhysicalAction).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Fechar ações" }));
+    expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
+  });
+
+  it("closes the previous HUD when another physical instance is explicitly selected", async () => {
+    const user = userEvent.setup();
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, false, undefined, vi.fn()));
+
+    await user.click(slotForPhysicalIndex(0));
+    const firstActions = screen.getByRole("button", { name: /mais ações para Island, cópia 1/i });
+    await user.click(firstActions);
+    expect(screen.getByTestId("compositor-instance-hud")).toHaveAttribute("aria-label", "Ações para Island, cópia 1");
+    expect(firstActions).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(slotForPhysicalIndex(1));
+
+    expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
+    expect(slotForPhysicalIndex(1)).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("moves exactly the physical instance represented by the open HUD", async () => {
+    const user = userEvent.setup();
+    const order = createPhysicalOrder([{ ...card(), quantity: 3 }]);
+    render(compositorWorkspace([{ ...card(), quantity: 3 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true, order, vi.fn()));
+
+    await user.click(slotForPhysicalIndex(1));
+    await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i }));
+    expect(screen.getByTestId("compositor-instance-hud")).toHaveTextContent("Cópia 2/3");
+    await user.click(screen.getByRole("button", { name: "Mover depois" }));
+
+    expect(slotForPhysicalIndex(0)).toHaveAttribute("data-physical-instance-id", "instance-1");
+    expect(slotForPhysicalIndex(1)).toHaveAttribute("data-physical-instance-id", "instance-3");
+    expect(slotForPhysicalIndex(2)).toHaveAttribute("data-physical-instance-id", "instance-2");
+  });
+
+  it("replaces the HUD context on contextmenu and reorders the newly targeted instance", async () => {
+    const order = createPhysicalOrder([{ ...card(), quantity: 3 }]);
+    render(compositorWorkspace([{ ...card(), quantity: 3 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true, order, vi.fn()));
+
+    fireEvent.contextMenu(slotForPhysicalIndex(0));
+    expect(screen.getByTestId("compositor-instance-hud")).toHaveTextContent("Cópia 1/3");
+    fireEvent.contextMenu(slotForPhysicalIndex(1));
+
+    expect(screen.getAllByTestId("compositor-instance-hud")).toHaveLength(1);
+    expect(screen.getByTestId("compositor-instance-hud")).toHaveTextContent("Cópia 2/3");
+    expect(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i })).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Mover depois" }));
+
+    expect(slotForPhysicalIndex(0)).toHaveAttribute("data-physical-instance-id", "instance-1");
+    expect(slotForPhysicalIndex(1)).toHaveAttribute("data-physical-instance-id", "instance-3");
+    expect(slotForPhysicalIndex(2)).toHaveAttribute("data-physical-instance-id", "instance-2");
+  });
+
+  it("closes the HUD when its physical instance is removed and keeps it closed after undo restores that ID", async () => {
+    const user = userEvent.setup();
+    const cards = [{ ...card(), quantity: 2 }];
+    const order = createPhysicalOrder(cards);
+    render(compositorWorkspace(cards, { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, false, order, vi.fn(), false, true));
+
+    await user.click(slotForPhysicalIndex(1));
+    await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i }));
+    expect(screen.getByTestId("compositor-instance-hud")).toHaveTextContent("Cópia 2/2");
+    await user.click(screen.getByRole("button", { name: "Remover uma cópia" }));
+
+    expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remover uma cópia" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Undo test removal" }));
     expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
   });
 
