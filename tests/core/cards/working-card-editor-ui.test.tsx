@@ -87,7 +87,7 @@ describe("working card editor list UI", () => {
       onSelect: vi.fn(), onLoadMore: vi.fn(),
     }));
 
-    expect(markup).toContain("800 DPI · informado pelo MPC · DPI efetivo · desconhecido");
+    expect(markup).toContain("800 DPI informado pelo MPC · DPI efetivo · desconhecido");
     expect(markup).toContain("798 DPI efetivo · verificado ✓");
     expect(markup).toContain("DPI efetivo · desconhecido");
     expect(markup).toContain("DPI efetivo · original indisponível");
