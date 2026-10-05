@@ -511,7 +511,7 @@ Direção desta mudança:
 - não apagar handlers/reducers apenas porque o botão do viewer sumiu sem antes confirmar todos os consumidores;
 - se alguma ação ficar sem qualquer caminho acessível após a remoção, o executor deve reportar a lacuna e preservar um caminho compacto temporário em vez de simplesmente eliminar funcionalidade.
 
-Não inventar neste momento um novo menu contextual complexo. O objetivo é simplificar.
+Substituir esse HUD pelo menu contextual flutuante especificado no item 4. O objetivo continua sendo simplificar: o menu existe apenas sob demanda, ancorado à carta, sem reservar espaço permanente no layout.
 
 #### 3.7. Informações técnicas continuam existindo, apenas mudam de lugar
 
@@ -577,6 +577,398 @@ Além da bateria definida no item 2, cobrir:
 - `npm run typecheck`;
 - testes direcionados;
 - `npm run build`.
+
+---
+
+
+### 4. Substituir o HUD expansível por menu contextual flutuante sobre a carta
+
+**Status:** especificado, ainda não implementado.
+
+#### Objetivo
+
+As ações secundárias de uma instância física não devem aparecer em um painel horizontal acima da folha. Elas devem existir em um **menu contextual temporário**, visualmente associado à carta que originou a ação.
+
+A referência visual fornecida estabelece o padrão de UX: clique secundário ou gatilho discreto sobre a carta abre uma pequena superfície flutuante com ações; o compositor não muda de tamanho e a folha não é empurrada.
+
+#### Abertura
+
+O mesmo menu deve poder ser aberto por:
+
+- clique com botão direito sobre o corpo da carta (`contextmenu`);
+- um botão `…`/kebab discreto sobre a própria carta para descoberta, teclado e dispositivos sem botão direito.
+
+Ao abrir:
+
+- prevenir o menu nativo do navegador somente quando o evento ocorrer sobre uma instância de carta válida;
+- tornar essa instância a `activePhysicalInstanceId`;
+- ancorar o menu ao ponto do clique ou ao retângulo visual da carta/gatilho;
+- fechar qualquer outro menu contextual já aberto;
+- operar sempre sobre `physicalInstanceId`, nunca apenas sobre `workingCardId`.
+
+#### Posicionamento
+
+O menu deve ser overlay/portal e **não participar do layout da folha**.
+
+Requisitos:
+
+- `position: fixed` ou estratégia equivalente com coordenadas de viewport;
+- collision detection contra as bordas da viewport;
+- preferir abertura à direita/abaixo quando houver espaço;
+- inverter horizontal/verticalmente quando necessário;
+- permanecer legível em viewport reduzido;
+- `z-index` acima do SVG e dos overlays da carta, mas abaixo de diálogos modais como o Artwork Picker;
+- fechar em scroll significativo do compositor, resize, troca de página, fechamento do picker ou quando a instância deixar de existir.
+
+Não mover, redimensionar ou recalcular a geometria física da carta para acomodar o menu.
+
+#### Ações
+
+Reutilizar os handlers e reducers existentes sempre que possível. O menu deve conter apenas ações que tenham semântica válida no TCGPrint:
+
+- **Selecionar/Trocar artwork** — abre o Artwork Picker da instância/face correta;
+- **Configurar verso / face** — abre o fluxo canônico de back/face;
+- **Aumentar quantidade**;
+- **Remover uma cópia**;
+- **Duplicar como entrada independente**;
+- **Configurações completas**;
+- **Mover antes** / **Mover depois**, se essas ações continuarem úteis após o drag/reorder;
+- **Remover carta inteira** como ação destrutiva visualmente separada.
+
+Não copiar ações da referência que não pertencem ao domínio do TCGPrint, como `Set as Cover`, `Edit Tags` ou rotação arbitrária, sem requisito próprio.
+
+`Desativar slot` só deve aparecer se a feature continuar suportada e o slot atual for elegível; não expor comando desabilitado sem necessidade.
+
+#### Convivência com outras interações
+
+- clique esquerdo no corpo: abre Artwork Picker;
+- checkbox: altera multi-seleção e nunca abre menu/picker;
+- flip local: alterna inspeção e nunca abre menu/picker;
+- clique direito: abre menu e não inicia drag;
+- início de drag: fecha menu;
+- conclusão de drag: não abre menu nem picker;
+- Escape: fecha menu e devolve foco ao gatilho/carta;
+- clique fora: fecha menu.
+
+#### Acessibilidade
+
+- gatilho `…` é um `button` real com `aria-haspopup="menu"` e `aria-expanded`;
+- menu com semântica `role="menu"` ou padrão acessível equivalente;
+- navegação por teclado previsível;
+- ação destrutiva identificável também sem depender de cor;
+- foco restaurado ao elemento originador quando o menu fecha.
+
+#### Regressões proibidas
+
+A troca do HUD por menu contextual não pode alterar:
+
+- reducers de quantidade/remoção/duplicação;
+- identidade da instância física;
+- physical order;
+- artwork/back selecionados;
+- undo/redo das operações editoriais;
+- exportação.
+
+---
+
+## Artwork Picker
+
+### 5. Redesenhar o Artwork Picker para seleção visual direta e pipeline automático
+
+**Status:** especificado, ainda não implementado.
+
+#### Decisão de produto
+
+O Artwork Picker deve parecer uma **galeria de artes**, não um painel administrativo de metadados.
+
+O fluxo normal deve ser:
+
+1. abrir o picker;
+2. o catálogo adequado começa a carregar automaticamente;
+3. ver artes em uma grade limpa;
+4. opcionalmente filtrar;
+5. clicar na arte desejada;
+6. o TCGPrint faz revalidação/preparo/download/validação necessários internamente;
+7. a escolha é aplicada;
+8. mostrar feedback curto de sucesso.
+
+O usuário não deve executar manualmente etapas internas do pipeline para conseguir selecionar uma arte.
+
+#### Estado técnico atual confirmado
+
+Hoje `src/app/artwork-candidate-grid.tsx` expõe em cada card:
+
+- provider e face;
+- set/collector;
+- idioma;
+- source MPC;
+- formato;
+- tamanho do arquivo;
+- dimensões;
+- DPI efetivo e status;
+- release;
+- full-art;
+- disponibilidade/cache do original;
+- tags;
+- estado de metadata MPC;
+- estado da imagem;
+- freshness;
+- hints de disponibilidade local;
+- botão `Revalidar metadata`;
+- botão cuja label pode virar `Validar original e calcular DPI`.
+
+Também existe em `card-identity-workbench.tsx` o botão `Atualizar resultados MPC`.
+
+Essa UI expõe detalhes de implementação que devem permanecer no domínio/Diagnostics, mas não no caminho principal de seleção.
+
+Há infraestrutura existente que deve ser aproveitada:
+
+- `ArtworkQualityHydrator` já prepara automaticamente candidatos visíveis do Scryfall com concorrência limitada;
+- `confirmArtworkSelection()` já chama `/api/cards/artworks/[candidateId]/prepare` antes de aplicar um candidato com original disponível;
+- o catálogo já é carregado automaticamente quando `artworkRequest` muda;
+- `forceMpcRefresh`, `refreshMpcMetadata` e o endpoint `/refresh` existem e podem continuar sendo usados internamente.
+
+Portanto, a implementação deve **automatizar e esconder** essas etapas, não simplesmente removê-las.
+
+### 5.1. Layout visual
+
+Adotar a direção das referências:
+
+- modal amplo, com boa hierarquia;
+- preview/contexto da carta atual em uma coluna lateral quando houver espaço;
+- região central dominada pela grade de artworks;
+- filtros em uma barra compacta acima da grade;
+- sem grandes blocos de texto técnico;
+- sem cards estreitos cheios de parágrafos;
+- scroll da galeria independente e estável;
+- responsivo: em larguras menores, preview lateral pode recolher/empilhar sem comprometer a grade.
+
+A inspiração é a densidade e clareza das referências, não uma cópia literal de outro produto.
+
+### 5.2. Providers no Front
+
+Para seleção de **Front artwork** de uma carta com identidade resolvida, a navegação principal deve oferecer somente:
+
+- **Scryfall**;
+- **MPC Autofill**.
+
+Remover da superfície principal de Front:
+
+- `Todas`;
+- `Meus uploads`.
+
+Motivo:
+
+- misturar providers em `Todas` torna ordenação/filtros/estado confusos;
+- upload próprio não é provider primário para escolher uma impressão/artwork de uma carta identificada.
+
+Uploads **não devem ser apagados do sistema**. Eles continuam válidos em fluxos nos quais imagens próprias realmente fazem sentido, especialmente Back Library/versos customizados e importações diretas.
+
+Para casos custom sem CardIdentity, o executor deve preservar um caminho funcional de imagem local; a regra acima é específica do picker normal de Front para carta identificada.
+
+### 5.3. Provider inicial
+
+Ao abrir Front picker:
+
+- abrir no último provider usado para Front na sessão, se válido;
+- caso contrário, default **Scryfall**;
+- nunca default `all`.
+
+Ao trocar para MPC Autofill:
+
+- iniciar automaticamente a consulta do catálogo;
+- não exigir clique em `Atualizar resultados MPC`.
+
+### 5.4. Remover informação excessiva dos cards
+
+No estado normal, cada resultado deve mostrar essencialmente:
+
+- imagem da carta/artwork;
+- badge compacto de DPI/resolução no canto superior;
+- estado visual de hover/foco/selecionado.
+
+Opcionalmente pode haver uma linha curta de identificação somente quando necessária para distinguir versões visualmente similares, mas o card não deve voltar a virar um relatório técnico.
+
+Remover da superfície do card:
+
+- `Resultado #N`;
+- texto `Provider: ... · Face: ...`;
+- formato;
+- KB;
+- dimensões em texto;
+- `DPI efetivo · verificado ...` em parágrafo;
+- `Original disponível/cache local`;
+- metadata freshness;
+- image status;
+- tags em bloco;
+- release/full-art como texto permanente;
+- status interno de XML/cache.
+
+Esses dados podem continuar:
+
+- no modelo;
+- em filtros;
+- em ordenação;
+- em tooltip/popover de detalhes opcional;
+- em Diagnostics;
+- em testes.
+
+Não devem ocupar a galeria normal.
+
+### 5.5. Semântica do badge de DPI
+
+O badge visual pode ser suficiente, mas não pode mentir sobre a origem do número.
+
+Regra:
+
+- se houver `effectiveDpi` verificado, exibir esse valor;
+- se ainda houver apenas DPI informado pelo MPC, o badge pode exibir o valor reportado pelo provider, mantendo internamente a distinção `provider-reported`;
+- diferença entre provider-reported e verified pode ser indicada de forma discreta por tooltip/ícone, não por parágrafos;
+- após `prepare`, atualizar para o DPI efetivo;
+- se o original validado contradisser gravemente o DPI informado, a seleção deve respeitar as regras de qualidade existentes e apresentar erro/aviso necessário.
+
+Nunca remover a validação real só para manter a UI simples.
+
+### 5.6. Remover ações técnicas manuais
+
+Remover da UI normal:
+
+- `Revalidar metadata`;
+- `Validar original e calcular DPI`;
+- `Atualizar resultados MPC`.
+
+Essas operações tornam-se responsabilidade do sistema.
+
+#### MPC catalog refresh automático
+
+O MPC não deve fazer um `force refresh` agressivo a cada render ou abertura de modal.
+
+Implementar comportamento equivalente a **cache-first / stale-while-revalidate**:
+
+- se houver catálogo/cache válido, renderizar imediatamente;
+- se a entrada estiver stale, incompleta ou exigir consulta atual, disparar refresh em background;
+- deduplicar por identity/face/filtros/request key;
+- aplicar cooldown/TTL do provider para evitar tempestade de requests;
+- alterações de filtros disparam nova consulta automaticamente, com debounce quando houver texto;
+- requisições antigas devem ser ignoradas/abortadas quando o contexto muda;
+- se MPC estiver offline, usar cache disponível e mostrar apenas um status curto não bloqueante.
+
+`forceMpcRefresh` pode permanecer internamente como mecanismo, mas não deve depender de botão manual para o fluxo comum funcionar.
+
+#### Revalidação de metadata MPC
+
+Não revalidar individualmente **todos os resultados do catálogo** antes de mostrá-los.
+
+Estratégia:
+
+- carregar metadata suficiente para montar a galeria;
+- revalidar em background apenas quando a metadata estiver stale e houver benefício, com fila limitada; e/ou
+- revalidar obrigatoriamente o candidato escolhido antes de confirmar se o contrato MPC exigir freshness.
+
+Isso preserva desempenho e evita centenas de requests desnecessários.
+
+### 5.7. Originais: carregar tudo visualmente não significa baixar todos os arquivos de impressão
+
+Ao abrir o picker, o usuário deve ver a galeria carregando automaticamente, mas o sistema **não deve baixar os originais de alta resolução de todos os resultados**.
+
+Separar:
+
+- **catalog/preview:** automático para todos os resultados necessários à viewport/paginação;
+- **validated original:** preparado sob demanda, principalmente para a arte escolhida e, quando apropriado, para candidatos visíveis em hidratação limitada.
+
+Ao selecionar uma arte:
+
+1. se metadata MPC precisar de refresh, revalidar;
+2. resolver candidato canônico atualizado;
+3. se houver original disponível, executar `prepare` automaticamente;
+4. validar bytes/formato/dimensões/hash conforme pipeline atual;
+5. calcular `effectiveDpi`;
+6. aplicar a seleção no escopo correto;
+7. atualizar cache/catalog state;
+8. mostrar feedback de sucesso.
+
+Se qualquer etapa obrigatória falhar, **não persistir uma seleção parcialmente validada**.
+
+### 5.8. Seleção por clique, sem etapa técnica intermediária
+
+Para Front artwork no fluxo aberto a partir de uma instância física:
+
+- clicar no card da artwork é a ação de seleção;
+- não exigir primeiro `Selecionar arte` dentro do card;
+- não exigir depois `Validar original`;
+- não exigir um segundo botão `Aplicar seleção` para o caso padrão.
+
+Default:
+
+- picker aberto a partir do compositor aplica somente à **physical instance** que originou o picker;
+- picker aberto por contexto de entrada aplica à entrada conforme semântica atual.
+
+Para preservar operações em lote, substituir o bloco grande de radios `Aplicar para` por um controle compacto opcional, inspirado na referência, por exemplo:
+
+- checkbox/toggle `Aplicar a todas as cópias desta carta`.
+
+Esse toggle deve mapear para o escopo canônico existente (`same-identity`) e nunca inferir escopo em silêncio.
+
+Para Back Library/ações destrutivas/semânticas de verso que exijam decisão adicional, confirmação explícita pode continuar existindo. A regra de aplicação imediata é especialmente para a escolha comum de artwork.
+
+### 5.9. Feedback
+
+Durante clique em uma artwork:
+
+- marcar aquele card como pending;
+- bloquear cliques duplicados no mesmo candidato;
+- não congelar a galeria inteira se não for necessário;
+- mostrar spinner/progresso curto sobre o card ou área de status;
+- ao concluir, mostrar toast discreto como `Arte aplicada`;
+- atualizar preview da carta/compositor imediatamente;
+- manter picker aberto ou fechar conforme decisão visual final; preferência: manter aberto para permitir comparação/troca rápida, com estado selecionado evidente.
+
+Falhas:
+
+- erro curto e acionável;
+- não despejar stack/provider diagnostics no card;
+- manter seleção anterior intacta se a nova falhar.
+
+### 5.10. Filtros compactos
+
+O bloco atual de `Filtros avançados MPC` com múltiplos `select multiple` altos deve sair da superfície padrão.
+
+Barra principal compacta, inspirada nas referências:
+
+- botão de filtros;
+- Set/Source quando aplicável;
+- idioma;
+- tag/category;
+- modo de busca/fuzzy quando relevante;
+- DPI mínimo/ordenação por DPI;
+- ordenação.
+
+Filtros de uso raro ficam em popover/drawer avançado aberto sob demanda.
+
+Não renderizar listas gigantes expandidas dentro do fluxo principal.
+
+### 5.11. Testes e invariantes
+
+Cobrir obrigatoriamente:
+
+- Front mostra somente Scryfall e MPC Autofill para carta identificada;
+- não existe `Todas` nem `Meus uploads` nesse contexto;
+- custom/local workflows continuam acessíveis onde necessários;
+- abrir MPC dispara carregamento sem botão manual;
+- cache existente aparece sem esperar refresh;
+- refresh stale ocorre sem duplicar requests;
+- offline usa cache quando disponível;
+- selecionar MPC stale revalida antes de aplicar quando necessário;
+- selecionar candidato com original chama `prepare` automaticamente;
+- falha de prepare não troca a artwork persistida;
+- badge usa effective DPI quando verificado;
+- cards não exibem o bloco antigo de metadata;
+- clique na artwork aplica no physical instance correto;
+- toggle `aplicar a todas` mapeia para o escopo correto;
+- seleção anterior permanece se nova seleção falhar;
+- undo/redo continua correto;
+- project serialization não recebe estado efêmero de UI;
+- build/typecheck/testes direcionados passam.
 
 ---
 
