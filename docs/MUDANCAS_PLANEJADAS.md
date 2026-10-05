@@ -1565,4 +1565,595 @@ Obrigatórios:
 
 ---
 
+
+## Painel de trabalho / Arquitetura de informação
+
+### 10. Reduzir o painel a três fluxos principais e fazer Project representar o documento completo
+
+**Status:** especificado, ainda não implementado.
+
+#### Diagnóstico do estado atual
+
+`src/app/workspace-sidebar.tsx` expõe hoje dez seções de primeiro nível:
+
+- Cartas;
+- Artwork;
+- Projeto;
+- Layout;
+- PDF;
+- Corte;
+- Templates;
+- Calibração;
+- Export;
+- Diagnóstico.
+
+Essa divisão corresponde mais às fronteiras históricas dos componentes internos do que ao modelo mental do usuário.
+
+Há redundâncias concretas:
+
+- `Artwork` oferece novamente `Selecionar arte`, apesar de o compositor passar a abrir diretamente o Artwork Picker ao clicar na carta;
+- `Layout`, `PDF` e `Corte` são apenas diferentes `section` do mesmo `ProjectSettingsControls`;
+- `Templates` é uma biblioteca técnica que fornece defaults/geometry para o mesmo Project;
+- `Calibração` altera `printerProfileSelection` e `printerDuplexMode`, que já fazem parte de `ProjectSettings`;
+- `Export` depende dessas mesmas configurações;
+- `Diagnóstico` mostra provider health e estados técnicos que não são uma tarefa principal.
+
+#### Estado de persistência confirmado
+
+O modelo de Project já é a base correta para um documento completo.
+
+`ProjectSettingsV5` já persiste:
+
+- bleed;
+- rounded corners;
+- cut guides;
+- page orientation;
+- card orientation;
+- paper format;
+- card format;
+- margins;
+- horizontal/vertical gaps;
+- registration;
+- registration override;
+- cut source selection;
+- rows/columns;
+- skipped slots;
+- template geometry;
+- export content mode;
+- missing back policy;
+- duplex flip mode;
+- project default back;
+- printer calibration profile snapshot;
+- printer duplex mode.
+
+O snapshot também persiste:
+
+- Working Cards;
+- artworks selecionadas por face;
+- back mode / back selection;
+- `physicalOrder`.
+
+Além disso, `projectSnapshotDocument(...)` inclui `templateSelection` no `ProjectSaveState`, e o autosave observa mudanças de cards, settings, physical order e template selection.
+
+Portanto, a UI deve refletir esse fato: **Project é o documento; as configurações abaixo pertencem ao Project**.
+
+#### 10.1. Nova navegação principal
+
+Substituir a grade atual de dez tabs por somente três destinos primários:
+
+1. **Cartas**
+2. **Configurações**
+3. **Exportar**
+
+Não manter como tabs de primeiro nível:
+
+- Artwork;
+- Projeto;
+- Layout;
+- PDF;
+- Corte;
+- Templates;
+- Calibração;
+- Diagnóstico.
+
+Isso não remove capacidades; apenas muda onde elas vivem.
+
+#### 10.2. Artwork deixa de ser seção
+
+Remover `artwork` de `WORKSPACE_SECTIONS`.
+
+O fluxo canônico passa a ser:
+
+- carta no compositor → clique → Artwork Picker;
+- context menu da carta → Trocar artwork;
+- back/face → picker correspondente.
+
+A seção atual `artworkSection`, que apenas resume a carta e oferece outro botão `Selecionar arte`, deve ser eliminada.
+
+Não criar outro atalho equivalente em `Configurações`, pois isso reintroduziria redundância.
+
+#### 10.3. Project deixa de ser aba e vira contexto persistente do workspace
+
+O Project ativo deve aparecer no **cabeçalho persistente** do painel de trabalho.
+
+Exemplo de estrutura:
+
+- nome do Project atual;
+- estado curto: `Salvo`, `Salvando…`, `Alterações pendentes` ou erro;
+- menu discreto para:
+  - Novo projeto;
+  - Salvar como projeto;
+  - Abrir projeto;
+  - Duplicar;
+  - Renomear, se o domínio/API suportar;
+  - Excluir.
+
+Não exibir permanentemente revision IDs, hashes ou mensagens de autosave no fluxo normal.
+
+Conflitos/recovery continuam existindo e devem aparecer quando realmente ocorrerem.
+
+#### 10.4. Corrigir a semântica "Novo" vs "Salvar como"
+
+O comportamento atual de `createProject()` usa `createNewProjectDocument(settings, templateSelection)`, que cria um snapshot sem cards, ativa esse Project e mantém o Working Set atual na interface, deixando-o imediatamente diferente do snapshot criado. O autosave pode então levar o conteúdo atual para esse Project. Essa semântica é confusa.
+
+Separar explicitamente:
+
+**Salvar como projeto**
+- quando existe Working Set/configuração atual sem Project ativo;
+- cria Project a partir de `currentSnapshotDocumentRef.current`;
+- inclui cards atuais, artworks, backs, physicalOrder, settings e template selection;
+- ativa o Project recém-criado;
+- o Project nasce em estado `Salvo`, não `Dirty`.
+
+**Novo projeto**
+- inicia deliberadamente um novo documento/Working Set;
+- se houver mudanças não salvas ou um Project ativo, resolver/flushar/confirmar conforme o mecanismo de recovery existente;
+- carregar estado inicial limpo e consistente;
+- não anexar silenciosamente o Working Set anterior ao Project novo.
+
+Não usar um único botão para as duas semânticas.
+
+#### 10.5. Autosave como comportamento normal
+
+Project aberto:
+
+- mudanças editoriais e de configuração continuam alimentando o autosave;
+- botão `Salvar agora` não precisa ser ação primária permanente;
+- pode existir no menu do Project/fallback de erro;
+- indicador de status deve ser compacto.
+
+Nenhum usuário deve precisar decidir manualmente quais subseções "salvar". O Project salva o documento inteiro.
+
+#### 10.6. O que pertence ao Project vs estado efêmero
+
+**Persistir no Project:**
+- cards e quantidades;
+- identidade/resolução relevante;
+- artwork/back selecionados;
+- physical order;
+- layout físico;
+- paper/card format;
+- margins/gaps;
+- bleed/corners/guides;
+- registration;
+- duplex/back policy;
+- project default back reference;
+- calibration profile snapshot/duplex mode;
+- template selection;
+- cut source selection;
+- skipped slots;
+- opções que alteram o resultado de impressão/exportação.
+
+**Não persistir no Project como configuração de produção:**
+- checkbox de multi-seleção atual;
+- active/focused card;
+- carta localmente flipada só para inspeção;
+- menu contextual aberto;
+- hover;
+- página temporariamente visualizada;
+- filtros correntes do Artwork Picker;
+- último texto de busca;
+- scroll;
+- estado aberto/fechado de accordions;
+- diagnostics expandido;
+- loading/toasts.
+
+Regra: se alterar o arquivo produzido ou a composição restaurada, é Project. Se for apenas interação momentânea, é UI state.
+
+#### 10.7. Assets referenciados
+
+Não é necessário embutir bytes gigantes no Project.
+
+Manter a arquitetura de referências imutáveis quando já existente:
+
+- TemplateSelection por ID/version/hash;
+- Back Library por assetId/SHA-256;
+- selected artwork por candidate/reference canônico;
+- calibration snapshot self-contained conforme modelo atual.
+
+Ao reabrir Project, validar disponibilidade das referências e apresentar erro acionável se um asset externo obrigatório estiver ausente. Não substituir silenciosamente por outro asset.
+
+---
+
+### 11. Nova seção única "Configurações" com grupos compactos
+
+**Status:** especificado, ainda não implementado.
+
+#### Objetivo visual
+
+Substituir os formulários longos e a divisão por tabs técnicas por uma coluna de **grupos compactos/accordions**, inspirada nas referências fornecidas.
+
+Características:
+
+- uma linha por categoria;
+- título claro;
+- ícone opcional;
+- toggle embutido quando a categoria possuir enable/disable natural;
+- conteúdo expande somente quando necessário;
+- inputs alinhados;
+- segmented controls para escolhas pequenas;
+- sliders para ajustes contínuos quando fizer sentido;
+- unidade exibida junto do valor;
+- ajuda curta por tooltip, não parágrafos permanentes;
+- Advanced fechado por padrão.
+
+Não copiar cores/branding da referência; copiar a hierarquia e densidade de interação.
+
+#### 11.1. Ordem dos grupos
+
+A seção `Configurações` deve conter, nesta ordem aproximada:
+
+1. **Página & Grade**
+2. **Posicionamento**
+3. **Guias**
+4. **Marcas de registro**
+5. **Bleed & Cantos**
+6. **Verso & Duplex**
+7. **Calibração da impressora**
+8. **Corte / Silhouette**
+9. **Preset / Template**
+10. **Avançado**
+
+A ordem pode ser ajustada durante implementação por dependências reais, mas não voltar a transformar cada grupo em uma tab de primeiro nível.
+
+#### 11.2. Página & Grade
+
+Concentrar:
+
+- formato de papel;
+- dimensões efetivas do papel;
+- orientação da página;
+- orientação da carta;
+- rows/columns quando a grade manual for aplicável.
+
+O estado atual possui `paperFormat`, porém `ProjectSettingsControls` hoje apenas mostra o formato como texto e não oferece controle direto. Corrigir essa incoerência.
+
+Direção de UI:
+
+- `Tamanho da página`: select dos formatos suportados pelo domínio;
+- dimensões mostradas compactamente;
+- `Portrait / Landscape`: segmented control;
+- Rows / Columns lado a lado;
+- se Template Geometry bloquear a grade manual, mostrar estado curto `Controlado pelo preset` em vez de um parágrafo técnico.
+
+Não adicionar formatos custom arbitrários sem suporte validado no modelo.
+
+#### 11.3. Posicionamento
+
+Concentrar ajustes avançados de composição:
+
+- margin top/right/bottom/left;
+- gap horizontal;
+- gap vertical;
+- skipped slots / posicionamento avançado quando aplicável.
+
+Fechado por padrão para o usuário comum.
+
+Os campos devem usar grid de 2 colunas quando houver largura suficiente, evitando a pilha vertical atual.
+
+#### 11.4. Guias
+
+Separar guide settings de Bleed.
+
+Concentrar:
+
+- trim guide enable;
+- trim guide extent/length;
+- trim guide color;
+- external cut guide enable;
+- external stroke width;
+- external color.
+
+Usar:
+
+- switches;
+- slider + numeric value quando o range for conhecido;
+- dropdown de cor compacto.
+
+Não renderizar labels e checkboxes colados como no painel atual.
+
+#### 11.5. Marcas de registro
+
+Concentrar `registration`.
+
+Direção:
+
+- `None / 3-point / 4-point` como segmented/card selection;
+- orientação `Portrait / Landscape` como segmented;
+- offsets/insets e dimensões com sliders/inputs compactos;
+- reserved-zone clearance em Advanced.
+
+`registration.type === "custom"` continua suportado, mas **JSON cru não deve ser parte do fluxo normal**.
+
+Custom geometry JSON deve ficar em `Avançado / Developer` ou ferramenta específica de Template, porque é representação interna, não configuração normal.
+
+#### 11.6. Bleed & Cantos
+
+Concentrar somente:
+
+- bleed width;
+- rounded corners;
+- radius quando existir configuração customizável suportada.
+
+Direção:
+
+- campo numérico com unidade `mm` integrada;
+- switch de cantos;
+- ajuda curta explicando que bleed só gera pixels externos ao trim;
+- sem parágrafo técnico longo permanente.
+
+Não misturar trim/cut guides nesse grupo.
+
+#### 11.7. Verso & Duplex
+
+Mover para um único grupo:
+
+- export front/back/duplex intent quando relevante à composição;
+- duplex flip long-edge / short-edge;
+- missing back policy;
+- Project Default Back;
+- gerenciamento/acesso à Back Library.
+
+Per-card back continua no fluxo da própria carta/Artwork Picker.
+
+A Back Library não deve dominar o painel: mostrar default atual + ação `Gerenciar versos`/galeria compacta.
+
+#### 11.8. Calibração da impressora
+
+`PrinterCalibrationPanel` deixa de ser tab de primeiro nível.
+
+Integrar:
+
+- perfil selecionado;
+- printer duplex mode;
+- ações para selecionar/criar/gerenciar perfil.
+
+Os detalhes técnicos da matriz/calibration revision podem ficar no painel expandido/Advanced.
+
+#### 11.9. Corte / Silhouette
+
+Integrar o que hoje está espalhado por `Corte`, `Templates` e Cut Export:
+
+- fonte de geometria de corte ativa;
+- SVG/DXF selecionado, quando houver;
+- status curto de sincronização;
+- configuração relevante para Silhouette.
+
+Ações de **baixar/exportar SVG/DXF** pertencem à seção `Exportar`, não à configuração.
+
+Não exigir Project salvo apenas para o usuário poder entender/configurar o corte; validações que necessitam revisão salva podem ocorrer em background antes do export.
+
+#### 11.10. Preset / Template
+
+Template continua existindo tecnicamente porque possui valor real:
+
+- package imutável;
+- versão;
+- hash;
+- physical format defaults;
+- registration defaults;
+- template geometry;
+- arquivos de corte.
+
+Mas deixa de ser uma seção principal chamada `Templates`.
+
+Na UI normal, apresentar como **Preset / Template** dentro de Configurações:
+
+- preset atual;
+- escolher preset;
+- remover preset;
+- eventualmente `Gerenciar presets…` em superfície secundária.
+
+A biblioteca técnica completa e criação/importação de packages pode ficar em um modal/advanced manager.
+
+Selecionar preset continua atualizando os mesmos defaults canônicos existentes; não duplicar estado.
+
+#### 11.11. Avançado
+
+Itens raros/técnicos:
+
+- registration custom JSON;
+- detalhes de template hashes/version;
+- paths alternativos;
+- configurações incomuns que não pertencem ao fluxo diário.
+
+Fechado por padrão.
+
+Diagnóstico de provider, ImportReport e dumps de geometria **não entram aqui como configurações**; continuam em Diagnostics separado.
+
+---
+
+### 12. Nova seção "Exportar" concentra intenção de saída e ações finais
+
+**Status:** especificado, ainda não implementado.
+
+A seção `Exportar` deve concentrar o que realmente é etapa final:
+
+- modo de saída:
+  - Front only;
+  - Back only;
+  - Front + Back separados;
+  - Duplex;
+- resumo curto das configurações físicas efetivas;
+- validações/bloqueios realmente acionáveis;
+- `Conferir PDF final`;
+- `Gerar/Baixar PDF`;
+- `Exportar SVG Cut`;
+- `Exportar DXF Cut`.
+
+Não mostrar permanentemente:
+
+- revision IDs;
+- parser versions;
+- hashes;
+- mensagens como `preview revision X`;
+- detalhes de provider;
+- descrição longa da implementação de bleed.
+
+Esses dados vão para Diagnostics.
+
+Se houver erro de configuração, mostrar uma mensagem curta com ação que leve ao grupo correto em `Configurações`.
+
+---
+
+### 13. Diagnóstico deixa de ser fluxo principal
+
+**Status:** especificado, ainda não implementado.
+
+Remover `Diagnóstico` de `WORKSPACE_SECTIONS` principal.
+
+Manter capacidade técnica acessível por:
+
+- menu `…` do painel;
+- item `Diagnóstico`/Developer;
+- rota/painel avançado equivalente.
+
+Preservar:
+
+- provider health;
+- MPC protocol diagnostics;
+- ImportReport;
+- cut preview dumps;
+- bleed diagnostics;
+- revision/hash/parser details.
+
+Regra: diagnóstico existe para investigar problema, não para configurar o documento.
+
+---
+
+### 14. Aparência e componentes de controles
+
+**Status:** especificado, ainda não implementado.
+
+A implementação visual deve corrigir a aparência atual dos formulários.
+
+#### Segmented controls
+
+Usar para escolhas pequenas e mutuamente exclusivas, por exemplo:
+
+- Portrait / Landscape;
+- None / 3-point / 4-point;
+- Long edge / Short edge quando houver espaço;
+- Front / Back onde pertinente.
+
+Não usar `select` para escolhas binárias/trinárias que ficam mais claras lado a lado.
+
+#### Sliders + valor
+
+Usar quando houver faixa física contínua bem definida:
+
+- guide length;
+- registration inset;
+- outros offsets com limites reais.
+
+Sempre oferecer valor numérico legível/editável junto ao slider para precisão.
+
+Não trocar todo number input por slider indiscriminadamente.
+
+#### Unit input
+
+Campos físicos devem mostrar unidade no próprio controle/adjacente:
+
+- mm;
+- pt;
+- outras unidades apenas quando realmente suportadas.
+
+Evitar labels repetindo `(mm)` em toda linha quando o componente já deixa isso claro.
+
+#### Switches
+
+Usar para capabilities on/off:
+
+- Guides;
+- Rounded corners;
+- outros recursos opcionais.
+
+#### Layout responsivo
+
+- labels acima ou lateral conforme largura;
+- grids de 2 colunas para pares naturais;
+- controles não devem transbordar o sidebar;
+- inputs não podem ficar colados como no estado atual;
+- nenhum texto técnico deve quebrar a hierarquia visual.
+
+#### Acessibilidade
+
+- todos os controles mantêm label programático;
+- segmented controls usam radio semantics ou buttons com `aria-pressed`;
+- sliders têm input numérico alternativo/valor acessível;
+- accordions usam button/summary com estado expandido;
+- foco visível;
+- não depender de cor.
+
+---
+
+### 15. Critérios de aceite do redesenho do painel
+
+**Status:** especificado, ainda não implementado.
+
+Ao concluir:
+
+- navegação principal contém somente `Cartas`, `Configurações`, `Exportar`;
+- não existe tab `Artwork`;
+- não existe tab `Projeto`;
+- não existe tab `Layout`;
+- não existe tab `PDF`;
+- não existe tab `Corte`;
+- não existe tab `Templates`;
+- não existe tab `Calibração`;
+- não existe tab principal `Diagnóstico`;
+- Project ativo e save status aparecem compactamente no header;
+- sessão sem Project oferece `Salvar como projeto` que salva o Working Set atual;
+- `Novo projeto` inicia documento realmente novo;
+- abrir Project restaura cards, artworks/backs, physical order, settings, template selection e calibration;
+- Configurações usam grupos compactos, não formulário longo único;
+- Template permanece funcional como preset/referência, sem duplicar estado;
+- Exportar concentra PDF e SVG/DXF finais;
+- nenhuma alteração de UI muda a geometria/export sem mudança correspondente no Project state;
+- autosave e recovery continuam funcionando;
+- snapshots legados continuam abrindo via serializer/migrations atuais;
+- não persistir estado efêmero de UI por engano.
+
+#### Testes obrigatórios
+
+- atualizar testes de `WorkspaceSidebar` para nova IA;
+- provar remoção do Artwork section sem perder acesso ao picker;
+- save-as cria Project com Working Set atual, não vazio;
+- new-project não herda cards silenciosamente;
+- autosave continua observando cards/settings/template/physicalOrder;
+- open/duplicate/delete/recovery continuam corretos;
+- Project round-trip restaura todas as configurações de produção;
+- TemplateSelection continua no ProjectSaveState;
+- calibration round-trip;
+- back/default-back round-trip;
+- physicalOrder round-trip;
+- configuração alterada em qualquer accordion marca Project dirty e autosave;
+- estado efêmero (multi-select/hover/filter) não marca Project dirty;
+- export PDF e cut usam settings restauradas;
+- typecheck;
+- testes completos relevantes;
+- build.
+
+---
+
 > Este arquivo deve continuar sendo atualizado conforme novas mudanças forem definidas. Nenhum item marcado como “especificado” deve ser tratado como implementado sem evidência de código e testes.
