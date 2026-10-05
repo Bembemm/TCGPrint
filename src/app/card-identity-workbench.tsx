@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ImportKind } from "../../import-engine/types";
@@ -33,7 +34,6 @@ import {
   type EditorSnapshot,
 } from "../../core/cards/editor-history";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
-import { postArtworkSelection, postManualBackArtworkSelection } from "./artwork-selection-request";
 import { clearRequestCache, createRequestCache, getOrCreateCachedRequest, updateResolvedRequestCache } from "./request-cache";
 import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
 import ProjectSettingsControls from "./project-settings-controls";
@@ -62,12 +62,22 @@ import BackLibraryControls, { type BackLibraryAssetDto } from "./back-library-co
 import { createBackValidationSummary, exportModeRequiresFrontArtwork } from "./back-validation";
 import { applyTemplateLayoutDefaults } from "./template-layout-defaults";
 import { createProjectRestoreLookupGate, runProjectRestoreProviderLookup } from "./project-restore-provider-gate";
-import { ARTWORK_WINDOW_SIZE, artworkWindowLimitForRequest, ArtworkCandidateGrid, sliceArtworkWindow, type ArtworkCandidateView } from "./artwork-candidate-grid";
+import { ARTWORK_WINDOW_SIZE, ArtworkCandidateGrid, filterAndSortArtworkCandidates, sliceArtworkPage, type ArtworkCandidateView, type ArtworkSortMode } from "./artwork-candidate-grid";
+import ArtworkPickerDialog from "./artwork-picker-dialog";
 import { artworkCatalogForRequest, ArtworkQualityHydrator, updateArtworkCatalogCandidate, type KeyedArtworkCatalogResult } from "./artwork-quality-hydration";
 import type { ResolveWorkingCardsResult, SafeImportReport, WorkingSetImportResult } from "../../services/card-workbench";
 
 type ArtworkFilter = "all" | "scryfall" | "mpc" | "upload";
+type ArtworkSort = ArtworkSortMode;
+type PickerScope = "entry" | "physical-copy" | "same-identity" | "all-simple-project";
 type CandidateDto = ArtworkCandidateView;
+
+interface ArtworkPickerContext {
+  readonly cardId: string;
+  readonly physicalCardIndex?: number;
+  readonly physicalCopyNumber?: number;
+  readonly physicalTotalCopies?: number;
+}
 
 interface Props {
   readonly files: readonly File[];
@@ -550,7 +560,15 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const selectedCardId = editorState.selectedCardId;
   const face = editorState.face;
   const [artworkCatalogState, setArtworkCatalogState] = useState<KeyedArtworkCatalogResult<CandidateDto> | null>(null);
-  const [artworkWindow, setArtworkWindow] = useState<{ requestKey: string; limit: number }>({ requestKey: "", limit: ARTWORK_WINDOW_SIZE });
+  const [artworkPageIndex, setArtworkPageIndex] = useState(0);
+  const [artworkSearch, setArtworkSearch] = useState("");
+  const [artworkSort, setArtworkSort] = useState<ArtworkSort>("recommended");
+  const [pendingArtwork, setPendingArtwork] = useState<CandidateDto | null>(null);
+  const [pendingBackChoice, setPendingBackChoice] = useState<{ readonly mode: "none" | "project-default" } | { readonly mode: "library"; readonly asset: BackLibraryAssetReference } | null>(null);
+  const [pickerScope, setPickerScope] = useState<PickerScope>("entry");
+  const [pickerContext, setPickerContext] = useState<ArtworkPickerContext | null>(null);
+  const [pickerSide, setPickerSide] = useState<CardFaceSide>("front");
+  const pickerOpenerRef = useRef<HTMLElement | null>(null);
   const [qualityChecking, setQualityChecking] = useState<{ requestKey: string; candidateIds: ReadonlySet<string> }>({ requestKey: "", candidateIds: new Set() });
   const [artworkCatalogRevision, setArtworkCatalogRevision] = useState(0);
   const [forcedMpcRefreshRevision, setForcedMpcRefreshRevision] = useState<number | null>(null);
@@ -560,7 +578,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const [mpcCatalogProblem, setMpcCatalogProblem] = useState("");
   const [mpcCatalogRetry, setMpcCatalogRetry] = useState(0);
   const [mpcDiagnostic, setMpcDiagnostic] = useState<MpcArtworkProviderDiagnostic | null>(null);
-  const [manualPhysicalBackPickerCardId, setManualPhysicalBackPickerCardId] = useState<string | null>(null);
   const [manualQuery, setManualQuery] = useState("");
   const [autocompleteEnabled, setAutocompleteEnabled] = useState(true);
   const [autocompleteResults, setAutocompleteResults] = useState<{ query: string; names: string[] } | null>(null);
@@ -753,42 +770,88 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     setAbortableOperation(null);
   }
 
+  const closeArtworkPicker = useCallback(() => {
+    setPickerContext(null);
+    setPendingArtwork(null);
+    setPendingBackChoice(null);
+  }, []);
+
+  function openArtworkPicker(cardId: string, side: CardFaceSide, opener: HTMLElement, physical?: { readonly index: number; readonly copyNumber: number; readonly totalCopies: number }) {
+    const target = workingCards.find((card) => card.id === cardId);
+    if (!target) return;
+    pickerOpenerRef.current = opener;
+    if (selectedCardId !== target.id) dispatchEditor({ type: "select-card", cardId: target.id });
+    if (isDoubleFacedIdentity(target.identity) && target.faces.some((item) => item.side === side)) dispatchEditor({ type: "set-face", side });
+    setPickerSide(side);
+    setArtworkFilter(side === "back" && !isDoubleFacedIdentity(target.identity) ? "mpc" : "all");
+    setArtworkPageIndex(0);
+    setArtworkSearch("");
+    setArtworkSort("recommended");
+    setPendingArtwork(null);
+    setPendingBackChoice(null);
+    setPickerScope(physical ? "physical-copy" : "entry");
+    setPickerContext({
+      cardId: target.id,
+      ...(physical ? { physicalCardIndex: physical.index, physicalCopyNumber: physical.copyNumber, physicalTotalCopies: physical.totalCopies } : {}),
+    });
+    setArtworkProblem(null);
+  }
+
+  function changeArtworkPickerSide(side: CardFaceSide) {
+    if (!artworkTargetCard) return;
+    if (isDoubleFacedIdentity(artworkTargetCard.identity)) {
+      if (!artworkTargetCard.faces.some((item) => item.side === side)) return;
+      dispatchEditor({ type: "set-face", side });
+    }
+    setPickerSide(side);
+    setArtworkFilter(side === "back" && !isDoubleFacedIdentity(artworkTargetCard.identity) ? "mpc" : "all");
+    setArtworkPageIndex(0);
+    setPendingArtwork(null);
+    setPendingBackChoice(null);
+    setPickerScope(pickerContext?.physicalCardIndex === undefined ? "entry" : "physical-copy");
+  }
 
   const activeCard = useMemo(() => workingCards.find((card) => card.id === selectedCardId), [workingCards, selectedCardId]);
+  const artworkTargetCard = pickerContext ? workingCards.find((card) => card.id === pickerContext.cardId) ?? activeCard : activeCard;
+  const pickerIsOpen = Boolean(pickerContext && artworkTargetCard);
+  const effectivePickerSide = pickerIsOpen ? pickerSide : face;
+  const manualPhysicalBackPicker = Boolean(pickerIsOpen && effectivePickerSide === "back" && artworkTargetCard && !isDoubleFacedIdentity(artworkTargetCard.identity));
   const physicalCardCount = useMemo(() => workingCards.reduce((sum, card) => sum + card.quantity, 0), [workingCards]);
   const backValidation = useMemo(() => createBackValidationSummary(workingCards, projectDefaultBack, missingBackPolicy), [workingCards, projectDefaultBack, missingBackPolicy]);
-  const manualPhysicalBackPicker = Boolean(activeCard && manualPhysicalBackPickerCardId === activeCard.id && !isDoubleFacedIdentity(activeCard.identity));
-  const artworkFace = manualPhysicalBackPicker ? "front" : face;
-  const activeFaceExists = Boolean(manualPhysicalBackPicker || activeCard?.faces.some((item) => item.side === face));
-  const activeIdentityId = activeCard?.identity?.id ?? null;
-  const artworkRequest = activeCard && activeFaceExists
+  const activeFaceExists = Boolean(manualPhysicalBackPicker || artworkTargetCard?.faces.some((item) => item.side === effectivePickerSide));
+  const activeIdentityId = artworkTargetCard?.identity?.id ?? null;
+  const artworkRequest = pickerIsOpen && artworkTargetCard && activeFaceExists
     ? {
       identityId: activeIdentityId ?? "custom:artwork-picker",
-      faceId: artworkFace,
+      faceId: manualPhysicalBackPicker ? "front" as const : effectivePickerSide,
       source: manualPhysicalBackPicker ? "mpc" : artworkFilter,
-      mpcReferences: activeCard.mpcReferences,
+      mpcReferences: artworkTargetCard.mpcReferences,
       mpcFilters: manualPhysicalBackPicker || artworkFilter === "mpc" ? mpcFilters : undefined,
       forceMpcRefresh: (manualPhysicalBackPicker || artworkFilter === "mpc") && forcedMpcRefreshRevision === artworkCatalogRevision,
-      cacheKey: JSON.stringify([activeIdentityId, artworkFace, manualPhysicalBackPicker, manualPhysicalBackPicker ? "mpc-cardbacks" : artworkFilter, activeCard.mpcReferences, manualPhysicalBackPicker || artworkFilter === "mpc" ? mpcFilters : undefined, artworkCatalogRevision]),
+      cacheKey: JSON.stringify([activeIdentityId, manualPhysicalBackPicker ? "physical-back" : effectivePickerSide, manualPhysicalBackPicker, manualPhysicalBackPicker ? "mpc-cardbacks" : artworkFilter, artworkTargetCard.mpcReferences, manualPhysicalBackPicker || artworkFilter === "mpc" ? mpcFilters : undefined, artworkCatalogRevision]),
     }
     : null;
   const currentArtworkCatalogKey = artworkRequest?.cacheKey ?? "";
-  const currentArtworkRequestKey = artworkRequest ? JSON.stringify([activeCard?.id, artworkRequest.cacheKey]) : "";
+  const currentArtworkRequestKey = artworkRequest ? JSON.stringify([artworkTargetCard?.id, artworkRequest.cacheKey]) : "";
   const currentArtworkCatalog = artworkCatalogForRequest(artworkCatalogState, currentArtworkRequestKey);
   const artworkCandidates = currentArtworkCatalog.candidates;
   const artworkCatalogTotal = currentArtworkCatalog.catalogTotal;
-  const filterCards = useMemo(() => manualPhysicalBackPicker && activeCard
-    ? artworkCandidates.filter((candidate) => isEligibleGenericPhysicalBack(activeCard, candidate))
-    : artworkCandidates.filter((candidate) => artworkFilter === "all" || candidate.source === artworkFilter), [activeCard, artworkCandidates, artworkFilter, manualPhysicalBackPicker]);
-  const artworkWindowLimit = artworkWindowLimitForRequest(artworkWindow, currentArtworkRequestKey);
-  const windowedArtworkCandidates = sliceArtworkWindow(filterCards, artworkWindowLimit);
+  const filterCards = useMemo(() => manualPhysicalBackPicker && artworkTargetCard
+    ? artworkCandidates.filter((candidate) => isEligibleGenericPhysicalBack(artworkTargetCard, candidate))
+    : artworkCandidates.filter((candidate) => artworkFilter === "all" || candidate.source === artworkFilter), [artworkTargetCard, artworkCandidates, artworkFilter, manualPhysicalBackPicker]);
+  const filteredArtworkCandidates = useMemo(
+    () => filterAndSortArtworkCandidates(filterCards, artworkSearch, artworkSort),
+    [filterCards, artworkSearch, artworkSort],
+  );
+  const visibleArtworkCandidates = sliceArtworkPage(filteredArtworkCandidates, artworkPageIndex, ARTWORK_WINDOW_SIZE);
+  const windowedArtworkCandidates = visibleArtworkCandidates;
   const windowedCandidateKey = windowedArtworkCandidates.map(({ id }) => id).join("\n");
   const qualityCheckingIds = qualityChecking.requestKey === currentArtworkRequestKey ? qualityChecking.candidateIds : new Set<string>();
   artworkRequestKeyRef.current = currentArtworkRequestKey;
   artworkCatalogKeyRef.current = currentArtworkCatalogKey;
   const visibleProblem = problem && (problemCardId === null || problemCardId === selectedCardId) ? problem : "";
   const visibleArtworkProblem = artworkProblem
-    && artworkProblem.cardId === activeCard?.id
+    && artworkProblem.cardId === artworkTargetCard?.id
     && artworkProblem.requestKey === artworkRequest?.cacheKey
     ? artworkProblem.message
     : "";
@@ -837,7 +900,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   }, [manualQuery, autocompleteEnabled]);
 
   useEffect(() => {
-    if (artworkFilter !== "mpc" || mpcCatalogs) return;
+    if (!pickerIsOpen || artworkFilter !== "mpc" || mpcCatalogs) return;
     const controller = new AbortController();
     void fetch("/api/cards/artworks/mpc-catalogs", { signal: controller.signal, cache: "no-store" })
       .then((response) => jsonResponse<MpcFilterCatalogResult>(response))
@@ -851,7 +914,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         if (!controller.signal.aborted) setMpcCatalogProblem(error instanceof Error ? error.message : "Catálogos avançados MPC indisponíveis.");
       });
     return () => controller.abort();
-  }, [artworkFilter, mpcCatalogs, mpcCatalogRetry]);
+  }, [artworkFilter, mpcCatalogs, mpcCatalogRetry, pickerIsOpen]);
 
   useEffect(() => {
     let current = true;
@@ -861,7 +924,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       projectRestoreVersion,
       "artwork",
       async () => {
-        if (!artworkRequest || !activeCard) return null;
+        if (!artworkRequest || !artworkTargetCard) return null;
         const forceMpcRefresh = artworkRequest.forceMpcRefresh;
         if (forceMpcRefresh) setForcedMpcRefreshRevision(null);
         return getOrCreateCachedRequest(artworkCatalogRequests.current, artworkRequest.cacheKey, async () => {
@@ -888,23 +951,42 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         setMpcDiagnostic(result.mpcDiagnostic ?? null);
       })
       .catch((error: unknown) => {
-        if (current && artworkRequestKeyRef.current === requestKey && activeCard && artworkRequest) {
-          setArtworkCatalogState({ requestKey, candidates: [], catalogTotal: 0, catalogTotalComplete: false });
+        if (current && artworkRequestKeyRef.current === requestKey && artworkTargetCard && artworkRequest) {
+          setArtworkCatalogState((existing) => existing?.requestKey === requestKey
+            ? existing
+            : { requestKey, candidates: [], catalogTotal: 0, catalogTotalComplete: false });
           setArtworkProblem({
             message: error instanceof Error ? error.message : "Não foi possível abrir o catálogo de artes.",
-            cardId: activeCard.id,
+            cardId: artworkTargetCard.id,
             requestKey: artworkRequest.cacheKey,
           });
         }
       });
     return () => { current = false; };
-  }, [artworkRequest?.cacheKey, activeCard?.id, projectRestoreVersion]);
+  }, [artworkRequest?.cacheKey, artworkTargetCard?.id, projectRestoreVersion]);
 
   useEffect(() => {
     qualityHydratorRef.current?.reset(currentArtworkRequestKey);
-    setArtworkWindow({ requestKey: currentArtworkRequestKey, limit: ARTWORK_WINDOW_SIZE });
+    setArtworkPageIndex(0);
     return () => qualityHydratorRef.current?.cancel(currentArtworkRequestKey);
   }, [currentArtworkRequestKey]);
+
+  useEffect(() => { setArtworkPageIndex(0); }, [artworkSearch, artworkSort, artworkFilter]);
+
+  useEffect(() => {
+    if (!pickerContext || pickerContext.physicalCardIndex === undefined) return;
+    let start = 0;
+    const target = [...workingCards].sort((left, right) => left.order - right.order).find((card) => {
+      const end = start + card.quantity;
+      const contains = pickerContext.physicalCardIndex! >= start && pickerContext.physicalCardIndex! < end;
+      start = end;
+      return contains;
+    });
+    if (target && target.id !== pickerContext.cardId) {
+      setPickerContext((current) => current && current.physicalCardIndex === pickerContext.physicalCardIndex ? { ...current, cardId: target.id } : current);
+      if (selectedCardId !== target.id) dispatchEditor({ type: "select-card", cardId: target.id });
+    }
+  }, [workingCards, pickerContext, selectedCardId]);
 
   useEffect(() => {
     qualityHydratorRef.current?.schedule(currentArtworkRequestKey, windowedArtworkCandidates);
@@ -1025,14 +1107,27 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     finally { setBusy(false); }
   }
 
-  async function chooseArtwork(candidate: CandidateDto) {
-    if (!activeCard || !artworkRequest) return;
+  function chooseArtwork(candidate: CandidateDto) {
+    setPendingArtwork(candidate);
+    setPendingBackChoice(null);
+    setPickerScope(pickerContext?.physicalCardIndex === undefined ? "entry" : "physical-copy");
+  }
+
+  function chooseSemanticBack(choice: { readonly mode: "none" | "project-default" } | { readonly mode: "library"; readonly asset: BackLibraryAssetReference }) {
+    setPendingArtwork(null);
+    setPendingBackChoice(choice);
+    setPickerScope(pickerContext?.physicalCardIndex === undefined ? "entry" : "physical-copy");
+  }
+
+  async function confirmArtworkSelection() {
+    if (!artworkTargetCard || !artworkRequest || (!pendingArtwork && !pendingBackChoice)) return;
     const controller = beginAbortableOperation("artwork");
-    const problemCardId = activeCard.id;
+    const problemCardId = artworkTargetCard.id;
     const problemRequestKey = artworkRequest.cacheKey;
     setBusy(true); setArtworkProblem(null); clearProblem(problemCardId);
     try {
-      if (candidate.originalAvailable) {
+      const candidate = pendingArtwork;
+      if (candidate?.originalAvailable) {
         const prepareResponse = await fetch(`/api/cards/artworks/${encodeURIComponent(candidate.id)}/prepare`, { method: "POST", signal: controller.signal });
         const prepared = await jsonResponse<{ candidate: CandidateDto }>(prepareResponse);
         updateResolvedRequestCache(artworkCatalogRequests.current, problemRequestKey, (cached) => ({
@@ -1041,14 +1136,56 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         }));
         setArtworkCatalogState((current) => updateArtworkCatalogCandidate(current, currentArtworkRequestKey, prepared.candidate));
       }
-      const response = manualPhysicalBackPicker
-        ? await postManualBackArtworkSelection(activeCard, candidate.id, fetch, controller.signal)
-        : await postArtworkSelection(activeCard, face, candidate.id, fetch, controller.signal);
-      const result = await jsonResponse<{ workingCards: WorkingCard[] }>(response);
-      dispatchEditor({ type: "apply-artwork-selection", cardId: activeCard.id, card: result.workingCards[0] });
-      setStatus(manualPhysicalBackPicker
-        ? candidate.originalAvailable ? "Artwork selecionado como verso físico manual; original validado e armazenado no cache." : "Referência MPC selecionada como verso físico manual; nenhum original local está disponível."
-        : candidate.originalAvailable ? "Artwork selecionado; original validado e armazenado no cache." : "Referência MPC selecionada; nenhum original local está disponível.");
+      const scope = manualPhysicalBackPicker
+        ? pickerScope
+        : pickerScope === "all-simple-project" ? "same-identity" : pickerScope;
+      const response = await fetch("/api/cards/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify(pendingBackChoice
+          ? {
+            action: "apply-generic-back-scope", cards: workingCards, targetCardId: artworkTargetCard.id,
+            scope, choiceMode: pendingBackChoice.mode,
+            ...(pendingBackChoice.mode === "library" ? { asset: pendingBackChoice.asset } : {}),
+            ...(pickerContext?.physicalCardIndex === undefined ? {} : { physicalCardIndex: pickerContext.physicalCardIndex }),
+          }
+          : manualPhysicalBackPicker
+            ? {
+              action: "apply-generic-back-scope", cards: workingCards, targetCardId: artworkTargetCard.id,
+              scope, choiceMode: "mpc", candidateId: candidate!.id,
+              ...(pickerContext?.physicalCardIndex === undefined ? {} : { physicalCardIndex: pickerContext.physicalCardIndex }),
+            }
+            : {
+              action: "apply-artwork-scope", cards: workingCards, targetCardId: artworkTargetCard.id,
+              faceId: effectivePickerSide, scope, candidateId: candidate!.id,
+              ...(pickerContext?.physicalCardIndex === undefined ? {} : { physicalCardIndex: pickerContext.physicalCardIndex }),
+            }),
+      });
+      const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth?: ProviderHealth; impact?: { affectedPhysicalCards: number; preservedDfcPhysicalCards: number } }>(response);
+      dispatchEditor({ type: "apply-resolve-all-result", cards: result.workingCards });
+      if (pickerContext?.physicalCardIndex !== undefined) {
+        let physicalOffset = 0;
+        const selectedSegment = [...result.workingCards].sort((left, right) => left.order - right.order).find((card) => {
+          const contains = pickerContext.physicalCardIndex! >= physicalOffset && pickerContext.physicalCardIndex! < physicalOffset + card.quantity;
+          physicalOffset += card.quantity;
+          return contains;
+        });
+        if (selectedSegment) {
+          setPickerContext((current) => current ? { ...current, cardId: selectedSegment.id } : current);
+          dispatchEditor({ type: "select-card", cardId: selectedSegment.id });
+        }
+      }
+      if (result.providerHealth) setProviderHealth((current) => ({ ...current, ...result.providerHealth }));
+      if (result.impact) {
+        setStatus(`Verso aplicado a ${result.impact.affectedPhysicalCards} carta(s) simples; ${result.impact.preservedDfcPhysicalCards} cartas dupla-face preservadas.`);
+      } else if (manualPhysicalBackPicker || pendingBackChoice) {
+        setStatus(candidate?.originalAvailable ? "Verso aplicado; original validado e armazenado no cache." : "Verso aplicado pela referência MPC validada.");
+      } else {
+        setStatus(candidate?.originalAvailable ? "Artwork selecionado; original validado e armazenado no cache." : "Referência MPC selecionada; nenhum original local está disponível.");
+      }
+      setPendingArtwork(null);
+      setPendingBackChoice(null);
     } catch (error) {
       if (controller.signal.aborted) {
         setArtworkProblem(null);
@@ -1065,7 +1202,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   }
 
   async function refreshMpcMetadata(candidate: CandidateDto) {
-    if (candidate.source !== "mpc" || !artworkRequest) return;
+    if (candidate.source !== "mpc" || !artworkRequest || !artworkTargetCard) return;
     const requestKey = artworkRequest.cacheKey;
     setBusy(true); setArtworkProblem(null);
     try {
@@ -1077,7 +1214,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         candidates: cached.candidates.map((item) => item.id === candidate.id ? result.candidate : item),
       }));
     } catch (error) {
-      setArtworkProblem({ message: error instanceof Error ? error.message : "Não foi possível revalidar os metadados MPC.", cardId: activeCard?.id ?? "", requestKey });
+      setArtworkProblem({ message: error instanceof Error ? error.message : "Não foi possível revalidar os metadados MPC.", cardId: artworkTargetCard.id, requestKey });
     } finally { setBusy(false); }
   }
 
@@ -1291,9 +1428,13 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     setCutSourceSelection(settings.cutSourceSelection);
 
     setArtworkCatalogState(null);
-    setManualPhysicalBackPickerCardId(null);
+    setPickerContext(null);
+    setPendingArtwork(null);
+    setPendingBackChoice(null);
     setArtworkProblem(null);
     setArtworkFilter("all");
+    setArtworkPageIndex(0);
+    setArtworkSearch("");
     setManualQuery("");
     manualQueryRef.current = "";
     setAutocompleteEnabled(true);
@@ -1308,8 +1449,8 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     setStatus(`${project.name} aberto · revisão ${project.revision}.`);
   }
 
-  const selected = activeCard
-    ? manualPhysicalBackPicker ? activeCard.manualBackArtwork : selectedFor(activeCard, face)
+  const selected = artworkTargetCard
+    ? manualPhysicalBackPicker ? artworkTargetCard.manualBackArtwork : selectedFor(artworkTargetCard, effectivePickerSide)
     : undefined;
   const previewMatchesActiveProject = !activeProjectSync || Boolean(activeProjectSync.saved
     && cutGeometryPreview
@@ -1476,7 +1617,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           disabled={interactionBusy}
           onSelect={(cardId) => {
             if (problemCardId !== null && problemCardId !== cardId) clearProblem();
-            setManualPhysicalBackPickerCardId((current) => current === cardId ? current : null);
             setArtworkProblem(null);
             dispatchEditor({ type: "select-card", cardId });
           }}
@@ -1530,100 +1670,175 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   </div>;
 
   const artworkSection = <div className="workspace-section-content workspace-artwork-content">
-    {providerStatus()}
     {activeCard ? <>
-      <p className="muted">Carta ativa: <strong>{displayCard(activeCard)}</strong>. Selecione outra carta em Cartas.</p>
-      <div className="working-card-detail">
-          {!isDoubleFacedIdentity(activeCard.identity) && <div className="manual-physical-back-picker-control">
-            <button
-              className={`button ${manualPhysicalBackPicker ? "primary" : "secondary"}`}
-              type="button"
-              aria-pressed={manualPhysicalBackPicker}
-              disabled={interactionBusy}
-              onClick={() => {
-                setManualPhysicalBackPickerCardId((current) => current === activeCard.id ? null : activeCard.id);
-                setArtworkFilter("mpc");
-                setArtworkProblem(null);
-              }}
-            >{manualPhysicalBackPicker ? "Fechar escolha do verso manual" : activeCard.manualBackArtwork ? "Editar artwork do verso manual" : "Escolher artwork como verso manual"}</button>
-            {manualPhysicalBackPicker && <p className="muted">Escolha um cardback MPC validado para o verso físico. Imagens próprias entram pela Back Library.</p>}
-          </div>}
-
-          {activeCard.faces.length > 1 && <div className="face-tabs" role="group" aria-label="Face da carta">
-            {activeCard.faces.map((item) => <button key={item.side} type="button" disabled={interactionBusy} className={`button ${face === item.side ? "primary" : "secondary"}`} onClick={() => dispatchEditor({ type: "set-face", side: item.side })}>{item.side === "front" ? "Front" : "Back"}{item.name ? ` · ${item.name}` : ""}</button>)}
-          </div>}
-
-          <div className="artwork-section">
-            <div className="compact-heading"><div><strong>{manualPhysicalBackPicker ? "Escolher artwork como verso manual" : `Artwork Picker · ${face === "front" ? "Front" : "Back"}`}{!manualPhysicalBackPicker && isDoubleFacedIdentity(activeCard.identity) && <span className="multiface-label" aria-label="Carta dupla-face"> · Carta dupla-face</span>}</strong><span>Seleção atual é preservada durante a atualização do catálogo.</span></div></div>
-            {abortableOperation === "artwork" && <button className="button secondary" type="button" aria-label="Cancelar download e seleção da arte" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar download/seleção</button>}
-            {!manualPhysicalBackPicker && <div className="artwork-filter-row" role="group" aria-label="Filtrar origem das artes">
-              {([ ["all", "Todas"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"], ["upload", "Meus uploads"] ] as const).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => setArtworkFilter(value)}>{label}</button>)}
-            </div>}
-            {(manualPhysicalBackPicker || artworkFilter === "mpc") && <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => {
-              const revision = artworkCatalogRevision + 1;
-              setForcedMpcRefreshRevision(revision);
-              setArtworkCatalogRevision(revision);
-            }}>Atualizar resultados MPC</button>}
-            {(manualPhysicalBackPicker || artworkFilter === "mpc") && mpcDiagnostic && (mpcDiagnostic.degraded || !mpcDiagnostic.available) && <p className="muted" role="status">MPC está {mpcDiagnostic.available ? "degradado ou em modo de cache" : "offline"}. Originals já armazenados continuam disponíveis para exportação.</p>}
-            {(manualPhysicalBackPicker || artworkFilter === "mpc") && <details className="mpc-advanced-filters">
-              <summary>Filtros e preferências avançados MPC</summary>
-              {mpcCatalogProblem && <p className="muted" role="status">Catálogos de filtros indisponíveis; a busca básica MPC continua disponível. {mpcCatalogProblem} <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => { setMpcCatalogs(null); setMpcCatalogRetry((revision) => revision + 1); }}>Tentar novamente</button></p>}
-              {!mpcCatalogs && !mpcCatalogProblem && <p className="muted">Carregando catálogos MPC…</p>}
-              {(!mpcDiagnostic?.capabilities.filters.dpi) && <p className="muted" role="status">Os filtros MPC aparecem quando o suporte do provider for confirmado. Atualize os resultados para consultar o protocolo atual.</p>}
-              <div className="mpc-filter-controls">
-                {mpcDiagnostic?.capabilities.filters.dpi && <>
-                  <label>DPI mínimo<input type="number" min={0} max={10000} step={1} value={mpcFilters.minimumDpi ?? ""} onChange={(event) => setMpcFilters((current) => ({ ...current, minimumDpi: event.target.value === "" ? undefined : Number(event.target.value) }))} /></label>
-                  <label>DPI máximo<input type="number" min={0} max={10000} step={1} value={mpcFilters.maximumDpi ?? ""} placeholder="1500" onChange={(event) => setMpcFilters((current) => ({ ...current, maximumDpi: event.target.value === "" ? undefined : Number(event.target.value) }))} /></label>
-                </>}
-                {mpcDiagnostic?.capabilities.filters.sources && <label>Sources permitidas (vazio = todas)<select multiple size={4} value={(mpcFilters.sources ?? []).map(String)} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, sources: Array.from(event.currentTarget.selectedOptions, (option) => Number(option.value)) }))}>{mpcCatalogs?.sources.map((source) => <option key={source.id} value={source.id}>{source.name} · {source.id}</option>)}</select></label>}
-                {mpcDiagnostic?.capabilities.filters.languages && <>
-                  <label>Languages<select multiple size={4} value={[...(mpcFilters.languages ?? [])]} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, languages: Array.from(event.currentTarget.selectedOptions, (option) => option.value) }))}>{mpcCatalogs?.languages.map((language) => <option key={language.code} value={language.code}>{language.name} · {language.code}</option>)}</select></label>
-                  <label>Languages preferidos (códigos em ordem)<input type="text" value={(mpcFilters.preferredLanguages ?? []).join(", ")} onChange={(event) => setMpcFilters((current) => ({ ...current, preferredLanguages: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) }))} /></label>
-                </>}
-                {mpcDiagnostic?.capabilities.filters.tags && <>
-                  <label>Incluir tags<select multiple size={4} value={[...(mpcFilters.includeTags ?? [])]} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, includeTags: Array.from(event.currentTarget.selectedOptions, (option) => option.value) }))}>{mpcCatalogs?.tags.map((tag) => <option key={tag.name} value={tag.name}>{tag.name}</option>)}</select></label>
-                  <label>Excluir tags<select multiple size={4} value={[...(mpcFilters.excludeTags ?? [])]} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, excludeTags: Array.from(event.currentTarget.selectedOptions, (option) => option.value) }))}>{mpcCatalogs?.tags.map((tag) => <option key={tag.name} value={tag.name}>{tag.name}</option>)}</select></label>
-                  <label>Tags preferidas<input type="text" value={(mpcFilters.preferredTags ?? []).join(", ")} onChange={(event) => setMpcFilters((current) => ({ ...current, preferredTags: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) }))} /></label>
-                </>}
-                {mpcDiagnostic?.capabilities.filters.sources && <label>Sources preferidas (IDs em ordem, separados por vírgula)<input type="text" inputMode="numeric" value={(mpcFilters.preferredSources ?? []).join(", ")} onChange={(event) => setMpcFilters((current) => ({ ...current, preferredSources: event.target.value.split(",").map((value) => value.trim()).filter(Boolean).map(Number) }))} /></label>}
-                {mpcDiagnostic?.capabilities.search && <label>Ordenação MPC<select value={mpcFilters.rankingMode ?? "balanced"} onChange={(event) => setMpcFilters((current) => ({ ...current, rankingMode: event.target.value === "provider" ? "provider" : "balanced" }))}><option value="balanced">Equilibrada</option><option value="provider">Ordem do provider</option></select></label>}
-              </div>
-              <p className="muted">Preferências só ordenam resultados; não selecionam arte. A escolha atual permanece intacta.</p>
-              {mpcDiagnostic && <p className="muted">Protocolo confirmado: {mpcDiagnostic.lastProtocolConfirmed ?? "ainda não"}{mpcDiagnostic.fallbackV2Used ? " · fallback v2 usado" : ""} · cache MPC {mpcDiagnostic.degraded ? "degradado" : "operacional"}</p>}
-            </details>}
-            {selected && <p className="selected-artwork-line">Selecionada: {labelSource(selected.source)} · {selected.candidateId} · {artworkPolicyLabel(selected)}</p>}
-            {!manualPhysicalBackPicker && <button
-              className="button secondary restore-artwork-default"
-              type="button"
-              disabled={interactionBusy || !activeCard.identity || !activeFaceExists}
-              title={!activeCard.identity ? "Não há identidade resolvida para determinar uma artwork padrão." : undefined}
-              onClick={() => void restoreArtworkDefault(activeCard, face)}
-            >Restaurar artwork padrão desta face</button>}
-            {!activeCard.identity && <p className="muted">Não há identidade resolvida para determinar uma artwork padrão.</p>}
-            {visibleArtworkProblem && <p className="error-message" role="alert">{visibleArtworkProblem}</p>}
-            {filterCards.length === 0 && !visibleArtworkProblem && <p className="muted">Nenhuma arte disponível neste filtro. Referências MPC não possuem original se não foram importadas localmente.</p>}
-            <ArtworkCandidateGrid
-              candidates={filterCards}
-              windowLimit={artworkWindowLimit}
-              catalogTotal={artworkCatalogTotal}
-              catalogTotalComplete={currentArtworkCatalog.catalogTotalComplete}
-              filterTotal={filterCards.length}
-              catalogLabel={artworkRequest?.source && artworkRequest.source !== "all" ? labelSource(artworkRequest.source) : "Catálogo de arte"}
-              cardName={displayCard(activeCard)}
-              selectedCandidateId={selected?.candidateId}
-              disabled={interactionBusy}
-              qualityCheckingIds={qualityCheckingIds}
-              onSelect={(candidate) => void chooseArtwork(candidate)}
-              onRevalidate={(candidate) => void refreshMpcMetadata(candidate)}
-              onLoadMore={() => setArtworkWindow((current) => ({
-                requestKey: currentArtworkRequestKey,
-                limit: Math.min(filterCards.length, (current.requestKey === currentArtworkRequestKey ? current.limit : ARTWORK_WINDOW_SIZE) + ARTWORK_WINDOW_SIZE),
-              }))}
-            />
-          </div>
+      <p className="muted">A arte é aplicada ao estado canônico usado pelo compositor, pelo Project e pelo PDF.</p>
+      <div className="selected-artwork-summary">
+        <strong>{displayCard(activeCard)}</strong>
+        <span>{activeCard.quantity} cópia(s) · {isDoubleFacedIdentity(activeCard.identity) ? "Carta dupla-face" : "Carta simples"}</span>
+        {selected && <span>Arte atual: {labelSource(selected.source)} · {selected.candidateId}</span>}
+        {activeCard.manualBackArtwork?.source === "scryfall" && <span>Verso Scryfall legado preservado.</span>}
+        <button className="button primary" type="button" disabled={interactionBusy} onClick={(event) => openArtworkPicker(activeCard.id, face, event.currentTarget)}>Selecionar arte</button>
       </div>
-    </> : <section className="panel"><h3>Nenhuma carta selecionada</h3><p>Adicione e selecione uma carta na seção Cartas para escolher artwork.</p></section>}
+      <p className="muted">Para editar uma cópia específica, selecione-a no compositor e use “Selecionar arte”.</p>
+    </> : <section className="panel"><h3>Nenhuma carta selecionada</h3><p>Adicione e selecione uma carta para escolher artwork.</p></section>}
   </div>;
+
+  const pickerCard = artworkTargetCard;
+  const pickerIsDfc = Boolean(pickerCard && isDoubleFacedIdentity(pickerCard.identity));
+  const pickerFaceName = pickerCard?.faces.find((item) => item.side === effectivePickerSide)?.name ?? (effectivePickerSide === "front" ? pickerCard?.identity?.name ?? pickerCard?.identityHints.name ?? "Front" : "Back");
+  const pickerTitle = pickerCard
+    ? `${displayCard(pickerCard)}${pickerContext?.physicalCardIndex !== undefined ? ` · cópia ${pickerContext.physicalCopyNumber}/${pickerContext.physicalTotalCopies}` : ` · ${pickerCard.quantity} cópia(s)`}`
+    : "Artwork Picker";
+  const sameIdentityCards = pickerCard?.identity
+    ? workingCards.filter((card) => card.identity?.id === pickerCard.identity?.id && card.identity?.provider === pickerCard.identity?.provider)
+    : [];
+  const sameIdentitySimpleCards = sameIdentityCards.filter((card) => !isDoubleFacedIdentity(card.identity));
+  const allSimpleCards = workingCards.filter((card) => !isDoubleFacedIdentity(card.identity));
+  const preservedDfcCards = workingCards.filter((card) => isDoubleFacedIdentity(card.identity));
+  const plannedBackPhysicalCount = pickerScope === "physical-copy" ? 1
+    : pickerScope === "same-identity" ? sameIdentitySimpleCards.reduce((sum, card) => sum + card.quantity, 0)
+      : pickerScope === "all-simple-project" ? allSimpleCards.reduce((sum, card) => sum + card.quantity, 0)
+        : pickerCard?.quantity ?? 0;
+  const plannedBackDfcCount = pickerScope === "all-simple-project" ? preservedDfcCards.reduce((sum, card) => sum + card.quantity, 0) : 0;
+  const selectedBackAssetId = pickerCard?.manualBackAsset?.assetId;
+  const pendingBackChoiceLabel = pendingBackChoice?.mode === "none" ? "Sem verso"
+    : pendingBackChoice?.mode === "project-default" ? "Project Default Back"
+      : pendingBackChoice?.mode === "library" ? `Back Library · ${pendingBackChoice.asset.assetId}`
+        : "";
+  const pickerBackLibraryAssets = backLibraryAssets.filter((asset) =>
+    (asset.selectable !== false && !asset.retired) || asset.assetId === selectedBackAssetId,
+  );
+
+  const mpcAdvancedFilters = <details className="mpc-advanced-filters">
+    <summary>Filtros avançados MPC</summary>
+    {mpcCatalogProblem && <p className="muted" role="status">Catálogos de filtros indisponíveis; a busca básica MPC continua disponível. {mpcCatalogProblem} <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => { setMpcCatalogs(null); setMpcCatalogRetry((revision) => revision + 1); }}>Tentar novamente</button></p>}
+    {!mpcCatalogs && !mpcCatalogProblem && <p className="muted">Carregando catálogos MPC…</p>}
+    {(!mpcDiagnostic?.capabilities.filters.dpi) && <p className="muted" role="status">Os filtros MPC aparecem quando o suporte do provider for confirmado. Atualize os resultados para consultar o protocolo atual.</p>}
+    <div className="mpc-filter-controls">
+      {mpcDiagnostic?.capabilities.filters.dpi && <>
+        <label>DPI mínimo<input type="number" min={0} max={10000} step={1} value={mpcFilters.minimumDpi ?? ""} onChange={(event) => setMpcFilters((current) => ({ ...current, minimumDpi: event.target.value === "" ? undefined : Number(event.target.value) }))} /></label>
+        <label>DPI máximo<input type="number" min={0} max={10000} step={1} value={mpcFilters.maximumDpi ?? ""} placeholder="1500" onChange={(event) => setMpcFilters((current) => ({ ...current, maximumDpi: event.target.value === "" ? undefined : Number(event.target.value) }))} /></label>
+      </>}
+      {mpcDiagnostic?.capabilities.filters.sources && <label>Sources permitidas (vazio = todas)<select multiple size={4} value={(mpcFilters.sources ?? []).map(String)} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, sources: Array.from(event.currentTarget.selectedOptions, (option) => Number(option.value)) }))}>{mpcCatalogs?.sources.map((source) => <option key={source.id} value={source.id}>{source.name} · {source.id}</option>)}</select></label>}
+      {mpcDiagnostic?.capabilities.filters.languages && <>
+        <label>Languages<select multiple size={4} value={[...(mpcFilters.languages ?? [])]} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, languages: Array.from(event.currentTarget.selectedOptions, (option) => option.value) }))}>{mpcCatalogs?.languages.map((language) => <option key={language.code} value={language.code}>{language.name} · {language.code}</option>)}</select></label>
+        <label>Languages preferidos (códigos em ordem)<input type="text" value={(mpcFilters.preferredLanguages ?? []).join(", ")} onChange={(event) => setMpcFilters((current) => ({ ...current, preferredLanguages: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) }))} /></label>
+      </>}
+      {mpcDiagnostic?.capabilities.filters.tags && <>
+        <label>Incluir tags<select multiple size={4} value={[...(mpcFilters.includeTags ?? [])]} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, includeTags: Array.from(event.currentTarget.selectedOptions, (option) => option.value) }))}>{mpcCatalogs?.tags.map((tag) => <option key={tag.name} value={tag.name}>{tag.name}</option>)}</select></label>
+        <label>Excluir tags<select multiple size={4} value={[...(mpcFilters.excludeTags ?? [])]} disabled={!mpcCatalogs} onChange={(event) => setMpcFilters((current) => ({ ...current, excludeTags: Array.from(event.currentTarget.selectedOptions, (option) => option.value) }))}>{mpcCatalogs?.tags.map((tag) => <option key={tag.name} value={tag.name}>{tag.name}</option>)}</select></label>
+        <label>Tags preferidas<input type="text" value={(mpcFilters.preferredTags ?? []).join(", ")} onChange={(event) => setMpcFilters((current) => ({ ...current, preferredTags: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) }))} /></label>
+      </>}
+      {mpcDiagnostic?.capabilities.filters.sources && <label>Sources preferidas (IDs em ordem)<input type="text" inputMode="numeric" value={(mpcFilters.preferredSources ?? []).join(", ")} onChange={(event) => setMpcFilters((current) => ({ ...current, preferredSources: event.target.value.split(",").map((value) => value.trim()).filter(Boolean).map(Number) }))} /></label>}
+      {mpcDiagnostic?.capabilities.search && <label>Ordenação do provider<select value={mpcFilters.rankingMode ?? "balanced"} onChange={(event) => setMpcFilters((current) => ({ ...current, rankingMode: event.target.value === "provider" ? "provider" : "balanced" }))}><option value="balanced">Equilibrada</option><option value="provider">Ordem original MPC</option></select></label>}
+    </div>
+    <p className="muted">Filtros MPC atuam no catálogo do provider; a escolha atual permanece intacta.</p>
+    {mpcDiagnostic && <p className="muted">Protocolo confirmado: {mpcDiagnostic.lastProtocolConfirmed ?? "ainda não"}{mpcDiagnostic.fallbackV2Used ? " · fallback v2 usado" : ""} · cache MPC {mpcDiagnostic.degraded ? "degradado" : "operacional"}</p>}
+  </details>;
+
+  const artworkPickerContent = pickerCard && pickerIsOpen ? <div className="artwork-picker-content">
+    {providerStatus()}
+    <div className="artwork-picker-context">
+      <strong>{pickerIsDfc ? "Carta dupla-face" : "Carta simples"}</strong>
+      <span>CardIdentity: {pickerCard.identity?.id ?? "não resolvida"}</span>
+      <span>{effectivePickerSide === "front" ? "Front" : "Back"} · {pickerFaceName}</span>
+      {pickerContext?.physicalCardIndex !== undefined
+        ? <span>Carta física {pickerContext.physicalCardIndex + 1} · cópia original {pickerContext.physicalCopyNumber}/{pickerContext.physicalTotalCopies}</span>
+        : <span>Entrada {pickerCard.order + 1} · {pickerCard.quantity} cópia(s)</span>}
+      {pickerCard.manualBackArtwork?.source === "scryfall" && manualPhysicalBackPicker && <span role="status">Verso Scryfall legado preservado; essa fonte não pode ser escolhida novamente para cartas simples.</span>}
+    </div>
+
+    <div className="artwork-picker-face-tabs" role="tablist" aria-label="Face da carta">
+      {(["front", "back"] as const).map((side) => <button key={side} type="button" role="tab" aria-selected={effectivePickerSide === side} className={`button ${effectivePickerSide === side ? "primary" : "secondary"}`} disabled={interactionBusy || (pickerIsDfc && !pickerCard.faces.some((item) => item.side === side))} onClick={() => changeArtworkPickerSide(side)}>
+        {side === "front" ? "Front" : "Back"}{pickerIsDfc && pickerCard.faces.find((item) => item.side === side)?.name ? ` · ${pickerCard.faces.find((item) => item.side === side)?.name}` : ""}
+      </button>)}
+    </div>
+
+    {pickerIsDfc && <p className="multiface-label">Carta dupla-face · {pickerCard.faces.map((item) => `${item.side === "front" ? "Front" : "Back"} · ${item.name ?? "face sem nome"}`).join(" · ")}</p>}
+
+    {!manualPhysicalBackPicker && <div className="artwork-filter-row picker-provider-tabs" role="group" aria-label="Filtrar provider">
+      {([ ["all", "Todas"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"], ["upload", "Meus uploads"] ] as const).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} aria-pressed={artworkFilter === value} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => { setArtworkFilter(value); setArtworkPageIndex(0); setPendingArtwork(null); }}>{label}</button>)}
+    </div>}
+
+    {manualPhysicalBackPicker && <section className="simple-back-options" aria-label="Opções de verso para carta simples">
+      <h3>Verso da carta simples</h3>
+      <div className="simple-back-semantic-options">
+        <button type="button" className={`button ${pendingBackChoice?.mode === "none" ? "primary" : "secondary"}`} disabled={interactionBusy} onClick={() => chooseSemanticBack({ mode: "none" })}>Sem verso</button>
+        {projectDefaultBack && <button type="button" className={`button ${pendingBackChoice?.mode === "project-default" ? "primary" : "secondary"}`} disabled={interactionBusy} onClick={() => chooseSemanticBack({ mode: "project-default" })}>Project Default Back · {backLibraryAssets.find((asset) => asset.assetId === projectDefaultBack.assetId)?.name ?? "configurado"}</button>}
+      </div>
+      <div className="picker-back-library">
+        <h4>Back Library</h4>
+        {pickerBackLibraryAssets.length === 0 && <p className="muted">A Back Library ainda não tem imagens disponíveis. Adicione uma pela seção Exportar → Back Library.</p>}
+        <div className="picker-back-library-grid">
+          {pickerBackLibraryAssets.map((asset) => <button key={asset.assetId} type="button" className={`picker-back-asset ${pendingBackChoice?.mode === "library" && pendingBackChoice.asset.assetId === asset.assetId ? "is-selected" : ""}`} disabled={interactionBusy || asset.retired} onClick={() => chooseSemanticBack({ mode: "library", asset: { assetId: asset.assetId, sha256: asset.sha256, format: asset.format } })}>
+            <Image src={`/api/back-library/${encodeURIComponent(asset.assetId)}/preview`} alt={`Preview do verso ${asset.name}`} width={200} height={280} unoptimized loading="lazy" />
+            <strong>{asset.name}{asset.retired ? " · arquivado" : ""}</strong>
+            <span>{asset.widthPx} × {asset.heightPx}px · {asset.format.toUpperCase()} · SHA-256 {asset.sha256.slice(0, 12)}</span>
+          </button>)}
+        </div>
+      </div>
+      <p className="muted">Cardbacks MPC precisam ser do tipo CARDBACK. Imagens próprias são selecionadas pela Back Library existente.</p>
+    </section>}
+
+    {(manualPhysicalBackPicker || artworkFilter === "mpc") && <div className="picker-mpc-controls">
+      <div className="picker-mpc-heading"><strong>{manualPhysicalBackPicker ? "MPC Autofill · cardbacks validados" : "MPC Autofill"}</strong><button className="button secondary" type="button" disabled={interactionBusy} onClick={() => {
+        const revision = artworkCatalogRevision + 1;
+        setForcedMpcRefreshRevision(revision);
+        setArtworkCatalogRevision(revision);
+      }}>Atualizar resultados MPC</button></div>
+      {mpcDiagnostic && (mpcDiagnostic.degraded || !mpcDiagnostic.available) && <p className="muted" role="status">MPC está {mpcDiagnostic.available ? "degradado ou em modo de cache" : "offline"}. Outros providers e a seleção anterior continuam disponíveis.</p>}
+      {mpcAdvancedFilters}
+    </div>}
+
+    <div className="artwork-picker-search-row">
+      <label>Buscar neste catálogo<input data-picker-initial-focus type="search" value={artworkSearch} onChange={(event) => { setArtworkSearch(event.target.value); setArtworkPageIndex(0); }} placeholder="Nome, set, idioma, tags…" /></label>
+      <label>Ordenar<select value={artworkSort} onChange={(event) => { setArtworkSort(event.target.value as ArtworkSort); setArtworkPageIndex(0); }}>
+        <option value="recommended">Recomendado</option><option value="dpi">Maior DPI</option><option value="recent">Mais recente</option><option value="provider">Ordem original do provider</option>
+      </select></label>
+    </div>
+
+    {selected && <p className="selected-artwork-line">Estado atual: {labelSource(selected.source)} · {selected.candidateId} · {artworkPolicyLabel(selected)}</p>}
+    {!manualPhysicalBackPicker && !pickerCard.identity && <p className="muted">Sem CardIdentity resolvida: “todas iguais” fica indisponível até a identidade ser confirmada.</p>}
+    {!manualPhysicalBackPicker && <button className="button secondary restore-artwork-default" type="button" disabled={interactionBusy || !pickerCard.identity || !activeFaceExists} title={!pickerCard.identity ? "Não há identidade resolvida para determinar uma artwork padrão." : undefined} onClick={() => void restoreArtworkDefault(pickerCard, effectivePickerSide)}>Restaurar artwork padrão desta face</button>}
+    {visibleArtworkProblem && <p className="error-message" role="alert">{visibleArtworkProblem}</p>}
+    {artworkCatalogState?.requestKey !== currentArtworkRequestKey && !visibleArtworkProblem && <p className="muted" role="status">Carregando o catálogo completo…</p>}
+    {artworkCatalogState?.requestKey === currentArtworkRequestKey && filteredArtworkCandidates.length === 0 && !visibleArtworkProblem && <p className="muted" role="status">Nenhum resultado corresponde a esta busca. Se um provider falhou, os demais resultados continuam disponíveis.</p>}
+
+    <ArtworkCandidateGrid
+      candidates={filteredArtworkCandidates}
+      windowLimit={ARTWORK_WINDOW_SIZE}
+      pageIndex={artworkPageIndex}
+      pageSize={ARTWORK_WINDOW_SIZE}
+      onPageChange={setArtworkPageIndex}
+      catalogTotal={artworkCatalogTotal}
+      catalogTotalComplete={currentArtworkCatalog.catalogTotalComplete}
+      filterTotal={filteredArtworkCandidates.length}
+      catalogLabel={manualPhysicalBackPicker ? "MPC cardbacks" : artworkRequest?.source && artworkRequest.source !== "all" ? labelSource(artworkRequest.source) : "Catálogo de arte"}
+      cardName={displayCard(pickerCard)}
+      selectedCandidateId={pendingArtwork?.id ?? selected?.candidateId}
+      disabled={interactionBusy}
+      qualityCheckingIds={qualityCheckingIds}
+      onSelect={chooseArtwork}
+      onRevalidate={(candidate) => void refreshMpcMetadata(candidate)}
+      onLoadMore={() => undefined}
+    />
+
+    {(pendingArtwork || pendingBackChoice) && <section className="artwork-apply-scope" aria-label="Confirmar escopo da seleção">
+      <p className="artwork-pending-selection" role="status">Nova escolha: {pendingArtwork
+        ? `${pendingArtwork.faceName ?? displayCard(pickerCard)} · ${labelSource(pendingArtwork.source)}`
+        : pendingBackChoiceLabel}</p>
+      <h3>Aplicar para</h3>
+      <div className="artwork-scope-options">
+        <label><input type="radio" name="artwork-scope" checked={pickerScope === (pickerContext?.physicalCardIndex === undefined ? "entry" : "physical-copy")} onChange={() => setPickerScope(pickerContext?.physicalCardIndex === undefined ? "entry" : "physical-copy")} />{pickerContext?.physicalCardIndex === undefined ? "Somente esta entrada/cópias" : "Somente esta cópia física"}</label>
+        <label><input type="radio" name="artwork-scope" checked={pickerScope === "same-identity"} disabled={!pickerCard.identity} onChange={() => setPickerScope("same-identity")} />Todas iguais · mesma CardIdentity + {manualPhysicalBackPicker ? "verso simples" : effectivePickerSide}</label>
+        {manualPhysicalBackPicker && <label><input type="radio" name="artwork-scope" checked={pickerScope === "all-simple-project"} onChange={() => setPickerScope("all-simple-project")} />Todas as cartas simples do Project</label>}
+      </div>
+      {manualPhysicalBackPicker && <p className="artwork-bulk-impact" role="status">Aplicar verso a {plannedBackPhysicalCount} carta(s) simples · {plannedBackDfcCount} carta(s) dupla-face serão preservadas.</p>}
+      {!manualPhysicalBackPicker && pickerScope === "same-identity" && <p className="muted" role="status">A seleção afeta {sameIdentityCards.filter((card) => card.faces.some((item) => item.side === effectivePickerSide)).reduce((sum, card) => sum + card.quantity, 0)} cópia(s) com a mesma CardIdentity e face.</p>}
+      <div className="artwork-scope-actions"><button className="button primary" type="button" disabled={interactionBusy || (pickerScope === "same-identity" && !pickerCard.identity)} onClick={() => void confirmArtworkSelection()}>Aplicar seleção</button><button className="button secondary" type="button" disabled={interactionBusy} onClick={() => { setPendingArtwork(null); setPendingBackChoice(null); }}>Cancelar seleção</button></div>
+    </section>}
+    {abortableOperation === "artwork" && <button className="button secondary" type="button" aria-label="Cancelar download e seleção da arte" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar download/seleção</button>}
+  </div> : null;
 
   const exportActionDisabled = interactionBusy
     || templateRegistrationRequiresUserChoice(templateRegistrationStatus)
@@ -1728,6 +1943,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         cutPreview={cutGeometryPreview}
         selectedPageNumber={cutPageNumber}
         onSelectPage={setCutPageNumber}
+        onSelectArtwork={(cardId, physicalCardIndex, side, opener, copyNumber, totalCopies) => openArtworkPicker(cardId, side, opener, { index: physicalCardIndex, copyNumber, totalCopies })}
         onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))}
       />
     </div>
@@ -1745,30 +1961,35 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     </section>}
   </div>;
 
-  return <WorkspaceShell
-    preview={preview}
-    hasCards={workingCards.length > 0}
-    sharedPanel={{ id: "workspace-project-settings-panel", sections: sharedProjectSections, content: sharedProjectPanel }}
-    sections={{
-      cards: cardsSection,
-      artwork: artworkSection,
-      calibration: <div className="workspace-section-content">
-        <PrinterCalibrationPanel
-        paperFormat={paperFormat}
-        pageOrientation={pageOrientation}
-        printerProfileSelection={printerProfileSelection}
-        printerDuplexMode={printerDuplexMode}
-        exportContentMode={exportContentMode}
-        duplexFlipMode={duplexFlipMode}
-        disabled={interactionBusy}
-        onProjectSelectionChange={(selection, mode) => updateProjectSetting(() => {
-          setPrinterProfileSelection(selection);
-          setPrinterDuplexMode(mode);
-        })}
-        />
-      </div>,
-      export: exportSection,
-      diagnostics: diagnosticsSection,
-    }}
-  />;
+  return <>
+    <WorkspaceShell
+      preview={preview}
+      hasCards={workingCards.length > 0}
+      inert={pickerIsOpen}
+      ariaHidden={pickerIsOpen}
+      sharedPanel={{ id: "workspace-project-settings-panel", sections: sharedProjectSections, content: sharedProjectPanel }}
+      sections={{
+        cards: cardsSection,
+        artwork: artworkSection,
+        calibration: <div className="workspace-section-content">
+          <PrinterCalibrationPanel
+          paperFormat={paperFormat}
+          pageOrientation={pageOrientation}
+          printerProfileSelection={printerProfileSelection}
+          printerDuplexMode={printerDuplexMode}
+          exportContentMode={exportContentMode}
+          duplexFlipMode={duplexFlipMode}
+          disabled={interactionBusy}
+          onProjectSelectionChange={(selection, mode) => updateProjectSetting(() => {
+            setPrinterProfileSelection(selection);
+            setPrinterDuplexMode(mode);
+          })}
+          />
+        </div>,
+        export: exportSection,
+        diagnostics: diagnosticsSection,
+      }}
+    />
+    {artworkPickerContent && <ArtworkPickerDialog title={pickerTitle} onClose={closeArtworkPicker} restoreFocusRef={pickerOpenerRef}>{artworkPickerContent}</ArtworkPickerDialog>}
+  </>;
 }

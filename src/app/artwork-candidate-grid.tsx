@@ -1,9 +1,11 @@
 import Image from "next/image";
+import { useState } from "react";
 import type { ArtworkCandidate } from "../../core/cards/types";
 
 export const ARTWORK_WINDOW_SIZE = 60;
 
 export type ArtworkQualityStatus = "verified" | "provider-reported" | "checking" | "unknown" | "unavailable";
+export type ArtworkSortMode = "recommended" | "dpi" | "recent" | "provider";
 
 export type ArtworkCandidateView = Omit<ArtworkCandidate, "originalUri" | "localOriginalPath"> & {
   readonly resolutionQuality?: "excellent" | "good" | "warning" | "low" | "unknown";
@@ -12,6 +14,66 @@ export type ArtworkCandidateView = Omit<ArtworkCandidate, "originalUri" | "local
 
 export function sliceArtworkWindow<T>(items: readonly T[], limit: number): readonly T[] {
   return items.slice(0, Math.max(0, limit));
+}
+
+export function sliceArtworkPage<T>(items: readonly T[], pageIndex: number, pageSize = ARTWORK_WINDOW_SIZE): readonly T[] {
+  const safePage = Math.max(0, Math.floor(pageIndex));
+  const safePageSize = Math.max(1, Math.floor(pageSize));
+  return items.slice(safePage * safePageSize, (safePage + 1) * safePageSize);
+}
+
+export function filterAndSortArtworkCandidates<T extends ArtworkCandidateView>(
+  candidates: readonly T[],
+  query: string,
+  sort: ArtworkSortMode,
+): readonly T[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filtered = candidates.filter((candidate) => !normalizedQuery || [
+    candidate.faceName,
+    candidate.setCode,
+    candidate.collectorNumber,
+    candidate.language,
+    candidate.source,
+    candidate.releasedAt,
+    candidate.metadata?.name,
+    candidate.metadata?.sourceName,
+    candidate.metadata?.originalFilename,
+    ...(Array.isArray(candidate.metadata?.tags) ? candidate.metadata.tags : []),
+  ].some((value) => typeof value === "string" && value.toLocaleLowerCase().includes(normalizedQuery)));
+  if (sort === "recommended") return filtered;
+  if (sort === "provider") {
+    const result: T[] = [];
+    for (let start = 0; start < filtered.length;) {
+      let end = start + 1;
+      while (end < filtered.length && filtered[end]!.source === filtered[start]!.source) end += 1;
+      const providerGroup = filtered.slice(start, end).map((candidate, index) => ({ candidate, index }));
+      providerGroup.sort((left, right) => {
+        const leftRank = typeof left.candidate.metadata?.providerRank === "number" ? left.candidate.metadata.providerRank : undefined;
+        const rightRank = typeof right.candidate.metadata?.providerRank === "number" ? right.candidate.metadata.providerRank : undefined;
+        if (leftRank === undefined && rightRank === undefined) return left.index - right.index;
+        if (leftRank === undefined) return 1;
+        if (rightRank === undefined) return -1;
+        return leftRank - rightRank || left.index - right.index;
+      });
+      result.push(...providerGroup.map(({ candidate }) => candidate));
+      start = end;
+    }
+    return result;
+  }
+  const dpi = (candidate: T) => candidate.effectiveDpi ?? (typeof candidate.metadata?.dpi === "number" ? candidate.metadata.dpi : -1);
+  const date = (candidate: T) => {
+    const value = candidate.releasedAt
+      ?? (typeof candidate.metadata?.dateCreated === "string" ? candidate.metadata.dateCreated : undefined)
+      ?? (typeof candidate.metadata?.dateModified === "string" ? candidate.metadata.dateModified : undefined)
+      ?? (typeof candidate.metadata?.createdAt === "string" ? candidate.metadata.createdAt : undefined)
+      ?? (typeof candidate.metadata?.modifiedAt === "string" ? candidate.metadata.modifiedAt : "");
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : -1;
+  };
+  return filtered.map((candidate, index) => ({ candidate, index })).sort((left, right) => {
+    const difference = sort === "dpi" ? dpi(right.candidate) - dpi(left.candidate) : date(right.candidate) - date(left.candidate);
+    return difference || left.index - right.index;
+  }).map(({ candidate }) => candidate);
 }
 
 export function artworkWindowLimitForRequest(window: { readonly requestKey: string; readonly limit: number }, requestKey: string): number {
@@ -31,13 +93,16 @@ function resolutionLabel(value: ArtworkCandidateView["resolutionQuality"]): stri
 }
 
 function qualityLine(candidate: ArtworkCandidateView, checking: boolean): string {
+  const providerDpi = candidate.source === "mpc" && typeof candidate.metadata?.dpi === "number"
+    ? `${candidate.metadata.dpi} DPI informado pelo MPC`
+    : undefined;
   if (candidate.effectiveDpi !== undefined && candidate.effectiveDpi > 0) {
-    return `${candidate.effectiveDpi} DPI efetivo · verificado ✓ · ${resolutionLabel(candidate.resolutionQuality)}`;
+    return `${candidate.effectiveDpi} DPI efetivo · verificado ✓${providerDpi ? ` · ${providerDpi}` : ""} · ${resolutionLabel(candidate.resolutionQuality)}`;
   }
   if (!candidate.originalAvailable || candidate.qualityStatus === "unavailable") return "DPI efetivo · original indisponível";
   if (checking || candidate.qualityStatus === "checking") return "DPI efetivo · verificando…";
-  if (candidate.source === "mpc" && typeof candidate.metadata?.dpi === "number") {
-    return `${candidate.metadata.dpi} DPI · informado pelo MPC · DPI efetivo · desconhecido`;
+  if (providerDpi) {
+    return `${providerDpi} · DPI efetivo · desconhecido`;
   }
   return "DPI efetivo · desconhecido";
 }
@@ -45,6 +110,9 @@ function qualityLine(candidate: ArtworkCandidateView, checking: boolean): string
 export interface ArtworkCandidateGridProps {
   readonly candidates: readonly ArtworkCandidateView[];
   readonly windowLimit: number;
+  readonly pageIndex?: number;
+  readonly pageSize?: number;
+  readonly onPageChange?: (pageIndex: number) => void;
   readonly catalogTotal: number;
   readonly catalogTotalComplete?: boolean;
   readonly filterTotal: number;
@@ -61,6 +129,9 @@ export interface ArtworkCandidateGridProps {
 export function ArtworkCandidateGrid({
   candidates,
   windowLimit,
+  pageIndex,
+  pageSize = ARTWORK_WINDOW_SIZE,
+  onPageChange,
   catalogTotal,
   catalogTotalComplete = true,
   filterTotal,
@@ -73,16 +144,36 @@ export function ArtworkCandidateGrid({
   onRevalidate,
   onLoadMore,
 }: ArtworkCandidateGridProps) {
-  const visibleCandidates = sliceArtworkWindow(candidates, windowLimit);
+  const [jumpToResult, setJumpToResult] = useState("");
+  const paginated = pageIndex !== undefined && onPageChange !== undefined;
+  const visibleCandidates = paginated ? sliceArtworkPage(candidates, pageIndex, pageSize) : sliceArtworkWindow(candidates, windowLimit);
   const hasMore = visibleCandidates.length < candidates.length;
+  const pageCount = Math.max(1, Math.ceil(candidates.length / pageSize));
+  const firstResult = candidates.length === 0 ? 0 : paginated ? pageIndex * pageSize + 1 : 1;
+  const lastResult = paginated ? Math.min((pageIndex + 1) * pageSize, candidates.length) : visibleCandidates.length;
 
   return <>
     <p className="artwork-catalog-count" aria-live="polite">
       {catalogLabel} · {catalogTotal} artworks{catalogTotalComplete ? "" : " conhecidas · catálogo parcial"}
-      <span> · {visibleCandidates.length} de {catalogTotal} exibidas · {filterTotal} de {catalogTotal}{catalogTotalComplete ? "" : " conhecidas"} correspondem ao filtro</span>
+      {paginated
+        ? <span> · {firstResult}{lastResult > 0 ? `–${lastResult}` : ""} de {filterTotal} nesta busca</span>
+        : <span> · {visibleCandidates.length} de {catalogTotal} exibidas · {filterTotal} de {catalogTotal}{catalogTotalComplete ? "" : " conhecidas"} correspondem ao filtro</span>}
     </p>
+    {paginated && <div className="artwork-pagination" role="group" aria-label="Navegação do catálogo">
+      <button className="button secondary" type="button" disabled={pageIndex === 0} onClick={() => onPageChange(Math.max(0, pageIndex - 1))}>Anterior</button>
+      <span>Página {Math.min(pageIndex + 1, pageCount)} de {pageCount}</span>
+      <button className="button secondary" type="button" disabled={pageIndex + 1 >= pageCount} onClick={() => onPageChange(Math.min(pageCount - 1, pageIndex + 1))}>Próxima</button>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        const rank = Number(jumpToResult);
+        if (Number.isSafeInteger(rank) && rank > 0 && rank <= candidates.length) onPageChange(Math.floor((rank - 1) / pageSize));
+      }}>
+        <label>Ir para resultado<input aria-label="Ir para resultado do catálogo" type="number" min={1} max={candidates.length} value={jumpToResult} onChange={(event) => setJumpToResult(event.target.value)} /></label>
+        <button className="button secondary" type="submit" disabled={!Number.isSafeInteger(Number(jumpToResult)) || Number(jumpToResult) < 1 || Number(jumpToResult) > candidates.length}>Ir</button>
+      </form>
+    </div>}
     <div className="artwork-grid">
-      {visibleCandidates.map((candidate) => {
+      {visibleCandidates.map((candidate, visibleIndex) => {
         const isSelected = selectedCandidateId === candidate.id;
         const mpcSourceName = typeof candidate.metadata?.sourceName === "string" ? candidate.metadata.sourceName : undefined;
         const format = typeof candidate.metadata?.originalFormat === "string"
@@ -93,11 +184,13 @@ export function ArtworkCandidateGrid({
         const tags = Array.isArray(candidate.metadata?.tags) ? candidate.metadata.tags.filter((tag): tag is string => typeof tag === "string") : [];
         const checking = qualityCheckingIds.has(candidate.id);
 
-        return <article className={`artwork-candidate ${isSelected ? "is-selected" : ""}`} key={candidate.id}>
+        const resultNumber = (paginated ? pageIndex * pageSize : 0) + visibleIndex + 1;
+        return <article className={`artwork-candidate ${isSelected ? "is-selected" : ""}`} key={candidate.id} data-candidate-rank={resultNumber}>
           {candidate.previewUri
             ? <Image src={candidate.previewUri} alt={`${cardName} · ${candidate.setCode ?? sourceLabel(candidate.source)} ${candidate.collectorNumber ?? ""}`} width={300} height={420} unoptimized loading="lazy" />
             : <div className="artwork-reference-thumb">{candidate.source === "mpc" ? "MPC reference" : "Preview indisponível"}</div>}
           <div className="candidate-meta">
+            {paginated && <span className="candidate-result-number">Resultado #{resultNumber}</span>}
             <strong>{candidate.faceName ?? candidate.metadata?.name as string ?? candidate.metadata?.originalFilename as string ?? sourceLabel(candidate.source)}</strong>
             <span>Provider: {sourceLabel(candidate.source)} · Face: {candidate.faceId === "back" ? "Back" : "Front"}</span>
             <span>{candidate.setCode ? `${candidate.setCode.toUpperCase()} #${candidate.collectorNumber ?? "?"}` : "Set/collector não informados"} · {candidate.language ? candidate.language.toUpperCase() : "idioma não informado"}</span>
@@ -109,6 +202,7 @@ export function ArtworkCandidateGrid({
             <span>{candidate.originalAvailable ? "Original disponível" : "Original indisponível"} · {candidate.originalCached ? "cache local validado" : "sem cache local"}</span>
             {tags.length > 0 && <span>Tags: {tags.join(", ")}</span>}
             {candidate.source === "mpc" && typeof candidate.metadata?.remoteMetadataStatus === "string" && <span className="reference-status">Validação da metadata MPC: {candidate.metadata.remoteMetadataStatus === "current" ? "atual" : candidate.metadata.remoteMetadataStatus === "removed" ? "removida no provider" : candidate.metadata.remoteMetadataStatus === "stale" ? "desatualizada" : candidate.metadata.remoteMetadataStatus}</span>}
+            {typeof candidate.metadata?.imageStatus === "string" && <span className="reference-status">Validação da imagem no provider: {candidate.metadata.imageStatus}</span>}
             {candidate.source === "mpc" && typeof candidate.metadata?.metadataFreshness === "string" && <span className="reference-status">Atualidade da metadata: {candidate.metadata.metadataFreshness === "fresh" ? "atual" : candidate.metadata.metadataFreshness === "stale" ? "cache desatualizado" : candidate.metadata.metadataFreshness === "revalidated" ? "revalidada" : candidate.metadata.metadataFreshness}</span>}
             {candidate.source === "mpc" && candidate.metadata?.localAvailabilityHint === true && !candidate.originalCached && <span className="reference-status">XML informa disponibilidade local; bytes ainda não verificados no cache</span>}
           </div>
@@ -119,7 +213,7 @@ export function ArtworkCandidateGrid({
         </article>;
       })}
     </div>
-    {hasMore && <button className="button secondary artwork-load-more" type="button" onClick={onLoadMore}>
+    {!paginated && hasMore && <button className="button secondary artwork-load-more" type="button" onClick={onLoadMore}>
       Carregar mais artes ({candidates.length - visibleCandidates.length} restantes)
     </button>}
   </>;

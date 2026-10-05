@@ -3,6 +3,7 @@ import { CardExportServiceError, exportWorkingCardsByContentMode, exportWorkingC
 import type { ArtworkCatalogSource } from "../artwork/types";
 import type { ArtworkCandidate, BackLibraryAssetReference, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardBackMode, WorkingCardBackModeSelectionPolicy, WorkingCardMpcReference } from "../core/cards/types";
 import { isSafeArtworkCandidateId } from "../core/cards/ids";
+import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../core/cards/limits";
 import { BackSelectionPolicyError, isDoubleFacedIdentity, isEligibleGenericPhysicalBack, isEligibleIdentityFaceSelection } from "../core/cards/back-selection";
 import { applyArtworkSelectionScope, applyGenericBackScope, ArtworkSelectionScopeError, type ArtworkSelectionScope, type GenericBackSelectionScope, type GenericBackChoice } from "../core/cards/artwork-selection-scope";
 import { sanitizeCardIdentityMetadata } from "../core/cards/safe-identity-metadata";
@@ -607,8 +608,8 @@ function genericBackSelectionScope(value: unknown): GenericBackSelectionScope {
 
 function physicalCardIndex(value: unknown): number | undefined {
   if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) >= 500) {
-    throw new ApiRequestError(400, "INVALID_PHYSICAL_INDEX", "physicalCardIndex must be a zero-based index between 0 and 499.");
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) >= MAX_PHYSICAL_CARDS_PER_EXPORT) {
+    throw new ApiRequestError(400, "INVALID_PHYSICAL_INDEX", `physicalCardIndex must be a zero-based index between 0 and ${MAX_PHYSICAL_CARDS_PER_EXPORT - 1}.`);
   }
   return value as number;
 }

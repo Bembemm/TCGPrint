@@ -19,6 +19,8 @@ export interface WorkspaceShellProps {
   readonly sections: Readonly<Partial<Record<WorkspaceSection, ReactNode>>>;
   readonly sharedPanel?: WorkspaceSharedPanel;
   readonly hasCards: boolean;
+  readonly inert?: boolean;
+  readonly ariaHidden?: boolean;
 }
 
 function isFocusable(element: Element): element is HTMLElement {
@@ -33,7 +35,7 @@ function isFocusable(element: Element): element is HTMLElement {
   return style.display !== "none" && style.visibility !== "hidden";
 }
 
-export default function WorkspaceShell({ preview, sections, sharedPanel, hasCards }: WorkspaceShellProps) {
+export default function WorkspaceShell({ preview, sections, sharedPanel, hasCards, inert = false, ariaHidden = false }: WorkspaceShellProps) {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("cards");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -122,7 +124,7 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, hasCard
     >{sections[id]}</section>)}
   </>;
 
-  return <div className="workspace-shell" data-active-section={activeSection} data-drawer-open={drawerOpen} data-sidebar-collapsed={sidebarCollapsed}>
+  return <div className="workspace-shell" data-active-section={activeSection} data-drawer-open={drawerOpen} data-sidebar-collapsed={sidebarCollapsed} inert={inert || undefined} aria-hidden={ariaHidden || undefined}>
     <header className="workspace-topbar">
       <a className="workspace-brand" href="/" aria-label="TCGPrint início">TCGPrint</a>
       <span className="workspace-topbar-status">Preview físico · Project local</span>

@@ -78,12 +78,16 @@ describe("Cards and Artwork navigation", () => {
       const url = String(input);
       if (url === "/api/cards/import") return Response.json({ workingCards: imported, report: { summary: {}, sources: [], selectedImporters: [], warnings: [], errors: [], pairings: [] }, providerHealth });
       if (url === "/api/cards/resolve") {
-        const body = JSON.parse(String(init?.body)) as { action: string; card?: WorkingCard; faceId?: "front" | "back"; candidateId?: string };
-        if (body.action === "select" && body.card && body.faceId && body.candidateId) {
-          const selection: SelectedArtwork = { candidateId: body.candidateId, source: "scryfall", identityId: body.card.identity?.id ?? null, faceId: body.faceId, selectionPolicy: "user-selected" };
-          return Response.json({ workingCards: [{ ...body.card, selectedArtworkByFace: { ...body.card.selectedArtworkByFace, [body.faceId]: selection } }], providerHealth });
+        const body = JSON.parse(String(init?.body)) as { action: string; cards?: WorkingCard[]; targetCardId?: string; faceId?: "front" | "back"; candidateId?: string };
+        if (body.action === "apply-artwork-scope" && body.cards && body.targetCardId && body.faceId && body.candidateId) {
+          const target = body.cards.find((item) => item.id === body.targetCardId)!;
+          const selection: SelectedArtwork = { candidateId: body.candidateId, source: "scryfall", identityId: target.identity?.id ?? null, faceId: body.faceId, selectionPolicy: "user-selected" };
+          const next = body.cards.map((item) => item.identity?.id === target.identity?.id && item.identity?.provider === target.identity?.provider
+            ? { ...item, selectedArtworkByFace: { ...item.selectedArtworkByFace, [body.faceId!]: selection } }
+            : item);
+          return Response.json({ workingCards: next, providerHealth });
         }
-        return Response.json({ workingCards: imported, providerHealth });
+        return Response.json({ workingCards: body.cards ?? imported, providerHealth });
       }
       if (url === "/api/back-library") return Response.json({ assets: [] });
       if (url === "/api/projects") return Response.json({ projects: [] });
@@ -111,21 +115,31 @@ describe("Cards and Artwork navigation", () => {
     expect(screen.getByRole("button", { name: /2\/2 · Mountain/ })).toHaveAttribute("aria-pressed", "true");
 
     await user.click(screen.getByRole("tab", { name: "Artwork" }));
-    const activeMountain = () => screen.getByText((_, element) => element?.tagName === "P" && element.textContent?.includes("Carta ativa: Mountain") === true);
-    await waitFor(() => expect(activeMountain()).toBeInTheDocument());
-    await user.click(await screen.findByRole("button", { name: "Selecionar arte" }));
-    await waitFor(() => expect(screen.getByText(/Selecionada:.*scryfall:mountain-front/)).toBeInTheDocument());
+    const openPicker = async () => {
+      await user.click(await screen.findByRole("button", { name: "Selecionar arte" }));
+      return screen.findByRole("dialog");
+    };
+    let picker = await openPicker();
+    await user.click(within(await picker).getByRole("button", { name: "Selecionar arte" }));
+    await user.click(within(await picker).getByRole("button", { name: "Aplicar seleção" }));
+    await waitFor(() => expect(within(screen.getByRole("dialog", { name: /Mountain/ })).getByText(/Estado atual:.*scryfall:mountain-front/)).toBeInTheDocument());
+    await user.click(within(screen.getByRole("dialog", { name: /Mountain/ })).getByRole("button", { name: "Fechar seletor de arte" }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     await user.click(screen.getByRole("button", { name: /1\/2 · Island/ }));
     await user.click(screen.getByRole("tab", { name: "Artwork" }));
-    await user.click(await screen.findByRole("button", { name: "Selecionar arte" }));
-    await waitFor(() => expect(screen.getByText(/Selecionada:.*scryfall:island-front/)).toBeInTheDocument());
+    picker = await openPicker();
+    await user.click(within(await picker).getByRole("button", { name: "Selecionar arte" }));
+    await user.click(within(await picker).getByRole("button", { name: "Aplicar seleção" }));
+    await waitFor(() => expect(within(screen.getByRole("dialog", { name: /Island/ })).getByText(/Estado atual:.*scryfall:island-front/)).toBeInTheDocument());
+    await user.click(within(screen.getByRole("dialog", { name: /Island/ })).getByRole("button", { name: "Fechar seletor de arte" }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     await user.click(screen.getByRole("button", { name: /2\/2 · Mountain/ }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     expect(screen.getByRole("button", { name: /2\/2 · Mountain/ })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("tab", { name: "Artwork" }));
-    expect(activeMountain()).toBeInTheDocument();
+    picker = await openPicker();
+    expect(within(await picker).getByText(/Estado atual:.*scryfall:mountain-front/)).toBeInTheDocument();
+    await user.click(within(await picker).getByRole("button", { name: "Fechar seletor de arte" }));
 
     await user.click(screen.getByRole("tab", { name: "Export" }));
     const composer = screen.getByRole("img", { name: /Compositor live frente/ });
@@ -139,11 +153,25 @@ describe("Cards and Artwork navigation", () => {
     pendingFirstExport.resolve(new Response("%PDF-1.7 cancelled", { headers: { "Content-Type": "application/pdf" } }));
     await waitFor(() => expect(screen.getAllByText("Exportação cancelada.").length).toBeGreaterThan(0));
 
-    const exportRequestBeforePhysicalSelection = exportRequests[0]?.body;
+    const compositorShell = document.querySelector(".workspace-shell");
     const secondPhysicalCard = composer.querySelector('g[data-physical-card-index="1"]');
     if (!secondPhysicalCard) throw new Error("The second physical card is not rendered in the live compositor.");
     await user.click(secondPhysicalCard);
-    expect(secondPhysicalCard).toHaveAttribute("aria-pressed", "true");
+    const pickerOpener = screen.getByRole("button", { name: "Selecionar arte" });
+    await user.click(pickerOpener);
+    const physicalPicker = await screen.findByRole("dialog", { name: /Mountain · cópia 1\/1/ });
+    expect(within(physicalPicker).getByText("Carta física 2 · cópia original 1/1")).toBeInTheDocument();
+    expect(compositorShell).toHaveAttribute("inert");
+    expect(compositorShell).toHaveAttribute("aria-hidden", "true");
+    expect(document.querySelector(".workspace-live-compositor")).toBeInTheDocument();
+    await user.click(within(physicalPicker).getByRole("button", { name: "Fechar seletor de arte" }));
+    expect(document.activeElement).toBe(pickerOpener);
+    expect(compositorShell).not.toHaveAttribute("inert");
+
+    const exportRequestBeforePhysicalSelection = exportRequests[0]?.body;
+    const selectedPhysicalCard = composer.querySelector('g[data-physical-card-index="1"]');
+    if (!selectedPhysicalCard) throw new Error("The second physical card is not rendered in the live compositor.");
+    expect(selectedPhysicalCard).toHaveAttribute("aria-pressed", "true");
 
     await user.click(screen.getByRole("button", { name: "Gerar PDF final" }));
     expect(await screen.findByRole("link", { name: "Baixar tcgprint-m4.pdf" })).toHaveAttribute("download", "tcgprint-m4.pdf");

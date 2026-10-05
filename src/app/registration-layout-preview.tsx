@@ -22,6 +22,7 @@ interface RegistrationLayoutPreviewProps {
   readonly selectedPageNumber: number;
   readonly onSelectPage: (pageNumber: number) => void;
   readonly onToggleSkippedSlot: (index: number) => void;
+  readonly onSelectArtwork?: (cardId: string, physicalCardIndex: number, side: "front" | "back", opener: HTMLButtonElement, copyNumber: number, totalCopies: number) => void;
 }
 
 type CompositorLayer = "artwork" | "bleed" | "trim" | "cut" | "silhouette" | "registration" | "reserved" | "margins" | "calibration";
@@ -74,7 +75,7 @@ function calibrationSvgMatrix(matrix: { readonly a: number; readonly b: number; 
   return `matrix(${matrix.a} ${matrix.b} ${matrix.c} ${matrix.d} ${matrix.e} ${matrix.f})`;
 }
 
-export default function RegistrationLayoutPreview({ settings, cardCount, cards, cutPreview = null, selectedPageNumber, onSelectPage, onToggleSkippedSlot }: RegistrationLayoutPreviewProps) {
+export default function RegistrationLayoutPreview({ settings, cardCount, cards, cutPreview = null, selectedPageNumber, onSelectPage, onToggleSkippedSlot, onSelectArtwork }: RegistrationLayoutPreviewProps) {
   const [previewSide, setPreviewSide] = useState<"front" | "back">("front");
   const [selectedPhysicalCardIndex, setSelectedPhysicalCardIndex] = useState<number | null>(null);
   const [manualZoomScale, setManualZoomScale] = useState(1);
@@ -289,6 +290,12 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       {selectedInstance
         ? `Carta física ${selectedInstance.physicalCardIndex + 1} · ${selectedCardName} · cópia ${selectedInstance.copyNumber}/${selectedInstance.totalCopies}`
         : "Selecione uma carta física no compositor"}
+      {selectedInstance && onSelectArtwork && <button
+        type="button"
+        className="button secondary compositor-select-artwork"
+        data-testid="compositor-select-artwork"
+        onClick={(event) => onSelectArtwork(selectedInstance.workingCardId, selectedInstance.physicalCardIndex, previewSide, event.currentTarget, selectedInstance.copyNumber, selectedInstance.totalCopies)}
+      >Selecionar arte</button>}
       {selectedPageSlot && slotsCanBeSkipped && previewSide === "front" && <button type="button" className="link-button" onClick={() => toggle(selectedPageSlot.index)}>Desativar slot da carta selecionada</button>}
     </p>
     <p className="muted compositor-calibration-context" data-calibration-profile-version={settings.printerProfileSelection?.version ?? "none"}>

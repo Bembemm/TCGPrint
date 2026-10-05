@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkingCard } from "../../core/cards/types";
 import { selectManualBackArtwork } from "../../core/cards/back-selection";
 import { createIdentitySideCalibration, type PrinterProfileSnapshot } from "../../core/calibration";
@@ -59,6 +59,7 @@ function compositorWorkspace(
   initialCards: readonly WorkingCard[] = [card()],
   initialSettings: ProjectSettingsV2 = { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } },
   enableSkippedSlotChanges = false,
+  onSelectArtwork?: (cardId: string, physicalCardIndex: number, side: "front" | "back", opener: HTMLButtonElement, copyNumber: number, totalCopies: number) => void,
 ) {
   function Harness() {
     const [settings, setSettings] = useState(initialSettings);
@@ -89,6 +90,7 @@ function compositorWorkspace(
           cards={cards}
           selectedPageNumber={pageNumber}
           onSelectPage={setPageNumber}
+          onSelectArtwork={onSelectArtwork}
           onToggleSkippedSlot={(index) => {
             if (!enableSkippedSlotChanges) return;
             changeSettings((current) => ({
@@ -248,6 +250,19 @@ describe("canonical live compositor interactions", () => {
     await user.keyboard(" ");
     expect(secondCopy).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
+  });
+
+  it("passes the exact selected physical instance and visible side to the artwork picker entry action", async () => {
+    const user = userEvent.setup();
+    const onSelectArtwork = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 3 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, onSelectArtwork));
+
+    await user.click(screen.getByRole("button", { name: /carta física 2.*cópia 2 de 3/i }));
+    await user.click(screen.getByRole("button", { name: "Verso" }));
+    const openPicker = screen.getByRole("button", { name: "Selecionar arte" });
+    await user.click(openPicker);
+
+    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", 1, "back", openPicker, 2, 3);
   });
 
   it("renders one zoom-stable selection indicator without changing the artwork, trim, or Project state", async () => {
