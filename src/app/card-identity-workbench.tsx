@@ -17,6 +17,9 @@ import {
   moveWorkingCard,
   replaceWorkingCard,
   replaceWorkingCards,
+  removeWorkingCardPhysicalInstance,
+  reorderWorkingCardPhysicalInstance,
+  duplicatePhysicalInstanceAsEntry,
   setWorkingCardQuantity,
   WorkingCardEditorError,
   type WorkingCardEditorState,
@@ -34,6 +37,7 @@ import {
   type EditorSnapshot,
 } from "../../core/cards/editor-history";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
+import { createPhysicalOrder, type PhysicalOrder } from "../../core/cards/physical-instance-order";
 import { clearRequestCache, createRequestCache, getOrCreateCachedRequest, updateResolvedRequestCache } from "./request-cache";
 import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
 import ProjectSettingsControls from "./project-settings-controls";
@@ -74,6 +78,7 @@ type CandidateDto = ArtworkCandidateView;
 
 interface ArtworkPickerContext {
   readonly cardId: string;
+  readonly physicalInstanceId?: string;
   readonly physicalCardIndex?: number;
   readonly physicalCopyNumber?: number;
   readonly physicalTotalCopies?: number;
@@ -414,21 +419,24 @@ export interface EditorHistoryUiState extends EditorHistoryState {
 
 export type EditorCommandAction =
   | { readonly type: "load-cards"; readonly cards: readonly WorkingCard[] }
-  | { readonly type: "load-project"; readonly cards: readonly WorkingCard[] }
-  | { readonly type: "replace-cards"; readonly cards: readonly WorkingCard[] }
+  | { readonly type: "load-project"; readonly cards: readonly WorkingCard[]; readonly physicalOrder?: PhysicalOrder }
+  | { readonly type: "replace-cards"; readonly cards: readonly WorkingCard[]; readonly physicalOrder?: PhysicalOrder }
   | { readonly type: "replace-card"; readonly cardId: string; readonly card: WorkingCard }
   | { readonly type: "apply-identity-result"; readonly cardId: string; readonly card: WorkingCard }
   | { readonly type: "apply-custom-result"; readonly cardId: string; readonly card: WorkingCard }
   | { readonly type: "apply-artwork-selection"; readonly cardId: string; readonly card: WorkingCard }
   | { readonly type: "apply-artwork-default"; readonly cardId: string; readonly card: WorkingCard }
   | { readonly type: "apply-reresolve-result"; readonly cardId: string; readonly card: WorkingCard }
-  | { readonly type: "apply-resolve-all-result"; readonly cards: readonly WorkingCard[] }
+  | { readonly type: "apply-resolve-all-result"; readonly cards: readonly WorkingCard[]; readonly physicalOrder?: PhysicalOrder }
   | { readonly type: "select-card"; readonly cardId: string }
   | { readonly type: "set-quantity"; readonly cardId: string; readonly quantity: number }
   | { readonly type: "adjust-quantity"; readonly cardId: string; readonly delta: -1 | 1 }
   | { readonly type: "move-card"; readonly cardId: string; readonly targetIndex: number }
   | { readonly type: "duplicate-card"; readonly cardId: string; readonly newCardId: string }
   | { readonly type: "delete-card"; readonly cardId: string }
+  | { readonly type: "reorder-physical-instance"; readonly instanceId: string; readonly targetInstanceId: string | null; readonly placement?: "before" | "after" }
+  | { readonly type: "remove-physical-instance"; readonly instanceId: string }
+  | { readonly type: "duplicate-physical-instance"; readonly instanceId: string; readonly newCardId: string }
   | { readonly type: "set-face"; readonly side: CardFaceSide };
 
 export type EditorAction = EditorCommandAction
@@ -458,8 +466,9 @@ export function workingCardEditorReducer(state: EditorUiState, action: EditorCom
       case "load-project": return withActiveFace({
         cards: [...action.cards],
         selectedCardId: action.cards[0]?.id ?? null,
+        physicalOrder: action.physicalOrder ?? createPhysicalOrder(action.cards),
       }, "front");
-      case "replace-cards": return preserveActiveFace(state, replaceWorkingCards(state, action.cards));
+      case "replace-cards": return preserveActiveFace(state, replaceWorkingCards(state, action.cards, action.physicalOrder));
       case "replace-card": return preserveActiveFace(state, replaceWorkingCard(state, action.cardId, action.card));
       case "apply-identity-result":
       case "apply-custom-result":
@@ -467,12 +476,12 @@ export function workingCardEditorReducer(state: EditorUiState, action: EditorCom
       case "apply-artwork-default":
       case "apply-reresolve-result":
         return preserveActiveFace(state, replaceWorkingCard(state, action.cardId, action.card));
-      case "apply-resolve-all-result": return preserveActiveFace(state, replaceWorkingCards(state, action.cards));
+      case "apply-resolve-all-result": return preserveActiveFace(state, replaceWorkingCards(state, action.cards, action.physicalOrder));
       case "select-card": {
         if (!state.cards.some((card) => card.id === action.cardId)) {
           throw new WorkingCardEditorError("CARD_NOT_FOUND", `WorkingCard ${action.cardId} was not found.`);
         }
-        return withActiveFace({ cards: state.cards, selectedCardId: action.cardId }, "front");
+        return withActiveFace({ cards: state.cards, selectedCardId: action.cardId, physicalOrder: state.physicalOrder }, "front");
       }
       case "set-face": return withActiveFace(state, action.side);
       case "set-quantity": return preserveActiveFace(state, setWorkingCardQuantity(state, action.cardId, action.quantity));
@@ -483,6 +492,9 @@ export function workingCardEditorReducer(state: EditorUiState, action: EditorCom
       case "move-card": return preserveActiveFace(state, moveWorkingCard(state, action.cardId, action.targetIndex));
       case "duplicate-card": return preserveActiveFace(state, duplicateWorkingCard(state, action.cardId, action.newCardId));
       case "delete-card": return preserveActiveFace(state, deleteWorkingCard(state, action.cardId));
+      case "reorder-physical-instance": return { ...state, ...reorderWorkingCardPhysicalInstance(state, action.instanceId, action.targetInstanceId, action.placement) };
+      case "remove-physical-instance": return preserveActiveFace(state, removeWorkingCardPhysicalInstance(state, action.instanceId));
+      case "duplicate-physical-instance": return preserveActiveFace(state, duplicatePhysicalInstanceAsEntry(state, action.instanceId, action.newCardId));
     }
   } catch (error) {
     return { ...state, error: error instanceof Error ? error.message : "A operação do Editor falhou." };
@@ -490,7 +502,7 @@ export function workingCardEditorReducer(state: EditorUiState, action: EditorCom
 }
 
 function snapshotFromEditorState(state: EditorUiState): EditorSnapshot {
-  return { cards: state.cards, selectedCardId: state.selectedCardId, face: state.face };
+  return { cards: state.cards, selectedCardId: state.selectedCardId, face: state.face, physicalOrder: state.physicalOrder };
 }
 
 function isEditorialAction(action: EditorCommandAction): boolean {
@@ -508,6 +520,9 @@ function isEditorialAction(action: EditorCommandAction): boolean {
     case "move-card":
     case "duplicate-card":
     case "delete-card":
+    case "reorder-physical-instance":
+    case "remove-physical-instance":
+    case "duplicate-physical-instance":
       return true;
     case "load-cards":
     case "load-project":
@@ -557,8 +572,12 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   }, [dispatchEditorAction]);
   const editorState: EditorUiState = { ...editorHistory.present, error: editorHistory.error };
   const workingCards = editorState.cards;
+  const physicalOrder = editorState.physicalOrder;
   const selectedCardId = editorState.selectedCardId;
+  const [selectedPhysicalInstanceId, setSelectedPhysicalInstanceId] = useState<string | null>(null);
+  const [compositorSide, setCompositorSide] = useState<CardFaceSide>(editorState.face);
   const face = editorState.face;
+  useEffect(() => { setCompositorSide(face); }, [face]);
   const [artworkCatalogState, setArtworkCatalogState] = useState<KeyedArtworkCatalogResult<CandidateDto> | null>(null);
   const [artworkPageIndex, setArtworkPageIndex] = useState(0);
   const [artworkSearch, setArtworkSearch] = useState("");
@@ -776,10 +795,11 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     setPendingBackChoice(null);
   }, []);
 
-  function openArtworkPicker(cardId: string, side: CardFaceSide, opener: HTMLElement, physical?: { readonly index: number; readonly copyNumber: number; readonly totalCopies: number }) {
+  function openArtworkPicker(cardId: string, side: CardFaceSide, opener: HTMLElement, physical?: { readonly instanceId: string; readonly index: number; readonly copyNumber: number; readonly totalCopies: number }) {
     const target = workingCards.find((card) => card.id === cardId);
     if (!target) return;
     pickerOpenerRef.current = opener;
+    if (physical) setSelectedPhysicalInstanceId(physical.instanceId);
     if (selectedCardId !== target.id) dispatchEditor({ type: "select-card", cardId: target.id });
     if (isDoubleFacedIdentity(target.identity) && target.faces.some((item) => item.side === side)) dispatchEditor({ type: "set-face", side });
     setPickerSide(side);
@@ -792,7 +812,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     setPickerScope(physical ? "physical-copy" : "entry");
     setPickerContext({
       cardId: target.id,
-      ...(physical ? { physicalCardIndex: physical.index, physicalCopyNumber: physical.copyNumber, physicalTotalCopies: physical.totalCopies } : {}),
+      ...(physical ? { physicalInstanceId: physical.instanceId, physicalCardIndex: physical.index, physicalCopyNumber: physical.copyNumber, physicalTotalCopies: physical.totalCopies } : {}),
     });
     setArtworkProblem(null);
   }
@@ -817,6 +837,24 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const effectivePickerSide = pickerIsOpen ? pickerSide : face;
   const manualPhysicalBackPicker = Boolean(pickerIsOpen && effectivePickerSide === "back" && artworkTargetCard && !isDoubleFacedIdentity(artworkTargetCard.identity));
   const physicalCardCount = useMemo(() => workingCards.reduce((sum, card) => sum + card.quantity, 0), [workingCards]);
+  const physicalInstances = useMemo(() => {
+    const byId = new Map(workingCards.map((card) => [card.id, card]));
+    const totals = new Map<string, number>();
+    for (const instance of physicalOrder.instances) totals.set(instance.workingCardId, (totals.get(instance.workingCardId) ?? 0) + 1);
+    const seen = new Map<string, number>();
+    return physicalOrder.instances.flatMap((instance, index) => {
+      const card = byId.get(instance.workingCardId);
+      if (!card) return [];
+      const copyNumber = (seen.get(card.id) ?? 0) + 1;
+      seen.set(card.id, copyNumber);
+      return [{ ...instance, physicalCardIndex: index, copyNumber, totalCopies: totals.get(card.id) ?? card.quantity, card }];
+    });
+  }, [workingCards, physicalOrder]);
+  useEffect(() => {
+    if (selectedPhysicalInstanceId && !physicalOrder.instances.some(({ id }) => id === selectedPhysicalInstanceId)) {
+      setSelectedPhysicalInstanceId(physicalOrder.instances[0]?.id ?? null);
+    }
+  }, [selectedPhysicalInstanceId, physicalOrder]);
   const backValidation = useMemo(() => createBackValidationSummary(workingCards, projectDefaultBack, missingBackPolicy), [workingCards, projectDefaultBack, missingBackPolicy]);
   const activeFaceExists = Boolean(manualPhysicalBackPicker || artworkTargetCard?.faces.some((item) => item.side === effectivePickerSide));
   const activeIdentityId = artworkTargetCard?.identity?.id ?? null;
@@ -974,19 +1012,17 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   useEffect(() => { setArtworkPageIndex(0); }, [artworkSearch, artworkSort, artworkFilter]);
 
   useEffect(() => {
-    if (!pickerContext || pickerContext.physicalCardIndex === undefined) return;
-    let start = 0;
-    const target = [...workingCards].sort((left, right) => left.order - right.order).find((card) => {
-      const end = start + card.quantity;
-      const contains = pickerContext.physicalCardIndex! >= start && pickerContext.physicalCardIndex! < end;
-      start = end;
-      return contains;
-    });
-    if (target && target.id !== pickerContext.cardId) {
-      setPickerContext((current) => current && current.physicalCardIndex === pickerContext.physicalCardIndex ? { ...current, cardId: target.id } : current);
-      if (selectedCardId !== target.id) dispatchEditor({ type: "select-card", cardId: target.id });
+    if (!pickerContext?.physicalInstanceId) return;
+    const selected = physicalInstances.find(({ id }) => id === pickerContext.physicalInstanceId);
+    if (selected && (selected.card.id !== pickerContext.cardId || selected.physicalCardIndex !== pickerContext.physicalCardIndex)) {
+      setPickerContext((current) => current && current.physicalInstanceId === pickerContext.physicalInstanceId
+        ? { ...current, cardId: selected.card.id, physicalCardIndex: selected.physicalCardIndex, physicalCopyNumber: selected.copyNumber, physicalTotalCopies: selected.totalCopies }
+        : current);
+      if (selectedCardId !== selected.card.id) dispatchEditor({ type: "select-card", cardId: selected.card.id });
+    } else if (selected && selected.card.id !== pickerContext.cardId) {
+      setPickerContext((current) => current && current.physicalInstanceId === pickerContext.physicalInstanceId ? { ...current, cardId: selected.card.id } : current);
     }
-  }, [workingCards, pickerContext, selectedCardId]);
+  }, [physicalInstances, pickerContext, selectedCardId]);
 
   useEffect(() => {
     qualityHydratorRef.current?.schedule(currentArtworkRequestKey, windowedArtworkCandidates);
@@ -1145,36 +1181,39 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         signal: controller.signal,
         body: JSON.stringify(pendingBackChoice
           ? {
-            action: "apply-generic-back-scope", cards: workingCards, targetCardId: artworkTargetCard.id,
+            action: "apply-generic-back-scope", cards: workingCards, physicalOrder, targetCardId: artworkTargetCard.id,
             scope, choiceMode: pendingBackChoice.mode,
             ...(pendingBackChoice.mode === "library" ? { asset: pendingBackChoice.asset } : {}),
             ...(pickerContext?.physicalCardIndex === undefined ? {} : { physicalCardIndex: pickerContext.physicalCardIndex }),
+            ...(pickerContext?.physicalInstanceId ? { physicalInstanceId: pickerContext.physicalInstanceId } : {}),
           }
           : manualPhysicalBackPicker
             ? {
-              action: "apply-generic-back-scope", cards: workingCards, targetCardId: artworkTargetCard.id,
+              action: "apply-generic-back-scope", cards: workingCards, physicalOrder, targetCardId: artworkTargetCard.id,
               scope, choiceMode: "mpc", candidateId: candidate!.id,
               ...(pickerContext?.physicalCardIndex === undefined ? {} : { physicalCardIndex: pickerContext.physicalCardIndex }),
+              ...(pickerContext?.physicalInstanceId ? { physicalInstanceId: pickerContext.physicalInstanceId } : {}),
             }
             : {
-              action: "apply-artwork-scope", cards: workingCards, targetCardId: artworkTargetCard.id,
+              action: "apply-artwork-scope", cards: workingCards, physicalOrder, targetCardId: artworkTargetCard.id,
               faceId: effectivePickerSide, scope, candidateId: candidate!.id,
               ...(pickerContext?.physicalCardIndex === undefined ? {} : { physicalCardIndex: pickerContext.physicalCardIndex }),
+              ...(pickerContext?.physicalInstanceId ? { physicalInstanceId: pickerContext.physicalInstanceId } : {}),
             }),
       });
-      const result = await jsonResponse<{ workingCards: WorkingCard[]; providerHealth?: ProviderHealth; impact?: { affectedPhysicalCards: number; preservedDfcPhysicalCards: number } }>(response);
-      dispatchEditor({ type: "apply-resolve-all-result", cards: result.workingCards });
-      if (pickerContext?.physicalCardIndex !== undefined) {
-        let physicalOffset = 0;
-        const selectedSegment = [...result.workingCards].sort((left, right) => left.order - right.order).find((card) => {
-          const contains = pickerContext.physicalCardIndex! >= physicalOffset && pickerContext.physicalCardIndex! < physicalOffset + card.quantity;
-          physicalOffset += card.quantity;
-          return contains;
-        });
-        if (selectedSegment) {
-          setPickerContext((current) => current ? { ...current, cardId: selectedSegment.id } : current);
-          dispatchEditor({ type: "select-card", cardId: selectedSegment.id });
+      const result = await jsonResponse<{ workingCards: WorkingCard[]; physicalOrder?: PhysicalOrder; selectedCardId?: string; providerHealth?: ProviderHealth; impact?: { affectedPhysicalCards: number; preservedDfcPhysicalCards: number } }>(response);
+      dispatchEditor({ type: "apply-resolve-all-result", cards: result.workingCards, ...(result.physicalOrder ? { physicalOrder: result.physicalOrder } : {}) });
+      if (pickerContext?.physicalInstanceId && result.physicalOrder) {
+        const updatedInstance = result.physicalOrder.instances.find(({ id }) => id === pickerContext.physicalInstanceId);
+        const selectedId = updatedInstance?.workingCardId ?? result.selectedCardId;
+        if (selectedId) {
+          setPickerContext((current) => current ? { ...current, cardId: selectedId } : current);
+          setSelectedPhysicalInstanceId(pickerContext.physicalInstanceId);
+          dispatchEditor({ type: "select-card", cardId: selectedId });
         }
+      } else if (result.selectedCardId) {
+        setPickerContext((current) => current ? { ...current, cardId: result.selectedCardId! } : current);
+        dispatchEditor({ type: "select-card", cardId: result.selectedCardId });
       }
       if (result.providerHealth) setProviderHealth((current) => ({ ...current, ...result.providerHealth }));
       if (result.impact) {
@@ -1266,6 +1305,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
 
   function exportRequestBody(contentMode: ExportContentMode) {
     return JSON.stringify({ cards: workingCards, options: {
+      physicalOrder,
       ...buildBleedExportOptions(
         bleedMm,
         buildCutGuideConfig(trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor),
@@ -1398,7 +1438,8 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
 
     clearRequestCache(artworkCatalogRequests.current);
     clearRequestCache(identityDetailsRequests.current);
-    dispatchEditor({ type: "load-project", cards });
+    dispatchEditor({ type: "load-project", cards, physicalOrder: project.snapshot.physicalOrder });
+    setSelectedPhysicalInstanceId(null);
     setBleedMm(String(settings.bleedMm));
     setRoundedCorners(settings.roundedCorners);
     setTrimGuideEnabled(settings.cutGuides.trim.enabled);
@@ -1477,6 +1518,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       <ProjectsPanel
         view={activeSection === "project" ? "project" : activeSection === "templates" ? "templates" : activeSection === "cut" ? "cut" : "hidden"}
         cards={workingCards}
+        physicalOrder={physicalOrder}
         settings={projectSettings}
         onProjectOpen={restoreProject}
         onCutSourceSelectionChange={setCutSourceSelection}
@@ -1954,16 +1996,69 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         </details>}
   </div>;
 
+  function handleCompositorPhysicalAction(action: "increase" | "remove-copy" | "duplicate-copy" | "delete-entry" | "open-settings", instanceId: string, cardId: string) {
+    if (interactionBusy) return;
+    if (action === "increase") {
+      const target = workingCards.find(({ id }) => id === cardId);
+      if (target) dispatchEditor({ type: "set-quantity", cardId, quantity: target.quantity + 1 });
+      return;
+    }
+    if (action === "remove-copy") {
+      const target = workingCards.find(({ id }) => id === cardId);
+      const previousIndex = physicalOrder.instances.findIndex(({ id }) => id === instanceId);
+      const remaining = physicalOrder.instances.filter((reference) => reference.id !== instanceId && (target?.quantity !== 1 || reference.workingCardId !== cardId));
+      setSelectedPhysicalInstanceId(remaining[Math.min(previousIndex, remaining.length - 1)]?.id ?? null);
+      dispatchEditor({ type: "remove-physical-instance", instanceId });
+      return;
+    }
+    if (action === "duplicate-copy") {
+      const nextInstanceId = "instance-" + physicalOrder.nextInstanceId;
+      dispatchEditor({ type: "duplicate-physical-instance", instanceId, newCardId: globalThis.crypto.randomUUID() });
+      setSelectedPhysicalInstanceId(nextInstanceId);
+      return;
+    }
+    if (action === "delete-entry") {
+      const previousIndex = physicalOrder.instances.findIndex(({ id }) => id === instanceId);
+      const remaining = physicalOrder.instances.filter(({ workingCardId }) => workingCardId !== cardId);
+      setSelectedPhysicalInstanceId(remaining[Math.min(previousIndex, remaining.length - 1)]?.id ?? null);
+      dispatchEditor({ type: "delete-card", cardId });
+      return;
+    }
+    dispatchEditor({ type: "select-card", cardId });
+    const cardsTab = document.getElementById("workspace-tab-cards");
+    cardsTab?.click();
+    cardsTab?.focus();
+  }
+
   const preview = <div className="workspace-preview-stack">
     <div ref={liveCompositorRef} className="workspace-live-compositor" tabIndex={-1} inert={pdfProof ? true : undefined} aria-hidden={pdfProof ? true : undefined}>
       <RegistrationLayoutPreview
         settings={projectSettings}
         cardCount={physicalCardCount}
         cards={workingCards}
+        physicalOrder={physicalOrder}
+        selectedPhysicalInstanceId={selectedPhysicalInstanceId}
+        face={compositorSide}
+        interactionBusy={interactionBusy}
         cutPreview={cutGeometryPreview}
         selectedPageNumber={cutPageNumber}
         onSelectPage={setCutPageNumber}
-        onSelectArtwork={(cardId, physicalCardIndex, side, opener, copyNumber, totalCopies) => openArtworkPicker(cardId, side, opener, { index: physicalCardIndex, copyNumber, totalCopies })}
+        onSelectPhysicalInstance={(instanceId, cardId, side) => {
+          setSelectedPhysicalInstanceId(instanceId);
+          setCompositorSide(side);
+          if (selectedCardId !== cardId) dispatchEditor({ type: "select-card", cardId });
+          const target = workingCards.find((item) => item.id === cardId);
+          if (target?.faces.some((item) => item.side === side) && face !== side) dispatchEditor({ type: "set-face", side });
+        }}
+        onFaceChange={(side) => {
+          setCompositorSide(side);
+          if (activeCard?.faces.some((item) => item.side === side) && face !== side) dispatchEditor({ type: "set-face", side });
+        }}
+        onSelectArtwork={(cardId, instanceId, physicalCardIndex, side, opener, copyNumber, totalCopies) => openArtworkPicker(cardId, side, opener, { instanceId, index: physicalCardIndex, copyNumber, totalCopies })}
+        onPhysicalAction={handleCompositorPhysicalAction}
+        onReorderPhysicalInstance={(instanceId, targetInstanceId, placement) => {
+          if (!interactionBusy) dispatchEditor({ type: "reorder-physical-instance", instanceId, targetInstanceId, placement });
+        }}
         onToggleSkippedSlot={(index) => updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((slot) => slot !== index) : [...current, index].sort((left, right) => left - right)))}
       />
     </div>

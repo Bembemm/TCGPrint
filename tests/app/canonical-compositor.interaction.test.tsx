@@ -2,11 +2,12 @@
 import { readFileSync } from "node:fs";
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkingCard } from "../../core/cards/types";
+import { createPhysicalOrder, movePhysicalInstance, type PhysicalOrder } from "../../core/cards/physical-instance-order";
 import { selectManualBackArtwork } from "../../core/cards/back-selection";
 import { createIdentitySideCalibration, type PrinterProfileSnapshot } from "../../core/calibration";
 import { DEFAULT_PROJECT_SETTINGS, type ProjectSettingsV2 } from "../../persistence/projects/serializer";
@@ -59,11 +60,16 @@ function compositorWorkspace(
   initialCards: readonly WorkingCard[] = [card()],
   initialSettings: ProjectSettingsV2 = { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } },
   enableSkippedSlotChanges = false,
-  onSelectArtwork?: (cardId: string, physicalCardIndex: number, side: "front" | "back", opener: HTMLButtonElement, copyNumber: number, totalCopies: number) => void,
+  onSelectArtwork?: (cardId: string, instanceId: string, physicalCardIndex: number, side: "front" | "back", opener: HTMLButtonElement, copyNumber: number, totalCopies: number) => void,
+  enableReorder = false,
+  initialPhysicalOrder?: PhysicalOrder,
+  onPhysicalAction?: (action: "increase" | "remove-copy" | "duplicate-copy" | "delete-entry" | "open-settings", instanceId: string, cardId: string) => void,
+  interactionBusy = false,
 ) {
   function Harness() {
     const [settings, setSettings] = useState(initialSettings);
     const [cards, setCards] = useState([...initialCards]);
+    const [physicalOrder, setPhysicalOrder] = useState(() => initialPhysicalOrder ?? createPhysicalOrder(initialCards));
     const [projectRevision, setProjectRevision] = useState(1);
     const [pageNumber, setPageNumber] = useState(1);
     const changeSettings = (update: (current: typeof settings) => typeof settings) => {
@@ -88,9 +94,13 @@ function compositorWorkspace(
           settings={settings}
           cardCount={cards.reduce((sum, entry) => sum + entry.quantity, 0)}
           cards={cards}
+          physicalOrder={physicalOrder}
+          interactionBusy={interactionBusy}
           selectedPageNumber={pageNumber}
           onSelectPage={setPageNumber}
           onSelectArtwork={onSelectArtwork}
+          onPhysicalAction={onPhysicalAction}
+          onReorderPhysicalInstance={enableReorder ? (instanceId, targetInstanceId, placement) => setPhysicalOrder((current) => movePhysicalInstance(current, instanceId, targetInstanceId, placement)) : undefined}
           onToggleSkippedSlot={(index) => {
             if (!enableSkippedSlotChanges) return;
             changeSettings((current) => ({
@@ -262,7 +272,125 @@ describe("canonical live compositor interactions", () => {
     const openPicker = screen.getByRole("button", { name: "Selecionar arte" });
     await user.click(openPicker);
 
-    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", 1, "back", openPicker, 2, 3);
+    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", "instance-2", 1, "back", openPicker, 2, 3);
+  });
+
+  it("opens M6 for the stable physical instance at its custom sequence index", async () => {
+    const user = userEvent.setup();
+    const onSelectArtwork = vi.fn();
+    const cards = [{ ...card(), quantity: 3 }];
+    const initialOrder = createPhysicalOrder(cards);
+    const customOrder = movePhysicalInstance(initialOrder, "instance-2", "instance-3", "after");
+    render(compositorWorkspace(cards, { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, onSelectArtwork, false, customOrder));
+
+    const physicalSecond = screen.getByRole("button", { name: /carta física 2.*cópia 2 de 3/i });
+    expect(physicalSecond).toHaveAttribute("data-physical-instance-id", "instance-3");
+    await user.click(physicalSecond);
+    const openPicker = screen.getByRole("button", { name: "Selecionar arte" });
+    await user.click(openPicker);
+
+    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", "instance-3", 1, "front", openPicker, 2, 3);
+  });
+
+  it("opens the contextual HUD on right click and configures the semantic Back through M6", async () => {
+    const user = userEvent.setup();
+    const onSelectArtwork = vi.fn();
+    const onPhysicalAction = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, onSelectArtwork, false, undefined, onPhysicalAction));
+    const firstSlot = slotForPhysicalIndex(0);
+
+    expect(fireEvent.contextMenu(firstSlot)).toBe(false);
+    expect(screen.getByTestId("compositor-instance-hud")).toBeInTheDocument();
+    expect(fireEvent.contextMenu(sheet())).toBe(true);
+
+    const configureBack = screen.getByRole("button", { name: "Configurar verso / face · Back" });
+    await user.click(configureBack);
+    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", "instance-1", 0, "back", configureBack, 1, 2);
+    expect(onPhysicalAction).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Fechar ações" }));
+    expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
+  });
+
+  it("opens the explicit mobile HUD and offers keyboard reorder through the same insertion action", async () => {
+    const user = userEvent.setup();
+    const onPhysicalAction = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 3 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true, undefined, onPhysicalAction));
+    await user.click(slotForPhysicalIndex(0));
+    const moreActions = screen.getByRole("button", { name: /mais ações para Island, cópia 1/i });
+    await user.click(moreActions);
+    expect(screen.getByTestId("compositor-instance-hud")).toBeInTheDocument();
+    expect(moreActions).toHaveAttribute("aria-expanded", "true");
+
+    const moveAfter = screen.getByRole("button", { name: "Mover depois" });
+    moveAfter.focus();
+    await user.keyboard("{Enter}");
+    expect(sheet().querySelectorAll("g[data-physical-instance-id]")[0]).toHaveAttribute("data-physical-instance-id", "instance-2");
+    expect(sheet().querySelectorAll("g[data-physical-instance-id]")[1]).toHaveAttribute("data-physical-instance-id", "instance-1");
+    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-instance-id", "instance-1");
+    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
+    expect(onPhysicalAction).not.toHaveBeenCalled();
+  });
+
+  it("blocks HUD mutations and drag initiation while the compositor is busy", async () => {
+    const user = userEvent.setup();
+    const onPhysicalAction = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true, undefined, onPhysicalAction, true));
+    const slot = slotForPhysicalIndex(0);
+    expect(slot).toHaveAttribute("draggable", "false");
+    await user.click(slot);
+    await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 1/i }));
+    expect(screen.getByRole("button", { name: "Aumentar quantidade" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remover uma cópia" })).toBeDisabled();
+
+    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-1") };
+    expect(fireEvent.dragStart(slot, { dataTransfer })).toBe(false);
+    expect(onPhysicalAction).not.toHaveBeenCalled();
+  });
+
+  it("rejects drops into skipped and registration-reserved slots without changing physical order", () => {
+    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-1") };
+    const skippedSettings: ProjectSettingsV2 = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      layout: { rows: 1, columns: 3, skippedSlotIndices: [1] },
+    };
+    const skipped = render(compositorWorkspace([{ ...card(), quantity: 2 }], skippedSettings, false, undefined, true));
+    const firstCard = sheet().querySelector('g[data-physical-card-index="0"]')!;
+    const skippedSlot = sheet().querySelector('g[aria-label^="Slot 2 desativado"]')!;
+    fireEvent.dragStart(firstCard, { dataTransfer });
+    fireEvent.dragOver(skippedSlot, { dataTransfer });
+    fireEvent.drop(skippedSlot, { dataTransfer });
+    expect(screen.getByText(/Drop rejeitado: slot ignorado não recebe cartas/)).toBeInTheDocument();
+    expect(skippedSlot).toHaveClass("is-invalid-drop");
+    expect(firstCard).not.toHaveClass("is-invalid-drop");
+    expect(sheet().querySelector('g[data-physical-card-index="0"]')).toHaveAttribute("data-physical-instance-id", "instance-1");
+
+    skipped.unmount();
+    const geometryProbe = render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { rows: 1, columns: 3, skippedSlotIndices: [] } }));
+    const firstSlotGeometry = geometryProbe.container.querySelector('g[data-physical-card-index="0"]')!;
+    const reservedX = Number(firstSlotGeometry.getAttribute("data-slot-x-mm")) + 1;
+    const reservedY = Number(firstSlotGeometry.getAttribute("data-slot-y-mm")) + 1;
+    geometryProbe.unmount();
+    const reservedSettings: ProjectSettingsV2 = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      registration: {
+        type: "custom", orientation: "portrait", marks: [[{ type: "line", x1Mm: 1, y1Mm: 1, x2Mm: 2, y2Mm: 2, strokeWidthMm: 0.2 }]],
+        reservedZones: [{ xMm: reservedX, yMm: reservedY, widthMm: 4, heightMm: 4 }],
+      },
+      layout: { rows: 1, columns: 3, skippedSlotIndices: [] },
+    };
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], reservedSettings, false, undefined, true));
+    const layoutAlert = screen.queryByRole("alert");
+    if (layoutAlert) throw new Error(layoutAlert.textContent ?? "Compositor layout failed.");
+    const reservedSlot = sheet().querySelector('g[aria-label^="Slot 1 reservado"]');
+    expect(reservedSlot).not.toBeNull();
+    const cardSlot = sheet().querySelector('g[data-physical-card-index="0"]')!;
+    fireEvent.dragStart(cardSlot, { dataTransfer });
+    fireEvent.dragOver(reservedSlot!, { dataTransfer });
+    fireEvent.drop(reservedSlot!, { dataTransfer });
+    expect(screen.getByText(/Drop rejeitado: slot reservado permanece vazio/)).toBeInTheDocument();
+    expect(reservedSlot).toHaveClass("is-invalid-drop");
+    expect(cardSlot).not.toHaveClass("is-invalid-drop");
+    expect(sheet().querySelector('g[data-physical-card-index="0"]')).toHaveAttribute("data-physical-instance-id", "instance-1");
   });
 
   it("renders one zoom-stable selection indicator without changing the artwork, trim, or Project state", async () => {
@@ -428,7 +556,7 @@ describe("canonical live compositor interactions", () => {
     expect(slotForPhysicalIndex(0).textContent).toContain("Verso sem artwork disponível");
   });
 
-  it("clears a physical selection when the destination page does not contain that copy", async () => {
+  it("keeps physical selection stable while browsing a different page", async () => {
     const user = userEvent.setup();
     render(compositorWorkspace([card()]));
 
@@ -436,12 +564,45 @@ describe("canonical live compositor interactions", () => {
     expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
     await user.click(screen.getByRole("button", { name: "Próxima página" }));
     expect(screen.getByRole("img", { name: /Compositor live frente.*página 2 de 2/ })).toHaveAttribute("data-selected-physical-card-index", "none");
-    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "none");
-    expect(screen.queryByRole("button", { name: /selecionada/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
+    expect(screen.queryByRole("button", { name: /carta física 2.*cópia 2 de 10/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Página anterior" }));
-    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "none");
-    expect(slotForPhysicalIndex(1)).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
+    expect(slotForPhysicalIndex(1)).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("follows the selected physical instance to its new page after a cross-page reorder", async () => {
+    const user = userEvent.setup();
+    render(compositorWorkspace([{ ...card(), quantity: 10 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true));
+
+    await user.click(screen.getByRole("button", { name: /carta física 2.*cópia 2 de 10/i }));
+    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-2") };
+    fireEvent.dragStart(slotForPhysicalIndex(1), { dataTransfer });
+    fireEvent.dragOver(screen.getByRole("button", { name: "Próxima página" }), { dataTransfer });
+    expect(sheet()).toHaveAttribute("data-compositor-page", "2");
+
+    fireEvent.drop(slotForPhysicalIndex(9), { dataTransfer });
+
+    expect(sheet()).toHaveAttribute("data-compositor-page", "2");
+    expect(slotForPhysicalIndex(9)).toHaveAttribute("data-physical-instance-id", "instance-2");
+    expect(slotForPhysicalIndex(9)).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-instance-id", "instance-2");
+    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "9");
+  });
+
+  it("drops on a final eligible empty slot as insertion at the end of the physical sequence", () => {
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { rows: 1, columns: 3, skippedSlotIndices: [] } }, false, undefined, true));
+    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-1") };
+    const source = sheet().querySelector('g[data-physical-card-index="0"]')!;
+    const emptyEnd = sheet().querySelector('g[aria-label^="Slot 3 vazio"]')!;
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragOver(emptyEnd, { dataTransfer });
+    fireEvent.drop(emptyEnd, { dataTransfer });
+
+    expect(sheet().querySelector('g[data-physical-card-index="0"]')).toHaveAttribute("data-physical-instance-id", "instance-2");
+    expect(sheet().querySelector('g[data-physical-card-index="1"]')).toHaveAttribute("data-physical-instance-id", "instance-1");
+    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
   });
 
   it("keeps explicit skipped-slot editing available without using selection clicks as Project edits", async () => {
