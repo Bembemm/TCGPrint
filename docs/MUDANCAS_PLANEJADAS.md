@@ -56,7 +56,6 @@ Não alterar:
 
 - Frente/Verso;
 - navegação Anterior/Próxima e seletor de página;
-- Layers;
 - dimensões físicas da folha;
 - posicionamento de slots;
 - transformação de calibração;
@@ -260,13 +259,13 @@ A referência visual deve influenciar o compositor nos seguintes pontos:
 - outline de seleção de alto contraste;
 - hover/focus estados claros;
 - barra contextual inferior;
-- controles de página e Layers compactos;
-- reduzir texto explicativo permanente que compete com a área do compositor, movendo detalhes técnicos secundários para UI menos intrusiva quando possível.
+- controles de página compactos;
+- remover o seletor de Layers da superfície principal; a apresentação normal deve ter um conjunto de camadas definido pelo produto, sem exigir configuração manual do usuário;
+- remover texto explicativo permanente que compete com a área do compositor; detalhes técnicos pertencem a Diagnostics/debug, não ao fluxo normal.
 
 Porém:
 
-- não esconder informações necessárias para debug/produção sem substituto;
-- não remover Layers nesta mudança;
+- informações necessárias para debug/produção devem continuar disponíveis no código, testes ou área de Diagnostics apropriada, mas não precisam permanecer na superfície principal do compositor;
 - não remover Frente/Verso global;
 - não remover page navigation;
 - não alterar cores dos overlays técnicos de maneira que os torne ambíguos;
@@ -351,6 +350,233 @@ Antes de considerar concluído:
   - troca Frente/Verso global;
   - multi-seleção entre páginas;
   - viewport comum e DPR alto.
+
+---
+
+
+### 3. Remover poluição técnica da superfície principal e tornar a própria carta o ponto de entrada para edição
+
+**Status:** especificado, ainda não implementado.
+
+#### Decisão de produto
+
+O compositor não deve funcionar como um painel permanente de diagnóstico. A superfície principal deve ser orientada a **ver a folha e interagir diretamente com as cartas**.
+
+A informação técnica atualmente espalhada acima e abaixo da folha cria ruído, reduz a área útil e duplica conhecimento que já existe no projeto, no workspace de configurações e em Diagnostics.
+
+A regra de UX passa a ser:
+
+> **a carta é o controle principal.** O usuário olha a folha, escolhe uma carta diretamente nela e abre o fluxo de seleção/edição correspondente. Informações técnicas que não são necessárias para essa decisão não ficam permanentemente visíveis.
+
+#### 3.1. Elementos que devem sair da superfície principal
+
+Remover da apresentação normal do `RegistrationLayoutPreview`:
+
+1. **Cabeçalho informativo do compositor**
+   - `Compositor live`;
+   - `A4 portrait · Magic Standard ... capacidade ... página ...`;
+   - `N cartas físicas · atualiza automaticamente`.
+
+   O contexto de formato/papel continua existindo no estado do projeto e nas configurações; não precisa ocupar uma faixa permanente sobre a folha.
+
+2. **Controle `Layers` e sua lista de filtros**
+   - Artwork;
+   - Bleed;
+   - Trim;
+   - Cut guides;
+   - Silhouette / SVG-DXF;
+   - Registration;
+   - Reserved zones;
+   - Margins;
+   - Calibration.
+
+   O usuário normal não deve precisar montar manualmente a representação correta da folha.
+
+3. **Linha de contexto de face/geometria**
+   - exemplos atuais como `Frente física · artwork da face selecionada · registration ...`;
+   - `Verso físico · long-edge · grade duplex pareada ...`.
+
+4. **Linha permanente de carta selecionada**
+   - `Carta física N · Nome · cópia X/Y`;
+   - botão `Selecionar arte`;
+   - botão `...`.
+
+   Essa faixa deixa de existir porque a interação deve acontecer sobre a própria carta.
+
+5. **HUD/caixa permanente de ações da instância**, quando aberta a partir do `...`
+   - não manter um segundo painel de comandos dentro do compositor;
+   - ações de quantidade/remoção/configuração continuam existindo nos fluxos próprios do workspace e não devem ser apagadas do domínio.
+
+6. **Texto permanente de calibração**
+   - `Sem perfil de calibração selecionado; geometria nominal visível...`;
+   - detalhes de offsets, rotação, skew e versões de perfil.
+
+7. **Textos auxiliares no rodapé**
+   - `Defina linhas e colunas antes de desativar slots.`;
+   - explicação longa de duplex/back;
+   - outros parágrafos explicativos equivalentes.
+
+8. **Legenda técnica inferior**
+   - Bleed;
+   - Trim/card;
+   - Cut path;
+   - Skipped slot/path;
+   - Reserved zone;
+   - Registration mark.
+
+A remoção é da **UI permanente do compositor**, não da capacidade interna correspondente.
+
+#### 3.2. Estado visual padrão sem seletor de Layers
+
+Eliminar o controle de Layers exige definir um estado correto e determinístico; não basta apagar o menu e deixar valores históricos arbitrários.
+
+A visualização normal deve representar o resultado físico de forma limpa:
+
+- **Artwork:** visível;
+- **Bleed:** visível quando configurado, pois faz parte da aparência física preparada para impressão;
+- **Calibration:** aplicada internamente quando houver perfil, porque a visualização deve refletir a composição efetiva, não uma geometria nominal enganosa;
+- **Registration:** mostrar somente quando fizer parte efetiva da saída/configuração física do projeto;
+- **Trim guide:** oculto na visualização normal;
+- **Cut guide:** oculto na visualização normal;
+- **Silhouette / SVG-DXF path:** oculto na visualização normal;
+- **Reserved zones:** ocultas;
+- **Margins:** ocultas.
+
+Se algum desses overlays for necessário para suporte/diagnóstico, ele pode ser exposto futuramente em **Diagnostics/developer tooling**, mas não deve reaparecer como dropdown no viewer principal.
+
+Importante: ocultar guide/overlay não pode remover sua geração, geometria ou exportação.
+
+#### 3.3. Toolbar mínima
+
+Após esta e as mudanças anteriores, a barra principal deve conter somente controles realmente necessários ao trabalho direto:
+
+- **Frente / Verso** global;
+- **Anterior / Página X de Y / Próxima**;
+- seletor `Ir para` apenas quando houver mais de uma página, se continuar sendo útil e compacto.
+
+Não reintroduzir zoom manual ou Layers.
+
+A toolbar deve ser compacta e consumir o mínimo de altura possível.
+
+#### 3.4. Clique direto na carta abre o fluxo de artwork existente
+
+O botão textual `Selecionar arte` deixa de ser necessário.
+
+Ao clicar normalmente no corpo de uma carta física:
+
+1. tornar aquela instância a **active/focused instance**;
+2. sincronizar o card lógico selecionado somente na medida necessária para o fluxo existente;
+3. abrir diretamente o **`ArtworkPickerDialog` já existente** para a **instância física correta** e para a **face que está sendo exibida/inspecionada**;
+4. fornecer ao picker o mesmo contexto que hoje é fornecido por `onSelectArtwork(...)`:
+   - `cardId`;
+   - `instanceId`;
+   - `physicalCardIndex`;
+   - side;
+   - copyNumber;
+   - totalCopies.
+
+Não criar um segundo seletor de artwork. Reutilizar `openArtworkPicker(...)` e o pipeline atual de seleção por escopo.
+
+#### 3.5. Compatibilidade entre clique, multi-seleção, flip e drag/reorder
+
+A carta passará a concentrar várias interações. A implementação deve separar os alvos para não criar eventos concorrentes:
+
+- **checkbox no canto superior esquerdo:** somente adiciona/remove a instância do multi-selection set; não abre picker;
+- **botão de flip no canto superior direito:** somente alterna inspeção local Front/Back; não abre picker;
+- **clique no corpo da carta:** abre o artwork picker;
+- **drag:** continua reordenando instâncias físicas e não deve abrir o picker ao terminar um arrasto;
+- **teclado:** Enter/Space sobre o corpo interativo deve oferecer caminho equivalente de abertura sem interferir nos controles filhos.
+
+É obrigatório implementar proteção contra `click-after-drag` — por exemplo, estado explícito de drag ou limiar de movimento — para que soltar uma carta depois de reordená-la não abra o picker acidentalmente.
+
+Os controles sobrepostos devem usar `stopPropagation`/tratamento de eventos equivalente apenas onde necessário; não criar um overlay gigante que bloqueie o drag e os eventos do SVG.
+
+#### 3.6. O que acontece com as ações do antigo `...`
+
+As capacidades de domínio não devem ser deletadas:
+
+- aumentar quantidade;
+- remover uma cópia;
+- duplicar como entrada independente;
+- remover carta inteira;
+- configurações completas;
+- mover antes/depois.
+
+Porém elas **não precisam permanecer como HUD permanente no viewer**.
+
+Direção desta mudança:
+
+- remover o gatilho visual `...` e `.compositor-instance-hud` da superfície principal;
+- manter as funções/reducers e os fluxos equivalentes onde já existem no workspace de Cartas/configurações;
+- não apagar handlers/reducers apenas porque o botão do viewer sumiu sem antes confirmar todos os consumidores;
+- se alguma ação ficar sem qualquer caminho acessível após a remoção, o executor deve reportar a lacuna e preservar um caminho compacto temporário em vez de simplesmente eliminar funcionalidade.
+
+Não inventar neste momento um novo menu contextual complexo. O objetivo é simplificar.
+
+#### 3.7. Informações técnicas continuam existindo, apenas mudam de lugar
+
+A limpeza visual não autoriza remover:
+
+- `settings.registration`;
+- `printerProfileSelection`;
+- matrizes de calibration;
+- `duplexFlipMode`;
+- cut geometry;
+- bleed configuration;
+- skipped slots;
+- reserved zones;
+- SVG/DXF geometry;
+- dados usados por testes e exportação.
+
+Esses dados continuam no modelo e no pipeline. Quando precisarem ser inspecionados pelo usuário avançado, o local apropriado é a área já existente de **Diagnostics/configurações**, não texto permanente em volta da folha.
+
+#### 3.8. Critérios de aceite visual
+
+No estado normal, com uma página carregada:
+
+- a maior parte da área disponível é dedicada à folha/cartas;
+- não existe dropdown `Layers`;
+- não existe legenda inferior de guias;
+- não existem parágrafos de calibration/duplex/contexto técnico ao redor da folha;
+- não existe linha `Carta física ... Selecionar arte ... ...`;
+- não existe cabeçalho descritivo redundante do compositor;
+- permanecem apenas os controles compactos de Frente/Verso e paginação;
+- seleção, checkbox, flip e estados necessários aparecem diretamente sobre as cartas;
+- clicar no corpo da carta abre o picker existente para a instância/face correta.
+
+#### 3.9. Critérios de regressão
+
+A simplificação da superfície não pode alterar o resultado de impressão.
+
+Para o mesmo projeto antes/depois:
+
+- número de páginas é igual;
+- slot assignment é igual;
+- posições em mm são iguais;
+- ordem física é igual;
+- resolução de front/back é igual;
+- calibration efetiva é igual;
+- bleed/trim/cut/registration continuam sendo produzidos conforme configuração;
+- PDF final continua funcionalmente equivalente;
+- SVG/DXF continuam equivalentes;
+- mudança de aparência do compositor não pode serializar novos valores no projeto apenas para lembrar estado de UI removido.
+
+#### 3.10. Testes mínimos adicionais
+
+Além da bateria definida no item 2, cobrir:
+
+- ausência do botão `Layers`;
+- ausência dos textos/legenda removidos;
+- presença de toolbar mínima;
+- clique em uma instância abre o `ArtworkPickerDialog` com contexto físico correto;
+- clicar checkbox não abre picker;
+- clicar flip não abre picker;
+- concluir drag/reorder não abre picker;
+- troca de Frente/Verso global ainda funciona;
+- overlays técnicos ocultos no viewer não deixam de existir no pipeline/export;
+- `npm run typecheck`;
+- testes direcionados;
+- `npm run build`.
 
 ---
 
