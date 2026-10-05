@@ -4,8 +4,9 @@ import type { ArtworkCatalogSource } from "../artwork/types";
 import type { ArtworkCandidate, BackLibraryAssetReference, CardFaceSide, CardIdentity, IdentityResolutionCandidate, SelectedArtwork, WorkingCard, WorkingCardBackMode, WorkingCardBackModeSelectionPolicy, WorkingCardMpcReference } from "../core/cards/types";
 import { isSafeArtworkCandidateId } from "../core/cards/ids";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../core/cards/limits";
+import { createPhysicalOrder, validatePhysicalOrder, type PhysicalOrder } from "../core/cards/physical-instance-order";
 import { BackSelectionPolicyError, isDoubleFacedIdentity, isEligibleGenericPhysicalBack, isEligibleIdentityFaceSelection } from "../core/cards/back-selection";
-import { applyArtworkSelectionScope, applyGenericBackScope, ArtworkSelectionScopeError, validateArtworkCandidateForCard, type ArtworkSelectionScope, type GenericBackSelectionScope, type GenericBackChoice } from "../core/cards/artwork-selection-scope";
+import { applyArtworkSelectionScope, applyArtworkSelectionScopeInPhysicalOrder, applyGenericBackScope, applyGenericBackScopeInPhysicalOrder, ArtworkSelectionScopeError, validateArtworkCandidateForCard, type ArtworkSelectionScope, type GenericBackSelectionScope, type GenericBackChoice } from "../core/cards/artwork-selection-scope";
 import { sanitizeCardIdentityMetadata } from "../core/cards/safe-identity-metadata";
 import type { UniversalImportRequest } from "../import-engine/types";
 import { sanitizeRelativeImportPath } from "../import-engine/source-path";
@@ -614,6 +615,15 @@ function physicalCardIndex(value: unknown): number | undefined {
   return value as number;
 }
 
+function submittedPhysicalOrder(cards: readonly WorkingCard[], value: unknown): PhysicalOrder | undefined {
+  if (value === undefined) return undefined;
+  try {
+    return validatePhysicalOrder(cards, value);
+  } catch (error) {
+    throw new ApiRequestError(400, "INVALID_PHYSICAL_ORDER", error instanceof Error ? error.message : "Physical order is invalid.");
+  }
+}
+
 async function getSelectableArtworkCandidate(
   workbench: CardWorkbench,
   card: WorkingCard,
@@ -722,19 +732,33 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
       }
       const scope = artworkSelectionScope(body.scope);
       const selectedPhysicalCardIndex = physicalCardIndex(body.physicalCardIndex);
+      const physicalOrder = submittedPhysicalOrder(cards, body.physicalOrder);
+      const physicalInstanceId = body.physicalInstanceId === undefined ? undefined : requiredString(body.physicalInstanceId, "physicalInstanceId", 32);
       const candidateId = requiredString(body.candidateId, "candidateId", 128);
       const candidate = await getSelectableArtworkCandidate(workbench, target, faceId, candidateId, request.signal);
       const selected = workbench.selectArtwork(target, faceId, candidate).selectedArtworkByFace[faceId];
       if (!selected) throw new ApiRequestError(409, "ARTWORK_SELECTION_FAILED", "The artwork candidate could not be turned into a durable selection reference.");
-      const updatedCards = applyArtworkSelectionScope({
+      const updated = physicalOrder ? applyArtworkSelectionScopeInPhysicalOrder({
         cards,
+        physicalOrder,
         targetCardId,
         faceId,
         artwork: selected,
         scope,
-        ...(selectedPhysicalCardIndex === undefined ? {} : { physicalCardIndex: selectedPhysicalCardIndex }),
-      });
-      return Response.json({ workingCards: updatedCards, providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
+        ...(physicalInstanceId ? { physicalInstanceId } : {}),
+      }) : {
+        cards: applyArtworkSelectionScope({
+          cards,
+          targetCardId,
+          faceId,
+          artwork: selected,
+          scope,
+          ...(selectedPhysicalCardIndex === undefined ? {} : { physicalCardIndex: selectedPhysicalCardIndex }),
+        }),
+        physicalOrder: undefined,
+        selectedCardId: undefined,
+      };
+      return Response.json({ workingCards: updated.cards, ...(updated.physicalOrder ? { physicalOrder: updated.physicalOrder, selectedCardId: updated.selectedCardId } : {}), providerHealth: safeProviderHealth(workbench.getProviderHealth()) });
     }
     if (action === "apply-generic-back-scope") {
       const cards = parseWorkingCards(body.cards);
@@ -767,7 +791,16 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
         throw new ApiRequestError(400, "INVALID_BACK_CHOICE", "Generic back choice must be a Back Library asset, MPC cardback, Project Default, or none.");
       }
       const selectedPhysicalCardIndex = physicalCardIndex(body.physicalCardIndex);
-      const result = applyGenericBackScope({
+      const physicalOrder = submittedPhysicalOrder(cards, body.physicalOrder);
+      const physicalInstanceId = body.physicalInstanceId === undefined ? undefined : requiredString(body.physicalInstanceId, "physicalInstanceId", 32);
+      const result = physicalOrder ? applyGenericBackScopeInPhysicalOrder({
+        cards,
+        physicalOrder,
+        targetCardId,
+        choice,
+        scope,
+        ...(physicalInstanceId ? { physicalInstanceId } : {}),
+      }) : applyGenericBackScope({
         cards,
         targetCardId,
         choice,
@@ -778,7 +811,7 @@ export async function handleResolve(request: Request, workbench: CardWorkbench):
       const updatedCards = candidate
         ? result.cards.map((card) => targetCardIds.has(card.id) && card.manualBackArtwork?.candidateId === candidate!.id ? workbench.selectManualBackArtwork(card, candidate!) : card)
         : result.cards;
-      return Response.json({ workingCards: updatedCards, impact: {
+      return Response.json({ workingCards: updatedCards, ...(result.physicalOrder ? { physicalOrder: result.physicalOrder, selectedCardId: result.targetCardIds[0] } : {}), impact: {
         affectedEntries: result.affectedEntries,
         affectedPhysicalCards: result.affectedPhysicalCards,
         preservedDfcEntries: result.preservedDfcEntries,
@@ -1000,7 +1033,19 @@ export async function handleCardExport(
   try {
     const body = await parseJsonRequest(request, 4_000_000);
     const cards = parseWorkingCards(body.cards);
+    const physicalCardCount = cards.reduce((sum, card) => sum + card.quantity, 0);
+    if (physicalCardCount > MAX_PHYSICAL_CARDS_PER_EXPORT) {
+      throw new ApiRequestError(413, "EXPORT_TOO_LARGE", `The first export is limited to ${MAX_PHYSICAL_CARDS_PER_EXPORT} physical cards per PDF.`);
+    }
     const options = record(body.options) ?? {};
+    let requestedPhysicalOrder: PhysicalOrder;
+    try {
+      requestedPhysicalOrder = options.physicalOrder === undefined
+        ? createPhysicalOrder(cards)
+        : validatePhysicalOrder(cards, options.physicalOrder);
+    } catch (error) {
+      throw new ApiRequestError(400, "INVALID_PHYSICAL_ORDER", error instanceof Error ? error.message : "Physical order is invalid.");
+    }
     const exportContentMode = options.exportContentMode === undefined ? "front-only" : options.exportContentMode as ExportContentMode;
     if (!EXPORT_CONTENT_MODES.has(exportContentMode)) throw new ApiRequestError(400, "INVALID_EXPORT_CONTENT_MODE", "exportContentMode must be front-only, back-only, front-back-separated, or duplex.");
     const missingBackPolicy = options.missingBackPolicy === undefined ? "use-project-default" : options.missingBackPolicy as MissingBackPolicy;
@@ -1113,7 +1158,9 @@ export async function handleCardExport(
       if (canonicalJson(expectedLayoutOptions) !== canonicalJson(requestLayoutOptions)) {
         throw new ApiRequestError(409, "PROJECT_CUT_SYNC_STALE", "PDF request does not match the autosaved Project settings used by cut geometry. Save the Project and retry.");
       }
-      if (canonicalJson(expectedBackOptions) !== canonicalJson(requestBackOptions) || canonicalJson(savedCards) !== canonicalJson(cards)) {
+      if (canonicalJson(expectedBackOptions) !== canonicalJson(requestBackOptions)
+        || canonicalJson(savedCards) !== canonicalJson(cards)
+        || canonicalJson(project.snapshot.physicalOrder) !== canonicalJson(requestedPhysicalOrder)) {
         throw new ApiRequestError(409, "STALE_PROJECT", "PDF request does not match the autosaved Project revision, card order, artwork selections, or duplex settings. Save the Project and retry.");
       }
       const requestedCalibration = {
@@ -1149,6 +1196,7 @@ export async function handleCardExport(
       const resolved = await resolveProjectCutLayout(project.id, project.revision, projects, templateLibrary);
       derivedTemplateGeometry = resolved.layout.derivedTemplateGeometry;
       exportCards = savedCards;
+      requestedPhysicalOrder = project.snapshot.physicalOrder;
       projectRevision = project.revision;
     }
     const exportOptions = {
@@ -1170,6 +1218,7 @@ export async function handleCardExport(
       duplexFlipMode,
       missingBackPolicy,
       projectDefaultBack,
+      physicalOrder: requestedPhysicalOrder,
       printerProfileSelection,
       projectRevision,
     } as const;

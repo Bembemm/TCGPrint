@@ -7,6 +7,7 @@ import type { ProjectDto, ProjectOpenDto, ProjectSaveState } from "../../service
 import type { TemplateSelection } from "../../templates/types";
 import type { CutSourceSelection } from "../../core/cut";
 import type { CutPreviewDto } from "../../services/cut-api";
+import { createPhysicalOrder, type PhysicalOrder } from "../../core/cards/physical-instance-order";
 import { createProjectApiClient, ProjectApiClientError } from "./project-api-client";
 import { createProjectListRequestGuard } from "./project-list-request-guard";
 import { ProjectAutosaveQueue } from "./project-autosave";
@@ -33,6 +34,7 @@ import {
 export interface ProjectsPanelProps {
   readonly view?: ProjectsPanelView;
   readonly cards: readonly WorkingCard[];
+  readonly physicalOrder?: PhysicalOrder;
   readonly settings: ProjectSettingsV1;
   readonly onProjectOpen: (project: ProjectDto) => void;
   readonly onTemplateDefaults?: (defaults: TemplateRegistrationDefaults | null) => void;
@@ -56,6 +58,7 @@ function errorMessage(error: unknown): string {
 export default function ProjectsPanel({
   view = "all",
   cards,
+  physicalOrder,
   settings,
   onProjectOpen,
   onTemplateDefaults,
@@ -71,7 +74,7 @@ export default function ProjectsPanel({
   const [templateSelection, setTemplateSelection] = useState<TemplateSelection | null>(null);
   const currentSnapshot = useMemo(() => {
     try {
-      const document = projectSnapshotDocument(cards, settings, templateSelection);
+      const document = projectSnapshotDocument(cards, settings, templateSelection, physicalOrder ?? createPhysicalOrder(cards));
       return {
         key: projectSaveStateValue(document),
         document,
@@ -80,7 +83,7 @@ export default function ProjectsPanel({
     } catch (error) {
       return { key: null, document: null, error: errorMessage(error) };
     }
-  }, [cards, settings, templateSelection]);
+  }, [cards, physicalOrder, settings, templateSelection]);
   const currentSnapshotKeyRef = useRef(currentSnapshot.key);
   currentSnapshotKeyRef.current = currentSnapshot.key;
   const currentSnapshotDocumentRef = useRef(currentSnapshot.document);

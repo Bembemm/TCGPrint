@@ -6,6 +6,11 @@ import ProjectsPanel from "../../src/app/projects-panel";
 import { resolveProjectRecoveryChoice } from "../../src/app/project-recovery-decision";
 import { createProjectOpenInteractionLock, resolveProjectRecoveryWithInteractionLock } from "../../src/app/project-interaction-lock";
 import type { ProjectDto, ProjectOpenDto } from "../../services/project-api";
+import { createPhysicalOrder } from "../../core/cards/physical-instance-order";
+
+function emptySnapshot() {
+  return { projectSchemaVersion: 6, cards: [], settings: DEFAULT_PROJECT_SETTINGS, physicalOrder: createPhysicalOrder([]) };
+}
 
 function project(id: string, revision: number): ProjectDto {
   return {
@@ -15,7 +20,7 @@ function project(id: string, revision: number): ProjectDto {
     revision,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
-    snapshot: { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+    snapshot: emptySnapshot(),
     templateSelection: null,
   };
 }
@@ -47,7 +52,7 @@ describe("Projects panel", () => {
       recovery: {
         baseRevision: 4,
         projectSchemaVersion: 2,
-        snapshot: { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        snapshot: emptySnapshot(),
         templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },
@@ -76,7 +81,7 @@ describe("Projects panel", () => {
       recovery: {
         baseRevision: choice === "copy" ? 3 : 4,
         projectSchemaVersion: 2,
-        snapshot: { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        snapshot: emptySnapshot(),
         templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },
@@ -115,7 +120,7 @@ describe("Projects panel", () => {
       recovery: {
         baseRevision: 4,
         projectSchemaVersion: 2,
-        snapshot: { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        snapshot: emptySnapshot(),
         templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },
@@ -143,7 +148,7 @@ describe("Projects panel", () => {
       recovery: {
         baseRevision: 4,
         projectSchemaVersion: 2,
-        snapshot: { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+        snapshot: emptySnapshot(),
         templateSelection: null,
         createdAt: "2026-01-02T00:00:00.000Z",
       },

@@ -30,6 +30,7 @@ import { BackLibraryError } from "./back-library";
 import type { ExportContentMode, MissingBackPolicy } from "../persistence/projects/serializer";
 import { calculateSharedPagePlacements } from "../core/duplex/shared-placement";
 import type { DuplexBackPageTransform } from "../core/duplex";
+import { createPhysicalOrder, validatePhysicalOrder, type PhysicalOrder } from "../core/cards/physical-instance-order";
 import { CalibrationError, createPrintCalibrationTransform, getCalibrationPageOverflowMm, type CalibrationSide, type PrinterProfileSnapshot, type SideCalibration } from "../core/calibration";
 
 export interface CardExportOptions {
@@ -59,6 +60,8 @@ export interface CardExportOptions {
   readonly missingBackPolicy?: MissingBackPolicy;
   readonly projectDefaultBack?: BackLibraryAssetReference | null;
   readonly projectRevision?: number | null;
+  /** Canonical Project order of physical instances; defaults to the legacy logical expansion for direct callers. */
+  readonly physicalOrder?: PhysicalOrder;
   /** Validated immutable Project profile snapshot used to select each physical side correction. */
   readonly printerProfileSelection?: PrinterProfileSnapshot | null;
   /** Low-level page-engine option for direct engine callers; project exports use the profile snapshot. */
@@ -214,14 +217,6 @@ function getOrAddUniqueImage(
   collisionBucket.push(sourceBytes);
   collidingImages.set(sha256, collisionBucket);
   return sourceBytes;
-}
-
-function hasDrawableCopy(quantity: number, firstPhysicalCardIndex: number, skipImageIndexes?: ReadonlySet<number>): boolean {
-  if (!skipImageIndexes) return quantity > 0;
-  for (let index = 0; index < quantity; index += 1) {
-    if (!skipImageIndexes.has(firstPhysicalCardIndex + index)) return true;
-  }
-  return false;
 }
 
 type BleedWorkState = "queued" | "running" | "cancelling" | "cancelled" | "completed" | "failed";
@@ -426,24 +421,21 @@ export async function exportWorkingCardsWithDiagnostics(
     throw new CardExportServiceError("INVALID_ROUNDED_CORNERS", "Rounded-corner bleed needs a card format with an explicit physical corner radius.");
   }
 
-  const orderedCards = [...cards].sort((a, b) => a.order - b.order);
+  const physicalCopies = orderedPhysicalCopies(cards, options.physicalOrder);
   const seenCandidateIds = new Set<string>();
   const repeatedCandidateIds = new Set<string>();
-  let physicalCardCursor = 0;
   try {
-  for (const card of orderedCards) {
+  for (const { card, physicalCardIndex } of physicalCopies) {
     const selection = card.selectedArtworkByFace.front;
-    if (selection && hasDrawableCopy(card.quantity, physicalCardCursor, options.skipImageIndexes)) {
+    if (selection && !options.skipImageIndexes?.has(physicalCardIndex)) {
       const id = selection.candidateId;
       if (seenCandidateIds.has(id)) repeatedCandidateIds.add(id);
       else seenCandidateIds.add(id);
     }
-    physicalCardCursor += card.quantity;
   }
-  let nextPhysicalCardIndex = 0;
-  for (const card of orderedCards) {
+  for (const { card, physicalCardIndex } of physicalCopies) {
     if (signal?.aborted) throw new CardExportServiceError("EXPORT_FAILED", "PDF export was cancelled.");
-    const physicalCardIndexes = Array.from({ length: card.quantity }, () => nextPhysicalCardIndex++);
+    const physicalCardIndexes = [physicalCardIndex];
     const hasDrawableCopies = physicalCardIndexes.some((index) => !options.skipImageIndexes?.has(index));
     if (!hasDrawableCopies) {
       for (const _physicalCardIndex of physicalCardIndexes) {
@@ -740,20 +732,22 @@ interface ResolvedBack {
   readonly missingReason?: string;
 }
 
-function orderedPhysicalCopies(cards: readonly WorkingCard[]): readonly PhysicalCopy[] {
-  const physical: PhysicalCopy[] = [];
+function orderedPhysicalCopies(cards: readonly WorkingCard[], suppliedOrder?: PhysicalOrder): readonly PhysicalCopy[] {
   const ids = new Set<string>();
   for (const card of cards) {
     if (!card.id || ids.has(card.id)) throw new CardExportServiceError("INVALID_CARD_ID", "Every logical card in an export must have a unique card ID.");
     ids.add(card.id);
   }
-  const orderedCards = cards.map((card, index) => ({ card, index })).sort((left, right) => left.card.order - right.card.order || left.index - right.index);
-  for (const { card } of orderedCards) {
-    for (let copy = 0; copy < card.quantity; copy += 1) {
-      physical.push({ card, physicalCardIndex: physical.length, copyNumber: copy + 1 });
-    }
-  }
-  return physical;
+  const physicalOrder = suppliedOrder ? validatePhysicalOrder(cards, suppliedOrder) : createPhysicalOrder(cards);
+  const byId = new Map(cards.map((card) => [card.id, card]));
+  const copyCounts = new Map<string, number>();
+  return physicalOrder.instances.map((reference, physicalCardIndex) => {
+    const card = byId.get(reference.workingCardId);
+    if (!card) throw new CardExportServiceError("INVALID_CARD_ID", `Physical instance ${reference.id} refers to an unknown WorkingCard.`);
+    const copyNumber = (copyCounts.get(card.id) ?? 0) + 1;
+    copyCounts.set(card.id, copyNumber);
+    return { card, physicalCardIndex, copyNumber };
+  });
 }
 
 function backName(card: WorkingCard): string {
@@ -869,7 +863,7 @@ export async function exportWorkingCardsByContentMode(
   if (contentMode !== "front-only" && contentMode !== "back-only" && contentMode !== "front-back-separated" && contentMode !== "duplex") {
     throw new CardExportServiceError("INVALID_BACK_MODE", "Export content mode is invalid.");
   }
-  const physical = orderedPhysicalCopies(cards);
+  const physical = orderedPhysicalCopies(cards, options.physicalOrder);
   const totalPhysicalCards = physical.length;
   if (totalPhysicalCards < 1) throw new CardExportServiceError("ARTWORK_REQUIRED", "Add at least one card to export.");
   if (totalPhysicalCards > MAX_PHYSICAL_CARDS_PER_EXPORT) throw new CardExportServiceError("EXPORT_TOO_LARGE", `The first export is limited to ${MAX_PHYSICAL_CARDS_PER_EXPORT} physical cards per PDF.`);
@@ -1009,6 +1003,7 @@ export async function exportWorkingCardsByContentMode(
     const selection = physicalBackSelections.get(copy.physicalCardIndex);
     return {
       ...copy.card,
+      id: "export-back-" + copy.physicalCardIndex,
       quantity: 1,
       order: copy.physicalCardIndex,
       selectedArtworkByFace: selection ? { front: selection } : {},
@@ -1019,6 +1014,7 @@ export async function exportWorkingCardsByContentMode(
   const duplexBackPageTransform = pairingPlan.pagePairs[0]!.backPageTransform;
   const renderOptions: CardExportOptions = {
     ...optionsForSide(options, "back"),
+    physicalOrder: createPhysicalOrder(backCards),
     pagePlacements: backPlacements,
     duplexBackPageTransform,
     skipImageIndexes: blankIndexes,

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import type { WorkingCard } from "../../core/cards/types";
+import { createPhysicalOrder, movePhysicalInstance } from "../../core/cards/physical-instance-order";
 import { openProjectDatabase } from "../../persistence/projects/database";
 import { ProjectRepository } from "../../persistence/projects/repository";
 import { DEFAULT_PROJECT_SETTINGS, deserializeProjectSnapshot, serializeProjectSnapshot } from "../../persistence/projects/serializer";
@@ -49,11 +50,12 @@ describe("project repository", () => {
     expect(created).toEqual({
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 5,
+      projectSchemaVersion: 6,
       revision: 1,
       snapshot: {
-        projectSchemaVersion: 5,
+        projectSchemaVersion: 6,
         cards: [],
+        physicalOrder: { nextInstanceId: 1, instances: [] },
         settings: {
           bleedMm: 0.625,
           roundedCorners: false,
@@ -88,7 +90,7 @@ describe("project repository", () => {
     expect(projects.list()).toEqual([{
       id: "project-1",
       name: "Novo projeto",
-      projectSchemaVersion: 5,
+      projectSchemaVersion: 6,
       revision: 1,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -96,6 +98,37 @@ describe("project repository", () => {
     }]);
     expect(projects.open("project-1")).toEqual(created);
     expect(projects.get("missing-project")).toBeUndefined();
+  });
+
+  it("persists a custom physical sequence through autosave, reopen, duplicate, recovery promotion, and recovery copy", async () => {
+    const projects = await setup();
+    const card = (id: string, order: number, quantity: number): WorkingCard => ({
+      id, order, quantity,
+      importSource: { sourceId: `source-${id}`, importKind: "text", entryKind: "card" },
+      identityHints: { name: id }, identity: null,
+      identityResolution: { status: "unresolved", candidates: [], confirmed: false },
+      faces: [{ id: "front", side: "front", name: id }], selectedArtworkByFace: {},
+      backMode: "project-default", backModeSelectionPolicy: "automatic", localArtworkIds: [], mpcReferences: [], faceAssociations: [],
+    });
+    const cards = [card("island", 0, 3), card("bolt", 1, 1)];
+    const legacyOrder = createPhysicalOrder(cards);
+    const customOrder = movePhysicalInstance(legacyOrder, "instance-2", "instance-4", "after");
+    const snapshot = deserializeProjectSnapshot(serializeProjectSnapshot(cards, DEFAULT_PROJECT_SETTINGS, customOrder));
+    const created = projects.create(snapshot);
+    const saved = projects.save(created.id, created.revision, snapshot);
+
+    expect(projects.open(saved.id)?.snapshot.physicalOrder).toEqual(customOrder);
+    expect(projects.duplicate(saved.id).snapshot.physicalOrder).toEqual(customOrder);
+
+    const recoveryOrder = movePhysicalInstance(customOrder, "instance-1", null);
+    const recoverySnapshot = deserializeProjectSnapshot(serializeProjectSnapshot(cards, DEFAULT_PROJECT_SETTINGS, recoveryOrder));
+    projects.stageRecovery(saved.id, saved.revision, recoverySnapshot);
+    expect(projects.readRecovery(saved.id)?.snapshot.physicalOrder).toEqual(recoveryOrder);
+    const promoted = projects.promoteRecovery(saved.id);
+    expect(promoted.snapshot.physicalOrder).toEqual(recoveryOrder);
+
+    projects.stageRecovery(saved.id, promoted.revision, snapshot);
+    expect(projects.copyRecovery(saved.id).snapshot.physicalOrder).toEqual(customOrder);
   });
 
   it("persists the exact DXF source and unit choice through autosave, reopen, duplicate, and recovery", async () => {
@@ -324,12 +357,47 @@ describe("project repository", () => {
 
     const opened = projects.open(created.id);
 
-    expect(opened.projectSchemaVersion).toBe(5);
+    expect(opened.projectSchemaVersion).toBe(6);
     expect(opened.snapshot).toMatchObject({
-      projectSchemaVersion: 5,
+      projectSchemaVersion: 6,
       settings: { bleedMm: 1.25, roundedCorners: true, registration: { type: "none", orientation: "portrait" } },
     });
     expect(database!.prepare("SELECT snapshot_json FROM projects WHERE id = ?").get(created.id)).toEqual({ snapshot_json: legacy });
+  });
+
+  it("opens v5 projects and recovery snapshots while promoting their physical order in memory", async () => {
+    const projects = await setup();
+    const card: WorkingCard = {
+      id: "legacy-v5-card", quantity: 2, order: 0,
+      importSource: { sourceId: "legacy-v5-source", importKind: "text", entryKind: "card" },
+      identityHints: { name: "Legacy v5" }, identity: null,
+      identityResolution: { status: "unresolved", candidates: [], confirmed: false },
+      faces: [{ id: "front", side: "front", name: "Legacy v5" }], selectedArtworkByFace: {},
+      backMode: "project-default", backModeSelectionPolicy: "automatic", localArtworkIds: [], mpcReferences: [], faceAssociations: [],
+    };
+    const project = projects.create();
+    const legacyV5 = JSON.parse(serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS)) as Record<string, unknown>;
+    legacyV5.projectSchemaVersion = 5;
+    delete legacyV5.physicalOrder;
+    const legacyV5Json = JSON.stringify(legacyV5);
+    database!.prepare("UPDATE projects SET project_schema_version = 5, snapshot_json = ? WHERE id = ?").run(legacyV5Json, project.id);
+
+    const opened = projects.open(project.id);
+
+    expect(opened.projectSchemaVersion).toBe(6);
+    expect(opened.snapshot.physicalOrder.instances.map(({ id, workingCardId }) => [id, workingCardId])).toEqual([
+      ["instance-1", card.id], ["instance-2", card.id],
+    ]);
+    expect(database!.prepare("SELECT snapshot_json FROM projects WHERE id = ?").get(project.id)).toEqual({ snapshot_json: legacyV5Json });
+
+    const staged = projects.stageRecovery(project.id, project.revision, opened.snapshot);
+    const recoveryJson = JSON.stringify(legacyV5);
+    database!.prepare("UPDATE project_recovery SET project_schema_version = 5, snapshot_json = ? WHERE project_id = ?").run(recoveryJson, project.id);
+    const recovery = projects.readRecovery(project.id);
+    expect(recovery?.projectSchemaVersion).toBe(6);
+    expect(recovery?.snapshot.physicalOrder.instances.map(({ id }) => id)).toEqual(["instance-1", "instance-2"]);
+    expect(database!.prepare("SELECT snapshot_json FROM project_recovery WHERE project_id = ?").get(project.id)).toEqual({ snapshot_json: recoveryJson });
+    expect(staged.projectSchemaVersion).toBe(6);
   });
 
   it("creates and saves a project with a confirmed custom card identity", async () => {
@@ -351,9 +419,10 @@ describe("project repository", () => {
       faceAssociations: [],
     };
     const initialSnapshot = {
-      projectSchemaVersion: 5 as const,
+      projectSchemaVersion: 6 as const,
       cards: [customCard],
       settings: DEFAULT_PROJECT_SETTINGS,
+      physicalOrder: createPhysicalOrder([customCard]),
     };
 
     const created = projects.create(initialSnapshot);
@@ -399,9 +468,9 @@ describe("project repository", () => {
     const projects = await setup();
     const future = projects.create();
     const corrupt = projects.create();
-    const futureJson = JSON.stringify({ projectSchemaVersion: 6, cards: [], settings: {} });
+    const futureJson = JSON.stringify({ projectSchemaVersion: 7, cards: [], settings: {} });
     const corruptJson = "{";
-    database!.prepare("UPDATE projects SET project_schema_version = 6, snapshot_json = ? WHERE id = ?").run(futureJson, future.id);
+    database!.prepare("UPDATE projects SET project_schema_version = 7, snapshot_json = ? WHERE id = ?").run(futureJson, future.id);
     database!.prepare("UPDATE projects SET snapshot_json = ? WHERE id = ?").run(corruptJson, corrupt.id);
     const readRaw = (projectId: string) => database!.prepare("SELECT project_schema_version, revision, snapshot_json FROM projects WHERE id = ?").get(projectId);
     const futureBefore = readRaw(future.id);
@@ -622,7 +691,7 @@ describe("project repository", () => {
     expect(staged).toEqual({
       projectId: canonical.id,
       baseRevision: 1,
-      projectSchemaVersion: 5,
+      projectSchemaVersion: 6,
       snapshot: candidate,
       templateSelection: null,
       createdAt: "2026-01-01T00:00:01.000Z",

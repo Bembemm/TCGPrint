@@ -12,6 +12,7 @@ import { handleCardExport } from "../../services/card-api";
 import { exportWorkingCards, exportWorkingCardsByContentMode, exportWorkingCardsWithDiagnostics } from "../../services/card-export";
 import { PAPER_FORMATS } from "../../core/geometry";
 import { createWorkingCardEditorState, deleteWorkingCard, duplicateWorkingCard, moveWorkingCard, setWorkingCardQuantity } from "../../core/cards/working-card-editor";
+import { movePhysicalInstance } from "../../core/cards/physical-instance-order";
 import { commitEditorHistory, createEditorHistoryState, redoEditorHistory, undoEditorHistory } from "../../core/cards/editor-history";
 import { BleedEngine } from "../../image-engine/bleed";
 import { LosslessPdfEngine } from "../../pdf-engine/document";
@@ -590,11 +591,20 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     expect(exportedNames(pdfGenerate.mock.calls[0][0].images)).toEqual(["C", "A", "A", "B"]);
     expect(pdfGenerate.mock.calls[0][0].cutGuides).toEqual(NO_CUT_GUIDES);
 
+    const customPhysicalOrder = movePhysicalInstance(initial.physicalOrder, "instance-2", "instance-4", "after");
+    await exportWorkingCardsWithDiagnostics(catalog, initial.cards, {
+      bleedMm: 0,
+      cutGuides: NO_CUT_GUIDES,
+      physicalOrder: customPhysicalOrder,
+    });
+    expect(initial.cards.map(({ id, quantity }) => [id, quantity])).toEqual([["working-A", 2], ["working-B", 1], ["working-C", 1]]);
+    expect(exportedNames(pdfGenerate.mock.calls[1][0].images)).toEqual(["A", "B", "C", "A"]);
+
     const duplicated = duplicateWorkingCard(reordered, "working-A", "working-A-copy");
     const deleted = deleteWorkingCard(duplicated, "working-B");
     await exportWorkingCardsWithDiagnostics(catalog, deleted.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
-    expect(exportedNames(pdfGenerate.mock.calls[1][0].images)).toEqual(["C", "A", "A", "A", "A"]);
-    expect(catalog.getArtworkCandidate.mock.calls.slice(3).map(([id]) => id)).toEqual([
+    expect(exportedNames(pdfGenerate.mock.calls[2][0].images)).toEqual(["C", "A", "A", "A", "A"]);
+    expect(catalog.getArtworkCandidate.mock.calls.slice(6).map(([id]) => id)).toEqual([
       "scryfall:C", "scryfall:A",
     ]);
 
@@ -605,8 +615,8 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     expect(dfcClone.selectedArtworkByFace).toEqual(dfc.cards[0].selectedArtworkByFace);
     expect(dfcClone.selectedArtworkByFace.back?.candidateId).toBe("scryfall:B-back");
     await exportWorkingCardsWithDiagnostics(catalog, reorderedDfc.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
-    expect(exportedNames(pdfGenerate.mock.calls[2][0].images)).toEqual(["B", "B"]);
-    expect(catalog.getArtworkCandidate.mock.calls.slice(5).map(([id]) => id)).toEqual([
+    expect(exportedNames(pdfGenerate.mock.calls[3][0].images)).toEqual(["B", "B"]);
+    expect(catalog.getArtworkCandidate.mock.calls.slice(8).map(([id]) => id)).toEqual([
       "scryfall:B",
     ]);
 
@@ -617,6 +627,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     const quantityUpdated = setWorkingCardQuantity({
       cards: history.present.cards,
       selectedCardId: history.present.selectedCardId,
+      physicalOrder: history.present.physicalOrder,
     }, "working-A", 3);
     history = commitEditorHistory(history, { ...quantityUpdated, face: history.present.face });
     const artworkUpdated = history.present.cards.map((item) => item.id === "working-B"
@@ -636,7 +647,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     ]);
     expect(history.present.cards[1].selectedArtworkByFace.front?.candidateId).toBe("scryfall:B");
     await exportWorkingCardsWithDiagnostics(catalog, history.present.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
-    expect(exportedNames(pdfGenerate.mock.calls[3][0].images)).toEqual(["A", "A", "B", "C"]);
+    expect(exportedNames(pdfGenerate.mock.calls[4][0].images)).toEqual(["A", "A", "B", "C"]);
 
     history = redoEditorHistory(redoEditorHistory(redoEditorHistory(history)));
     expect(history.present.cards.map(({ id, quantity, order }) => [id, quantity, order])).toEqual([
@@ -644,6 +655,67 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     ]);
     expect(history.present.cards[2].selectedArtworkByFace.front?.candidateId).toBe("scryfall:B-after");
     await exportWorkingCardsWithDiagnostics(catalog, history.present.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
-    expect(exportedNames(pdfGenerate.mock.calls[4][0].images)).toEqual(["C", "A", "A", "A", "B-after"]);
+    expect(exportedNames(pdfGenerate.mock.calls[5][0].images)).toEqual(["C", "A", "A", "A", "B-after"]);
+  });
+
+  it.each(["long-edge", "short-edge"] as const)("keeps reordered simple and DFC front/back pages paired for %s duplex", async (duplexFlipMode) => {
+    const names = ["A-front", "A-back", "DFC-front", "DFC-back", "C-front", "C-back"] as const;
+    const bytesByName = new Map<string, Uint8Array>();
+    const candidates = new Map<string, ArtworkCandidate>();
+    for (const [index, name] of names.entries()) {
+      const bytes = new Uint8Array(await sharp({ create: { width: 24, height: 36, channels: 3, background: { r: index * 35, g: 200 - index * 20, b: 60 + index * 22 } } }).png().toBuffer());
+      bytesByName.set(name, bytes);
+      candidates.set(`upload:${name}`, { id: `upload:${name}`, source: "upload", identityId: name.startsWith("DFC-") ? "dfc-identity" : null, faceId: name.endsWith("back") ? "back" : "front", originalAvailable: true });
+    }
+    const nameByBytes = new Map([...bytesByName].map(([name, bytes]) => [Buffer.from(bytes).toString("base64"), name]));
+    const catalog = {
+      getArtworkCandidate: async (id: string) => candidates.get(id),
+      getArtworkOriginal: async (id: string) => {
+        const bytes = bytesByName.get(id.replace("upload:", ""))!;
+        return { artworkId: id, contentHash: createHash("sha256").update(bytes).digest("hex"), extension: "png", format: "png" as const, byteLength: bytes.byteLength, widthPx: 24, heightPx: 36, provenance: [], createdAt: "2026-10-01T00:00:00.000Z", bytes };
+      },
+    };
+    const simple = (name: "A" | "C", order: number): WorkingCard => ({
+      id: `working-${name}`, quantity: 1, order,
+      importSource: { sourceId: `source-${name}`, importKind: "synthetic", entryKind: "card" },
+      identityHints: { name }, identity: null,
+      identityResolution: { status: "unresolved", candidates: [], confirmed: false },
+      faces: [{ id: "front", side: "front" }],
+      selectedArtworkByFace: { front: { candidateId: `upload:${name}-front`, source: "upload", identityId: null, faceId: "front" } },
+      manualBackArtwork: { candidateId: `upload:${name}-back`, source: "upload", identityId: null, faceId: "back" },
+      backMode: "manual", backModeSelectionPolicy: "explicit", localArtworkIds: [], mpcReferences: [], faceAssociations: [],
+    });
+    const dfc: WorkingCard = {
+      id: "working-dfc", quantity: 1, order: 1,
+      importSource: { sourceId: "source-dfc", importKind: "synthetic", entryKind: "card" },
+      identityHints: { name: "DFC" },
+      identity: { id: "dfc-identity", provider: "scryfall", name: "DFC Front // DFC Back", resolutionMethod: "manual", confidence: 1, metadata: { layout: "transform", faces: [{ name: "DFC Front" }, { name: "DFC Back" }] } },
+      identityResolution: { status: "resolved", method: "manual", confidence: 1, confirmed: true, candidates: [] },
+      faces: [{ id: "front", side: "front", name: "DFC Front" }, { id: "back", side: "back", name: "DFC Back" }],
+      selectedArtworkByFace: {
+        front: { candidateId: "upload:DFC-front", source: "upload", identityId: "dfc-identity", faceId: "front" },
+        back: { candidateId: "upload:DFC-back", source: "upload", identityId: "dfc-identity", faceId: "back" },
+      },
+      backMode: "auto", backModeSelectionPolicy: "automatic", localArtworkIds: [], mpcReferences: [], faceAssociations: [],
+    };
+    const cards = [simple("A", 0), dfc, simple("C", 2)];
+    const initialOrder = createWorkingCardEditorState(cards).physicalOrder;
+    const physicalOrder = movePhysicalInstance(initialOrder, "instance-3", "instance-1", "before");
+    const options = {
+      bleedMm: 0, cutGuides: NO_CUT_GUIDES, paperFormat: PAPER_FORMATS.A4,
+      cardFormat: { id: "large-test", name: "large-test", widthMm: 150, heightMm: 150 },
+      pageOrientation: "portrait" as const, cardOrientation: "portrait" as const,
+      marginsMm: { top: 3, right: 3, bottom: 3, left: 3 }, horizontalGapMm: 0, verticalGapMm: 0,
+      exportContentMode: "duplex" as const, duplexFlipMode, missingBackPolicy: "block" as const, physicalOrder,
+    };
+    const generate = vi.spyOn(LosslessPdfEngine.prototype, "generate");
+    const result = await exportWorkingCardsByContentMode(catalog, undefined, cards, options);
+
+    expect(result.pagePairingPlan?.pagePairs.map(({ frontPageNumber, backPageNumber }) => [frontPageNumber, backPageNumber])).toEqual([[1, 1], [2, 2], [3, 3]]);
+    expect(result.pagePairingPlan?.pagePairs.every(({ flipMode }) => flipMode === duplexFlipMode)).toBe(true);
+    expect(nameByBytes).toBeDefined();
+    const renderedNames = (images: readonly Uint8Array[]) => images.map((bytes) => nameByBytes.get(Buffer.from(bytes).toString("base64")));
+    expect(renderedNames(generate.mock.calls[0]![0].images)).toEqual(["C-front", "A-front", "DFC-front"]);
+    expect(renderedNames(generate.mock.calls[1]![0].images)).toEqual(["C-back", "A-back", "DFC-back"]);
   });
 });

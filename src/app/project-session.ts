@@ -2,6 +2,7 @@ import type { WorkingCard } from "../../core/cards/types";
 import type { ProjectDto, ProjectSaveState, ProjectSummaryDto } from "../../services/project-api";
 import { serializeProjectSnapshot, type ProjectSettingsV1, type ProjectSnapshotV1 } from "../../persistence/projects/serializer";
 import type { TemplateSelection } from "../../templates/types";
+import { createPhysicalOrder, type PhysicalOrder } from "../../core/cards/physical-instance-order";
 
 export type ProjectSaveStatus = "Dirty" | "Salvando" | "Salvo" | "Erro" | "Conflito";
 
@@ -74,8 +75,9 @@ export function projectSnapshotDocument(
   cards: readonly WorkingCard[],
   settings: ProjectSettingsV1,
   templateSelection: TemplateSelection | null = null,
+  physicalOrder: PhysicalOrder = createPhysicalOrder(cards),
 ): ProjectSaveState {
-  const snapshotJson = serializeProjectSnapshot(cards, settings);
+  const snapshotJson = serializeProjectSnapshot(cards, settings, physicalOrder);
   return { snapshot: JSON.parse(snapshotJson) as ProjectSnapshotV1, templateSelection };
 }
 
@@ -91,8 +93,9 @@ export function projectSnapshotKey(
   cards: readonly WorkingCard[],
   settings: ProjectSettingsV1,
   templateSelection: TemplateSelection | null = null,
+  physicalOrder: PhysicalOrder = createPhysicalOrder(cards),
 ): string {
-  return projectSaveStateValue(projectSnapshotDocument(cards, settings, templateSelection));
+  return projectSaveStateValue(projectSnapshotDocument(cards, settings, templateSelection, physicalOrder));
 }
 
 export function projectSnapshotValue(snapshot: ProjectSnapshotV1, templateSelection: TemplateSelection | null = null): string {
@@ -100,7 +103,7 @@ export function projectSnapshotValue(snapshot: ProjectSnapshotV1, templateSelect
 }
 
 export function projectSaveStateValue(state: ProjectSaveState): string {
-  return JSON.stringify({ snapshot: JSON.parse(serializeProjectSnapshot(state.snapshot.cards, state.snapshot.settings)), templateSelection: state.templateSelection });
+  return JSON.stringify({ snapshot: JSON.parse(serializeProjectSnapshot(state.snapshot.cards, state.snapshot.settings, state.snapshot.physicalOrder)), templateSelection: state.templateSelection });
 }
 
 export function projectSessionReducer(state: ProjectSessionState, action: ProjectSessionAction): ProjectSessionState {

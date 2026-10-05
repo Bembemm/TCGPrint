@@ -21,6 +21,7 @@ import {
   parseWorkingCards,
 } from "../../services/card-api";
 import type { ArtworkCandidate, CardIdentity, WorkingCard } from "../../core/cards/types";
+import { createPhysicalOrder } from "../../core/cards/physical-instance-order";
 import type { ArtworkOriginal } from "../../artwork/storage/types";
 import { selectArtwork as selectWorkingCardArtwork } from "../../core/cards/working-set";
 import { postArtworkSelection, postManualBackArtworkSelection } from "../../src/app/artwork-selection-request";
@@ -169,6 +170,28 @@ describe("card APIs", () => {
     } finally {
       database.close();
     }
+  });
+
+  it("rejects malformed physical-order references before starting PDF artwork work", async () => {
+    const workbench = testWorkbench();
+    const response = await handleCardExport(jsonRequest("http://localhost/api/cards/export", {
+      cards: [card],
+      options: {
+        physicalOrder: {
+          nextInstanceId: 3,
+          instances: [
+            { id: "instance-1", workingCardId: card.id },
+            { id: "instance-2", workingCardId: "missing-working-card" },
+          ],
+        },
+        bleedMm: 0,
+        cutGuides: NO_CUT_GUIDES,
+      },
+    }), workbench);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_PHYSICAL_ORDER" });
+    expect(workbench.getArtworkOriginal).not.toHaveBeenCalled();
   });
 
   it("validates registration input and forwards independent orientations and slot skips to PDF export", async () => {
@@ -501,6 +524,35 @@ describe("card APIs", () => {
     expect(result.workingCards[1]?.identity).toEqual(card.identity);
     expect(result.workingCards[1]?.manualBackArtwork).toEqual(card.manualBackArtwork);
     expect(result.workingCards[1]?.mpcReferences).toEqual(card.mpcReferences);
+  });
+
+  it("preserves a reordered stable physical instance when M6 splits its artwork through the API", async () => {
+    const alternative = { ...candidate, id: `upload:${"e".repeat(64)}` };
+    const workbench = testWorkbench({
+      listArtworkCandidates: vi.fn(async () => [alternative]),
+      getArtworkCandidate: vi.fn(async () => alternative),
+      selectArtwork: vi.fn((workingCard: WorkingCard, side: "front" | "back", selected: ArtworkCandidate) => selectWorkingCardArtwork(workingCard, side, {
+        candidateId: selected.id, source: selected.source, identityId: workingCard.identity?.id ?? null, faceId: side, selectionPolicy: "user-selected",
+      })),
+    });
+    const otherEntry = { ...card, id: "other-entry", order: 1, quantity: 1 };
+    const cards = [{ ...card, quantity: 4 }, otherEntry];
+    const initial = createPhysicalOrder(cards);
+    const [one, two, three, four, other] = initial.instances;
+    const physicalOrder = { ...initial, instances: [one!, other!, two!, three!, four!] };
+    const response = await handleResolve(jsonRequest("http://localhost/api/cards/resolve", {
+      action: "apply-artwork-scope", cards, physicalOrder, targetCardId: card.id,
+      faceId: "front", candidateId: alternative.id, scope: "physical-copy", physicalInstanceId: three!.id,
+    }), workbench);
+    const result = await response.json() as { workingCards: WorkingCard[]; physicalOrder: { instances: Array<{ id: string; workingCardId: string }> }; selectedCardId: string };
+
+    expect(response.status).toBe(200);
+    expect(result.workingCards.map(({ quantity }) => quantity)).toEqual([3, 1, 1]);
+    expect(result.physicalOrder.instances.map(({ id }) => id)).toEqual([one!.id, other!.id, two!.id, three!.id, four!.id]);
+    expect(result.physicalOrder.instances.map(({ workingCardId }) => workingCardId)).toEqual([
+      card.id, otherEntry.id, card.id, result.selectedCardId, card.id,
+    ]);
+    expect(result.workingCards.find(({ id }) => id === result.selectedCardId)?.selectedArtworkByFace.front?.candidateId).toBe(alternative.id);
   });
 
   it.each([

@@ -21,8 +21,9 @@ import type { CutSourceSelection, DxfUnitsOverride } from "../../core/cut";
 import { isDoubleFacedIdentity } from "../../core/cards/back-selection";
 import type { DuplexFlipMode } from "../../core/duplex";
 import { CalibrationError, parsePrinterProfileSnapshot, type PrinterDuplexMode, type PrinterProfileSnapshot } from "../../core/calibration";
+import { createPhysicalOrder, validatePhysicalOrder, type PhysicalOrder } from "../../core/cards/physical-instance-order";
 
-export const CURRENT_PROJECT_SCHEMA_VERSION = 5;
+export const CURRENT_PROJECT_SCHEMA_VERSION = 6;
 
 /** 16 MiB bounds a 500-entry resolved Working Set without ever embedding artwork bytes. */
 export const MAX_PROJECT_SNAPSHOT_BYTES = 16 * 1024 * 1024;
@@ -84,10 +85,11 @@ export type ProjectSettingsV1 = ProjectSettingsV5;
 export type ProjectSettingsInput = ProjectSettingsV5 | ProjectSettingsV4 | ProjectSettingsV3 | LegacyProjectSettingsV1;
 
 export interface ProjectSnapshotV1 {
-  /** Legacy v1/v2/v3 snapshots are accepted and promoted to the current v4 shape on read. */
+  /** Legacy v1-v5 snapshots are accepted and promoted to the current v6 shape on read. */
   readonly projectSchemaVersion: number;
   readonly cards: readonly PersistedWorkingCard[];
   readonly settings: ProjectSettingsV5;
+  readonly physicalOrder: PhysicalOrder;
 }
 
 export class ProjectSnapshotError extends Error {
@@ -736,16 +738,42 @@ function projectSettings(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_
 }
 
 function validateSnapshot(value: unknown, schemaVersion = CURRENT_PROJECT_SCHEMA_VERSION): ProjectSnapshotV1 {
-  const source = object(value, "snapshot", ["projectSchemaVersion", "cards", "settings"]);
+  const source = object(value, "snapshot", schemaVersion >= 6
+    ? ["projectSchemaVersion", "cards", "settings", "physicalOrder"]
+    : ["projectSchemaVersion", "cards", "settings"]);
   const cards = array(source.cards, "snapshot.cards", MAX_PROJECT_CARDS).map((card, index) => persistedCard(card, index, schemaVersion));
   if (new Set(cards.map(({ id }) => id)).size !== cards.length) invalid("snapshot.cards", "must not contain duplicate WorkingCard IDs.");
   if (cards.reduce((total, card) => total + card.quantity, 0) > MAX_PHYSICAL_CARDS_PER_EXPORT) {
     invalid("snapshot.cards", `must contain at most ${MAX_PHYSICAL_CARDS_PER_EXPORT} physical cards.`);
   }
+  let physicalOrder: PhysicalOrder;
+  try {
+    const persistedOrder = schemaVersion >= 6
+      ? (() => {
+        const order = object(source.physicalOrder, "snapshot.physicalOrder", ["nextInstanceId", "instances"]);
+        const instances = array(order.instances, "snapshot.physicalOrder.instances", MAX_PHYSICAL_CARDS_PER_EXPORT)
+          .map((reference, index) => {
+            const path = `snapshot.physicalOrder.instances[${index}]`;
+            const instance = object(reference, path, ["id", "workingCardId"]);
+            return {
+              id: string(instance.id, `${path}.id`, 32),
+              workingCardId: string(instance.workingCardId, `${path}.workingCardId`, 180),
+            };
+          });
+        return { nextInstanceId: order.nextInstanceId, instances };
+      })()
+      : undefined;
+    physicalOrder = schemaVersion >= 6
+      ? validatePhysicalOrder(cards, persistedOrder)
+      : createPhysicalOrder(cards);
+  } catch (error) {
+    invalid("snapshot.physicalOrder", error instanceof Error ? error.message : "is invalid.");
+  }
   return {
     projectSchemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
     cards,
     settings: projectSettings(source.settings, schemaVersion),
+    physicalOrder,
   };
 }
 
@@ -756,16 +784,22 @@ function checkSnapshotSize(serialized: string): void {
 }
 
 /** Serializes only durable WorkingCard fields; WorkingCard.metadata is intentionally omitted. */
-export function serializeProjectSnapshot(cards: readonly WorkingCard[], settings: ProjectSettingsInput): string {
+export function serializeProjectSnapshot(cards: readonly WorkingCard[], settings: ProjectSettingsInput, physicalOrder?: PhysicalOrder): string {
   const persistedCards = cards.map((card, index) => {
     if (!isPlainObject(card)) invalid(`cards[${index}]`, "must be a plain object.");
     const copy = { ...card } as DataObject;
     delete copy.metadata;
     return copy;
   });
+  let canonicalPhysicalOrder: PhysicalOrder;
+  try {
+    canonicalPhysicalOrder = physicalOrder ?? createPhysicalOrder(cards);
+  } catch (error) {
+    invalid("snapshot.physicalOrder", error instanceof Error ? error.message : "is invalid.");
+  }
   const isLegacySettings = isPlainObject(settings) && !Object.prototype.hasOwnProperty.call(settings, "registration");
   const normalizedSettings = projectSettings(settings, isLegacySettings ? 1 : CURRENT_PROJECT_SCHEMA_VERSION);
-  const candidate = { projectSchemaVersion: CURRENT_PROJECT_SCHEMA_VERSION, cards: persistedCards, settings: normalizedSettings };
+  const candidate = { projectSchemaVersion: CURRENT_PROJECT_SCHEMA_VERSION, cards: persistedCards, settings: normalizedSettings, physicalOrder: canonicalPhysicalOrder };
   assertJsonData(candidate, "snapshot");
   const snapshot = validateSnapshot(candidate, CURRENT_PROJECT_SCHEMA_VERSION);
   const serialized = JSON.stringify(snapshot);
@@ -773,7 +807,7 @@ export function serializeProjectSnapshot(cards: readonly WorkingCard[], settings
   return serialized;
 }
 
-/** Dispatches logical Project snapshot versions; v1-v4 migrate in memory and future versions remain read-only errors. */
+/** Dispatches logical Project snapshot versions; v1-v5 migrate in memory and future versions remain read-only errors. */
 export function deserializeProjectSnapshot(value: string | unknown): ProjectSnapshotV1 {
   let snapshot: unknown = value;
   if (typeof value === "string") {
@@ -801,9 +835,9 @@ export function deserializeProjectSnapshot(value: string | unknown): ProjectSnap
   if (version > CURRENT_PROJECT_SCHEMA_VERSION) {
     throw new ProjectSnapshotError("FUTURE_PROJECT_SCHEMA_VERSION", `Project snapshot schema ${version} is newer than this application supports (${CURRENT_PROJECT_SCHEMA_VERSION}).`);
   }
-  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== CURRENT_PROJECT_SCHEMA_VERSION) {
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== CURRENT_PROJECT_SCHEMA_VERSION) {
     throw new ProjectSnapshotError("UNSUPPORTED_PROJECT_SCHEMA_VERSION", `Project snapshot schema ${version} has no supported migration path.`);
   }
-  // v1-v4 snapshots migrate in memory; autosave serializes them as the v5 shape.
+  // v1-v5 snapshots migrate in memory; autosave serializes them as the v6 shape.
   return validateSnapshot(snapshot, version);
 }

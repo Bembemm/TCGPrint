@@ -4,6 +4,7 @@ import { parseTemplateLayoutGeometry, type TemplateLayoutGeometryMm } from "../.
 import type { ProjectSnapshotV1 } from "./serializer";
 import type { TemplateSelection } from "../../templates/types";
 import { verifyPrinterProfileSnapshot } from "../printer-profiles/hash";
+import { createPhysicalOrder } from "../../core/cards/physical-instance-order";
 import {
   CURRENT_PROJECT_SCHEMA_VERSION,
   DEFAULT_PROJECT_SETTINGS,
@@ -88,6 +89,7 @@ function emptySnapshot(): ProjectSnapshotV1 {
     projectSchemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
     cards: [],
     settings: DEFAULT_PROJECT_SETTINGS,
+    physicalOrder: createPhysicalOrder([]),
   };
 }
 
@@ -154,7 +156,7 @@ export class ProjectRepository {
     }
     const snapshot = deserializeProjectSnapshot(candidateSnapshot);
     this.validateCalibrationSelection(snapshot);
-    const snapshotJson = serializeProjectSnapshot(snapshot.cards, snapshot.settings);
+    const snapshotJson = serializeProjectSnapshot(snapshot.cards, snapshot.settings, snapshot.physicalOrder);
     return this.database.transaction(() => {
       const project = this.database.prepare(`
         SELECT id, name, project_schema_version, revision, snapshot_json, created_at, updated_at, autosaved_at
@@ -323,7 +325,7 @@ export class ProjectRepository {
 
   private insertProject(project: ProjectRecord): void {
     this.validateTemplateSelection(project.templateSelection, project.snapshot);
-    const snapshotJson = serializeProjectSnapshot(project.snapshot.cards, project.snapshot.settings);
+    const snapshotJson = serializeProjectSnapshot(project.snapshot.cards, project.snapshot.settings, project.snapshot.physicalOrder);
     this.database.prepare(`
       INSERT INTO projects
         (id, name, project_schema_version, revision, snapshot_json, created_at, updated_at, autosaved_at)
@@ -352,7 +354,7 @@ export class ProjectRepository {
     }
     const snapshot = deserializeProjectSnapshot(nextSnapshot);
     this.validateCalibrationSelection(snapshot);
-    const snapshotJson = serializeProjectSnapshot(snapshot.cards, snapshot.settings);
+    const snapshotJson = serializeProjectSnapshot(snapshot.cards, snapshot.settings, snapshot.physicalOrder);
     return this.database.transaction(() => {
       const row = this.database.prepare(`
         SELECT id, name, project_schema_version, revision, snapshot_json, created_at, updated_at, autosaved_at
@@ -403,7 +405,7 @@ export class ProjectRepository {
     }
     let snapshot = deserializeProjectSnapshot(row.snapshot_json);
     this.validateCalibrationSelection(snapshot);
-    if (row.project_schema_version !== snapshot.projectSchemaVersion && (row.project_schema_version < 1 || row.project_schema_version > 4)) {
+    if (row.project_schema_version !== snapshot.projectSchemaVersion && row.project_schema_version >= CURRENT_PROJECT_SCHEMA_VERSION) {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.id} database and snapshot schema versions do not match.`);
     }
     const templateSelection = this.readProjectTemplateSelection(row.id);
@@ -420,7 +422,7 @@ export class ProjectRepository {
     }
     let snapshot = deserializeProjectSnapshot(row.snapshot_json);
     this.validateCalibrationSelection(snapshot);
-    if (row.project_schema_version !== snapshot.projectSchemaVersion && (row.project_schema_version < 1 || row.project_schema_version > 4)) {
+    if (row.project_schema_version !== snapshot.projectSchemaVersion && row.project_schema_version >= CURRENT_PROJECT_SCHEMA_VERSION) {
       throw new ProjectSnapshotError("INVALID_PROJECT_SNAPSHOT", `Project ${row.project_id} recovery schema versions do not match.`);
     }
     const templateSelection = this.readRecoveryTemplateSelection(row.project_id);
@@ -558,7 +560,7 @@ export class ProjectRepository {
     return {
       id: row.id,
       name: row.name,
-      projectSchemaVersion: row.project_schema_version <= 4 ? CURRENT_PROJECT_SCHEMA_VERSION : row.project_schema_version,
+      projectSchemaVersion: row.project_schema_version < CURRENT_PROJECT_SCHEMA_VERSION ? CURRENT_PROJECT_SCHEMA_VERSION : row.project_schema_version,
       revision: row.revision,
       createdAt: this.readTimestamp(row.created_at),
       updatedAt: this.readTimestamp(row.updated_at),

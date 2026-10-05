@@ -10,6 +10,7 @@ import {
   type EditorSnapshot,
 } from "../../../core/cards/editor-history";
 import type { WorkingCard } from "../../../core/cards/types";
+import { createPhysicalOrder } from "../../../core/cards/physical-instance-order";
 
 function card(id: string, order: number, quantity = 1): WorkingCard {
   return {
@@ -31,7 +32,7 @@ function card(id: string, order: number, quantity = 1): WorkingCard {
 }
 
 function snapshot(cards: readonly WorkingCard[], selectedCardId = cards[0]?.id ?? null): EditorSnapshot {
-  return { cards, selectedCardId, face: "front" };
+  return { cards, selectedCardId, face: "front", physicalOrder: createPhysicalOrder(cards) };
 }
 
 describe("editor history", () => {

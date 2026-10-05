@@ -3,6 +3,7 @@ import type { WorkingCard } from "../../core/cards/types";
 import { mpcArtworkCandidateId } from "../../core/cards/ids";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
 import { applyArtworkSelectionScope } from "../../core/cards/artwork-selection-scope";
+import { movePhysicalInstance } from "../../core/cards/physical-instance-order";
 import {
   DEFAULT_PROJECT_SETTINGS,
   MAX_PROJECT_SNAPSHOT_BYTES,
@@ -42,7 +43,7 @@ describe("project snapshot serializer", () => {
     };
     const roundTrip = deserializeProjectSnapshot(serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS));
 
-    expect(roundTrip.projectSchemaVersion).toBe(5);
+    expect(roundTrip.projectSchemaVersion).toBe(6);
     expect(roundTrip.cards[0]).toMatchObject({
       importSource: { filename: "Island.png", entryKind: "custom-card" },
       identityHints: { name: "Island" },
@@ -69,7 +70,7 @@ describe("project snapshot serializer", () => {
     const snapshot = deserializeProjectSnapshot(encoded);
 
     expect(snapshot).toEqual({
-      projectSchemaVersion: 5,
+      projectSchemaVersion: 6,
       cards: [{
         id: "working-card-1",
         quantity: 1,
@@ -86,6 +87,7 @@ describe("project snapshot serializer", () => {
         mpcReferences: [],
         faceAssociations: [],
       }],
+      physicalOrder: { nextInstanceId: 2, instances: [{ id: "instance-1", workingCardId: "working-card-1" }] },
       settings: {
         bleedMm: 0.625,
         roundedCorners: false,
@@ -112,6 +114,32 @@ describe("project snapshot serializer", () => {
         layout: { skippedSlotIndices: [] },
       },
     });
+  });
+
+  it("round-trips custom physical order and promotes v5 snapshots to deterministic legacy order", () => {
+    const cards = [{ ...singleFaceCard(), quantity: 2 }, { ...singleFaceCard(), id: "working-card-2", order: 1 }];
+    const initial = deserializeProjectSnapshot(serializeProjectSnapshot(cards, DEFAULT_PROJECT_SETTINGS));
+    const customOrder = movePhysicalInstance(initial.physicalOrder, initial.physicalOrder.instances[0]!.id, initial.physicalOrder.instances[2]!.id, "after");
+    const reopened = deserializeProjectSnapshot(serializeProjectSnapshot(cards, DEFAULT_PROJECT_SETTINGS, customOrder));
+    const legacyV5 = JSON.parse(serializeProjectSnapshot(cards, DEFAULT_PROJECT_SETTINGS)) as Record<string, unknown>;
+    delete legacyV5.physicalOrder;
+    legacyV5.projectSchemaVersion = 5;
+
+    expect(reopened.physicalOrder).toEqual(customOrder);
+    expect(deserializeProjectSnapshot(legacyV5).physicalOrder.instances.map(({ workingCardId }) => workingCardId)).toEqual([
+      "working-card-1", "working-card-1", "working-card-2",
+    ]);
+  });
+
+  it("rejects duplicate and dangling physical references in current snapshots", () => {
+    const snapshot = JSON.parse(serializeProjectSnapshot([singleFaceCard()], DEFAULT_PROJECT_SETTINGS)) as Record<string, unknown>;
+    snapshot.physicalOrder = { nextInstanceId: 3, instances: [
+      { id: "instance-1", workingCardId: "working-card-1" },
+      { id: "instance-1", workingCardId: "working-card-1" },
+    ] };
+    expect(() => deserializeProjectSnapshot(snapshot)).toThrow(/duplicated|quantities exactly/i);
+    snapshot.physicalOrder = { nextInstanceId: 2, instances: [{ id: "instance-1", workingCardId: "missing" }] };
+    expect(() => deserializeProjectSnapshot(snapshot)).toThrow(/unknown WorkingCard/i);
   });
 
   it("round-trips a physical-copy artwork split with sequence, Back Library references, and DFC faces", () => {
@@ -170,7 +198,7 @@ describe("project snapshot serializer", () => {
     };
 
     expect(deserializeProjectSnapshot(legacy)).toMatchObject({
-      projectSchemaVersion: 5,
+      projectSchemaVersion: 6,
       settings: {
         pageOrientation: "portrait",
         cardOrientation: "portrait",
@@ -198,7 +226,7 @@ describe("project snapshot serializer", () => {
       ...phase10Settings
     } = DEFAULT_PROJECT_SETTINGS;
     expect(deserializeProjectSnapshot({ projectSchemaVersion: 2, cards: [], settings: phase10Settings })).toMatchObject({
-      projectSchemaVersion: 5,
+      projectSchemaVersion: 6,
       settings: { cutSourceSelection: null, registrationOverride: false },
     });
   });
@@ -272,7 +300,7 @@ describe("project snapshot serializer", () => {
     };
 
     expect(deserializeProjectSnapshot(serializeProjectSnapshot([card], settings))).toMatchObject({
-      projectSchemaVersion: 5,
+      projectSchemaVersion: 6,
       cards: [{
         backMode: "manual",
         backModeSelectionPolicy: "explicit",
@@ -303,7 +331,6 @@ describe("project snapshot serializer", () => {
       backMode: "manual",
       backModeSelectionPolicy: "explicit",
     };
-
     expect(deserializeProjectSnapshot(serializeProjectSnapshot([card], DEFAULT_PROJECT_SETTINGS)).cards[0]).toMatchObject({
       faces: [{ side: "front" }],
       manualBackArtwork: { source: "scryfall", candidateId: "scryfall:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:front", faceId: "front", providerAssetId: "printing-123", selectedArtworkId: "artwork-123", selectionPolicy: "user-selected" },
@@ -353,8 +380,10 @@ describe("project snapshot serializer", () => {
       projectSchemaVersion: number;
       cards: Array<Record<string, unknown>>;
       settings: Record<string, unknown>;
+      physicalOrder?: unknown;
     };
     current.projectSchemaVersion = 3;
+    delete current.physicalOrder;
     delete current.cards[0].backMode;
     delete current.cards[0].backModeSelectionPolicy;
     delete current.cards[0].manualBackAsset;
@@ -366,7 +395,7 @@ describe("project snapshot serializer", () => {
     delete current.settings.printerDuplexMode;
 
     expect(deserializeProjectSnapshot(current)).toMatchObject({
-      projectSchemaVersion: 5,
+      projectSchemaVersion: 6,
       cards: [{ backMode: "project-default", backModeSelectionPolicy: "automatic" }],
       settings: {
         exportContentMode: "front-only",
@@ -385,11 +414,11 @@ describe("project snapshot serializer", () => {
   });
 
   it("rejects a future logical snapshot version with an explicit version error", () => {
-    expect(() => deserializeProjectSnapshot({ projectSchemaVersion: 6, cards: [], settings: {} }))
+    expect(() => deserializeProjectSnapshot({ projectSchemaVersion: 7, cards: [], settings: {} }))
       .toThrowError(expect.objectContaining({ code: "FUTURE_PROJECT_SCHEMA_VERSION" }));
   });
 
-  it("round-trips an exact immutable printer profile snapshot in Project v5", () => {
+  it("round-trips an exact immutable printer profile snapshot in Project v6", () => {
     const profile = {
       id: "profile-a4",
       name: "A4 manual",
@@ -407,7 +436,7 @@ describe("project snapshot serializer", () => {
 
     const snapshot = deserializeProjectSnapshot(serializeProjectSnapshot([], settings));
 
-    expect(snapshot.projectSchemaVersion).toBe(5);
+    expect(snapshot.projectSchemaVersion).toBe(6);
     expect(snapshot.settings.printerProfileSelection).toEqual({
       ...printerProfileSelection,
       physicalVerification: null,
@@ -415,17 +444,19 @@ describe("project snapshot serializer", () => {
     expect(snapshot.settings.printerDuplexMode).toBe("manual-long-edge");
   });
 
-  it("migrates a genuine Project v4 snapshot to v5 with no calibration selection", () => {
+  it("migrates a genuine Project v4 snapshot to v6 with no calibration selection", () => {
     const v4 = JSON.parse(serializeProjectSnapshot([], DEFAULT_PROJECT_SETTINGS)) as {
       projectSchemaVersion: number;
       settings: Record<string, unknown>;
+      physicalOrder?: unknown;
     };
     v4.projectSchemaVersion = 4;
+    delete v4.physicalOrder;
     delete v4.settings.printerProfileSelection;
     delete v4.settings.printerDuplexMode;
 
     expect(deserializeProjectSnapshot(v4)).toMatchObject({
-      projectSchemaVersion: 5,
+      projectSchemaVersion: 6,
       settings: { printerProfileSelection: null, printerDuplexMode: "single-sided" },
     });
   });

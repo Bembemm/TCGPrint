@@ -1,9 +1,11 @@
 import type { CardFaceSide, WorkingCard } from "./types";
+import type { PhysicalOrder } from "./physical-instance-order";
 
 export interface EditorSnapshot {
   readonly cards: readonly WorkingCard[];
   readonly selectedCardId: string | null;
   readonly face: CardFaceSide;
+  readonly physicalOrder: PhysicalOrder;
 }
 
 export interface EditorHistoryState {
@@ -31,6 +33,7 @@ function copySnapshot(snapshot: EditorSnapshot): EditorSnapshot {
     cards: [...snapshot.cards],
     selectedCardId: snapshot.selectedCardId,
     face: snapshot.face,
+    physicalOrder: { ...snapshot.physicalOrder, instances: [...snapshot.physicalOrder.instances] },
   };
 }
 
@@ -62,6 +65,7 @@ function valuesEqual(left: unknown, right: unknown, seen = new WeakMap<object, W
 export function editorSnapshotsEqual(left: EditorSnapshot, right: EditorSnapshot): boolean {
   return left.selectedCardId === right.selectedCardId
     && left.face === right.face
+    && valuesEqual(left.physicalOrder, right.physicalOrder)
     && valuesEqual(left.cards, right.cards);
 }
 

@@ -30,6 +30,7 @@ import { readPdfRasterCacheDiagnostics } from "../../pdf-engine/document/raster-
 import CardIdentityWorkbench, { editorHistoryReducer, WorkingCardList } from "../../src/app/card-identity-workbench";
 import ProjectsPanel from "../../src/app/projects-panel";
 import { createEditorHistoryState } from "../../core/cards/editor-history";
+import { createPhysicalOrder } from "../../core/cards/physical-instance-order";
 import { projectSaveStateValue, projectSessionReducer, projectSnapshotDocument, createProjectSessionState } from "../../src/app/project-session";
 import type { ProjectDto } from "../../services/project-api";
 
@@ -94,7 +95,7 @@ function syntheticProject(index: number): ProjectDto {
     revision: index + 1,
     createdAt: "2026-10-03T00:00:00.000Z",
     updatedAt: "2026-10-03T00:00:00.000Z",
-    snapshot: { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS },
+    snapshot: { projectSchemaVersion: 6, cards: [], settings: DEFAULT_PROJECT_SETTINGS, physicalOrder: createPhysicalOrder([]) },
     templateSelection: null,
   };
 }
@@ -357,7 +358,7 @@ describe.skipIf(!profileEnabled)("Phase 15 baseline/optimized benchmark", () => 
         identityResolution: { status: "resolved", method: "manual", confidence: 1, confirmed: true, candidates: [] },
         selectedArtworkByFace: { front: { candidateId: candidates[0]!.id, source: "upload", identityId: "upload:synthetic-gallery-identity", faceId: "front" } },
       };
-      const editorState = createEditorHistoryState({ cards: [galleryCard], selectedCardId: galleryCard.id, face: "front" });
+      const editorState = createEditorHistoryState({ cards: [galleryCard], selectedCardId: galleryCard.id, face: "front", physicalOrder: createPhysicalOrder([galleryCard]) });
       const reducerMock = vi.mocked(React.useReducer);
       const originalUseReducer = reducerMock.getMockImplementation() ?? React.useReducer;
       reducerMock.mockImplementation(((reducer: unknown, initial: unknown, initialize?: (value: unknown) => unknown) => {

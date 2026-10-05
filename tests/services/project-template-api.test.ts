@@ -57,7 +57,7 @@ describe("Project template API persistence", () => {
     const created = await createdResponse.json() as { id: string; revision: number; templateSelection: TemplateSelection };
     expect(created.templateSelection).toEqual(v5);
 
-    const snapshot: ProjectSnapshotV1 = {
+    const snapshot = {
       projectSchemaVersion: 5,
       cards: [],
       settings: { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 1.25 },

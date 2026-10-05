@@ -2,6 +2,7 @@ import { isDoubleFacedIdentity, isEligibleIdentityFaceSelection, selectManualBac
 import { normalizeWorkingCardOrder } from "./working-card-editor";
 import { mpcArtworkCandidateId } from "./ids";
 import { selectArtwork } from "./working-set";
+import { replacePhysicalInstanceCard, validatePhysicalOrder, type PhysicalOrder } from "./physical-instance-order";
 import type { ArtworkCandidate, BackLibraryAssetReference, CardFaceSide, SelectedArtwork, WorkingCard } from "./types";
 
 export type ArtworkSelectionScope = "entry" | "physical-copy" | "same-identity";
@@ -24,6 +25,17 @@ export interface ApplyArtworkSelectionScopeInput {
   readonly physicalCardIndex?: number;
 }
 
+export interface ApplyPhysicalArtworkSelectionScopeInput extends Omit<ApplyArtworkSelectionScopeInput, "physicalCardIndex"> {
+  readonly physicalOrder: PhysicalOrder;
+  readonly physicalInstanceId?: string;
+}
+
+export interface AppliedPhysicalArtworkSelectionScope {
+  readonly cards: readonly WorkingCard[];
+  readonly physicalOrder: PhysicalOrder;
+  readonly selectedCardId: string;
+}
+
 export type GenericBackChoice =
   | { readonly mode: "none" | "project-default" }
   | { readonly mode: "library"; readonly asset: BackLibraryAssetReference }
@@ -37,8 +49,14 @@ export interface ApplyGenericBackScopeInput {
   readonly physicalCardIndex?: number;
 }
 
+export interface ApplyPhysicalGenericBackScopeInput extends Omit<ApplyGenericBackScopeInput, "physicalCardIndex"> {
+  readonly physicalOrder: PhysicalOrder;
+  readonly physicalInstanceId?: string;
+}
+
 export interface AppliedGenericBackScope {
   readonly cards: readonly WorkingCard[];
+  readonly physicalOrder?: PhysicalOrder;
   readonly targetCardIds: readonly string[];
   readonly affectedEntries: number;
   readonly affectedPhysicalCards: number;
@@ -135,6 +153,56 @@ function validateArtworkTarget(card: WorkingCard, faceId: CardFaceSide, artwork:
   }
 }
 
+function stablePhysicalSplitId(cardId: string, instanceId: string, existing: ReadonlySet<string>): string {
+  const source = cardId + "\u0000" + instanceId;
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) hash = Math.imul(hash ^ source.charCodeAt(index), 16777619) >>> 0;
+  const stem = "m7:copy:" + hash.toString(16).padStart(8, "0");
+  let result = stem;
+  let collision = 0;
+  while (existing.has(result)) result = stem + ":" + (++collision);
+  return result;
+}
+
+function splitPhysicalInstance(cards: readonly WorkingCard[], physicalOrder: PhysicalOrder, targetCardId: string, instanceId: string): {
+  readonly cards: readonly WorkingCard[];
+  readonly physicalOrder: PhysicalOrder;
+  readonly selectedCardId: string;
+} {
+  const reference = physicalOrder.instances.find(({ id }) => id === instanceId);
+  if (!reference || reference.workingCardId !== targetCardId) {
+    throw new ArtworkSelectionScopeError("INVALID_PHYSICAL_INDEX", "Physical instance does not belong to the selected WorkingCard.");
+  }
+  const source = requireTarget(cards, targetCardId);
+  if (source.quantity === 1) return { cards, physicalOrder, selectedCardId: source.id };
+  const selectedId = stablePhysicalSplitId(source.id, instanceId, new Set(cards.map(({ id }) => id)));
+  const next = cards.flatMap((card) => card.id === source.id
+    ? [{ ...card, quantity: card.quantity - 1 }, { ...card, id: selectedId, quantity: 1 }]
+    : [card]);
+  const normalized = normalizeWorkingCardOrder(next);
+  return {
+    cards: normalized,
+    physicalOrder: replacePhysicalInstanceCard(physicalOrder, instanceId, selectedId),
+    selectedCardId: selectedId,
+  };
+}
+
+/** Applies M6 scopes while preserving the canonical physical instance mapping through a one-copy split. */
+export function applyArtworkSelectionScopeInPhysicalOrder(input: ApplyPhysicalArtworkSelectionScopeInput): AppliedPhysicalArtworkSelectionScope {
+  const cards = normalizeWorkingCardOrder(input.cards);
+  const physicalOrder = validatePhysicalOrder(cards, input.physicalOrder);
+  const target = requireTarget(cards, input.targetCardId);
+  validateArtworkTarget(target, input.faceId, input.artwork);
+  if (input.scope === "physical-copy") {
+    if (!input.physicalInstanceId) throw new ArtworkSelectionScopeError("INVALID_PHYSICAL_INDEX", "A physical-copy selection requires its stable instance ID.");
+    const split = splitPhysicalInstance(cards, physicalOrder, target.id, input.physicalInstanceId);
+    const updatedCards = split.cards.map((card) => card.id === split.selectedCardId ? selectArtwork(card, input.faceId, input.artwork) : card);
+    return { cards: updatedCards, physicalOrder: validatePhysicalOrder(updatedCards, split.physicalOrder), selectedCardId: split.selectedCardId };
+  }
+  const updatedCards = applyArtworkSelectionScope({ ...input, cards });
+  return { cards: updatedCards, physicalOrder, selectedCardId: target.id };
+}
+
 /** Applies one identity-face candidate at a semantic scope while preserving physical card order. */
 export function applyArtworkSelectionScope(input: ApplyArtworkSelectionScopeInput): readonly WorkingCard[] {
   const cards = normalizeWorkingCardOrder(input.cards);
@@ -205,5 +273,30 @@ export function applyGenericBackScope(input: ApplyGenericBackScopeInput): Applie
     affectedPhysicalCards: selected.reduce((sum, card) => sum + card.quantity, 0),
     preservedDfcEntries: preservedDfcs.length,
     preservedDfcPhysicalCards: preservedDfcs.reduce((sum, card) => sum + card.quantity, 0),
+  };
+}
+
+/** Generic-back variant that splits exactly one stable physical instance without disturbing sequence. */
+export function applyGenericBackScopeInPhysicalOrder(input: ApplyPhysicalGenericBackScopeInput): AppliedGenericBackScope {
+  const cards = normalizeWorkingCardOrder(input.cards);
+  const physicalOrder = validatePhysicalOrder(cards, input.physicalOrder);
+  const target = requireTarget(cards, input.targetCardId);
+  if (isDoubleFacedIdentity(target.identity)) {
+    throw new ArtworkSelectionScopeError("DFC_GENERIC_BACK", "A double-faced card's Back tab edits its real face and cannot use generic cardback actions.");
+  }
+  if (input.scope !== "physical-copy") {
+    return { ...applyGenericBackScope({ ...input, cards }), physicalOrder };
+  }
+  if (!input.physicalInstanceId) throw new ArtworkSelectionScopeError("INVALID_PHYSICAL_INDEX", "A physical-copy back selection requires its stable instance ID.");
+  const split = splitPhysicalInstance(cards, physicalOrder, target.id, input.physicalInstanceId);
+  const updatedCards = normalizeWorkingCardOrder(split.cards.map((card) => card.id === split.selectedCardId ? applyGenericBackChoice(card, input.choice) : card));
+  return {
+    cards: updatedCards,
+    physicalOrder: validatePhysicalOrder(updatedCards, split.physicalOrder),
+    targetCardIds: [split.selectedCardId],
+    affectedEntries: 1,
+    affectedPhysicalCards: 1,
+    preservedDfcEntries: 0,
+    preservedDfcPhysicalCards: 0,
   };
 }

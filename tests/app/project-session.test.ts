@@ -9,9 +9,10 @@ import {
   projectSnapshotValue,
 } from "../../src/app/project-session";
 import type { WorkingCard } from "../../core/cards/types";
+import { createPhysicalOrder } from "../../core/cards/physical-instance-order";
 
 function emptySnapshot(): ProjectSnapshotV1 {
-  return { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS };
+  return { projectSchemaVersion: 6, cards: [], settings: DEFAULT_PROJECT_SETTINGS, physicalOrder: createPhysicalOrder([]) };
 }
 
 function project(id: string, revision = 1, snapshot = emptySnapshot()): ProjectDto {
@@ -96,7 +97,7 @@ describe("project session", () => {
   it("keeps selection and visual face changes out of the persisted dirty state", () => {
     const cards = [card("first", 9), card("second", 3)];
     const key = projectSnapshotKey(cards, DEFAULT_PROJECT_SETTINGS);
-    const saved = project("project-1", 1, { projectSchemaVersion: 2, cards, settings: DEFAULT_PROJECT_SETTINGS });
+    const saved = project("project-1", 1, { projectSchemaVersion: 6, cards, settings: DEFAULT_PROJECT_SETTINGS, physicalOrder: createPhysicalOrder(cards) });
     const state = projectSessionReducer(createProjectSessionState(key), {
       type: "activate-project",
       project: saved,
@@ -126,7 +127,7 @@ describe("project session", () => {
       type: "save-succeeded",
       projectId: "project-1",
       expectedRevision: 1,
-      project: project("project-1", 2, { projectSchemaVersion: 2, cards: [], settings: DEFAULT_PROJECT_SETTINGS }),
+      project: project("project-1", 2, { projectSchemaVersion: 6, cards: [], settings: DEFAULT_PROJECT_SETTINGS, physicalOrder: createPhysicalOrder([]) }),
       snapshotKey: "changed",
     });
 

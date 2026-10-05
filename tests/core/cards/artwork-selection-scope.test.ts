@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { applyArtworkSelectionScope, applyGenericBackScope, ArtworkSelectionScopeError, validateArtworkCandidateForCard } from "../../../core/cards/artwork-selection-scope";
+import { applyArtworkSelectionScope, applyArtworkSelectionScopeInPhysicalOrder, applyGenericBackScope, applyGenericBackScopeInPhysicalOrder, ArtworkSelectionScopeError, validateArtworkCandidateForCard } from "../../../core/cards/artwork-selection-scope";
 import type { ArtworkCandidate, SelectedArtwork, WorkingCard } from "../../../core/cards/types";
+import { createPhysicalOrder } from "../../../core/cards/physical-instance-order";
 
 const identity = { id: "scryfall:oracle:island", provider: "scryfall", name: "Island", resolutionMethod: "manual" as const, confidence: 1 };
 const sameNameDifferentIdentity = { ...identity, id: "scryfall:oracle:other-island", name: "Island" };
@@ -77,6 +78,44 @@ describe("M6 artwork selection scopes", () => {
       cards: [card("one", 0), card("two", 1)], targetCardId: "one", faceId: "front", artwork: secondArtwork,
       scope: "physical-copy", physicalCardIndex: 1,
     })).toThrow(ArtworkSelectionScopeError);
+  });
+
+  it("keeps a M6 physical-copy split at its interleaved stable instance position", () => {
+    const island = card("island-x4", 0, { quantity: 4 });
+    const bolt = card("bolt", 1);
+    const cards = [island, bolt];
+    const initial = createPhysicalOrder(cards);
+    const [one, two, three, four, boltInstance] = initial.instances;
+    const physicalOrder = { ...initial, instances: [one!, boltInstance!, two!, three!, four!] };
+    const result = applyArtworkSelectionScopeInPhysicalOrder({
+      cards, physicalOrder, physicalInstanceId: three!.id,
+      targetCardId: island.id, faceId: "front", artwork: secondArtwork, scope: "physical-copy",
+    });
+
+    expect(result.cards.map(({ quantity }) => quantity)).toEqual([3, 1, 1]);
+    expect(result.physicalOrder.instances.map(({ id }) => id)).toEqual([one!.id, boltInstance!.id, two!.id, three!.id, four!.id]);
+    expect(result.physicalOrder.instances.map(({ workingCardId }) => workingCardId)).toEqual([
+      island.id, bolt.id, island.id, result.selectedCardId, island.id,
+    ]);
+    expect(result.cards.find(({ id }) => id === result.selectedCardId)?.selectedArtworkByFace.front?.candidateId).toBe(secondArtwork.candidateId);
+  });
+
+  it("keeps a generic-back physical-copy split attached to the same instance after interleaving", () => {
+    const island = card("island-x3", 0, { quantity: 3 });
+    const bolt = card("bolt", 1);
+    const cards = [island, bolt];
+    const initial = createPhysicalOrder(cards);
+    const [one, two, three, boltInstance] = initial.instances;
+    const physicalOrder = { ...initial, instances: [one!, boltInstance!, two!, three!] };
+    const result = applyGenericBackScopeInPhysicalOrder({
+      cards, physicalOrder, physicalInstanceId: two!.id,
+      targetCardId: island.id, choice: { mode: "none" }, scope: "physical-copy",
+    });
+
+    expect(result.physicalOrder?.instances.map(({ id }) => id)).toEqual([one!.id, boltInstance!.id, two!.id, three!.id]);
+    const selectedId = result.physicalOrder?.instances[2]?.workingCardId;
+    expect(result.cards.find(({ id }) => id === selectedId)).toMatchObject({ quantity: 1, backMode: "none" });
+    expect(result.cards.find(({ id }) => id === island.id)?.quantity).toBe(2);
   });
 
   it("applies bulk simple backs and reports preserved DFCs without changing their real back artwork", () => {

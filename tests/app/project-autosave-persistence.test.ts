@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 import type { ProjectDto, ProjectOpenDto } from "../../services/project-api";
 import type { WorkingCard } from "../../core/cards/types";
+import { createPhysicalOrder } from "../../core/cards/physical-instance-order";
 import { saveProjectWithRecovery } from "../../src/app/project-autosave-persistence";
 
 function project(revision: number, bleedMm: number): ProjectDto {
@@ -17,6 +18,7 @@ function project(revision: number, bleedMm: number): ProjectDto {
       projectSchemaVersion: 2,
       cards: [],
       settings: { ...DEFAULT_PROJECT_SETTINGS, bleedMm },
+      physicalOrder: createPhysicalOrder([]),
     },
   };
 }
@@ -80,7 +82,7 @@ describe("saveProjectWithRecovery", () => {
       localArtworkIds: [], mpcReferences: [], faceAssociations: [],
     };
     const state = {
-      snapshot: { ...project(1, 2).snapshot, cards: [card] },
+      snapshot: { ...project(1, 2).snapshot, cards: [card], physicalOrder: createPhysicalOrder([card]) },
       templateSelection: null,
     };
     const api = {
