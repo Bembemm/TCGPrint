@@ -993,10 +993,10 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
         <button type="button" className={`button ${previewSide === "back" ? "primary" : "secondary"}`} aria-pressed={previewSide === "back"} onClick={() => { setUncontrolledSide("back"); onFaceChange?.("back"); }}>Verso</button>
       </div>
       <div className="compositor-page-controls" role="group" aria-label="Navegação de páginas">
-        <button type="button" className="button secondary" aria-label="Página anterior" data-compositor-page-nav="previous" data-compositor-page-target={activePageIndex} disabled={activePageIndex === 0} onClick={() => onSelectPage(activePageIndex)}>Anterior</button>
-        <span aria-live="polite">Página {activePageIndex + 1} de {pageCount}</span>
-        <button type="button" className="button secondary" aria-label="Próxima página" data-compositor-page-nav="next" data-compositor-page-target={activePageIndex + 2} disabled={activePageIndex >= pageCount - 1} onClick={() => onSelectPage(activePageIndex + 2)}>Próxima</button>
-        {pageCount > 1 && <label className="registration-page-picker">Ir para<select aria-label="Página do compositor" value={activePageIndex + 1} onChange={(event) => onSelectPage(Number(event.currentTarget.value))}>
+        <button type="button" className="button secondary compositor-page-arrow" aria-label="Página anterior" data-compositor-page-nav="previous" data-compositor-page-target={activePageIndex} disabled={activePageIndex === 0} onClick={() => onSelectPage(activePageIndex)}>‹</button>
+        <span className="compositor-page-count" aria-live="polite">{activePageIndex + 1} / {pageCount}</span>
+        <button type="button" className="button secondary compositor-page-arrow" aria-label="Próxima página" data-compositor-page-nav="next" data-compositor-page-target={activePageIndex + 2} disabled={activePageIndex >= pageCount - 1} onClick={() => onSelectPage(activePageIndex + 2)}>›</button>
+        {pageCount > 1 && <label className="registration-page-picker"><span>Ir para</span><select aria-label="Página do compositor" value={activePageIndex + 1} onChange={(event) => onSelectPage(Number(event.currentTarget.value))}>
           {result.pages.map((entry, index) => <option key={entry.pageIndex} value={entry.pageIndex + 1}>Página {index + 1} · cartas {entry.startCardIndex + 1}–{entry.endCardIndex}</option>)}
         </select></label>}
       </div>
@@ -1155,7 +1155,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
                 {!artwork.available && displayedSide === "back" && <text x={centerX} y={slot.trim.yMm + slot.trim.heightMm * 0.76} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize * 0.62} fill="#475569">VERSO INDISPONÍVEL</text>}
                 {localInspection && <g className="compositor-local-inspection-indicator" pointerEvents="none" aria-hidden="true">
                   <rect x={slot.trim.xMm + 1} y={slot.trim.yMm + slot.trim.heightMm - 5.5} width="24" height="4.2" rx="0.8" />
-                  <text x={slot.trim.xMm + 2.2} y={slot.trim.yMm + slot.trim.heightMm - 2.7}>INSPEÇÃO · {displayedSide === "front" ? "FRENTE" : "VERSO"}</text>
+                  <text x={slot.trim.xMm + 2.2} y={slot.trim.yMm + slot.trim.heightMm - 2.7}>{displayedSide === "front" ? "FRENTE" : "VERSO"}</text>
                 </g>}
               </>;
             })()}
