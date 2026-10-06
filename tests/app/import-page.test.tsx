@@ -21,7 +21,7 @@ describe("import workbench page", () => {
     expect(markup).toContain('id="workspace-tab-settings"');
     expect(markup).toContain('id="workspace-tab-export"');
     expect(markup).not.toContain('id="workspace-tab-artwork"');
-    expect(markup).toContain("Entradas");
+    expect(markup).toContain("Adicionar cartas");
     expect(markup).toContain("Adicionar cartas");
     expect(markup).not.toContain("Resolver identidades");
     expect(markup).not.toContain("Universal Import → Working Set");
