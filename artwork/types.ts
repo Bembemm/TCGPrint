@@ -21,6 +21,7 @@ export interface ProviderHealth {
 export interface ArtworkSearchOptions {
   readonly faceId?: CardFaceSide;
   readonly mpcReferences?: readonly WorkingCardMpcReference[];
+  readonly progressive?: boolean;
   readonly signal?: AbortSignal;
 }
 
