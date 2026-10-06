@@ -1210,47 +1210,82 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               const canFlip = previewArtwork(physicalInstance.card, nextSide).available;
               const isMenuOpen = contextMenu?.instanceId === physicalInstance.id && contextMenu.workingCardId === physicalInstance.workingCardId;
               const localName = cardName ?? "Carta";
-              return <foreignObject
-                className="compositor-card-control-overlay"
-                x={slot.trim.xMm + slot.trim.widthMm - 19.5}
-                y={slot.trim.yMm + 1}
-                width="18.5"
-                height="8.5"
-                pointerEvents="none"
-                data-compositor-controls-for={physicalInstance.id}
-              >
-                <div className="compositor-card-controls">
-                  {canFlip && <button
-                    type="button"
-                    className="compositor-card-control-button compositor-local-flip"
-                    data-compositor-local-flip="true"
-                    aria-label={`Ver ${nextSide === "front" ? "frente" : "verso"} de ${localName}, cópia ${physicalInstance.copyNumber}`}
-                    aria-pressed={localFaceOverrideByInstanceId[physicalInstance.id] !== undefined}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => { event.preventDefault(); event.stopPropagation(); toggleLocalFace(physicalInstance); }}
-                    onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
-                  >↻</button>}
-                  <button
-                    type="button"
-                    className="compositor-card-control-button compositor-context-trigger"
-                    data-compositor-context-trigger="true"
-                    aria-label={`Mais ações para ${localName}, cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`}
-                    aria-haspopup="menu"
-                    aria-expanded={isMenuOpen}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (isMenuOpen) closeContextMenu(true);
-                      else {
-                        const bounds = event.currentTarget.getBoundingClientRect();
-                        openContextMenu(physicalInstance, bounds.left, bounds.bottom + 4, event.currentTarget);
-                      }
-                    }}
-                    onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
-                  >⋯</button>
-                </div>
-              </foreignObject>;
+              const controlSize = 5.6;
+              const controlGap = 1;
+              const controlY = slot.trim.yMm + 1.35;
+              const menuX = slot.trim.xMm + slot.trim.widthMm - controlSize - 1.35;
+              const flipX = menuX - controlSize - controlGap;
+              const openMenuFromControl = (opener: SVGElement) => {
+                if (isMenuOpen) {
+                  closeContextMenu(true);
+                  return;
+                }
+                const bounds = opener.getBoundingClientRect();
+                openContextMenu(physicalInstance, bounds.left, bounds.bottom + 4, opener);
+              };
+              return <g className="compositor-card-controls-svg" data-compositor-controls-for={physicalInstance.id}>
+                {canFlip && <g
+                  className="compositor-card-control compositor-local-flip"
+                  data-compositor-local-flip="true"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Ver ${nextSide === "front" ? "frente" : "verso"} de ${localName}, cópia ${physicalInstance.copyNumber}`}
+                  aria-pressed={localFaceOverrideByInstanceId[physicalInstance.id] !== undefined}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => { event.preventDefault(); event.stopPropagation(); toggleLocalFace(physicalInstance); }}
+                  onKeyDown={(event: KeyboardEvent<SVGGElement>) => {
+                    event.stopPropagation();
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    toggleLocalFace(physicalInstance);
+                  }}
+                  onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                >
+                  <rect className="compositor-card-control-surface" x={flipX} y={controlY} width={controlSize} height={controlSize} rx="1.45" />
+                  <text
+                    className="compositor-card-control-flip-icon"
+                    x={flipX + controlSize / 2}
+                    y={controlY + controlSize / 2 + 0.1}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    pointerEvents="none"
+                    aria-hidden="true"
+                  >↻</text>
+                </g>}
+                <g
+                  className="compositor-card-control compositor-context-trigger"
+                  data-compositor-context-trigger="true"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Mais ações para ${localName}, cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`}
+                  aria-haspopup="menu"
+                  aria-expanded={isMenuOpen}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openMenuFromControl(event.currentTarget);
+                  }}
+                  onKeyDown={(event: KeyboardEvent<SVGGElement>) => {
+                    event.stopPropagation();
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    openMenuFromControl(event.currentTarget);
+                  }}
+                  onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                >
+                  <rect className="compositor-card-control-surface" x={menuX} y={controlY} width={controlSize} height={controlSize} rx="1.45" />
+                  {[1.65, 2.8, 3.95].map((offset) => <circle
+                    key={offset}
+                    className="compositor-card-control-dot"
+                    cx={menuX + offset}
+                    cy={controlY + controlSize / 2}
+                    r="0.38"
+                    pointerEvents="none"
+                    aria-hidden="true"
+                  />)}
+                </g>
+              </g>;
             })()}
             {skipped.has(slot.index) && <>
               <line x1={slot.trim.xMm} y1={slot.trim.yMm} x2={slot.trim.xMm + slot.trim.widthMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
