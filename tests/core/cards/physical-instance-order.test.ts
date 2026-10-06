@@ -45,11 +45,33 @@ describe("durable physical instance order", () => {
     expect(cards.map(({ id, quantity }) => [id, quantity])).toEqual([["island", 4], ["bolt", 1]]);
   });
 
-  it("supports insertion before and moving to the final eligible slot", () => {
-    const order = createPhysicalOrder([card("a", 0), card("b", 1), card("c", 2)]);
-    const [a, b, c] = order.instances;
-    expect(movePhysicalInstance(order, a!.id, c!.id, "before").instances.map(({ workingCardId }) => workingCardId)).toEqual(["b", "a", "c"]);
-    expect(movePhysicalInstance(order, b!.id, null, "after").instances.map(({ workingCardId }) => workingCardId)).toEqual(["a", "c", "b"]);
+  it("inserts before and after in either direction and preserves all physical IDs at end", () => {
+    const order = createPhysicalOrder([card("a", 0), card("b", 1), card("c", 2), card("d", 3)]);
+    const [a, b, c, d] = order.instances;
+    const cases = [
+      { source: a!.id, target: c!.id, placement: "before" as const, expected: ["instance-2", "instance-1", "instance-3", "instance-4"] },
+      { source: a!.id, target: c!.id, placement: "after" as const, expected: ["instance-2", "instance-3", "instance-1", "instance-4"] },
+      { source: d!.id, target: b!.id, placement: "before" as const, expected: ["instance-1", "instance-4", "instance-2", "instance-3"] },
+      { source: d!.id, target: b!.id, placement: "after" as const, expected: ["instance-1", "instance-2", "instance-4", "instance-3"] },
+      { source: b!.id, target: null, placement: "after" as const, expected: ["instance-1", "instance-3", "instance-4", "instance-2"] },
+    ];
+
+    for (const { source, target, placement, expected } of cases) {
+      const moved = movePhysicalInstance(order, source, target, placement);
+      expect(moved.instances.map(({ id }) => id)).toEqual(expected);
+      expect(moved.nextInstanceId).toBe(order.nextInstanceId);
+      expect(new Set(moved.instances.map(({ id }) => id)).size).toBe(order.instances.length);
+      expect(new Set(moved.instances.map(({ workingCardId }) => workingCardId))).toEqual(new Set(order.instances.map(({ workingCardId }) => workingCardId)));
+      for (const reference of moved.instances) {
+        expect(order.instances).toContain(reference);
+      }
+    }
+  });
+
+  it("rejects a missing source or insertion target", () => {
+    const order = createPhysicalOrder([card("a", 0), card("b", 1)]);
+    expect(() => movePhysicalInstance(order, "instance-999", "instance-1", "before")).toThrow(/instance-999.*not found/i);
+    expect(() => movePhysicalInstance(order, "instance-1", "instance-999", "after")).toThrow(/instance-999.*not found/i);
   });
 
   it("retains existing references and adds quantity beside its logical entry", () => {

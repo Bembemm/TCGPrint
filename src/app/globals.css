@@ -346,10 +346,11 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .compositor-selection-checkbox[aria-checked="true"] .compositor-selection-checkbox-mark { opacity: 1; }
 .compositor-selection-checkbox:focus-visible .compositor-selection-checkbox-box { stroke: #111827; stroke-width: 0.8; }
 .registration-preview-slot.is-drag-source { opacity: 0.58; }
-.registration-preview-slot.is-drop-target { filter: drop-shadow(0 0 1.8px #ea580c); }
-.registration-preview-slot.is-invalid-drop { filter: drop-shadow(0 0 1.8px #dc2626); }
-.registration-preview-slot.is-drop-target .compositor-card-body { stroke: #ea580c; stroke-width: 1.1; stroke-dasharray: 1.5 0.8; }
-.registration-preview-slot.is-invalid-drop .compositor-card-body { stroke: #dc2626; stroke-width: 1.1; stroke-dasharray: 1.5 0.8; }
+.registration-preview-slot.is-invalid-drop .compositor-card-body { stroke: #4b5563; stroke-width: 0.9; stroke-dasharray: 1.5 0.8; }
+.compositor-insertion-indicator { fill: #111827; stroke: #fff; stroke-width: 0.48; vector-effect: non-scaling-stroke; }
+.compositor-drag-ghost { z-index: 60; overflow: hidden; border: 1px solid rgb(31 41 55 / 42%); border-radius: 2px; background: #f3f4f6; box-shadow: 0 4px 12px rgb(17 24 39 / 24%); pointer-events: none; opacity: 0.94; }
+.compositor-drag-ghost img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.compositor-drag-ghost > span { display: grid; width: 100%; height: 100%; align-content: center; justify-items: center; padding: 8%; color: #252b31; font-size: 11px; text-align: center; overflow-wrap: anywhere; pointer-events: none; }
 .canonical-compositor { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 8px; overflow: hidden; }
 .canonical-compositor .compositor-sheet { max-height: none; }
 .workspace-preview-stack { position: relative; display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; justify-content: center; }

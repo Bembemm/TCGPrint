@@ -11,7 +11,7 @@ import { createCardWorkbench, type CardWorkbench } from "../../services/card-wor
 import { handleCardExport } from "../../services/card-api";
 import { exportWorkingCards, exportWorkingCardsByContentMode, exportWorkingCardsWithDiagnostics } from "../../services/card-export";
 import { PAPER_FORMATS } from "../../core/geometry";
-import { createWorkingCardEditorState, deleteWorkingCard, duplicateWorkingCard, moveWorkingCard, setWorkingCardQuantity } from "../../core/cards/working-card-editor";
+import { createWorkingCardEditorState, deleteWorkingCard, duplicateWorkingCard, moveWorkingCard, reorderWorkingCardPhysicalInstance, setWorkingCardQuantity } from "../../core/cards/working-card-editor";
 import { movePhysicalInstance } from "../../core/cards/physical-instance-order";
 import { commitEditorHistory, createEditorHistoryState, redoEditorHistory, undoEditorHistory } from "../../core/cards/editor-history";
 import { BleedEngine } from "../../image-engine/bleed";
@@ -543,7 +543,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
   });
 
   it("exports edited order, keeps quantity compact until composition, and includes/removes duplicated entries", async () => {
-    const names = ["A", "B", "C", "B-back", "B-after"] as const;
+    const names = ["A", "B", "C", "D", "B-back", "B-after"] as const;
     const bytesByName = new Map<string, Uint8Array>();
     const candidates: Record<string, ArtworkCandidate> = {};
     for (const [index, name] of names.entries()) {
@@ -656,10 +656,21 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     expect(history.present.cards[2].selectedArtworkByFace.front?.candidateId).toBe("scryfall:B-after");
     await exportWorkingCardsWithDiagnostics(catalog, history.present.cards, { bleedMm: 0, cutGuides: NO_CUT_GUIDES });
     expect(exportedNames(pdfGenerate.mock.calls[5][0].images)).toEqual(["C", "A", "A", "A", "B-after"]);
+
+    const fourCards = [card("A", 0, 1), card("B", 1, 1), card("C", 2, 1), card("D", 3, 1)];
+    const fourCardEditor = createWorkingCardEditorState(fourCards);
+    const afterDrag = reorderWorkingCardPhysicalInstance(fourCardEditor, "instance-4", "instance-2", "before");
+    await exportWorkingCardsWithDiagnostics(catalog, afterDrag.cards, {
+      bleedMm: 0,
+      cutGuides: NO_CUT_GUIDES,
+      physicalOrder: afterDrag.physicalOrder,
+    });
+    expect(afterDrag.physicalOrder.instances.map(({ id }) => id)).toEqual(["instance-1", "instance-4", "instance-2", "instance-3"]);
+    expect(exportedNames(pdfGenerate.mock.calls[6]![0].images)).toEqual(["A", "D", "B", "C"]);
   });
 
   it.each(["long-edge", "short-edge"] as const)("keeps reordered simple and DFC front/back pages paired for %s duplex", async (duplexFlipMode) => {
-    const names = ["A-front", "A-back", "DFC-front", "DFC-back", "C-front", "C-back"] as const;
+    const names = ["A-front", "A-back", "DFC-front", "DFC-back", "C-front", "C-back", "D-front", "D-back"] as const;
     const bytesByName = new Map<string, Uint8Array>();
     const candidates = new Map<string, ArtworkCandidate>();
     for (const [index, name] of names.entries()) {
@@ -675,7 +686,7 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
         return { artworkId: id, contentHash: createHash("sha256").update(bytes).digest("hex"), extension: "png", format: "png" as const, byteLength: bytes.byteLength, widthPx: 24, heightPx: 36, provenance: [], createdAt: "2026-10-01T00:00:00.000Z", bytes };
       },
     };
-    const simple = (name: "A" | "C", order: number): WorkingCard => ({
+    const simple = (name: "A" | "C" | "D", order: number): WorkingCard => ({
       id: `working-${name}`, quantity: 1, order,
       importSource: { sourceId: `source-${name}`, importKind: "synthetic", entryKind: "card" },
       identityHints: { name }, identity: null,
@@ -698,9 +709,9 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
       },
       backMode: "auto", backModeSelectionPolicy: "automatic", localArtworkIds: [], mpcReferences: [], faceAssociations: [],
     };
-    const cards = [simple("A", 0), dfc, simple("C", 2)];
+    const cards = [simple("A", 0), dfc, simple("C", 2), simple("D", 3)];
     const initialOrder = createWorkingCardEditorState(cards).physicalOrder;
-    const physicalOrder = movePhysicalInstance(initialOrder, "instance-3", "instance-1", "before");
+    const physicalOrder = movePhysicalInstance(initialOrder, "instance-4", "instance-2", "before");
     const options = {
       bleedMm: 0, cutGuides: NO_CUT_GUIDES, paperFormat: PAPER_FORMATS.A4,
       cardFormat: { id: "large-test", name: "large-test", widthMm: 150, heightMm: 150 },
@@ -711,11 +722,11 @@ describe("decklist → identity → Scryfall artwork → PDF", () => {
     const generate = vi.spyOn(LosslessPdfEngine.prototype, "generate");
     const result = await exportWorkingCardsByContentMode(catalog, undefined, cards, options);
 
-    expect(result.pagePairingPlan?.pagePairs.map(({ frontPageNumber, backPageNumber }) => [frontPageNumber, backPageNumber])).toEqual([[1, 1], [2, 2], [3, 3]]);
+    expect(result.pagePairingPlan?.pagePairs.map(({ frontPageNumber, backPageNumber }) => [frontPageNumber, backPageNumber])).toEqual([[1, 1], [2, 2], [3, 3], [4, 4]]);
     expect(result.pagePairingPlan?.pagePairs.every(({ flipMode }) => flipMode === duplexFlipMode)).toBe(true);
     expect(nameByBytes).toBeDefined();
     const renderedNames = (images: readonly Uint8Array[]) => images.map((bytes) => nameByBytes.get(Buffer.from(bytes).toString("base64")));
-    expect(renderedNames(generate.mock.calls[0]![0].images)).toEqual(["C-front", "A-front", "DFC-front"]);
-    expect(renderedNames(generate.mock.calls[1]![0].images)).toEqual(["C-back", "A-back", "DFC-back"]);
+    expect(renderedNames(generate.mock.calls[0]![0].images)).toEqual(["A-front", "D-front", "DFC-front", "C-front"]);
+    expect(renderedNames(generate.mock.calls[1]![0].images)).toEqual(["A-back", "D-back", "DFC-back", "C-back"]);
   });
 });

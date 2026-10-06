@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { CutGuideEngine } from "../../core/geometry";
 import type { CardSlotMm } from "../../core/geometry/placement";
@@ -15,6 +15,7 @@ import { cutPathToSvgD } from "../../core/cut";
 import type { CutPreviewDto } from "../../services/cut-api";
 import { transformRegistrationGeometry, type RegistrationPrimitive } from "../../core/registration";
 import { calculateCompositorScale, COMPOSITOR_CSS_PX_PER_MM, type CompositorViewportSize } from "./compositor-zoom";
+import { deriveCompositorInsertionAxis, resolveCompositorInsertionPlacement, type CompositorInsertionAxis } from "./compositor-pointer-drag";
 import type { FocusableElement } from "./artwork-picker-dialog";
 
 interface RegistrationLayoutPreviewProps {
@@ -77,6 +78,42 @@ interface ContextMenuPlacement {
   readonly ready: boolean;
 }
 
+type PointerDropTarget =
+  | { readonly kind: "instance"; readonly physicalInstanceId: string; readonly placement: "before" | "after"; readonly pageNumber: number; readonly slotIndex: number }
+  | { readonly kind: "end"; readonly pageNumber: number; readonly slotIndex: number }
+  | { readonly kind: "invalid"; readonly pageNumber: number; readonly slotIndex: number; readonly reason: string }
+  | { readonly kind: "self"; readonly pageNumber: number; readonly slotIndex: number }
+  | null;
+
+interface PointerDragState {
+  readonly pointerId: number;
+  readonly documentRevision: number;
+  readonly sourcePhysicalInstanceId: string;
+  readonly startClientX: number;
+  readonly startClientY: number;
+  readonly currentClientX: number;
+  readonly currentClientY: number;
+  readonly phase: "pending" | "dragging";
+  readonly insertionAxis: CompositorInsertionAxis;
+  readonly grabOffsetX: number;
+  readonly grabOffsetY: number;
+  readonly ghostWidth: number;
+  readonly ghostHeight: number;
+  readonly ghostRotationDegrees: number;
+  readonly ghostUrl?: string;
+  readonly ghostLabel: string;
+  readonly displayedSide: "front" | "back";
+  readonly target: PointerDropTarget;
+}
+
+interface PointerHandlers {
+  readonly move: (event: PointerEvent) => void;
+  readonly up: (event: PointerEvent) => void;
+  readonly cancel: (event?: PointerEvent) => void;
+}
+
+const POINTER_DRAG_THRESHOLD_PX = 6;
+
 function primitiveElement(primitive: RegistrationPrimitive, key: string) {
   if (primitive.type === "line") return <line key={key} x1={primitive.x1Mm} y1={primitive.y1Mm} x2={primitive.x2Mm} y2={primitive.y2Mm} stroke="#111827" strokeWidth={primitive.strokeWidthMm} />;
   if (primitive.type === "rect") return <rect key={key} x={primitive.xMm} y={primitive.yMm} width={primitive.widthMm} height={primitive.heightMm} fill={primitive.fill ? "#111827" : "none"} stroke={primitive.strokeWidthMm ? "#111827" : "none"} strokeWidth={primitive.strokeWidthMm} />;
@@ -116,13 +153,16 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   const localFaceOverrideByInstanceId = localFaceOverrideState.documentRevision === documentRevision
     ? localFaceOverrideState.byInstanceId
     : EMPTY_LOCAL_FACE_OVERRIDES;
-  const [dragSourceId, setDragSourceId] = useState<string | null>(null);
-  const interactionControlPointerDownRef = useRef(false);
-  const suppressNextBodyActivationRef = useRef(false);
+  const [pointerDrag, setPointerDrag] = useState<PointerDragState | null>(null);
+  const pointerDragRef = useRef<PointerDragState | null>(null);
+  const pointerHandlersRef = useRef<PointerHandlers>({ move: () => undefined, up: () => undefined, cancel: () => undefined });
+  const dragGhostRef = useRef<HTMLDivElement | null>(null);
+  const pageNavigationHoverRef = useRef<string | null>(null);
+  const suppressNextClickAfterDragRef = useRef(false);
+  const clickSuppressionTimeoutRef = useRef<number | null>(null);
   const contextMenuTokenRef = useRef(0);
   const contextMenuElementRef = useRef<HTMLDivElement | null>(null);
   const [dropFeedback, setDropFeedback] = useState<string | null>(null);
-  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const sheetViewportRef = useRef<HTMLDivElement | null>(null);
   const [viewportSize, setViewportSize] = useState<CompositorViewportSize>({ widthPx: 0, heightPx: 0 });
   const paper = settings.paperFormat;
@@ -205,6 +245,14 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     });
   }, [physicalInstanceIdsSignature, documentRevision]);
   useEffect(() => {
+    const drag = pointerDragRef.current;
+    if (drag && (interactionBusy
+      || drag.documentRevision !== documentRevision
+      || !physicalCards.some(({ id }) => id === drag.sourcePhysicalInstanceId))) {
+      pointerHandlersRef.current.cancel();
+    }
+  }, [interactionBusy, documentRevision, physicalInstanceIdsSignature]);
+  useEffect(() => {
     if (previousPreviewSideRef.current !== previewSide) {
       previousPreviewSideRef.current = previewSide;
       setLocalFaceOverrideState({ documentRevision, byInstanceId: {} });
@@ -249,6 +297,35 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       window.removeEventListener("resize", close);
     };
   }, [contextMenu?.token]);
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => pointerHandlersRef.current.move(event);
+    const handlePointerUp = (event: PointerEvent) => pointerHandlersRef.current.up(event);
+    const handlePointerCancel = (event: PointerEvent) => pointerHandlersRef.current.cancel(event);
+    const handlePointerOut = (event: PointerEvent) => {
+      if (event.relatedTarget === null) pointerHandlersRef.current.cancel(event);
+    };
+    const handleWindowBlur = () => pointerHandlersRef.current.cancel();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") pointerHandlersRef.current.cancel();
+    };
+    window.addEventListener("pointermove", handlePointerMove, { passive: false });
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+    window.addEventListener("pointerout", handlePointerOut);
+    window.addEventListener("blur", handleWindowBlur);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+      window.removeEventListener("pointerout", handlePointerOut);
+      window.removeEventListener("blur", handleWindowBlur);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (clickSuppressionTimeoutRef.current !== null) window.clearTimeout(clickSuppressionTimeoutRef.current);
+      pointerDragRef.current = null;
+      pageNavigationHoverRef.current = null;
+    };
+  }, []);
   useEffect(() => {
     if (!contextMenu || !contextMenuInstance) return;
     const menu = contextMenuElementRef.current;
@@ -333,6 +410,10 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     ? geometry
     : transformRegistrationGeometry(geometry, pagePair.backPlacement.placement.pageSizeMm, pagePair.backPageTransform.registrationReflectionAxis);
   const { placement } = pagePlacement;
+  const compositorInsertionAxis = deriveCompositorInsertionAxis(
+    placement.gridSlots.map(({ trim }) => ({ left: trim.xMm, top: trim.yMm, width: trim.widthMm, height: trim.heightMm })),
+    settings.layout.columns === 1 ? "vertical" : "horizontal",
+  );
   const physicalSheet = pagePair.frontPlacement.placement;
   const cutGeometry = new CutGuideEngine().generate({
     cards: physicalSheet.slots.map((slot) => ({ trim: slot.trim, bleedMm: settings.bleedMm })),
@@ -415,10 +496,6 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   }
 
   function activateBody(instance: PhysicalCardInstance, opener: SVGRectElement) {
-    if (suppressNextBodyActivationRef.current) {
-      suppressNextBodyActivationRef.current = false;
-      return;
-    }
     activateInstance(instance);
     const displayedSide = localFaceOverrideByInstanceId[instance.id] ?? previewSide;
     openPickerForInstance(instance, displayedSide, opener);
@@ -465,67 +542,297 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     onPhysicalAction(action, contextMenuInstance.id, contextMenuInstance.workingCardId);
   }
 
-  function beginSlotDrag(event: DragEvent<SVGGElement>, instance: PhysicalCardInstance) {
-    if (interactionBusy || !onReorderPhysicalInstance) {
-      event.preventDefault();
-      return;
+  function samePointerDropTarget(left: PointerDropTarget, right: PointerDropTarget): boolean {
+    if (left === right) return true;
+    if (!left || !right || left.kind !== right.kind) return false;
+    if (left.kind === "instance" && right.kind === "instance") {
+      return left.physicalInstanceId === right.physicalInstanceId
+        && left.placement === right.placement && left.pageNumber === right.pageNumber && left.slotIndex === right.slotIndex;
     }
-    suppressNextBodyActivationRef.current = true;
-    activateInstance(instance);
-    setDragSourceId(instance.id);
+    if (left.kind === "invalid" && right.kind === "invalid") {
+      return left.reason === right.reason && left.pageNumber === right.pageNumber && left.slotIndex === right.slotIndex;
+    }
+    return left.pageNumber === right.pageNumber && left.slotIndex === right.slotIndex;
+  }
+
+  function clearClickSuppression() {
+    suppressNextClickAfterDragRef.current = false;
+    if (clickSuppressionTimeoutRef.current !== null) {
+      window.clearTimeout(clickSuppressionTimeoutRef.current);
+      clickSuppressionTimeoutRef.current = null;
+    }
+  }
+
+  function armClickSuppression() {
+    clearClickSuppression();
+    suppressNextClickAfterDragRef.current = true;
+    clickSuppressionTimeoutRef.current = window.setTimeout(() => {
+      suppressNextClickAfterDragRef.current = false;
+      clickSuppressionTimeoutRef.current = null;
+    }, 0);
+  }
+
+  function consumeClickSuppression(): boolean {
+    if (!suppressNextClickAfterDragRef.current) return false;
+    clearClickSuppression();
+    return true;
+  }
+
+  function clearPointerDrag() {
+    pointerDragRef.current = null;
+    pageNavigationHoverRef.current = null;
+    if (dragGhostRef.current) dragGhostRef.current.style.transform = "";
+    setPointerDrag(null);
+  }
+
+  function cancelPointerDrag(event?: PointerEvent) {
+    const current = pointerDragRef.current;
+    if (!current || event && current.pointerId !== event.pointerId) return;
+    clearPointerDrag();
+    clearClickSuppression();
     setDropFeedback(null);
-    setDropTargetId(null);
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", instance.id);
   }
 
-  function overPageDuringDrag(event: DragEvent<HTMLButtonElement>, pageNumber: number) {
-    if (!dragSourceId || interactionBusy) return;
-    event.preventDefault();
-    onSelectPage(pageNumber);
+  function pointerEventElement(event: PointerEvent): Element | null {
+    const documentElement = (document as Document & { elementFromPoint?: (x: number, y: number) => Element | null })
+      .elementFromPoint?.(event.clientX, event.clientY);
+    if (documentElement) return documentElement;
+    return event.target instanceof Element ? event.target : null;
   }
 
-  function dropOnSlot(event: DragEvent<SVGGElement>, instance: PhysicalCardInstance | undefined, canDropAtEnd: boolean, invalidReason?: string, invalidTargetId?: string) {
-    if (!dragSourceId || interactionBusy) return;
+  function promotePointerDrag(current: PointerDragState): PointerDragState | null {
+    if (current.phase === "dragging") return current;
+    const source = physicalCards.find(({ id }) => id === current.sourcePhysicalInstanceId);
+    if (!source || interactionBusy || !onReorderPhysicalInstance) {
+      cancelPointerDrag();
+      return null;
+    }
+    activateInstance(source);
+    setDropFeedback(null);
+    const promoted = { ...current, phase: "dragging" as const };
+    pointerDragRef.current = promoted;
+    setPointerDrag(promoted);
+    return promoted;
+  }
+
+  function moveDragGhost(current: PointerDragState) {
+    const ghost = dragGhostRef.current;
+    if (!ghost) return;
+    ghost.style.transform = `translate3d(${current.currentClientX - current.grabOffsetX}px, ${current.currentClientY - current.grabOffsetY}px, 0)`;
+  }
+
+  function pointerDropTarget(element: Element | null, clientX: number, clientY: number, current: PointerDragState): PointerDropTarget {
+    const slot = element?.closest<SVGGElement>("[data-compositor-slot='true']");
+    if (!slot) return null;
+    const pageNumber = Number(slot.dataset.compositorPageNumber);
+    const slotIndex = Number(slot.dataset.compositorSlotIndex);
+    const invalidReason = slot.dataset.dropInvalidReason;
+    if (invalidReason) return { kind: "invalid", pageNumber, slotIndex, reason: invalidReason };
+    const targetPhysicalInstanceId = slot.dataset.physicalInstanceId;
+    if (targetPhysicalInstanceId) {
+      if (targetPhysicalInstanceId === current.sourcePhysicalInstanceId) return { kind: "self", pageNumber, slotIndex };
+      const body = slot.querySelector<SVGRectElement>("[data-compositor-card-body='true']");
+      if (!body) return { kind: "invalid", pageNumber, slotIndex, reason: "Esta carta não é um destino elegível." };
+      const targetRect = body.getBoundingClientRect();
+      const placement = resolveCompositorInsertionPlacement(targetRect, clientX, clientY, current.insertionAxis);
+      return { kind: "instance", physicalInstanceId: targetPhysicalInstanceId, placement, pageNumber, slotIndex };
+    }
+    if (slot.dataset.dropCanEnd === "true") return { kind: "end", pageNumber, slotIndex };
+    return {
+      kind: "invalid",
+      pageNumber,
+      slotIndex,
+      reason: "Este slot não é um destino elegível.",
+    };
+  }
+
+  function updatePointerDrag(event: PointerEvent) {
+    let current = pointerDragRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (interactionBusy || current.documentRevision !== documentRevision
+      || !physicalCards.some(({ id }) => id === current!.sourcePhysicalInstanceId)) {
+      cancelPointerDrag(event);
+      return;
+    }
+    const distance = Math.hypot(event.clientX - current.startClientX, event.clientY - current.startClientY);
+    if (current.phase === "pending" && distance >= POINTER_DRAG_THRESHOLD_PX) {
+      const promoted = promotePointerDrag({ ...current, currentClientX: event.clientX, currentClientY: event.clientY });
+      if (!promoted) return;
+      current = promoted;
+    }
+    if (current.phase !== "dragging") {
+      pointerDragRef.current = { ...current, currentClientX: event.clientX, currentClientY: event.clientY };
+      return;
+    }
+
     event.preventDefault();
-    if (invalidReason) {
-      setDropFeedback(invalidReason);
-      setDropTargetId(invalidTargetId ?? "invalid");
+    const element = pointerEventElement(event);
+    const pageControl = element?.closest<HTMLElement>("[data-compositor-page-nav]");
+    let target: PointerDropTarget = null;
+    if (pageControl && !pageControl.hasAttribute("disabled")) {
+      const direction = pageControl.dataset.compositorPageNav ?? "";
+      if (pageNavigationHoverRef.current !== direction) {
+        pageNavigationHoverRef.current = direction;
+        const targetPage = Number(pageControl.dataset.compositorPageTarget);
+        if (Number.isSafeInteger(targetPage) && targetPage >= 1 && targetPage <= pageCount) onSelectPage(targetPage);
+      }
+    } else {
+      pageNavigationHoverRef.current = null;
+      target = pointerDropTarget(element, event.clientX, event.clientY, current);
+    }
+
+    const next: PointerDragState = {
+      ...current,
+      currentClientX: event.clientX,
+      currentClientY: event.clientY,
+      target,
+    };
+    pointerDragRef.current = next;
+    moveDragGhost(next);
+    if (current.phase !== next.phase || !samePointerDropTarget(current.target, next.target)) setPointerDrag(next);
+  }
+
+  function physicalMoveIsNoop(instanceId: string, targetInstanceId: string | null, placement: "before" | "after"): boolean {
+    const sourceIndex = physicalOrder.instances.findIndex(({ id }) => id === instanceId);
+    if (sourceIndex < 0) return true;
+    if (targetInstanceId === null) return sourceIndex === physicalOrder.instances.length - 1;
+    const targetIndex = physicalOrder.instances.findIndex(({ id }) => id === targetInstanceId);
+    if (targetIndex < 0) return true;
+    return placement === "before" ? sourceIndex === targetIndex - 1 : sourceIndex === targetIndex + 1;
+  }
+
+  function finishPointerDrag(event: PointerEvent) {
+    let current = pointerDragRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (interactionBusy || current.documentRevision !== documentRevision
+      || !physicalCards.some(({ id }) => id === current!.sourcePhysicalInstanceId)) {
+      cancelPointerDrag(event);
       return;
     }
-    if (!instance && !canDropAtEnd) {
-      setDropFeedback("Este slot não é um destino elegível.");
-      setDropTargetId("invalid");
+    const distance = Math.hypot(event.clientX - current.startClientX, event.clientY - current.startClientY);
+    if (current.phase === "pending" && distance >= POINTER_DRAG_THRESHOLD_PX) {
+      const promoted = promotePointerDrag({ ...current, currentClientX: event.clientX, currentClientY: event.clientY });
+      if (!promoted) return;
+      current = promoted;
+    }
+    if (current.phase !== "dragging") {
+      clearPointerDrag();
       return;
     }
-    if (instance?.id === dragSourceId) {
-      setDragSourceId(null);
+
+    event.preventDefault();
+    const element = pointerEventElement(event);
+    const pageControl = element?.closest<HTMLElement>("[data-compositor-page-nav]");
+    const target = pageControl ? null : pointerDropTarget(element, event.clientX, event.clientY, current);
+    armClickSuppression();
+    if (target?.kind === "instance" && !physicalMoveIsNoop(current.sourcePhysicalInstanceId, target.physicalInstanceId, target.placement)) {
+      onReorderPhysicalInstance?.(current.sourcePhysicalInstanceId, target.physicalInstanceId, target.placement);
       setDropFeedback(null);
-      setDropTargetId(null);
-      return;
+    } else if (target?.kind === "end" && !physicalMoveIsNoop(current.sourcePhysicalInstanceId, null, "after")) {
+      onReorderPhysicalInstance?.(current.sourcePhysicalInstanceId, null, "after");
+      setDropFeedback(null);
+    } else if (target?.kind === "invalid") {
+      setDropFeedback(target.reason);
+    } else {
+      setDropFeedback(null);
     }
-    onReorderPhysicalInstance?.(dragSourceId, instance?.id ?? null, "after");
-    setDropFeedback(null);
-    setDragSourceId(null);
-    setDropTargetId(null);
+    clearPointerDrag();
   }
 
-  return <section className="registration-preview canonical-compositor" role="region" aria-label="Compositor live">
+  function beginBodyPointerDrag(event: ReactPointerEvent<SVGRectElement>, instance: PhysicalCardInstance) {
+    if (event.button !== 0 || event.isPrimary === false || interactionBusy || !onReorderPhysicalInstance || pointerDragRef.current) return;
+    clearClickSuppression();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const displayedSide = localFaceOverrideByInstanceId[instance.id] ?? previewSide;
+    const artwork = previewArtwork(instance.card, displayedSide);
+    const sourceSlot = placement.gridSlots.find(({ cardIndex }) => cardIndex !== undefined
+      && pagePlacement.startCardIndex + cardIndex === instance.physicalCardIndex);
+    const duplexRotationDegrees = displayedSide === "back" ? pagePair.backPageTransform.artworkOrientation.rotationDegrees : 0;
+    const session: PointerDragState = {
+      pointerId: event.pointerId,
+      documentRevision,
+      sourcePhysicalInstanceId: instance.id,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      currentClientX: event.clientX,
+      currentClientY: event.clientY,
+      phase: "pending",
+      insertionAxis: compositorInsertionAxis,
+      grabOffsetX: event.clientX - bounds.left,
+      grabOffsetY: event.clientY - bounds.top,
+      ghostWidth: bounds.width || (sourceSlot?.trim.widthMm ?? settings.cardFormat.widthMm) * COMPOSITOR_CSS_PX_PER_MM * zoomScale,
+      ghostHeight: bounds.height || (sourceSlot?.trim.heightMm ?? settings.cardFormat.heightMm) * COMPOSITOR_CSS_PX_PER_MM * zoomScale,
+      ghostRotationDegrees: (artworkRotationDegrees + duplexRotationDegrees) % 360,
+      ...(artwork.url ? { ghostUrl: artwork.url } : {}),
+      ghostLabel: artwork.available ? artwork.label : `${instance.card.identity?.name ?? instance.card.identityHints.name ?? "Carta"} · ${artwork.label}`,
+      displayedSide,
+      target: null,
+    };
+    pointerDragRef.current = session;
+    setPointerDrag(session);
+    setDropFeedback(null);
+  }
+
+  function handleBodyKeyDown(event: KeyboardEvent<SVGRectElement>, instance: PhysicalCardInstance) {
+    if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (interactionBusy || !onReorderPhysicalInstance) return;
+      const index = physicalOrder.instances.findIndex(({ id }) => id === instance.id);
+      const targetIndex = event.key === "ArrowLeft" ? index - 1 : index + 1;
+      const target = physicalOrder.instances[targetIndex];
+      if (index < 0 || !target) return;
+      const placement = event.key === "ArrowLeft" ? "before" : "after";
+      if (physicalMoveIsNoop(instance.id, target.id, placement)) return;
+      activateInstance(instance);
+      onReorderPhysicalInstance(instance.id, target.id, placement);
+      setDropFeedback(`${instance.card.identity?.name ?? instance.card.identityHints.name ?? "Carta"} movida para a posição ${targetIndex + 1} da ordem física.`);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      event.stopPropagation();
+      activateInstance(instance);
+      const displayedSide = localFaceOverrideByInstanceId[instance.id] ?? previewSide;
+      openPickerForInstance(instance, displayedSide, event.currentTarget);
+    }
+  }
+
+  pointerHandlersRef.current = {
+    move: updatePointerDrag,
+    up: finishPointerDrag,
+    cancel: cancelPointerDrag,
+  };
+
+  const liveDropFeedback = pointerDrag?.phase === "dragging" && pointerDrag.target?.kind === "invalid"
+    ? pointerDrag.target.reason
+    : dropFeedback;
+
+  return <section
+    className="registration-preview canonical-compositor"
+    role="region"
+    aria-label="Compositor live"
+    onClickCapture={(event) => {
+      if (!consumeClickSuppression()) return;
+      event.preventDefault();
+      event.stopPropagation();
+    }}
+  >
     <div className="compositor-toolbar" role="toolbar" aria-label="Controles do compositor">
       <div className="duplex-preview-controls" role="group" aria-label="Face do compositor">
         <button type="button" className={`button ${previewSide === "front" ? "primary" : "secondary"}`} aria-pressed={previewSide === "front"} onClick={() => { setUncontrolledSide("front"); onFaceChange?.("front"); }}>Frente</button>
         <button type="button" className={`button ${previewSide === "back" ? "primary" : "secondary"}`} aria-pressed={previewSide === "back"} onClick={() => { setUncontrolledSide("back"); onFaceChange?.("back"); }}>Verso</button>
       </div>
       <div className="compositor-page-controls" role="group" aria-label="Navegação de páginas">
-        <button type="button" className="button secondary" aria-label="Página anterior" disabled={activePageIndex === 0} onDragOver={(event) => overPageDuringDrag(event, activePageIndex)} onClick={() => onSelectPage(activePageIndex)}>Anterior</button>
+        <button type="button" className="button secondary" aria-label="Página anterior" data-compositor-page-nav="previous" data-compositor-page-target={activePageIndex} disabled={activePageIndex === 0} onClick={() => onSelectPage(activePageIndex)}>Anterior</button>
         <span aria-live="polite">Página {activePageIndex + 1} de {pageCount}</span>
-        <button type="button" className="button secondary" aria-label="Próxima página" disabled={activePageIndex >= pageCount - 1} onDragOver={(event) => overPageDuringDrag(event, activePageIndex + 2)} onClick={() => onSelectPage(activePageIndex + 2)}>Próxima</button>
+        <button type="button" className="button secondary" aria-label="Próxima página" data-compositor-page-nav="next" data-compositor-page-target={activePageIndex + 2} disabled={activePageIndex >= pageCount - 1} onClick={() => onSelectPage(activePageIndex + 2)}>Próxima</button>
         {pageCount > 1 && <label className="registration-page-picker">Ir para<select aria-label="Página do compositor" value={activePageIndex + 1} onChange={(event) => onSelectPage(Number(event.currentTarget.value))}>
           {result.pages.map((entry, index) => <option key={entry.pageIndex} value={entry.pageIndex + 1}>Página {index + 1} · cartas {entry.startCardIndex + 1}–{entry.endCardIndex}</option>)}
         </select></label>}
       </div>
     </div>
-    {dropFeedback && <p role="status" className="compositor-drop-feedback">{dropFeedback}</p>}
+    {liveDropFeedback && <p role="status" className="compositor-drop-feedback">{liveDropFeedback}</p>}
     <div className="compositor-sheet-frame">
     <div className="compositor-sheet-scroll" ref={sheetViewportRef} tabIndex={-1}>
       <svg className="registration-sheet-preview compositor-sheet" style={{ width: `${page.widthMm * COMPOSITOR_CSS_PX_PER_MM * zoomScale}px`, height: `${page.heightMm * COMPOSITOR_CSS_PX_PER_MM * zoomScale}px`, maxWidth: "none", maxHeight: "none" }} viewBox={`0 0 ${page.widthMm} ${page.heightMm}`} role="group" aria-label={`Compositor live ${previewSide === "front" ? "frente" : "verso"} ${settings.paperFormat.name} ${settings.pageOrientation}, página ${activePageIndex + 1} de ${pageCount}`} data-compositor-page={activePageIndex + 1} data-active-physical-card-index={visibleActivePhysicalCardIndex ?? "none"} data-compositor-bleed-mm={settings.bleedMm} data-compositor-calibration-matrix={calibrationMatrix ?? "identity"} data-compositor-zoom-mode="fit-page" data-compositor-zoom-scale={zoomScale}>
@@ -579,7 +886,17 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               : reserved.has(slot.index)
                 ? "Drop rejeitado: slot reservado permanece vazio."
                 : !physicalInstance && !canDropAtEnd ? "Drop rejeitado: somente um slot elegível vazio após a última carta pode receber a cópia." : undefined;
-            const invalidDropTargetId = `invalid:${activePageIndex}:${slot.index}`;
+            const dragTarget = pointerDrag?.phase === "dragging" ? pointerDrag.target : null;
+            const isDragSource = pointerDrag?.phase === "dragging" && pointerDrag.sourcePhysicalInstanceId === physicalInstance?.id;
+            const isEndDropTarget = dragTarget?.kind === "end"
+              && dragTarget.pageNumber === activePageIndex + 1 && dragTarget.slotIndex === slot.index;
+            const isInvalidDropTarget = dragTarget?.kind === "invalid"
+              && dragTarget.pageNumber === activePageIndex + 1 && dragTarget.slotIndex === slot.index;
+            const insertionPlacement = dragTarget?.kind === "instance"
+              && dragTarget.physicalInstanceId === physicalInstance?.id
+              ? dragTarget.placement
+              : undefined;
+            const showEndInsertion = isEndDropTarget;
             const role = canToggleSkippedSlot ? "button" : undefined;
             const label = physicalInstance
               ? `Slot ${slot.index + 1} · carta física ${physicalCardIndex! + 1} · ${cardName} · cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`
@@ -592,6 +909,11 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               {...(role ? { "aria-pressed": skipped.has(slot.index) } : {})}
               data-physical-card-index={physicalCardIndex}
               data-physical-instance-id={physicalInstance?.id}
+              data-compositor-slot="true"
+              data-compositor-page-number={activePageIndex + 1}
+              data-compositor-slot-index={slot.index}
+              data-drop-can-end={canDropAtEnd ? "true" : undefined}
+              data-drop-invalid-reason={invalidDropReason}
               data-local-inspection-side={physicalInstance && localFaceOverrideByInstanceId[physicalInstance.id] !== previewSide ? localFaceOverrideByInstanceId[physicalInstance.id] : undefined}
               data-active-physical-instance={isActive ? "true" : "false"}
               data-multi-selected={isMultiSelected ? "true" : "false"}
@@ -613,31 +935,13 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
                   if (event.target === event.currentTarget) activateInstance(physicalInstance);
                 } else activateSkippedSlot();
               }}
-              {...({ draggable: Boolean(physicalInstance && onReorderPhysicalInstance && !interactionBusy) } as Record<string, boolean>)}
-              onDragStart={physicalInstance ? (event) => {
-                if (interactionControlPointerDownRef.current) {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  interactionControlPointerDownRef.current = false;
-                  return;
-                }
-                beginSlotDrag(event, physicalInstance);
-              } : undefined}
-              onDragEnd={() => { interactionControlPointerDownRef.current = false; setDragSourceId(null); setDropTargetId(null); }}
-              onDragOver={(event) => {
-                if (!dragSourceId || interactionBusy) return;
-                event.preventDefault();
-                setDropTargetId(invalidDropReason ? invalidDropTargetId : physicalInstance?.id ?? "end");
-                setDropFeedback(invalidDropReason ?? (physicalInstance ? "Solte para inserir esta cópia depois da carta de destino." : "Solte para mover esta cópia para o final."));
-              }}
-              onDrop={(event) => dropOnSlot(event, physicalInstance, canDropAtEnd, invalidDropReason, invalidDropTargetId)}
               onContextMenu={(event) => {
                 if (!physicalInstance) return;
                 event.preventDefault();
                 const opener = event.currentTarget.querySelector<SVGRectElement>("[data-compositor-card-body='true']");
                 if (opener) openContextMenu(physicalInstance, event.clientX, event.clientY, opener);
               }}
-              className={`registration-preview-slot ${previewSide === "back" ? "is-back" : ""} ${isActive ? "is-active" : ""} ${dropTargetId === physicalInstance?.id || dropTargetId === "end" && canDropAtEnd ? "is-drop-target" : ""} ${dropTargetId === invalidDropTargetId ? "is-invalid-drop" : ""} ${dragSourceId === physicalInstance?.id ? "is-drag-source" : ""}`}
+              className={`registration-preview-slot ${previewSide === "back" ? "is-back" : ""} ${isActive ? "is-active" : ""} ${isInvalidDropTarget ? "is-invalid-drop" : ""} ${isDragSource ? "is-drag-source" : ""}`}
             >
             {settings.bleedMm > 0 && <rect x={slot.slotXmm} y={slot.slotYmm} width={slot.slotWidthMm} height={slot.slotHeightMm} fill="#dbeafe" fillOpacity="0.72" stroke="#2563eb" strokeWidth="0.25" strokeDasharray="1.2 0.8" data-compositor-layer="bleed" />}
             {skipped.has(slot.index) && <rect x={slot.trim.xMm} y={slot.trim.yMm} width={slot.trim.widthMm} height={slot.trim.heightMm} fill="#f3e8ff" stroke="#7e22ce" strokeWidth="0.6" />}
@@ -699,21 +1003,13 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               pointerEvents="all"
               role="button"
               tabIndex={0}
+              aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
+              style={{ touchAction: compositorInsertionAxis === "horizontal" ? "pan-y" : "pan-x" }}
               aria-label={`Slot ${slot.index + 1} · carta física ${physicalCardIndex! + 1} · ${cardName} · cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`}
               aria-current={isActive ? "true" : undefined}
-              onPointerDown={() => {
-                if (suppressNextBodyActivationRef.current && !dragSourceId) suppressNextBodyActivationRef.current = false;
-              }}
+              onPointerDown={(event) => beginBodyPointerDrag(event, physicalInstance)}
               onClick={(event) => activateBody(physicalInstance, event.currentTarget)}
-              onKeyDown={(event: KeyboardEvent<SVGRectElement>) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  activateInstance(physicalInstance);
-                  const displayedSide = localFaceOverrideByInstanceId[physicalInstance.id] ?? previewSide;
-                  openPickerForInstance(physicalInstance, displayedSide, event.currentTarget);
-                }
-              }}
+              onKeyDown={(event: KeyboardEvent<SVGRectElement>) => handleBodyKeyDown(event, physicalInstance)}
             />}
             {physicalInstance && onTogglePhysicalInstanceSelection && <g
               className="compositor-selection-checkbox"
@@ -721,14 +1017,9 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               aria-checked={isMultiSelected}
               aria-label={`Selecionar ${cardName}, cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`}
               tabIndex={0}
-              onPointerDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
-              onPointerUp={() => { interactionControlPointerDownRef.current = false; }}
-              onPointerCancel={() => { interactionControlPointerDownRef.current = false; }}
-              onMouseDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
-              onMouseUp={() => { interactionControlPointerDownRef.current = false; }}
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
-                interactionControlPointerDownRef.current = false;
                 onTogglePhysicalInstanceSelection(physicalInstance.id);
               }}
               onKeyDown={(event: KeyboardEvent<SVGGElement>) => {
@@ -737,10 +1028,6 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
                   event.preventDefault();
                   onTogglePhysicalInstanceSelection(physicalInstance.id);
                 }
-              }}
-              onDragStart={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
               }}
               onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
             >
@@ -768,42 +1055,29 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
                     type="button"
                     className="compositor-card-control-button compositor-local-flip"
                     data-compositor-local-flip="true"
-                    draggable={false}
                     aria-label={`Ver ${nextSide === "front" ? "frente" : "verso"} de ${localName}, cópia ${physicalInstance.copyNumber}`}
                     aria-pressed={localFaceOverrideByInstanceId[physicalInstance.id] !== undefined}
-                    onPointerDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
-                    onPointerUp={() => { interactionControlPointerDownRef.current = false; }}
-                    onPointerCancel={() => { interactionControlPointerDownRef.current = false; }}
-                    onMouseDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
-                    onMouseUp={() => { interactionControlPointerDownRef.current = false; }}
-                    onClick={(event) => { event.preventDefault(); event.stopPropagation(); interactionControlPointerDownRef.current = false; toggleLocalFace(physicalInstance); }}
-                    onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => { event.preventDefault(); event.stopPropagation(); toggleLocalFace(physicalInstance); }}
                     onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
                   >↻</button>}
                   <button
                     type="button"
                     className="compositor-card-control-button compositor-context-trigger"
                     data-compositor-context-trigger="true"
-                    draggable={false}
                     aria-label={`Mais ações para ${localName}, cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`}
                     aria-haspopup="menu"
                     aria-expanded={isMenuOpen}
-                    onPointerDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
-                    onPointerUp={() => { interactionControlPointerDownRef.current = false; }}
-                    onPointerCancel={() => { interactionControlPointerDownRef.current = false; }}
-                    onMouseDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
-                    onMouseUp={() => { interactionControlPointerDownRef.current = false; }}
+                    onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      interactionControlPointerDownRef.current = false;
                       if (isMenuOpen) closeContextMenu(true);
                       else {
                         const bounds = event.currentTarget.getBoundingClientRect();
                         openContextMenu(physicalInstance, bounds.left, bounds.bottom + 4, event.currentTarget);
                       }
                     }}
-                    onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
                     onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
                   >⋯</button>
                 </div>
@@ -814,6 +1088,32 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               <line x1={slot.trim.xMm + slot.trim.widthMm} y1={slot.trim.yMm} x2={slot.trim.xMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
             </>}
             {!assigned.has(slot.index) && !skipped.has(slot.index) && <rect x={slot.trim.xMm} y={slot.trim.yMm} width={slot.trim.widthMm} height={slot.trim.heightMm} fill="#f8fafc" stroke="#cbd5e1" strokeWidth="0.35" strokeDasharray="1 1" data-compositor-empty-slot="true" />}
+            {insertionPlacement && <rect
+              className="compositor-insertion-indicator"
+              data-compositor-insertion-indicator={insertionPlacement}
+              x={compositorInsertionAxis === "horizontal"
+                ? slot.trim.xMm + (insertionPlacement === "after" ? slot.trim.widthMm : 0) - 0.48
+                : slot.trim.xMm - 0.48}
+              y={compositorInsertionAxis === "horizontal"
+                ? slot.trim.yMm - 0.8
+                : slot.trim.yMm + (insertionPlacement === "after" ? slot.trim.heightMm : 0) - 0.48}
+              width={compositorInsertionAxis === "horizontal" ? 0.96 : slot.trim.widthMm + 0.96}
+              height={compositorInsertionAxis === "horizontal" ? slot.trim.heightMm + 1.6 : 0.96}
+              rx="0.45"
+              pointerEvents="none"
+              aria-hidden="true"
+            />}
+            {showEndInsertion && <rect
+              className="compositor-insertion-indicator"
+              data-compositor-insertion-indicator="end"
+              x={compositorInsertionAxis === "horizontal" ? slot.trim.xMm - 0.48 : slot.trim.xMm - 0.48}
+              y={compositorInsertionAxis === "horizontal" ? slot.trim.yMm - 0.8 : slot.trim.yMm - 0.48}
+              width={compositorInsertionAxis === "horizontal" ? 0.96 : slot.trim.widthMm + 0.96}
+              height={compositorInsertionAxis === "horizontal" ? slot.trim.heightMm + 1.6 : 0.96}
+              rx="0.45"
+              pointerEvents="none"
+              aria-hidden="true"
+            />}
             </g>;
           })}
           {(cutGeometry.trimSegments.length > 0 || cutGeometry.externalSegments.length > 0) && <g data-compositor-layer="cut" data-duplex-cut-overlay={previewSide} transform={cutOverlayTransform}>
@@ -871,6 +1171,39 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       <button type="button" role="menuitem" disabled={interactionBusy || !onPhysicalAction} onClick={(event) => { event.stopPropagation(); runPhysicalMenuAction("open-settings"); }}>Configurações completas</button>
       <div className="compositor-context-menu-separator" role="separator" />
       <button type="button" role="menuitem" className="is-destructive" disabled={interactionBusy || !onPhysicalAction} onClick={(event) => { event.stopPropagation(); runPhysicalMenuAction("delete-entry"); }}>Remover carta inteira</button>
+    </div>, document.body)}
+    {pointerDrag?.phase === "dragging" && typeof document !== "undefined" && createPortal(<div
+      ref={dragGhostRef}
+      className="compositor-drag-ghost"
+      data-testid="compositor-drag-ghost"
+      data-displayed-side={pointerDrag.displayedSide}
+      aria-hidden="true"
+      style={{
+        position: "fixed",
+        left: 0,
+        top: 0,
+        width: pointerDrag.ghostWidth,
+        height: pointerDrag.ghostHeight,
+        pointerEvents: "none",
+        transform: `translate3d(${pointerDrag.currentClientX - pointerDrag.grabOffsetX}px, ${pointerDrag.currentClientY - pointerDrag.grabOffsetY}px, 0)`,
+      }}
+    >
+      {pointerDrag.ghostUrl
+        ? <img
+          src={pointerDrag.ghostUrl}
+          alt=""
+          draggable={false}
+          style={Math.abs(pointerDrag.ghostRotationDegrees) % 180 === 90 ? {
+            position: "absolute",
+            left: "50%",
+            top: "50%",
+            width: pointerDrag.ghostHeight,
+            height: pointerDrag.ghostWidth,
+            maxWidth: "none",
+            transform: `translate(-50%, -50%) rotate(${pointerDrag.ghostRotationDegrees}deg)`,
+          } : { width: "100%", height: "100%" }}
+        />
+        : <span>{pointerDrag.ghostLabel}</span>}
     </div>, document.body)}
   </section>;
 }

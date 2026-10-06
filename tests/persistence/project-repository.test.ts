@@ -5,6 +5,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import type { WorkingCard } from "../../core/cards/types";
 import { createPhysicalOrder, movePhysicalInstance } from "../../core/cards/physical-instance-order";
+import { createWorkingCardEditorState, reorderWorkingCardPhysicalInstance } from "../../core/cards/working-card-editor";
 import { openProjectDatabase } from "../../persistence/projects/database";
 import { ProjectRepository } from "../../persistence/projects/repository";
 import { DEFAULT_PROJECT_SETTINGS, deserializeProjectSnapshot, serializeProjectSnapshot } from "../../persistence/projects/serializer";
@@ -111,11 +112,13 @@ describe("project repository", () => {
       backMode: "project-default", backModeSelectionPolicy: "automatic", localArtworkIds: [], mpcReferences: [], faceAssociations: [],
     });
     const cards = [card("island", 0, 3), card("bolt", 1, 1)];
-    const legacyOrder = createPhysicalOrder(cards);
-    const customOrder = movePhysicalInstance(legacyOrder, "instance-2", "instance-4", "after");
-    const snapshot = deserializeProjectSnapshot(serializeProjectSnapshot(cards, DEFAULT_PROJECT_SETTINGS, customOrder));
-    const created = projects.create(snapshot);
-    const saved = projects.save(created.id, created.revision, snapshot);
+    const initialEditor = createWorkingCardEditorState(cards);
+    const initialSnapshot = deserializeProjectSnapshot(serializeProjectSnapshot(cards, DEFAULT_PROJECT_SETTINGS, initialEditor.physicalOrder));
+    const created = projects.create(initialSnapshot);
+    const reorderedEditor = reorderWorkingCardPhysicalInstance(initialEditor, "instance-2", "instance-4", "after");
+    const customOrder = reorderedEditor.physicalOrder;
+    const savedSnapshot = deserializeProjectSnapshot(serializeProjectSnapshot(reorderedEditor.cards, DEFAULT_PROJECT_SETTINGS, customOrder));
+    const saved = projects.save(created.id, created.revision, savedSnapshot);
 
     expect(projects.open(saved.id)?.snapshot.physicalOrder).toEqual(customOrder);
     expect(projects.duplicate(saved.id).snapshot.physicalOrder).toEqual(customOrder);
@@ -127,7 +130,7 @@ describe("project repository", () => {
     const promoted = projects.promoteRecovery(saved.id);
     expect(promoted.snapshot.physicalOrder).toEqual(recoveryOrder);
 
-    projects.stageRecovery(saved.id, promoted.revision, snapshot);
+    projects.stageRecovery(saved.id, promoted.revision, savedSnapshot);
     expect(projects.copyRecovery(saved.id).snapshot.physicalOrder).toEqual(customOrder);
   });
 

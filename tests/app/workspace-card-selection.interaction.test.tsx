@@ -59,6 +59,17 @@ function card(id: string, name: string, order: number): WorkingCard {
   };
 }
 
+function setClientRect(element: Element, bounds: { readonly left: number; readonly top: number; readonly width: number; readonly height: number }) {
+  vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
+    ...bounds,
+    x: bounds.left,
+    y: bounds.top,
+    right: bounds.left + bounds.width,
+    bottom: bounds.top + bounds.height,
+    toJSON: () => ({}),
+  } as DOMRect);
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((accept) => { resolve = accept; });
@@ -74,6 +85,7 @@ describe("Cartas workspace navigation", () => {
     ];
     const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
     const savedProjects: Array<Record<string, unknown>> = [];
+    const pendingRecoveries = new Map<string, Record<string, unknown>>();
 
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -88,7 +100,7 @@ describe("Cartas workspace navigation", () => {
           const project = {
             id: `project-selection-test-${savedProjects.length + 1}`,
             name: `Selection test ${savedProjects.length + 1}`,
-            projectSchemaVersion: 2,
+            projectSchemaVersion: 6,
             revision: 1,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
@@ -98,7 +110,33 @@ describe("Cartas workspace navigation", () => {
           savedProjects.push(project);
           return Response.json(project);
         }
-        return Response.json({ projects: [] });
+        return Response.json({ projects: savedProjects.map(({ id, name, projectSchemaVersion, revision, createdAt, updatedAt }) => ({ id, name, projectSchemaVersion, revision, createdAt, updatedAt })) });
+      }
+      const projectMatch = /^\/api\/projects\/([^/]+)$/.exec(url);
+      if (projectMatch && method === "GET") {
+        const project = savedProjects.find(({ id }) => id === projectMatch[1]);
+        return project ? Response.json({ ...project, recovery: null }) : Response.json({ message: "Not found" }, { status: 404 });
+      }
+      const recoveryMatch = /^\/api\/projects\/([^/]+)\/recovery$/.exec(url);
+      if (recoveryMatch && method === "POST") {
+        const project = savedProjects.find(({ id }) => id === recoveryMatch[1]);
+        if (!project) return Response.json({ message: "Not found" }, { status: 404 });
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+        pendingRecoveries.set(recoveryMatch[1]!, body);
+        return Response.json({ recovery: { baseRevision: project.revision } });
+      }
+      const promoteMatch = /^\/api\/projects\/([^/]+)\/recovery\/promote$/.exec(url);
+      if (promoteMatch && method === "POST") {
+        const project = savedProjects.find(({ id }) => id === promoteMatch[1]);
+        const recovery = pendingRecoveries.get(promoteMatch[1]!);
+        if (!project || !recovery) return Response.json({ message: "Not found" }, { status: 404 });
+        Object.assign(project, {
+          revision: Number(project.revision) + 1,
+          snapshot: recovery.snapshot,
+          templateSelection: recovery.templateSelection ?? null,
+        });
+        pendingRecoveries.delete(promoteMatch[1]!);
+        return Response.json(project);
       }
       if (url === "/api/cards/import") return Response.json({ workingCards: imported, report: { summary: {}, sources: [], selectedImporters: [], warnings: [], errors: [], pairings: [] }, providerHealth });
       if (url === "/api/cards/resolve") {
@@ -154,6 +192,29 @@ describe("Cartas workspace navigation", () => {
     expect(savedProjects[0]?.snapshot).toEqual(snapshot);
     expect(requests.filter(({ url }) => url.includes("/recovery") || url.includes("project-selection-test"))).toHaveLength(0);
     expect(requests.filter(({ method }) => method === "PUT")).toHaveLength(0);
+
+    const mountainBody = document.querySelector<SVGRectElement>('[data-physical-instance-id="instance-2"] [data-compositor-card-body="true"]');
+    const islandDropBody = document.querySelector<SVGRectElement>('[data-physical-instance-id="instance-1"] [data-compositor-card-body="true"]');
+    expect(mountainBody).not.toBeNull();
+    expect(islandDropBody).not.toBeNull();
+    setClientRect(mountainBody!, { left: 240, top: 100, width: 60, height: 84 });
+    setClientRect(islandDropBody!, { left: 100, top: 100, width: 60, height: 84 });
+    fireEvent.pointerDown(mountainBody!, { pointerId: 31, pointerType: "mouse", isPrimary: true, button: 0, clientX: 250, clientY: 110 });
+    fireEvent.pointerMove(mountainBody!, { pointerId: 31, pointerType: "mouse", buttons: 1, clientX: 256, clientY: 110 });
+    fireEvent.pointerMove(islandDropBody!, { pointerId: 31, pointerType: "mouse", buttons: 1, clientX: 101, clientY: 110 });
+    fireEvent.pointerUp(islandDropBody!, { pointerId: 31, pointerType: "mouse", button: 0, clientX: 101, clientY: 110 });
+    await waitFor(() => expect(savedProjects[0]?.revision).toBe(2), { timeout: 4_000 });
+    expect(savedProjects[0]?.snapshot).toMatchObject({ physicalOrder: { instances: [{ id: "instance-2" }, { id: "instance-1" }] } });
+    expect(requests.filter(({ url, method }) => url.endsWith("/recovery") && method === "POST")).toHaveLength(1);
+    expect(requests.filter(({ url, method }) => url.endsWith("/recovery/promote") && method === "POST")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
+    await user.click(screen.getByRole("button", { name: "Abrir projeto" }));
+    const reopenDialog = await screen.findByRole("dialog", { name: "Abrir projeto" });
+    await user.click(within(reopenDialog).getByRole("button", { name: "Abrir Selection test 1" }));
+    await waitFor(() => expect(document.querySelector('[data-physical-card-index="0"]')).toHaveAttribute("data-physical-instance-id", "instance-2"));
+    expect(document.querySelector('[data-physical-card-index="1"]')).toHaveAttribute("data-physical-instance-id", "instance-1");
+    expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Salvo");
 
     await user.click(screen.getByRole("checkbox", { name: "Selecionar Island, cópia 1 de 1" }));
     await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
@@ -306,17 +367,31 @@ describe("Cartas workspace navigation", () => {
     await user.click(within(menuPicker).getByRole("button", { name: "Fechar seletor de arte" }));
     expect(document.activeElement).toBe(contextTrigger);
 
-    const exportRequestBeforePhysicalSelection = exportRequests[0]?.body;
-    const selectedPhysicalCard = composer.querySelector('g[data-physical-card-index="1"]');
-    if (!selectedPhysicalCard) throw new Error("The second physical card is not rendered in the live compositor.");
-    expect(selectedPhysicalCard?.querySelector('[data-compositor-card-body="true"]')).toHaveAttribute("aria-current", "true");
+    const exportRequestBeforePointerReorder = exportRequests[0]?.body;
+    const mountainDragBody = composer.querySelector<SVGRectElement>('[data-physical-instance-id="instance-2"] [data-compositor-card-body="true"]');
+    const islandDropBody = composer.querySelector<SVGRectElement>('[data-physical-instance-id="instance-1"] [data-compositor-card-body="true"]');
+    if (!mountainDragBody || !islandDropBody) throw new Error("The two physical cards are not rendered in the live compositor.");
+    setClientRect(mountainDragBody, { left: 240, top: 100, width: 60, height: 84 });
+    setClientRect(islandDropBody, { left: 100, top: 100, width: 60, height: 84 });
+    fireEvent.pointerDown(mountainDragBody, { pointerId: 32, pointerType: "mouse", isPrimary: true, button: 0, clientX: 250, clientY: 110 });
+    fireEvent.pointerMove(mountainDragBody, { pointerId: 32, pointerType: "mouse", buttons: 1, clientX: 256, clientY: 110 });
+    expect(screen.getByTestId("compositor-drag-ghost")).toBeInTheDocument();
+    fireEvent.pointerMove(islandDropBody, { pointerId: 32, pointerType: "mouse", buttons: 1, clientX: 101, clientY: 110 });
+    fireEvent.pointerUp(islandDropBody, { pointerId: 32, pointerType: "mouse", button: 0, clientX: 101, clientY: 110 });
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+    expect([...composer.querySelectorAll<SVGGElement>("g[data-physical-instance-id]")].map((slot) => slot.dataset.physicalInstanceId)).toEqual(["instance-2", "instance-1"]);
+    expect(composer.querySelector('[data-physical-instance-id="instance-2"] [data-compositor-card-body="true"]')).toHaveAttribute("aria-current", "true");
 
     await user.click(screen.getByRole("button", { name: "Gerar PDF final" }));
     expect(await screen.findByRole("link", { name: "Baixar tcgprint-m4.pdf" })).toHaveAttribute("download", "tcgprint-m4.pdf");
     expect(createObjectUrl).toHaveBeenCalledTimes(1);
     expect(exportCount).toBe(2);
     const generatedPdfRequestBody = exportRequests[1]?.body;
-    expect(generatedPdfRequestBody).toBe(exportRequestBeforePhysicalSelection);
+    expect(generatedPdfRequestBody).not.toBe(exportRequestBeforePointerReorder);
+    const parsedExportRequest = JSON.parse(String(generatedPdfRequestBody)) as {
+      options: { physicalOrder: { instances: readonly { id: string }[] } };
+    };
+    expect(parsedExportRequest.options.physicalOrder.instances.map(({ id }) => id)).toEqual(["instance-2", "instance-1"]);
     expect(composer).toHaveAttribute("data-compositor-zoom-mode", "fit-page");
     expect(screen.queryByRole("button", { name: "Aumentar zoom" })).not.toBeInTheDocument();
 

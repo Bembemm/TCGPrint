@@ -6,6 +6,7 @@ import {
   duplicateWorkingCard,
   moveWorkingCard,
   normalizeWorkingCardOrder,
+  reorderWorkingCardPhysicalInstance,
   setWorkingCardQuantity,
   type WorkingCardEditorState,
 } from "../../../core/cards/working-card-editor";
@@ -50,6 +51,26 @@ function state(cards: readonly WorkingCard[], selectedCardId = cards[0]?.id ?? n
 }
 
 describe("working card editor operations", () => {
+  it("reorders one repeated physical copy without changing WorkingCards or their quantities", () => {
+    const island = card("island", 0, 3);
+    const mountain = card("mountain", 1, 1);
+    const initial = state([island, mountain], "mountain");
+    const initialWorkingCards = initial.cards;
+    const initialWorkingOrder = initial.cards.map(({ id, order }) => [id, order]);
+    const initialNextInstanceId = initial.physicalOrder.nextInstanceId;
+
+    const moved = reorderWorkingCardPhysicalInstance(initial, "instance-2", "instance-4", "after");
+
+    expect(moved.physicalOrder.instances.map(({ id }) => id)).toEqual(["instance-1", "instance-3", "instance-4", "instance-2"]);
+    expect(moved.physicalOrder.nextInstanceId).toBe(initialNextInstanceId);
+    expect(moved.cards).toBe(initialWorkingCards);
+    expect(moved.cards.map(({ id, order, quantity }) => [id, order, quantity])).toEqual([
+      ["island", 0, 3], ["mountain", 1, 1],
+    ]);
+    expect(moved.cards.map(({ id, order }) => [id, order])).toEqual(initialWorkingOrder);
+    expect(moved.selectedCardId).toBe("mountain");
+  });
+
   it("normalizes imported order while retaining stable card IDs and selected artwork", () => {
     const cards = [card("third", 9), card("first", 0), card("second", 4)];
     const normalized = normalizeWorkingCardOrder(cards);

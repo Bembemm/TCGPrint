@@ -174,6 +174,35 @@ function compositorWorkspace(
   return <Harness />;
 }
 
+function pointerLifecycleWorkspace() {
+  const cards = [{ ...card(), quantity: 3 }];
+  const settings: ProjectSettingsV2 = { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } };
+  function Harness() {
+    const [physicalOrder, setPhysicalOrder] = useState(() => createPhysicalOrder(cards));
+    const [documentRevision, setDocumentRevision] = useState(0);
+    const [interactionBusy, setInteractionBusy] = useState(false);
+    return <>
+      <output data-testid="lifecycle-order">{physicalOrder.instances.map(({ id }) => id).join(",")}</output>
+      <button type="button" onClick={() => setInteractionBusy(true)}>Set interaction busy</button>
+      <button type="button" onClick={() => setDocumentRevision((revision) => revision + 1)}>Change document revision</button>
+      <button type="button" onClick={() => setPhysicalOrder((current) => ({ ...current, instances: current.instances.filter(({ id }) => id !== "instance-3") }))}>Remove drag source</button>
+      <RegistrationLayoutPreview
+        settings={settings}
+        cardCount={physicalOrder.instances.length}
+        cards={cards}
+        physicalOrder={physicalOrder}
+        documentRevision={documentRevision}
+        interactionBusy={interactionBusy}
+        selectedPageNumber={1}
+        onSelectPage={() => undefined}
+        onToggleSkippedSlot={() => undefined}
+        onReorderPhysicalInstance={(instanceId, targetInstanceId, placement) => setPhysicalOrder((current) => movePhysicalInstance(current, instanceId, targetInstanceId, placement))}
+      />
+    </>;
+  }
+  return <Harness />;
+}
+
 function simpleCardWithBackMode(mode: "auto" | "manual" | "project-default" | "none"): WorkingCard {
   const base = card();
   const { manualBackArtwork: _manualBackArtwork, ...withoutManualBack } = base;
@@ -215,6 +244,30 @@ function artworkForPhysicalIndex(index: number) {
   const artwork = slotForPhysicalIndex(index).querySelector("image[data-compositor-artwork]");
   if (!artwork) throw new Error("Physical card " + index + " has no preview artwork on this side.");
   return artwork;
+}
+
+function setClientRect(element: Element, bounds: { readonly left: number; readonly top: number; readonly width: number; readonly height: number }) {
+  vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
+    ...bounds,
+    x: bounds.left,
+    y: bounds.top,
+    right: bounds.left + bounds.width,
+    bottom: bounds.top + bounds.height,
+    toJSON: () => ({}),
+  } as DOMRect);
+}
+
+function startBodyPointerDrag(body: Element, pointerId: number, clientX = 20, clientY = 20) {
+  fireEvent.pointerDown(body, { pointerId, pointerType: "mouse", isPrimary: true, button: 0, clientX, clientY });
+  fireEvent.pointerMove(body, { pointerId, pointerType: "mouse", buttons: 1, clientX: clientX + 6, clientY });
+}
+
+function movePointerDrag(target: Element, pointerId: number, clientX: number, clientY: number) {
+  fireEvent.pointerMove(target, { pointerId, pointerType: "mouse", buttons: 1, clientX, clientY });
+}
+
+function dropPointerDrag(target: Element, pointerId: number, clientX: number, clientY: number) {
+  fireEvent.pointerUp(target, { pointerId, pointerType: "mouse", button: 0, clientX, clientY });
 }
 
 const defaultBackAsset = { assetId: "project-default", sha256: "d".repeat(64), format: "png" as const };
@@ -369,27 +422,40 @@ describe("canonical live compositor interactions", () => {
   it("keeps checkbox clicks out of the context menu and drag path while right click only activates", async () => {
     const user = userEvent.setup();
     const onPhysicalAction = vi.fn();
-    render(compositorWorkspace([{ ...card(), quantity: 2 }], undefined, false, undefined, true, undefined, onPhysicalAction));
+    const onSelectArtwork = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], undefined, false, onSelectArtwork, true, undefined, onPhysicalAction));
 
     await user.click(checkboxForPhysicalIndex(0));
     expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("none");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 
-    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-1") };
-    fireEvent.pointerDown(checkboxForPhysicalIndex(0), { pointerType: "mouse" });
-    expect(fireEvent.dragStart(slotForPhysicalIndex(0), { dataTransfer })).toBe(false);
-    expect(slotForPhysicalIndex(0)).not.toHaveClass("is-drag-source");
-    expect(fireEvent.dragStart(checkboxForPhysicalIndex(0), { dataTransfer })).toBe(false);
+    fireEvent.pointerDown(checkboxForPhysicalIndex(0), { pointerId: 26, pointerType: "mouse", isPrimary: true, button: 0, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(checkboxForPhysicalIndex(0), { pointerId: 26, pointerType: "mouse", buttons: 1, clientX: 50, clientY: 60 });
+    fireEvent.pointerUp(checkboxForPhysicalIndex(0), { pointerId: 26, pointerType: "mouse", button: 0, clientX: 50, clientY: 60 });
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
     expect(slotForPhysicalIndex(0)).not.toHaveClass("is-drag-source");
     expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("none");
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2");
 
+    const kebab = slotForPhysicalIndex(0).querySelector<HTMLButtonElement>("[data-compositor-context-trigger]");
+    expect(kebab).not.toBeNull();
+    fireEvent.pointerDown(kebab!, { pointerId: 27, pointerType: "mouse", isPrimary: true, button: 0, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(kebab!, { pointerId: 27, pointerType: "mouse", buttons: 1, clientX: 50, clientY: 60 });
+    fireEvent.pointerUp(kebab!, { pointerId: 27, pointerType: "mouse", button: 0, clientX: 50, clientY: 60 });
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2");
+
+    fireEvent.pointerDown(bodyButtonForPhysicalIndex(1), { pointerId: 28, pointerType: "mouse", isPrimary: true, button: 2, clientX: 50, clientY: 50 });
+    fireEvent.pointerMove(bodyButtonForPhysicalIndex(1), { pointerId: 28, pointerType: "mouse", buttons: 2, clientX: 80, clientY: 80 });
+    fireEvent.pointerUp(bodyButtonForPhysicalIndex(1), { pointerId: 28, pointerType: "mouse", button: 2, clientX: 80, clientY: 80 });
     expect(fireEvent.contextMenu(bodyButtonForPhysicalIndex(1))).toBe(false);
     expect(screen.getByRole("menu", { name: /Ações para Island, cópia 2/i })).toBeInTheDocument();
     expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
     expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "true");
     expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "false");
     expect(onPhysicalAction).not.toHaveBeenCalled();
+    expect(onSelectArtwork).not.toHaveBeenCalled();
   });
 
   it("selects every physical ID across pages and excludes unassigned slots", async () => {
@@ -549,6 +615,11 @@ describe("canonical live compositor interactions", () => {
     const flip = flipButtonForPhysicalIndex(0);
     expect(flip).toHaveAccessibleName("Ver verso de Island, cópia 1");
     expect(flip).toHaveAttribute("aria-pressed", "false");
+    fireEvent.pointerDown(flip, { pointerId: 25, pointerType: "mouse", isPrimary: true, button: 0, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(flip, { pointerId: 25, pointerType: "mouse", buttons: 1, clientX: 40, clientY: 20 });
+    fireEvent.pointerUp(flip, { pointerId: 25, pointerType: "mouse", button: 0, clientX: 40, clientY: 20 });
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent(order ?? "");
     await user.click(flip);
 
     expect(flipButtonForPhysicalIndex(0)).toHaveAttribute("aria-pressed", "true");
@@ -568,21 +639,183 @@ describe("canonical live compositor interactions", () => {
     expect(artworkForPhysicalIndex(1)).toHaveAttribute("data-compositor-artwork", artworkBack.candidateId);
   });
 
-  it("keeps a local flip with its physical ID after legacy reorder and suppresses the residual click", () => {
+  it("keeps a local flip with its physical ID after pointer reorder and suppresses the residual click", () => {
     const onSelectArtwork = vi.fn();
     const order = createPhysicalOrder([{ ...card(), quantity: 3 }]);
     render(compositorWorkspace([{ ...card(), quantity: 3 }], undefined, false, onSelectArtwork, true, order));
     fireEvent.click(flipButtonForPhysicalIndex(1));
 
-    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-2") };
-    fireEvent.dragStart(slotForPhysicalIndex(1), { dataTransfer });
-    fireEvent.dragOver(slotForPhysicalIndex(2), { dataTransfer });
-    fireEvent.drop(slotForPhysicalIndex(2), { dataTransfer });
+    const source = bodyButtonForPhysicalIndex(1);
+    const target = bodyButtonForPhysicalIndex(2);
+    setClientRect(target, { left: 100, top: 100, width: 60, height: 84 });
+    startBodyPointerDrag(source, 11);
+    movePointerDrag(target, 11, 145, 120);
+    dropPointerDrag(target, 11, 145, 120);
 
-    expect(slotForPhysicalIndex(2)).toHaveAttribute("data-physical-instance-id", "instance-2");
+    const movedSlot = slotForPhysicalIndex(2);
+    expect(movedSlot).toHaveAttribute("data-physical-instance-id", "instance-2");
     expect(artworkForPhysicalIndex(2)).toHaveAttribute("data-compositor-artwork", artworkBack.candidateId);
     fireEvent.click(bodyButtonForPhysicalIndex(2));
     expect(onSelectArtwork).not.toHaveBeenCalled();
+    fireEvent.pointerDown(bodyButtonForPhysicalIndex(2), { pointerId: 12, pointerType: "mouse", isPrimary: true, button: 0, clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(bodyButtonForPhysicalIndex(2), { pointerId: 12, pointerType: "mouse", button: 0, clientX: 20, clientY: 20 });
+    fireEvent.click(bodyButtonForPhysicalIndex(2));
+    expect(onSelectArtwork).toHaveBeenCalledTimes(1);
+  });
+
+  it("promotes a body pointer gesture at 6px and inserts before the target without a picker", () => {
+    const onSelectArtwork = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 4 }], undefined, false, onSelectArtwork, true));
+    const source = bodyButtonForPhysicalIndex(3);
+    const target = bodyButtonForPhysicalIndex(1);
+    setClientRect(source, { left: 240, top: 100, width: 60, height: 84 });
+    setClientRect(target, { left: 100, top: 100, width: 60, height: 84 });
+
+    fireEvent.pointerDown(source, { pointerId: 7, pointerType: "mouse", isPrimary: true, button: 0, clientX: 250, clientY: 110 });
+    fireEvent.pointerMove(source, { pointerId: 7, pointerType: "mouse", buttons: 1, clientX: 256, clientY: 110 });
+
+    const ghost = screen.getByTestId("compositor-drag-ghost");
+    expect(ghost).toHaveStyle({ pointerEvents: "none" });
+    expect(slotForPhysicalIndex(3)).toHaveClass("is-drag-source");
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2,instance-3,instance-4");
+
+    fireEvent.pointerMove(target, { pointerId: 7, pointerType: "mouse", buttons: 1, clientX: 101, clientY: 110 });
+    expect(target.closest("g[data-compositor-slot]")?.querySelector('[data-compositor-insertion-indicator="before"]')).toBeInTheDocument();
+    fireEvent.pointerUp(target, { pointerId: 7, pointerType: "mouse", button: 0, clientX: 101, clientY: 110 });
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-4,instance-2,instance-3");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-4");
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-compositor-insertion-indicator]")).not.toBeInTheDocument();
+    expect(onSelectArtwork).not.toHaveBeenCalled();
+
+    const movedSourceBody = sheet().querySelector('[data-physical-instance-id="instance-4"] [data-compositor-card-body="true"]');
+    expect(movedSourceBody).not.toBeNull();
+    fireEvent.click(movedSourceBody!);
+    expect(onSelectArtwork).not.toHaveBeenCalled();
+    fireEvent.click(movedSourceBody!);
+    expect(onSelectArtwork).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a pointer movement below 6px as the normal body click", () => {
+    const onSelectArtwork = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 1 }], undefined, false, onSelectArtwork, true));
+    const body = bodyButtonForPhysicalIndex(0);
+
+    fireEvent.pointerDown(body, { pointerId: 8, pointerType: "mouse", isPrimary: true, button: 0, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(body, { pointerId: 8, pointerType: "mouse", buttons: 1, clientX: 24, clientY: 23 });
+    fireEvent.pointerUp(body, { pointerId: 8, pointerType: "mouse", button: 0, clientX: 24, clientY: 23 });
+    fireEvent.click(body);
+
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1");
+    expect(onSelectArtwork).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves only the dragged member of a multi-selection and keeps selection and active IDs", () => {
+    render(compositorWorkspace([{ ...card(), quantity: 4 }], undefined, false, undefined, true));
+    fireEvent.click(checkboxForPhysicalIndex(1));
+    fireEvent.click(checkboxForPhysicalIndex(2));
+    fireEvent.click(checkboxForPhysicalIndex(3));
+    const source = bodyButtonForPhysicalIndex(2);
+    const target = bodyButtonForPhysicalIndex(3);
+    setClientRect(target, { left: 100, top: 100, width: 60, height: 84 });
+
+    startBodyPointerDrag(source, 20);
+    movePointerDrag(target, 20, 155, 120);
+    dropPointerDrag(target, 20, 155, 120);
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2,instance-4,instance-3");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-3");
+    expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "false");
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "true");
+    expect(checkboxForPhysicalIndex(2)).toHaveAttribute("aria-checked", "true");
+    expect(checkboxForPhysicalIndex(3)).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("treats dropping on self and an adjacent insertion as no-ops", () => {
+    const onSelectArtwork = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 3 }], undefined, false, onSelectArtwork, true));
+    const revision = screen.getByTestId("project-revision").textContent;
+    const source = bodyButtonForPhysicalIndex(0);
+    setClientRect(source, { left: 100, top: 100, width: 60, height: 84 });
+
+    startBodyPointerDrag(source, 21);
+    movePointerDrag(source, 21, 120, 120);
+    dropPointerDrag(source, 21, 120, 120);
+    fireEvent.click(source);
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2,instance-3");
+    expect(onSelectArtwork).not.toHaveBeenCalled();
+
+    const adjacentTarget = bodyButtonForPhysicalIndex(1);
+    setClientRect(adjacentTarget, { left: 100, top: 100, width: 60, height: 84 });
+    startBodyPointerDrag(source, 22);
+    movePointerDrag(adjacentTarget, 22, 101, 120);
+    dropPointerDrag(adjacentTarget, 22, 101, 120);
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2,instance-3");
+    expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
+    expect(onSelectArtwork).not.toHaveBeenCalled();
+  });
+
+  it("cleans up ghost and insertion feedback on pointercancel", () => {
+    render(pointerLifecycleWorkspace());
+    const source = bodyButtonForPhysicalIndex(2);
+    startBodyPointerDrag(source, 29);
+    expect(screen.getByTestId("compositor-drag-ghost")).toBeInTheDocument();
+    fireEvent.pointerCancel(source, { pointerId: 29, pointerType: "mouse" });
+
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-compositor-insertion-indicator]")).not.toBeInTheDocument();
+    expect(screen.getByTestId("lifecycle-order")).toHaveTextContent("instance-1,instance-2,instance-3");
+  });
+
+  it("cancels an active pointer drag when interaction becomes busy or the document revision changes", () => {
+    const busyView = render(pointerLifecycleWorkspace());
+    startBodyPointerDrag(bodyButtonForPhysicalIndex(2), 30);
+    expect(screen.getByTestId("compositor-drag-ghost")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Set interaction busy" }));
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+    expect(screen.getByTestId("lifecycle-order")).toHaveTextContent("instance-1,instance-2,instance-3");
+    busyView.unmount();
+
+    render(pointerLifecycleWorkspace());
+    startBodyPointerDrag(bodyButtonForPhysicalIndex(2), 31);
+    expect(screen.getByTestId("compositor-drag-ghost")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Change document revision" }));
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+    expect(screen.getByTestId("lifecycle-order")).toHaveTextContent("instance-1,instance-2,instance-3");
+  });
+
+  it("cancels when the source instance disappears during a pointer gesture", () => {
+    render(pointerLifecycleWorkspace());
+    startBodyPointerDrag(bodyButtonForPhysicalIndex(2), 32);
+    expect(screen.getByTestId("compositor-drag-ghost")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove drag source" }));
+
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+    expect(screen.getByTestId("lifecycle-order")).toHaveTextContent("instance-1,instance-2");
+  });
+
+  it("removes the drag overlay on compositor unmount", () => {
+    const view = render(pointerLifecycleWorkspace());
+    startBodyPointerDrag(bodyButtonForPhysicalIndex(2), 33);
+    expect(screen.getByTestId("compositor-drag-ghost")).toBeInTheDocument();
+    view.unmount();
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+  });
+
+  it("supports global keyboard reorder with Alt+Arrow and preserves the physical ID", () => {
+    render(compositorWorkspace([{ ...card(), quantity: 4 }], undefined, false, undefined, true));
+    const source = bodyButtonForPhysicalIndex(3);
+
+    fireEvent.keyDown(source, { key: "ArrowLeft", altKey: true });
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2,instance-4,instance-3");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-4");
+    expect(source).toHaveAttribute("aria-keyshortcuts", "Alt+ArrowLeft Alt+ArrowRight");
+    expect(screen.getByText(/posição 3 da ordem física/i)).toBeInTheDocument();
   });
 
   it("does not offer local flip when no alternate artwork is available", () => {
@@ -759,33 +992,49 @@ describe("canonical live compositor interactions", () => {
     const onPhysicalAction = vi.fn();
     render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true, undefined, onPhysicalAction, true));
     const slot = slotForPhysicalIndex(0);
-    expect(slot).toHaveAttribute("draggable", "false");
     await user.click(slot);
     await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 1/i }));
     expect(screen.getByRole("menuitem", { name: "Aumentar quantidade" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Duplicar como entrada independente" })).toBeDisabled();
 
-    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-1") };
-    expect(fireEvent.dragStart(slot, { dataTransfer })).toBe(false);
+    const revision = screen.getByTestId("project-revision").textContent;
+    const order = screen.getByTestId("physical-order-ids").textContent;
+    fireEvent.pointerDown(bodyButtonForPhysicalIndex(0), { pointerId: 14, pointerType: "mouse", isPrimary: true, button: 0, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(bodyButtonForPhysicalIndex(0), { pointerId: 14, pointerType: "mouse", clientX: 40, clientY: 20 });
+    fireEvent.pointerUp(bodyButtonForPhysicalIndex(0), { pointerId: 14, pointerType: "mouse", clientX: 40, clientY: 20 });
+    fireEvent.keyDown(bodyButtonForPhysicalIndex(0), { key: "ArrowRight", altKey: true });
+    expect(screen.queryByTestId("compositor-drag-ghost")).not.toBeInTheDocument();
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent(order ?? "");
+    expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
     expect(onPhysicalAction).not.toHaveBeenCalled();
   });
 
   it("rejects drops into skipped and registration-reserved slots without changing physical order", () => {
-    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-1") };
+    const onSkippedSelectArtwork = vi.fn();
     const skippedSettings: ProjectSettingsV2 = {
       ...DEFAULT_PROJECT_SETTINGS,
       layout: { rows: 1, columns: 3, skippedSlotIndices: [1] },
     };
-    const skipped = render(compositorWorkspace([{ ...card(), quantity: 2 }], skippedSettings, false, undefined, true));
-    const firstCard = sheet().querySelector('g[data-physical-card-index="0"]')!;
+    const skipped = render(compositorWorkspace([{ ...card(), quantity: 2 }], skippedSettings, false, onSkippedSelectArtwork, true));
+    const firstCard = bodyButtonForPhysicalIndex(0);
     const skippedSlot = sheet().querySelector('g[aria-label^="Slot 2 desativado"]')!;
-    fireEvent.dragStart(firstCard, { dataTransfer });
-    fireEvent.dragOver(skippedSlot, { dataTransfer });
-    fireEvent.drop(skippedSlot, { dataTransfer });
-    expect(screen.getByText(/Drop rejeitado: slot ignorado não recebe cartas/)).toBeInTheDocument();
+    const skippedRevision = screen.getByTestId("project-revision").textContent;
+    startBodyPointerDrag(firstCard, 15);
+    movePointerDrag(skippedSlot, 15, 40, 20);
     expect(skippedSlot).toHaveClass("is-invalid-drop");
-    expect(firstCard).not.toHaveClass("is-invalid-drop");
+    dropPointerDrag(skippedSlot, 15, 40, 20);
+    expect(screen.getByText(/Drop rejeitado: slot ignorado não recebe cartas/)).toBeInTheDocument();
+    expect(skippedSlot).not.toHaveClass("is-invalid-drop");
+    expect(firstCard.closest("g[data-compositor-slot]")).not.toHaveClass("is-invalid-drop");
     expect(sheet().querySelector('g[data-physical-card-index="0"]')).toHaveAttribute("data-physical-instance-id", "instance-1");
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2");
+    expect(screen.getByTestId("project-revision")).toHaveTextContent(skippedRevision ?? "");
+    fireEvent.click(firstCard);
+    expect(onSkippedSelectArtwork).not.toHaveBeenCalled();
+    fireEvent.pointerDown(firstCard, { pointerId: 24, pointerType: "mouse", isPrimary: true, button: 0, clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(firstCard, { pointerId: 24, pointerType: "mouse", button: 0, clientX: 20, clientY: 20 });
+    fireEvent.click(firstCard);
+    expect(onSkippedSelectArtwork).toHaveBeenCalledTimes(1);
 
     skipped.unmount();
     const geometryProbe = render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { rows: 1, columns: 3, skippedSlotIndices: [] } }));
@@ -801,19 +1050,25 @@ describe("canonical live compositor interactions", () => {
       },
       layout: { rows: 1, columns: 3, skippedSlotIndices: [] },
     };
-    render(compositorWorkspace([{ ...card(), quantity: 2 }], reservedSettings, false, undefined, true));
+    const onReservedSelectArtwork = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], reservedSettings, false, onReservedSelectArtwork, true));
     const layoutAlert = screen.queryByRole("alert");
     if (layoutAlert) throw new Error(layoutAlert.textContent ?? "Compositor layout failed.");
     const reservedSlot = sheet().querySelector('g[aria-label^="Slot 1 reservado"]');
     expect(reservedSlot).not.toBeNull();
     const cardSlot = sheet().querySelector('g[data-physical-card-index="0"]')!;
-    fireEvent.dragStart(cardSlot, { dataTransfer });
-    fireEvent.dragOver(reservedSlot!, { dataTransfer });
-    fireEvent.drop(reservedSlot!, { dataTransfer });
-    expect(screen.getByText(/Drop rejeitado: slot reservado permanece vazio/)).toBeInTheDocument();
+    const reservedRevision = screen.getByTestId("project-revision").textContent;
+    startBodyPointerDrag(bodyButtonForPhysicalIndex(0), 16);
+    movePointerDrag(reservedSlot!, 16, 40, 20);
     expect(reservedSlot).toHaveClass("is-invalid-drop");
+    dropPointerDrag(reservedSlot!, 16, 40, 20);
+    expect(screen.getByText(/Drop rejeitado: slot reservado permanece vazio/)).toBeInTheDocument();
+    expect(reservedSlot).not.toHaveClass("is-invalid-drop");
     expect(cardSlot).not.toHaveClass("is-invalid-drop");
     expect(sheet().querySelector('g[data-physical-card-index="0"]')).toHaveAttribute("data-physical-instance-id", "instance-1");
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2");
+    expect(screen.getByTestId("project-revision")).toHaveTextContent(reservedRevision ?? "");
+    expect(onReservedSelectArtwork).not.toHaveBeenCalled();
   });
 
   it("uses an accessible checkbox as selection feedback without changing artwork, geometry, or Project state", async () => {
@@ -945,18 +1200,21 @@ describe("canonical live compositor interactions", () => {
     expect(bodyButtonForPhysicalIndex(1)).toHaveAttribute("aria-current", "true");
   });
 
-  it("keeps checkbox selection keyed to the physical ID after a cross-page reorder", async () => {
+  it("keeps the source and checkbox selection through a pointer reorder across pages", async () => {
     const user = userEvent.setup();
     render(compositorWorkspace([{ ...card(), quantity: 10 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true));
 
     await user.click(checkboxForPhysicalIndex(1));
     await user.click(bodyButtonForPhysicalIndex(1));
-    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-2") };
-    fireEvent.dragStart(slotForPhysicalIndex(1), { dataTransfer });
-    fireEvent.dragOver(screen.getByRole("button", { name: "Próxima página" }), { dataTransfer });
+    const revision = screen.getByTestId("project-revision").textContent;
+    startBodyPointerDrag(bodyButtonForPhysicalIndex(1), 17);
+    movePointerDrag(screen.getByRole("button", { name: "Próxima página" }), 17, 40, 20);
     expect(sheet()).toHaveAttribute("data-compositor-page", "2");
 
-    fireEvent.drop(slotForPhysicalIndex(9), { dataTransfer });
+    const finalCardBody = bodyButtonForPhysicalIndex(9);
+    setClientRect(finalCardBody, { left: 100, top: 100, width: 60, height: 84 });
+    movePointerDrag(finalCardBody, 17, 155, 120);
+    dropPointerDrag(finalCardBody, 17, 155, 120);
 
     expect(sheet()).toHaveAttribute("data-compositor-page", "2");
     expect(slotForPhysicalIndex(9)).toHaveAttribute("data-physical-instance-id", "instance-2");
@@ -964,16 +1222,39 @@ describe("canonical live compositor interactions", () => {
     expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
     expect(sheet()).toHaveAttribute("data-active-physical-card-index", "9");
     expect(checkboxForPhysicalIndex(9)).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-3,instance-4,instance-5,instance-6,instance-7,instance-8,instance-9,instance-10,instance-2");
+    expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
+  });
+
+  it("keeps a page-two source alive while dragging back to page one", async () => {
+    const user = userEvent.setup();
+    render(compositorWorkspace([{ ...card(), quantity: 10 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true));
+    await user.click(screen.getByRole("button", { name: "Próxima página" }));
+    const source = bodyButtonForPhysicalIndex(9);
+    startBodyPointerDrag(source, 23);
+    expect(screen.getByTestId("compositor-drag-ghost")).toBeInTheDocument();
+    movePointerDrag(screen.getByRole("button", { name: "Página anterior" }), 23, 40, 20);
+    expect(sheet()).toHaveAttribute("data-compositor-page", "1");
+
+    const firstCardBody = bodyButtonForPhysicalIndex(0);
+    setClientRect(firstCardBody, { left: 100, top: 100, width: 60, height: 84 });
+    movePointerDrag(firstCardBody, 23, 101, 120);
+    expect(screen.getByTestId("compositor-drag-ghost")).toBeInTheDocument();
+    dropPointerDrag(firstCardBody, 23, 101, 120);
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-10,instance-1,instance-2,instance-3,instance-4,instance-5,instance-6,instance-7,instance-8,instance-9");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-10");
+    expect(sheet()).toHaveAttribute("data-compositor-page", "1");
   });
 
   it("drops on a final eligible empty slot as insertion at the end of the physical sequence", () => {
     render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { rows: 1, columns: 3, skippedSlotIndices: [] } }, false, undefined, true));
-    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-1") };
-    const source = sheet().querySelector('g[data-physical-card-index="0"]')!;
+    const source = bodyButtonForPhysicalIndex(0);
     const emptyEnd = sheet().querySelector('g[aria-label^="Slot 3 vazio"]')!;
-    fireEvent.dragStart(source, { dataTransfer });
-    fireEvent.dragOver(emptyEnd, { dataTransfer });
-    fireEvent.drop(emptyEnd, { dataTransfer });
+    startBodyPointerDrag(source, 18);
+    movePointerDrag(emptyEnd, 18, 180, 120);
+    expect(emptyEnd.querySelector('[data-compositor-insertion-indicator="end"]')).toBeInTheDocument();
+    dropPointerDrag(emptyEnd, 18, 180, 120);
 
     expect(sheet().querySelector('g[data-physical-card-index="0"]')).toHaveAttribute("data-physical-instance-id", "instance-2");
     expect(sheet().querySelector('g[data-physical-card-index="1"]')).toHaveAttribute("data-physical-instance-id", "instance-1");

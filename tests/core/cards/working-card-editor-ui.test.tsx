@@ -584,6 +584,54 @@ describe("working card editor list UI", () => {
     expect(redone.present.cards.map(({ id, order }) => [id, order])).toEqual([[third.id, 0], [card.id, 1], [second.id, 2]]);
   });
 
+  it("records one physical insertion reorder and restores its stable IDs on undo and redo", () => {
+    const cards = [
+      { ...card, id: "physical-a", quantity: 1, order: 0 },
+      { ...card, id: "physical-b", quantity: 1, order: 1 },
+      { ...card, id: "physical-c", quantity: 1, order: 2 },
+      { ...card, id: "physical-d", quantity: 1, order: 3 },
+    ];
+    const initial = createEditorHistoryState({
+      ...createWorkingCardEditorState(cards, "physical-b"),
+      face: "front",
+    });
+
+    const moved = editorHistoryReducer(initial, {
+      type: "reorder-physical-instance",
+      instanceId: "instance-4",
+      targetInstanceId: "instance-2",
+      placement: "before",
+    });
+    const undone = editorHistoryReducer(moved, { type: "undo" });
+    const redone = editorHistoryReducer(undone, { type: "redo" });
+
+    expect(moved.past).toHaveLength(1);
+    expect(moved.present.physicalOrder.instances.map(({ id }) => id)).toEqual(["instance-1", "instance-4", "instance-2", "instance-3"]);
+    expect(undone.present.physicalOrder.instances.map(({ id }) => id)).toEqual(["instance-1", "instance-2", "instance-3", "instance-4"]);
+    expect(redone.present.physicalOrder.instances.map(({ id }) => id)).toEqual(["instance-1", "instance-4", "instance-2", "instance-3"]);
+    expect([moved, undone, redone].map(({ present }) => present.selectedCardId)).toEqual(["physical-b", "physical-b", "physical-b"]);
+    expect([moved, undone, redone].map(({ present }) => present.physicalOrder.nextInstanceId)).toEqual([5, 5, 5]);
+    expect(moved.present.cards.map(({ id, quantity, order }) => [id, quantity, order])).toEqual(cards.map(({ id, quantity, order }) => [id, quantity, order]));
+  });
+
+  it("does not create history for a semantic physical reorder no-op", () => {
+    const cards = [
+      { ...card, id: "physical-a", quantity: 1, order: 0 },
+      { ...card, id: "physical-b", quantity: 1, order: 1 },
+    ];
+    const initial = createEditorHistoryState({ ...createWorkingCardEditorState(cards), face: "front" });
+    const unchanged = editorHistoryReducer(initial, {
+      type: "reorder-physical-instance",
+      instanceId: "instance-1",
+      targetInstanceId: "instance-2",
+      placement: "before",
+    });
+
+    expect(unchanged.present.physicalOrder.instances.map(({ id }) => id)).toEqual(["instance-1", "instance-2"]);
+    expect(unchanged.past).toHaveLength(0);
+    expect(unchanged.future).toHaveLength(0);
+  });
+
   it("undoes and redoes duplicate while restoring the same clone ID and selection", () => {
     const initial = createEditorHistoryState({ ...createWorkingCardEditorState([card]), face: "front" });
     const duplicated = editorHistoryReducer(initial, { type: "duplicate-card", cardId: card.id, newCardId: "stable-clone-id" });

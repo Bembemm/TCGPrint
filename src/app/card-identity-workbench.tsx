@@ -737,7 +737,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     };
   }, [bleedMm, roundedCorners, trimGuideEnabled, trimGuideExtentMm, externalGuideEnabled, externalGuideStrokeWidthPt, trimGuideColor, externalGuideColor, pageOrientation, cardOrientation, paperFormat, cardFormat, exportContentMode, missingBackPolicy, duplexFlipMode, projectDefaultBack, printerProfileSelection, printerDuplexMode, marginsMm, horizontalGapMm, verticalGapMm, registration, registrationOverride, cutSourceSelection, layoutRows, layoutColumns, skippedSlotIndices, templateGeometry]);
 
-  const compositorFingerprint = useMemo(() => JSON.stringify({ cards: workingCards, settings: projectSettings, cutPreview: cutGeometryPreview }), [workingCards, projectSettings, cutGeometryPreview]);
+  const compositorFingerprint = useMemo(() => JSON.stringify({ cards: workingCards, physicalOrder, settings: projectSettings, cutPreview: cutGeometryPreview }), [workingCards, physicalOrder, projectSettings, cutGeometryPreview]);
   const pdfProofIsStale = Boolean(pdfProof && pdfProof.fingerprint !== compositorFingerprint);
 
   useEffect(() => () => {
