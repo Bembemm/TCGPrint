@@ -1990,44 +1990,70 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     || (exportModeRequiresFrontArtwork(exportContentMode) && !workingCards.every((card) => Boolean(card.selectedArtworkByFace.front)))
     || (exportContentMode !== "front-only" && backValidation.blockers.length > 0);
 
+  const missingFrontArtworkCount = exportModeRequiresFrontArtwork(exportContentMode)
+    ? workingCards.filter((card) => !card.selectedArtworkByFace.front).reduce((sum, card) => sum + card.quantity, 0)
+    : 0;
+  const exportModeLabel = exportContentMode === "front-only" ? "Somente frente"
+    : exportContentMode === "back-only" ? "Somente verso"
+      : exportContentMode === "front-back-separated" ? "Frente + verso separados"
+        : "Duplex";
+
   const exportSection = <div className="workspace-section-content workspace-export-content">
-    <p className="status" aria-live="polite">{status}</p>
     {problem && <p className="error-message" role="alert">{problem}</p>}
-      {workingCards.length > 0 ? <div className="phase5-export">
-        <div className="panel-heading"><div><h3>Export PDF</h3><p>PDF {paperFormat.name} · {cardFormat.name} {cardFormat.widthMm} × {cardFormat.heightMm} mm · quantities expandidas somente na composição.</p></div></div>
-        <section className="export-sync-status" aria-label="Estado de sincronização do export">
-          <h4>Pré-validação</h4>
-          <p>Project: {activeProjectSync ? `${activeProjectSync.projectId} · revisão ${activeProjectSync.revision} · ${activeProjectSync.saved ? "salvo" : "autosave pendente"}` : "sem Project aberto · Working Set local"}</p>
-          <p>Template: {templateRegistrationStatus} · corte: {cutGeometryPreview ? `preview da revisão ${cutGeometryPreview.projectRevision}` : "sem preview de Project"} · sincronizado {projectCutSyncReady ? "sim" : "não"}.</p>
-        </section>
-        <div className="pdf-controls">
-
-
-          {exportContentMode !== "front-only" && <section className="back-preflight" aria-label="Validação de versos antes do export">
-            <h4>Validação de versos</h4>
-            <p>{physicalCardCount} cartas físicas · {backValidation.dfcPhysicalCards} DFC · {backValidation.simplePhysicalCards} simples</p>
-            <p>Versos: {backValidation.backs.auto} auto · {backValidation.backs.projectDefault} Project default · {backValidation.backs.manual} manual · {backValidation.backs.noneOrMissing} none/missing</p>
-            {backValidation.missing.length > 0 && <div>
-              <p className={backValidation.blockers.length ? "error-message" : backValidation.warnings.length ? "warning-message" : "muted"} role={backValidation.blockers.length ? "alert" : "status"}>
-                {backValidation.blockers.length ? `${backValidation.blockers.length} slot(s) sem verso bloqueiam o export.` : backValidation.warnings.length ? `${backValidation.warnings.length} slot(s) sem verso; política permite continuar.` : `${backValidation.missing.length} slot(s) ficarão sem arte traseira.`}
-              </p>
-              <ul>{backValidation.missing.map((item, index) => <li key={`${item.cardId}-${item.copy}-${index}`}>
-                <button type="button" className="link-button" onClick={() => dispatchEditor({ type: "select-card", cardId: item.cardId })}>{item.name} · cópia {item.copy}: {item.reason}</button>
-              </li>)}</ul>
-            </div>}
-          </section>}
-          {templateRegistrationStatus === "legacy-custom-unconfigured" && <p className="error-message" role="alert">O template selecionado declara registration custom, mas a versão não contém geometria física. O PDF usará somente a configuração independente do Project após escolha explícita.</p>}
-          {templateRegistrationStatus === "legacy-physical-format-unconfigured" && <p className="error-message" role="alert">A versão legada do template declara papel ou carta custom sem dimensões físicas. Os formatos atuais do Working Set não foram substituídos; exportação bloqueada até selecionar uma versão com geometria explícita.</p>}
-          {templateRegistrationStatus === "unavailable" && <p className="error-message" role="alert">A versão exata do template não está disponível para validar registration. Revise ou desassocie o template.</p>}
-          <button className="button primary" type="button" disabled={exportActionDisabled} onClick={() => void exportPdf()}>Gerar PDF final</button>
-          <button ref={pdfProofTriggerRef} className="button secondary final-pdf-proof-action" type="button" disabled={exportActionDisabled} onClick={() => void proveFinalPdf()}>Conferir PDF final</button>
-          {abortableOperation === "export" && <button className="button secondary" type="button" aria-label="Cancelar exportação do PDF" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar exportação</button>}
-          {abortableOperation === "pdf-proof" && <button className="button secondary" type="button" aria-label="Cancelar conferência do PDF final" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar conferência</button>}
-          {pdfUrl && <a className="download-link" href={pdfUrl} download={exportDownloadName}>Baixar {exportDownloadName}</a>}
+    {workingCards.length > 0 ? <section className="export-ready-card" aria-label="Exportação final">
+      <header className="export-ready-heading">
+        <div>
+          <h3>Exportar</h3>
+          <p>{physicalCardCount} carta(s) · {paperFormat.name} · {exportModeLabel}</p>
         </div>
-        <p className="muted">Bleed estende somente os pixels da borda imediata de cada lado. Moldura preta continua preta; full-art continua a própria arte. O trim da carta permanece intacto. Cantos arredondados são uma opção separada.</p>
+        <span className={exportActionDisabled ? "export-readiness is-blocked" : "export-readiness is-ready"}>
+          {exportActionDisabled ? "Revisar" : "Pronto"}
+        </span>
+      </header>
 
-      </div>: <p className="muted">Adicione cartas em Cartas para validar e gerar o PDF.</p>}
+      <div className="export-physical-summary" aria-label="Resumo físico">
+        <div><span>Cartas</span><strong>{physicalCardCount}</strong></div>
+        <div><span>Formato</span><strong>{cardFormat.widthMm} × {cardFormat.heightMm} mm</strong></div>
+        <div><span>Folha</span><strong>{paperFormat.name}</strong></div>
+      </div>
+
+      <div className="export-blockers" aria-live="polite">
+        {missingFrontArtworkCount > 0 && <p className="error-message" role="alert">{missingFrontArtworkCount} carta(s) ainda precisam de artwork de frente.</p>}
+        {!projectCutSyncReady && <p className="warning-message" role="status">Aguardando sincronização do Project e do corte antes de exportar.</p>}
+        {activeProjectSync && !activeProjectSync.saved && <p className="muted" role="status">Salvando alterações do Project…</p>}
+        {templateRegistrationStatus === "legacy-custom-unconfigured" && <p className="error-message" role="alert">O template precisa de uma escolha explícita para as marcas de registro.</p>}
+        {templateRegistrationStatus === "legacy-physical-format-unconfigured" && <p className="error-message" role="alert">O template legado não informa as dimensões físicas necessárias.</p>}
+        {templateRegistrationStatus === "unavailable" && <p className="error-message" role="alert">A versão exata do template não está disponível. Revise ou desassocie o template.</p>}
+      </div>
+
+      {exportContentMode !== "front-only" && <details className="export-back-summary" open={backValidation.missing.length > 0}>
+        <summary>Versos · {backValidation.missing.length === 0 ? "prontos" : `${backValidation.missing.length} requer atenção`}</summary>
+        <div className="export-back-summary-body">
+          <p>{backValidation.dfcPhysicalCards} DFC · {backValidation.simplePhysicalCards} simples</p>
+          {backValidation.missing.length > 0 && <>
+            <p className={backValidation.blockers.length ? "error-message" : backValidation.warnings.length ? "warning-message" : "muted"} role={backValidation.blockers.length ? "alert" : "status"}>
+              {backValidation.blockers.length ? `${backValidation.blockers.length} verso(s) bloqueiam o export.` : backValidation.warnings.length ? `${backValidation.warnings.length} verso(s) ausentes; a política atual permite continuar.` : `${backValidation.missing.length} verso(s) ficarão sem arte.`}
+            </p>
+            <ul>{backValidation.missing.map((item, index) => <li key={`${item.cardId}-${item.copy}-${index}`}>
+              <button type="button" className="link-button" onClick={() => dispatchEditor({ type: "select-card", cardId: item.cardId })}>{item.name} · cópia {item.copy}: {item.reason}</button>
+            </li>)}</ul>
+          </>}
+        </div>
+      </details>}
+
+      <div className="export-actions">
+        <button className="button primary" type="button" disabled={exportActionDisabled} onClick={() => void exportPdf()}>Gerar PDF final</button>
+        <button ref={pdfProofTriggerRef} className="button secondary final-pdf-proof-action" type="button" disabled={exportActionDisabled} onClick={() => void proveFinalPdf()}>Conferir PDF final</button>
+        {abortableOperation === "export" && <button className="button secondary" type="button" aria-label="Cancelar exportação do PDF" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar exportação</button>}
+        {abortableOperation === "pdf-proof" && <button className="button secondary" type="button" aria-label="Cancelar conferência do PDF final" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar conferência</button>}
+      </div>
+
+      {pdfUrl && <a className="download-link export-download" href={pdfUrl} download={exportDownloadName}>Baixar {exportDownloadName}</a>}
+      <p className="status export-status" aria-live="polite">{status}</p>
+    </section> : <div className="export-empty-state">
+      <strong>Nada para exportar ainda</strong>
+      <p>Adicione cartas em Cartas para preparar o arquivo final.</p>
+    </div>}
   </div>;
 
   const diagnosticsSection = <div className="workspace-section-content workspace-diagnostics-content">
