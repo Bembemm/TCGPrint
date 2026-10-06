@@ -304,7 +304,6 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .selected-artwork-summary { display: grid; gap: 7px; border: 1px solid #d7dfe5; border-radius: 5px; padding: 11px; background: #fff; }
 .selected-artwork-summary strong { color: #293642; }
 .selected-artwork-summary span { color: #5f6b77; font-size: 11px; overflow-wrap: anywhere; }
-.compositor-active-card .compositor-select-artwork { margin-left: 10px; vertical-align: middle; }
 .phase5-export { margin-top: 16px; padding-top: 12px; border-top: 1px solid #d5dce2; }
 .phase5-export .panel-heading { margin-bottom: 8px; }
 .phase5-export h3 { margin: 0 0 3px; font-size: 14px; }
@@ -381,14 +380,24 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .compositor-layers label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .compositor-side-context { flex: none; margin: 0; color: #536171; font-size: 10px; }
 .compositor-active-card { display: flex; flex: none; align-items: center; gap: 8px; margin: 0; color: #263544; font-size: 10px; font-weight: 650; }
-.compositor-hud-open { min-width: 34px; min-height: 34px; padding: 4px 9px; font-size: 17px; line-height: 1; }
-.compositor-instance-hud { display: grid; flex: none; gap: 8px; border: 1px solid #b8c7d2; border-radius: 5px; padding: 9px; color: #263544; background: #fff; }
-.compositor-instance-hud > div:first-child { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 12px; }
-.compositor-instance-hud > div:first-child span { color: #526171; font-size: 10px; }
-.compositor-hud-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
-.compositor-hud-actions button { min-height: 36px; border: 1px solid #c5d0d9; border-radius: 4px; padding: 6px 8px; color: #294358; background: #f8fafc; font: inherit; font-size: 10px; font-weight: 650; text-align: left; cursor: pointer; }
-.compositor-hud-actions button:disabled { color: #87939d; background: #f1f3f5; cursor: not-allowed; }
-.compositor-hud-actions button:focus-visible { outline: 2px solid #145c92; outline-offset: 2px; }
+.compositor-card-control-overlay { overflow: visible; pointer-events: none; }
+.compositor-card-controls { display: flex; width: 100%; height: 100%; flex-direction: column; align-items: flex-end; gap: 2px; pointer-events: none; }
+.compositor-card-control-button { display: inline-flex; width: 30px; min-width: 30px; height: 30px; min-height: 30px; align-items: center; justify-content: center; border: 1px solid #4b5563; border-radius: 4px; padding: 0; color: #242a30; background: rgb(255 255 255 / 96%); box-shadow: 0 1px 3px rgb(17 24 39 / 22%); font: 700 18px/1 Arial, sans-serif; cursor: pointer; opacity: 0.46; pointer-events: auto; transition: opacity 120ms ease, background-color 120ms ease; }
+.compositor-card-control-button:hover { background: #f0f2f4; }
+.registration-preview-slot:hover .compositor-card-control-button, .compositor-card-control-button:focus-visible, .compositor-card-control-button[aria-expanded="true"], .compositor-local-flip[aria-pressed="true"] { opacity: 1; }
+.compositor-card-control-button:focus-visible { outline: 2px solid #111827; outline-offset: 2px; }
+.compositor-local-inspection-indicator rect { fill: #252b31; fill-opacity: 0.84; }
+.compositor-local-inspection-indicator text { fill: #fff; font-size: 1.65px; font-weight: 700; letter-spacing: 0.06px; }
+.compositor-context-menu { z-index: 50; display: grid; width: min(238px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); gap: 2px; overflow: auto; overscroll-behavior: contain; border: 1px solid #929ba3; border-radius: 5px; padding: 6px; color: #252b31; background: #fff; box-shadow: 0 6px 20px rgb(18 25 32 / 22%); font-size: 12px; }
+.compositor-context-menu-heading { display: grid; gap: 2px; padding: 5px 7px 7px; }
+.compositor-context-menu-heading strong { overflow: hidden; color: #20262c; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.compositor-context-menu-heading span { color: #5b646c; font-size: 10px; }
+.compositor-context-menu [role="menuitem"] { min-height: 34px; border: 0; border-radius: 3px; padding: 6px 8px; color: #252b31; background: transparent; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.compositor-context-menu [role="menuitem"]:hover:not(:disabled) { background: #f0f2f4; }
+.compositor-context-menu [role="menuitem"]:focus-visible { outline: 2px solid #343a40; outline-offset: -2px; background: #f0f2f4; }
+.compositor-context-menu [role="menuitem"]:disabled { color: #858d94; cursor: not-allowed; }
+.compositor-context-menu-separator { height: 1px; margin: 4px 2px; background: #d6dade; }
+.compositor-context-menu [role="menuitem"].is-destructive { border-top: 1px solid #d6dade; border-radius: 0 0 3px 3px; padding-top: 8px; color: #8b2424; font-weight: 700; }
 .compositor-drop-feedback { flex: none; margin: 0; border-left: 3px solid #ea580c; padding: 6px 8px; color: #72410f; background: #fff7ed; font-size: 10px; }
 .compositor-sheet-frame { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; }
 .compositor-sheet-scroll { display: grid; min-width: 0; min-height: 0; flex: 1; place-items: center; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
@@ -398,7 +407,7 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .compositor-selection-bar button:focus-visible { outline: 2px solid #111827; outline-offset: 2px; }
 .canonical-compositor .registration-preview-legend { flex: none; margin-top: 0; }
 .compositor-toolbar button:focus-visible, .compositor-layers summary:focus-visible, .compositor-page-controls select:focus-visible { outline: 2px solid #145c92; outline-offset: 2px; }
-@media (hover: none) { .compositor-selection-checkbox { opacity: 0.86; } }
+@media (hover: none) { .compositor-selection-checkbox { opacity: 0.86; } .compositor-card-control-button { opacity: 0.9; } }
 @media (max-width: 420px) { .compositor-selection-bar { gap: 3px; padding: 3px; } .compositor-selection-bar button { min-height: 38px; padding-inline: 8px; } }
 .compositor-proof-overlay { position: absolute; z-index: 20; inset: 0; display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 8px; border: 1px solid #b5c2cd; border-radius: 6px; padding: 12px; background: #f8fafc; box-shadow: 0 10px 36px #13202c3b; }
 .compositor-proof-heading { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; }

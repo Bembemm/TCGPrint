@@ -67,7 +67,7 @@ import { createBackValidationSummary, exportModeRequiresFrontArtwork } from "./b
 import { applyTemplateLayoutDefaults } from "./template-layout-defaults";
 import { createProjectRestoreLookupGate, runProjectRestoreProviderLookup } from "./project-restore-provider-gate";
 import { ARTWORK_WINDOW_SIZE, ArtworkCandidateGrid, filterAndSortArtworkCandidates, sliceArtworkPage, type ArtworkCandidateView, type ArtworkSortMode } from "./artwork-candidate-grid";
-import ArtworkPickerDialog from "./artwork-picker-dialog";
+import ArtworkPickerDialog, { type FocusableElement } from "./artwork-picker-dialog";
 import { artworkCatalogForRequest, ArtworkQualityHydrator, updateArtworkCatalogCandidate, type KeyedArtworkCatalogResult } from "./artwork-quality-hydration";
 import type { ResolveWorkingCardsResult, SafeImportReport, WorkingSetImportResult } from "../../services/card-workbench";
 
@@ -576,6 +576,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const selectedCardId = editorState.selectedCardId;
   const [activePhysicalInstanceId, setActivePhysicalInstanceId] = useState<string | null>(null);
   const [selectedPhysicalInstanceIds, setSelectedPhysicalInstanceIds] = useState<Set<string>>(() => new Set());
+  const [compositorDocumentRevision, setCompositorDocumentRevision] = useState(0);
   const [compositorSide, setCompositorSide] = useState<CardFaceSide>(editorState.face);
   const face = editorState.face;
   useEffect(() => { setCompositorSide(face); }, [face]);
@@ -588,7 +589,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const [pickerScope, setPickerScope] = useState<PickerScope>("entry");
   const [pickerContext, setPickerContext] = useState<ArtworkPickerContext | null>(null);
   const [pickerSide, setPickerSide] = useState<CardFaceSide>("front");
-  const pickerOpenerRef = useRef<HTMLElement | null>(null);
+  const pickerOpenerRef = useRef<FocusableElement | null>(null);
   const [qualityChecking, setQualityChecking] = useState<{ requestKey: string; candidateIds: ReadonlySet<string> }>({ requestKey: "", candidateIds: new Set() });
   const [artworkCatalogRevision, setArtworkCatalogRevision] = useState(0);
   const [forcedMpcRefreshRevision, setForcedMpcRefreshRevision] = useState<number | null>(null);
@@ -796,7 +797,12 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     setPendingBackChoice(null);
   }, []);
 
-  function openArtworkPicker(cardId: string, side: CardFaceSide, opener: HTMLElement, physical?: { readonly instanceId: string; readonly index: number; readonly copyNumber: number; readonly totalCopies: number }) {
+  useEffect(() => {
+    pickerOpenerRef.current = null;
+    closeArtworkPicker();
+  }, [compositorDocumentRevision, closeArtworkPicker]);
+
+  function openArtworkPicker(cardId: string, side: CardFaceSide, opener: FocusableElement, physical?: { readonly instanceId: string; readonly index: number; readonly copyNumber: number; readonly totalCopies: number }) {
     const target = workingCards.find((card) => card.id === cardId);
     if (!target) return;
     pickerOpenerRef.current = opener;
@@ -1080,6 +1086,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       setArtworkProblem(null);
       setActivePhysicalInstanceId(null);
       setSelectedPhysicalInstanceIds(new Set());
+      setCompositorDocumentRevision((revision) => revision + 1);
       dispatchEditor({ type: "load-cards", cards: result.workingCards });
       setArtworkFilter("all"); setManualIdentities([]);
       setProviderHealth(result.providerHealth);
@@ -1449,6 +1456,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     dispatchEditor({ type: "load-project", cards, physicalOrder: project.snapshot.physicalOrder });
     setActivePhysicalInstanceId(null);
     setSelectedPhysicalInstanceIds(new Set());
+    setCompositorDocumentRevision((revision) => revision + 1);
     setBleedMm(String(settings.bleedMm));
     setRoundedCorners(settings.roundedCorners);
     setTrimGuideEnabled(settings.cutGuides.trim.enabled);
@@ -2055,6 +2063,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         selectedPhysicalInstanceIds={selectedPhysicalInstanceIds}
         face={compositorSide}
         interactionBusy={interactionBusy}
+        documentRevision={compositorDocumentRevision}
         cutPreview={cutGeometryPreview}
         selectedPageNumber={cutPageNumber}
         onSelectPage={setCutPageNumber}
@@ -2111,6 +2120,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         cards: cardsSection,
       }}
     />
-    {artworkPickerContent && <ArtworkPickerDialog title={pickerTitle} onClose={closeArtworkPicker} restoreFocusRef={pickerOpenerRef}>{artworkPickerContent}</ArtworkPickerDialog>}
+    {artworkPickerContent && <ArtworkPickerDialog title={pickerTitle} onClose={closeArtworkPicker} restoreFocusRef={pickerOpenerRef} fallbackFocusRef={liveCompositorRef}>{artworkPickerContent}</ArtworkPickerDialog>}
   </>;
 }

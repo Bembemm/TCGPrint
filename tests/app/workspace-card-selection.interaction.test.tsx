@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -68,7 +68,10 @@ function deferred<T>() {
 describe("Cartas workspace navigation", () => {
   it("keeps physical checkbox selection out of the active Project and autosave", async () => {
     const user = userEvent.setup();
-    const imported = [card("island-card", "Island", 0), card("mountain-card", "Mountain", 1)];
+    const imported = [
+      { ...card("island-card", "Island", 0), manualBackArtwork: { candidateId: `upload:${"b".repeat(64)}`, source: "upload" as const, identityId: null, faceId: "back" as const, selectionPolicy: "user-selected" as const }, backMode: "manual" as const, backModeSelectionPolicy: "explicit" as const },
+      card("mountain-card", "Mountain", 1),
+    ];
     const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
     const savedProjects: Array<Record<string, unknown>> = [];
 
@@ -129,6 +132,22 @@ describe("Cartas workspace navigation", () => {
     await user.click(screen.getByRole("button", { name: "Desmarcar" }));
     expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Salvo");
     expect(screen.queryByRole("group", { name: "Ações de seleção" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Ver verso de Island, cópia 1" }));
+    expect(document.querySelector(".workspace-live-compositor image[data-compositor-artwork]"))
+      .toHaveAttribute("data-compositor-artwork", `upload:${"b".repeat(64)}`);
+    await user.click(screen.getByRole("button", { name: "Mais ações para Island, cópia 1 de 1" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    const islandBody = document.querySelector<SVGRectElement>(".workspace-live-compositor [data-compositor-card-body='true']");
+    expect(islandBody).not.toBeNull();
+    fireEvent.contextMenu(islandBody!, { clientX: 430, clientY: 240 });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(islandBody!);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Fechar seletor de arte" }));
 
     await new Promise((resolve) => setTimeout(resolve, 700));
     expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Salvo");
@@ -266,16 +285,26 @@ describe("Cartas workspace navigation", () => {
     const secondCardBody = secondPhysicalCard.querySelector('[data-compositor-card-body="true"]');
     if (!secondCardBody) throw new Error("The second physical card has no body activation target.");
     await user.click(secondCardBody);
-    const pickerOpener = screen.getByRole("button", { name: "Selecionar arte" });
-    await user.click(pickerOpener);
     const physicalPicker = await screen.findByRole("dialog", { name: /Mountain · cópia 1\/1/ });
     expect(within(physicalPicker).getByText("Carta física 2 · cópia original 1/1")).toBeInTheDocument();
     expect(compositorShell).toHaveAttribute("inert");
     expect(compositorShell).toHaveAttribute("aria-hidden", "true");
     expect(document.querySelector(".workspace-live-compositor")).toBeInTheDocument();
     await user.click(within(physicalPicker).getByRole("button", { name: "Fechar seletor de arte" }));
-    expect(document.activeElement).toBe(pickerOpener);
+    expect(document.activeElement).toBe(secondCardBody);
     expect(compositorShell).not.toHaveAttribute("inert");
+
+    const contextTrigger = secondPhysicalCard.querySelector<HTMLButtonElement>("[data-compositor-context-trigger]");
+    if (!contextTrigger) throw new Error("The second physical card has no context menu trigger.");
+    await user.click(contextTrigger);
+    const contextMenu = screen.getByRole("menu", { name: /Ações para Mountain, cópia 1 de 1/ });
+    await user.click(within(contextMenu).getByRole("menuitem", { name: "Trocar artwork" }));
+    const menuPicker = await screen.findByRole("dialog", { name: /Mountain · cópia 1\/1/ });
+    expect(within(menuPicker).getByText("Carta física 2 · cópia original 1/1")).toBeInTheDocument();
+    await user.click(within(menuPicker).getByRole("button", { name: "Selecionada" }));
+    expect(within(menuPicker).getByRole("radio", { name: "Somente esta cópia física" })).toBeChecked();
+    await user.click(within(menuPicker).getByRole("button", { name: "Fechar seletor de arte" }));
+    expect(document.activeElement).toBe(contextTrigger);
 
     const exportRequestBeforePhysicalSelection = exportRequests[0]?.body;
     const selectedPhysicalCard = composer.querySelector('g[data-physical-card-index="1"]');

@@ -4,7 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { useCallback, useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import ArtworkPickerDialog from "../../src/app/artwork-picker-dialog";
+import ArtworkPickerDialog, { type FocusableElement } from "../../src/app/artwork-picker-dialog";
 import { ArtworkCandidateGrid, filterAndSortArtworkCandidates, sliceArtworkPage, type ArtworkCandidateView } from "../../src/app/artwork-candidate-grid";
 
 afterEach(cleanup);
@@ -57,6 +57,32 @@ function PagedGridHarness() {
   />;
 }
 
+function SvgOpenerHarness() {
+  const [open, setOpen] = useState(false);
+  const [targetPresent, setTargetPresent] = useState(true);
+  const openerRef = useRef<FocusableElement | null>(null);
+  const fallbackRef = useRef<HTMLButtonElement | null>(null);
+  const close = useCallback(() => setOpen(false), []);
+  return <>
+    <svg aria-label="Carta">
+      {targetPresent && <rect
+        ref={(element) => { openerRef.current = element; }}
+        role="button"
+        tabIndex={0}
+        aria-label="Abrir picker da carta"
+        width="30"
+        height="40"
+        onClick={() => setOpen(true)}
+      />}
+    </svg>
+    <button ref={fallbackRef} type="button">Compositor</button>
+    <button type="button" onClick={() => setTargetPresent(false)}>Remover carta</button>
+    {open && <ArtworkPickerDialog title="Carta picker" onClose={close} restoreFocusRef={openerRef} fallbackFocusRef={fallbackRef}>
+      <input data-picker-initial-focus aria-label="Buscar carta" />
+    </ArtworkPickerDialog>}
+  </>;
+}
+
 describe("M6 Artwork Picker dialog", () => {
   it("has an accessible modal, traps focus, closes with Escape, and restores the opener focus", async () => {
     const user = userEvent.setup();
@@ -86,6 +112,22 @@ describe("M6 Artwork Picker dialog", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Island picker" })).not.toBeInTheDocument());
     expect(document.activeElement).toBe(opener);
     expect(screen.getByTestId("background")).not.toHaveAttribute("inert");
+  });
+
+  it("restores focus to a connected SVG opener and safely falls back if its card was removed", async () => {
+    const user = userEvent.setup();
+    render(<SvgOpenerHarness />);
+
+    const opener = screen.getByRole("button", { name: "Abrir picker da carta" });
+    await user.click(opener);
+    expect(await screen.findByRole("dialog", { name: "Carta picker" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Fechar seletor de arte" }));
+    expect(document.activeElement).toBe(opener);
+
+    await user.click(opener);
+    await user.click(screen.getByRole("button", { name: "Remover carta" }));
+    await user.click(screen.getByRole("button", { name: "Fechar seletor de arte" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Compositor" }));
   });
 
   it("filters and ranks the full 1200-item catalog and jumps to result 1100 with at most 60 cards mounted", async () => {

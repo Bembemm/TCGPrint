@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { CutGuideEngine } from "../../core/geometry";
 import type { CardSlotMm } from "../../core/geometry/placement";
 import { buildCanonicalPrintPlan, getDuplexPreviewOverlayMatrix } from "../../core/duplex";
@@ -14,6 +15,7 @@ import { cutPathToSvgD } from "../../core/cut";
 import type { CutPreviewDto } from "../../services/cut-api";
 import { transformRegistrationGeometry, type RegistrationPrimitive } from "../../core/registration";
 import { calculateCompositorScale, COMPOSITOR_CSS_PX_PER_MM, stepCompositorScale, type CompositorViewportSize, type CompositorZoomMode } from "./compositor-zoom";
+import type { FocusableElement } from "./artwork-picker-dialog";
 
 interface RegistrationLayoutPreviewProps {
   readonly settings: ProjectSettingsV2;
@@ -24,6 +26,7 @@ interface RegistrationLayoutPreviewProps {
   readonly selectedPhysicalInstanceIds?: ReadonlySet<string>;
   readonly face?: "front" | "back";
   readonly interactionBusy?: boolean;
+  readonly documentRevision?: number;
   readonly cutPreview?: CutPreviewDto | null;
   readonly selectedPageNumber: number;
   readonly onSelectPage: (pageNumber: number) => void;
@@ -33,7 +36,7 @@ interface RegistrationLayoutPreviewProps {
   readonly onSelectAllPhysicalInstances?: (instanceIds: readonly string[]) => void;
   readonly onClearPhysicalInstanceSelection?: () => void;
   readonly onFaceChange?: (side: "front" | "back") => void;
-  readonly onSelectArtwork?: (cardId: string, instanceId: string, physicalCardIndex: number, side: "front" | "back", opener: HTMLButtonElement, copyNumber: number, totalCopies: number) => void;
+  readonly onSelectArtwork?: (cardId: string, instanceId: string, physicalCardIndex: number, side: "front" | "back", opener: FocusableElement, copyNumber: number, totalCopies: number) => void;
   readonly onPhysicalAction?: (action: "increase" | "remove-copy" | "duplicate-copy" | "delete-entry" | "open-settings", instanceId: string, cardId: string) => void;
   readonly onReorderPhysicalInstance?: (instanceId: string, targetInstanceId: string | null, placement: "before" | "after") => void;
 }
@@ -50,9 +53,28 @@ interface PhysicalCardInstance {
   readonly card: WorkingCard;
 }
 
-interface ContextualHudTarget {
+interface ContextMenuTarget {
   readonly instanceId: string;
   readonly workingCardId: string;
+  readonly documentRevision: number;
+  readonly x: number;
+  readonly y: number;
+  readonly opener: FocusableElement;
+  readonly token: number;
+}
+
+interface LocalFaceOverrideState {
+  readonly documentRevision: number;
+  readonly byInstanceId: Readonly<Record<string, "front" | "back">>;
+}
+
+const EMPTY_LOCAL_FACE_OVERRIDES: Readonly<Record<string, "front" | "back">> = {};
+
+interface ContextMenuPlacement {
+  readonly instanceId: string;
+  readonly left: number;
+  readonly top: number;
+  readonly ready: boolean;
 }
 
 const COMPOSITOR_LAYERS: readonly { readonly id: CompositorLayer; readonly label: string }[] = [
@@ -96,13 +118,21 @@ function calibrationSvgMatrix(matrix: { readonly a: number; readonly b: number; 
   return `matrix(${matrix.a} ${matrix.b} ${matrix.c} ${matrix.d} ${matrix.e} ${matrix.f})`;
 }
 
-export default function RegistrationLayoutPreview({ settings, cardCount, cards, physicalOrder: suppliedPhysicalOrder, activePhysicalInstanceId = null, selectedPhysicalInstanceIds = EMPTY_PHYSICAL_INSTANCE_IDS, face, interactionBusy = false, cutPreview = null, selectedPageNumber, onSelectPage, onToggleSkippedSlot, onActivatePhysicalInstance, onTogglePhysicalInstanceSelection, onSelectAllPhysicalInstances, onClearPhysicalInstanceSelection, onFaceChange, onSelectArtwork, onPhysicalAction, onReorderPhysicalInstance }: RegistrationLayoutPreviewProps) {
+export default function RegistrationLayoutPreview({ settings, cardCount, cards, physicalOrder: suppliedPhysicalOrder, activePhysicalInstanceId = null, selectedPhysicalInstanceIds = EMPTY_PHYSICAL_INSTANCE_IDS, face, interactionBusy = false, documentRevision = 0, cutPreview = null, selectedPageNumber, onSelectPage, onToggleSkippedSlot, onActivatePhysicalInstance, onTogglePhysicalInstanceSelection, onSelectAllPhysicalInstances, onClearPhysicalInstanceSelection, onFaceChange, onSelectArtwork, onPhysicalAction, onReorderPhysicalInstance }: RegistrationLayoutPreviewProps) {
   const physicalOrder = suppliedPhysicalOrder ?? createPhysicalOrder(cards);
   const [uncontrolledSide, setUncontrolledSide] = useState<"front" | "back">("front");
   const previewSide = face ?? uncontrolledSide;
-  const [hudTarget, setHudTarget] = useState<ContextualHudTarget | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null);
+  const [contextMenuPlacement, setContextMenuPlacement] = useState<ContextMenuPlacement | null>(null);
+  const [localFaceOverrideState, setLocalFaceOverrideState] = useState<LocalFaceOverrideState>(() => ({ documentRevision, byInstanceId: {} }));
+  const localFaceOverrideByInstanceId = localFaceOverrideState.documentRevision === documentRevision
+    ? localFaceOverrideState.byInstanceId
+    : EMPTY_LOCAL_FACE_OVERRIDES;
   const [dragSourceId, setDragSourceId] = useState<string | null>(null);
-  const selectionPointerDownRef = useRef(false);
+  const interactionControlPointerDownRef = useRef(false);
+  const suppressNextBodyActivationRef = useRef(false);
+  const contextMenuTokenRef = useRef(0);
+  const contextMenuElementRef = useRef<HTMLDivElement | null>(null);
   const [dropFeedback, setDropFeedback] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [manualZoomScale, setManualZoomScale] = useState(1);
@@ -127,6 +157,13 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       return [{ id: reference.id, physicalCardIndex, workingCardId: entry.id, copyNumber, totalCopies: totals.get(entry.id) ?? entry.quantity, card: entry } satisfies PhysicalCardInstance];
     });
   }, [cards, physicalOrder]);
+  const physicalInstanceIdsSignature = physicalCards.map(({ id }) => id).join("\u0000");
+  const contextMenuInstance = contextMenu === null || contextMenu.documentRevision !== documentRevision
+    ? undefined
+    : physicalCards.find(({ id, workingCardId }) => id === contextMenu.instanceId && workingCardId === contextMenu.workingCardId);
+  const activeInstance = activePhysicalInstanceId === null
+    ? undefined
+    : physicalCards.find(({ id }) => id === activePhysicalInstanceId);
   const result = useMemo(() => {
     try {
       const templateGeometry = settings.layout.templateGeometry ?? cutPreview?.derivedTemplateGeometry;
@@ -161,6 +198,74 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     : physicalCards.find(({ id }) => id === activePhysicalInstanceId)?.physicalCardIndex ?? null;
   const physicalOrderSignature = physicalOrder.instances.map(({ id }) => id).join("\u0000");
   const pageLayoutSignature = result.pages?.map(({ startCardIndex, endCardIndex }) => `${startCardIndex}:${endCardIndex}`).join("|") ?? "";
+  const previousPreviewSideRef = useRef(previewSide);
+  const previousPageIndexRef = useRef(activePageIndex);
+  const previousDocumentRevisionRef = useRef(documentRevision);
+  useEffect(() => {
+    const existingIds = new Set(physicalCards.map(({ id }) => id));
+    setLocalFaceOverrideState((current) => {
+      const overrides = current.documentRevision === documentRevision ? current.byInstanceId : EMPTY_LOCAL_FACE_OVERRIDES;
+      const next = Object.fromEntries(Object.entries(overrides).filter(([instanceId]) => existingIds.has(instanceId)));
+      return current.documentRevision === documentRevision && Object.keys(next).length === Object.keys(overrides).length
+        ? current
+        : { documentRevision, byInstanceId: next };
+    });
+  }, [physicalInstanceIdsSignature, documentRevision]);
+  useEffect(() => {
+    if (previousPreviewSideRef.current !== previewSide) {
+      previousPreviewSideRef.current = previewSide;
+      setLocalFaceOverrideState({ documentRevision, byInstanceId: {} });
+      setContextMenu(null);
+    }
+  }, [previewSide]);
+  useEffect(() => {
+    if (previousPageIndexRef.current !== activePageIndex) {
+      previousPageIndexRef.current = activePageIndex;
+      setContextMenu(null);
+    }
+  }, [activePageIndex]);
+  useEffect(() => {
+    if (previousDocumentRevisionRef.current !== documentRevision) {
+      previousDocumentRevisionRef.current = documentRevision;
+      setLocalFaceOverrideState({ documentRevision, byInstanceId: {} });
+      setContextMenu(null);
+    }
+  }, [documentRevision]);
+  useEffect(() => {
+    if (contextMenu !== null && !contextMenuInstance) setContextMenu(null);
+  }, [contextMenu, contextMenuInstance]);
+  useEffect(() => {
+    if (!contextMenu) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && contextMenuElementRef.current?.contains(target)) return;
+      setContextMenu(null);
+    };
+    const close = () => setContextMenu(null);
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [contextMenu?.token]);
+  useEffect(() => {
+    if (!contextMenu || !contextMenuInstance) return;
+    const menu = contextMenuElementRef.current;
+    if (!menu) return;
+    const { width, height } = menu.getBoundingClientRect();
+    const edge = 8;
+    const left = Math.min(Math.max(edge, contextMenu.x), Math.max(edge, window.innerWidth - width - edge));
+    const top = Math.min(Math.max(edge, contextMenu.y), Math.max(edge, window.innerHeight - height - edge));
+    setContextMenuPlacement((current) => current?.instanceId === contextMenu.instanceId
+      && current.left === left && current.top === top && current.ready
+      ? current
+      : { instanceId: contextMenu.instanceId, left, top, ready: true });
+    const firstItem = menu.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');
+    firstItem?.focus();
+  }, [contextMenu?.token, contextMenu?.x, contextMenu?.y, contextMenuInstance?.copyNumber, contextMenuInstance?.totalCopies]);
   const previousSelectionLocation = useRef({
     instanceId: activePhysicalInstanceId,
     physicalIndex: activePhysicalCardIndex,
@@ -267,39 +372,31 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     setManualZoomScale(stepCompositorScale(zoomScale, direction));
   }
 
-  function previewArtwork(cardEntry: WorkingCard | undefined) {
+  function previewArtwork(cardEntry: WorkingCard | undefined, side: "front" | "back" = previewSide) {
     const bleedMm = layers.bleed ? settings.bleedMm : 0;
     const roundedCorners = settings.roundedCorners;
     const cornerRadiusMm = settings.cardFormat.cornerRadiusMm ?? 3.175;
     const sourceTrimWidthMm = settings.cardFormat.widthMm;
     const sourceTrimHeightMm = settings.cardFormat.heightMm;
-    if (!cardEntry) return { url: undefined, label: "Carta sem arte selecionada", available: false };
-    if (previewSide === "front") {
+    if (!cardEntry) return { url: undefined, label: "Carta sem arte selecionada", available: false, referenceId: undefined };
+    if (side === "front") {
       const artwork = cardEntry.selectedArtworkByFace.front;
       return artwork
-        ? { url: artworkPreviewUrl(artwork.candidateId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm), label: `${cardEntry.identity?.name ?? cardEntry.identityHints.name ?? "Carta"} · frente`, available: true }
-        : { url: undefined, label: "Frente sem artwork selecionada", available: false };
+        ? { url: artworkPreviewUrl(artwork.candidateId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm), label: `${cardEntry.identity?.name ?? cardEntry.identityHints.name ?? "Carta"} · frente`, available: true, referenceId: artwork.candidateId }
+        : { url: undefined, label: "Frente sem artwork selecionada", available: false, referenceId: undefined };
     }
     const back = resolveBackForMissingPolicy(cardEntry, settings.projectDefaultBack, settings.missingBackPolicy);
-    if (back.status !== "available") return { url: undefined, label: back.status === "intentional-none" ? "Verso intencionalmente em branco" : "Verso sem artwork disponível", available: false };
-    if (back.artwork) return { url: artworkPreviewUrl(back.artwork.candidateId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm), label: `${cardEntry.identity?.name ?? cardEntry.identityHints.name ?? "Carta"} · verso`, available: true };
+    if (back.status !== "available") return { url: undefined, label: back.status === "intentional-none" ? "Verso intencionalmente em branco" : "Verso sem artwork disponível", available: false, referenceId: undefined };
+    if (back.artwork) return { url: artworkPreviewUrl(back.artwork.candidateId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm), label: `${cardEntry.identity?.name ?? cardEntry.identityHints.name ?? "Carta"} · verso`, available: true, referenceId: back.artwork.candidateId };
     if (back.asset) return {
       url: backPreviewUrl(back.asset.assetId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm),
       label: back.mode === "project-default" ? "Verso padrão do Project" : "Verso da Back Library",
       available: true,
+      referenceId: backPreviewUrl(back.asset.assetId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm),
     };
-    return { url: undefined, label: "Verso sem artwork disponível", available: false };
+    return { url: undefined, label: "Verso sem artwork disponível", available: false, referenceId: undefined };
   }
 
-  const activeInstance = activePhysicalInstanceId === null
-    ? undefined
-    : physicalCards.find(({ id }) => id === activePhysicalInstanceId);
-  const hudInstance = hudTarget === null
-    ? undefined
-    : physicalCards.find(({ id, workingCardId }) => id === hudTarget.instanceId && workingCardId === hudTarget.workingCardId);
-  useEffect(() => {
-    if (hudTarget !== null && !hudInstance) setHudTarget(null);
-  }, [hudTarget, hudInstance]);
   const activePageSlot = visibleActivePhysicalCardIndex === null
     ? undefined
     : placement.slots.find((slot) => pagePlacement.startCardIndex + slot.cardIndex! === visibleActivePhysicalCardIndex);
@@ -309,8 +406,81 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   const lastAssignedGridSlot = placement.gridSlots.reduce((last, slot) => assigned.has(slot.index) ? Math.max(last, slot.index) : last, -1);
 
   function activateInstance(instance: PhysicalCardInstance) {
-    setHudTarget(null);
+    setContextMenu(null);
     onActivatePhysicalInstance?.(instance.id, instance.workingCardId, previewSide);
+  }
+
+  function openContextMenu(instance: PhysicalCardInstance, x: number, y: number, opener: FocusableElement) {
+    activateInstance(instance);
+    const token = ++contextMenuTokenRef.current;
+    setContextMenuPlacement({ instanceId: instance.id, left: x, top: y, ready: false });
+    setContextMenu({ instanceId: instance.id, workingCardId: instance.workingCardId, documentRevision, x, y, opener, token });
+  }
+
+  function closeContextMenu(restoreFocus = false) {
+    const opener = contextMenu?.opener;
+    setContextMenu(null);
+    if (!restoreFocus) return;
+    window.setTimeout(() => {
+      const target = opener?.isConnected ? opener : sheetViewportRef.current;
+      target?.focus();
+    }, 0);
+  }
+
+  function openPickerForInstance(instance: PhysicalCardInstance, side: "front" | "back", opener: FocusableElement) {
+    closeContextMenu(false);
+    if (!interactionBusy) onSelectArtwork?.(instance.workingCardId, instance.id, instance.physicalCardIndex, side, opener, instance.copyNumber, instance.totalCopies);
+  }
+
+  function activateBody(instance: PhysicalCardInstance, opener: SVGRectElement) {
+    if (suppressNextBodyActivationRef.current) {
+      suppressNextBodyActivationRef.current = false;
+      return;
+    }
+    activateInstance(instance);
+    const displayedSide = localFaceOverrideByInstanceId[instance.id] ?? previewSide;
+    openPickerForInstance(instance, displayedSide, opener);
+  }
+
+  function toggleLocalFace(instance: PhysicalCardInstance) {
+    const currentSide = localFaceOverrideByInstanceId[instance.id] ?? previewSide;
+    const nextSide = currentSide === "front" ? "back" : "front";
+    if (!previewArtwork(instance.card, nextSide).available) return;
+    setLocalFaceOverrideState((current) => {
+      const overrides = current.documentRevision === documentRevision ? current.byInstanceId : EMPTY_LOCAL_FACE_OVERRIDES;
+      const next = { ...overrides };
+      if (nextSide === previewSide) delete next[instance.id];
+      else next[instance.id] = nextSide;
+      return { documentRevision, byInstanceId: next };
+    });
+  }
+
+  function handleContextMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeContextMenu(true);
+      return;
+    }
+    const items = Array.from(contextMenuElementRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
+    if (items.length === 0) return;
+    const currentIndex = items.findIndex((item) => item === document.activeElement);
+    let nextIndex: number | undefined;
+    if (event.key === "ArrowDown") nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
+    else if (event.key === "ArrowUp") nextIndex = currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = items.length - 1;
+    if (nextIndex !== undefined) {
+      event.preventDefault();
+      event.stopPropagation();
+      items[nextIndex]?.focus();
+    }
+  }
+
+  function runPhysicalMenuAction(action: "increase" | "remove-copy" | "duplicate-copy" | "delete-entry" | "open-settings") {
+    if (!contextMenuInstance || !onPhysicalAction || interactionBusy) return;
+    closeContextMenu(action !== "open-settings");
+    onPhysicalAction(action, contextMenuInstance.id, contextMenuInstance.workingCardId);
   }
 
   function beginSlotDrag(event: DragEvent<SVGGElement>, instance: PhysicalCardInstance) {
@@ -318,6 +488,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       event.preventDefault();
       return;
     }
+    suppressNextBodyActivationRef.current = true;
     activateInstance(instance);
     setDragSourceId(instance.id);
     setDropFeedback(null);
@@ -357,15 +528,6 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     setDropTargetId(null);
   }
 
-  function moveInstanceRelative(instance: PhysicalCardInstance, direction: "before" | "after") {
-    if (!onReorderPhysicalInstance || interactionBusy) return;
-    const index = physicalCards.findIndex(({ id, workingCardId }) => id === instance.id && workingCardId === instance.workingCardId);
-    if (index < 0) return;
-    const neighbor = direction === "before" ? physicalCards[index - 1] : physicalCards[index + 1];
-    if (!neighbor) return;
-    onReorderPhysicalInstance(instance.id, neighbor.id, direction);
-  }
-
   return <section className="registration-preview canonical-compositor" aria-label="Compositor live">
     <div className="registration-preview-heading compositor-heading">
       <div><h2>Compositor live</h2><p>{settings.paperFormat.name} {settings.pageOrientation} · {settings.cardFormat.name} {card.widthMm} × {card.heightMm} mm / {settings.cardOrientation} · capacidade {placement.capacity} · página {activePageIndex + 1} de {pageCount}</p></div>
@@ -403,38 +565,16 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       {activeInstance
         ? `Carta física ${activeInstance.physicalCardIndex + 1} · ${activeCardName} · cópia ${activeInstance.copyNumber}/${activeInstance.totalCopies}${isDoubleFacedIdentity(activeInstance.card.identity) ? " · DFC" : ""}`
         : "Selecione uma carta física no compositor"}
-      {activeInstance && onSelectArtwork && <button
-        type="button"
-        className="button secondary compositor-select-artwork"
-        data-testid="compositor-select-artwork"
-        onClick={(event) => onSelectArtwork(activeInstance.workingCardId, activeInstance.id, activeInstance.physicalCardIndex, previewSide, event.currentTarget, activeInstance.copyNumber, activeInstance.totalCopies)}
-      >Selecionar arte</button>}
-      {activeInstance && onPhysicalAction && <button type="button" className="button secondary compositor-hud-open" aria-label={`Mais ações para ${activeCardName}, cópia ${activeInstance.copyNumber}`} aria-expanded={hudInstance?.id === activeInstance.id && hudInstance.workingCardId === activeInstance.workingCardId} onClick={() => setHudTarget((current) => current?.instanceId === activeInstance.id && current.workingCardId === activeInstance.workingCardId ? null : { instanceId: activeInstance.id, workingCardId: activeInstance.workingCardId })}>…</button>}
       {activePageSlot && slotsCanBeSkipped && previewSide === "front" && <button type="button" className="link-button" onClick={() => toggle(activePageSlot.index)}>Desativar slot da carta ativa</button>}
     </p>
     {dropFeedback && <p role="status" className="compositor-drop-feedback">{dropFeedback}</p>}
-    {hudInstance && onPhysicalAction && <section className="compositor-instance-hud" aria-label={`Ações para ${hudInstance.card.identity?.name ?? hudInstance.card.identityHints.name ?? "Carta"}, cópia ${hudInstance.copyNumber}`} data-testid="compositor-instance-hud">
-      <div><strong>{hudInstance.card.identity?.name ?? hudInstance.card.identityHints.name ?? "Carta custom"}</strong><span>Cópia {hudInstance.copyNumber}/{hudInstance.totalCopies} · Carta física {hudInstance.physicalCardIndex + 1} · {previewSide === "front" ? "Front" : "Back"}{isDoubleFacedIdentity(hudInstance.card.identity) ? " · DFC" : ""}</span></div>
-      <div className="compositor-hud-actions">
-        <button type="button" disabled={interactionBusy} onClick={(event) => onSelectArtwork?.(hudInstance.workingCardId, hudInstance.id, hudInstance.physicalCardIndex, previewSide, event.currentTarget, hudInstance.copyNumber, hudInstance.totalCopies)}>Selecionar arte</button>
-        <button type="button" disabled={interactionBusy} onClick={(event) => onSelectArtwork?.(hudInstance.workingCardId, hudInstance.id, hudInstance.physicalCardIndex, "back", event.currentTarget, hudInstance.copyNumber, hudInstance.totalCopies)}>Configurar verso / face · Back</button>
-        <button type="button" disabled={interactionBusy} onClick={() => onPhysicalAction("increase", hudInstance.id, hudInstance.workingCardId)}>Aumentar quantidade</button>
-        <button type="button" disabled={interactionBusy} onClick={() => onPhysicalAction("remove-copy", hudInstance.id, hudInstance.workingCardId)}>Remover uma cópia</button>
-        <button type="button" disabled={interactionBusy} onClick={() => onPhysicalAction("duplicate-copy", hudInstance.id, hudInstance.workingCardId)}>Duplicar como entrada independente</button>
-        <button type="button" disabled={interactionBusy} onClick={() => onPhysicalAction("delete-entry", hudInstance.id, hudInstance.workingCardId)}>Remover carta inteira ({hudInstance.totalCopies} cópia(s))</button>
-        <button type="button" disabled={interactionBusy} onClick={() => onPhysicalAction("open-settings", hudInstance.id, hudInstance.workingCardId)}>Configurações completas</button>
-        <button type="button" disabled={interactionBusy || hudInstance.physicalCardIndex === 0} onClick={() => moveInstanceRelative(hudInstance, "before")}>Mover antes</button>
-        <button type="button" disabled={interactionBusy || hudInstance.physicalCardIndex >= physicalCards.length - 1} onClick={() => moveInstanceRelative(hudInstance, "after")}>Mover depois</button>
-        <button type="button" onClick={() => setHudTarget(null)}>Fechar ações</button>
-      </div>
-    </section>}
     <p className="muted compositor-calibration-context" data-calibration-profile-version={settings.printerProfileSelection?.version ?? "none"}>
       {settings.printerProfileSelection
         ? <>Perfil {settings.printerProfileSelection.name} v{settings.printerProfileSelection.version} · {settings.printerDuplexMode} · {previewSide === "front" ? "frente" : "verso"}: ΔX {settings.printerProfileSelection[previewSide].offsetXUm} µm, ΔY {settings.printerProfileSelection[previewSide].offsetYUm} µm, rotação {settings.printerProfileSelection[previewSide].rotationDeg}°, escala {settings.printerProfileSelection[previewSide].scaleX}/{settings.printerProfileSelection[previewSide].scaleY}, skew {settings.printerProfileSelection[previewSide].skewXDeg ?? 0}°/{settings.printerProfileSelection[previewSide].skewYDeg ?? 0}° · {calibrationTransform ? layers.calibration ? "transformação calibrada visível" : "geometria nominal visível" : "transformação identidade"}.</>
         : <>Sem perfil de calibração selecionado; geometria nominal visível.</>} Conteúdo impresso segue a calibração; paths SVG/DXF de Silhouette permanecem nominais.
     </p>
     <div className="compositor-sheet-frame">
-    <div className="compositor-sheet-scroll" ref={sheetViewportRef}>
+    <div className="compositor-sheet-scroll" ref={sheetViewportRef} tabIndex={-1}>
       <svg className="registration-sheet-preview compositor-sheet" style={{ width: `${page.widthMm * COMPOSITOR_CSS_PX_PER_MM * zoomScale}px`, height: `${page.heightMm * COMPOSITOR_CSS_PX_PER_MM * zoomScale}px`, maxWidth: "none", maxHeight: "none" }} viewBox={`0 0 ${page.widthMm} ${page.heightMm}`} role="group" aria-label={`Compositor live ${previewSide === "front" ? "frente" : "verso"} ${settings.paperFormat.name} ${settings.pageOrientation}, página ${activePageIndex + 1} de ${pageCount}`} data-compositor-page={activePageIndex + 1} data-active-physical-card-index={visibleActivePhysicalCardIndex ?? "none"} data-compositor-bleed-mm={settings.bleedMm} data-compositor-calibration-matrix={visibleCalibrationMatrix ?? "identity"} data-compositor-profile-version={settings.printerProfileSelection?.version ?? "none"} data-compositor-printer-mode={settings.printerDuplexMode} data-compositor-zoom-mode={zoomMode} data-compositor-zoom-scale={zoomScale}>
         <defs>
           {placement.gridSlots.filter(({ cardIndex }) => cardIndex !== undefined).map((slot) => {
@@ -499,6 +639,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               {...(role ? { "aria-pressed": skipped.has(slot.index) } : {})}
               data-physical-card-index={physicalCardIndex}
               data-physical-instance-id={physicalInstance?.id}
+              data-local-inspection-side={physicalInstance && localFaceOverrideByInstanceId[physicalInstance.id] !== previewSide ? localFaceOverrideByInstanceId[physicalInstance.id] : undefined}
               data-active-physical-instance={isActive ? "true" : "false"}
               data-multi-selected={isMultiSelected ? "true" : "false"}
               data-working-card-id={physicalInstance?.workingCardId}
@@ -521,15 +662,15 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               }}
               {...({ draggable: Boolean(physicalInstance && onReorderPhysicalInstance && !interactionBusy) } as Record<string, boolean>)}
               onDragStart={physicalInstance ? (event) => {
-                if (selectionPointerDownRef.current) {
+                if (interactionControlPointerDownRef.current) {
                   event.preventDefault();
                   event.stopPropagation();
-                  selectionPointerDownRef.current = false;
+                  interactionControlPointerDownRef.current = false;
                   return;
                 }
                 beginSlotDrag(event, physicalInstance);
               } : undefined}
-              onDragEnd={() => { selectionPointerDownRef.current = false; setDragSourceId(null); setDropTargetId(null); }}
+              onDragEnd={() => { interactionControlPointerDownRef.current = false; setDragSourceId(null); setDropTargetId(null); }}
               onDragOver={(event) => {
                 if (!dragSourceId || interactionBusy) return;
                 event.preventDefault();
@@ -538,10 +679,10 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               }}
               onDrop={(event) => dropOnSlot(event, physicalInstance, canDropAtEnd, invalidDropReason, invalidDropTargetId)}
               onContextMenu={(event) => {
-                if (!physicalInstance || !onPhysicalAction) return;
+                if (!physicalInstance) return;
                 event.preventDefault();
-                activateInstance(physicalInstance);
-                setHudTarget({ instanceId: physicalInstance.id, workingCardId: physicalInstance.workingCardId });
+                const opener = event.currentTarget.querySelector<SVGRectElement>("[data-compositor-card-body='true']");
+                if (opener) openContextMenu(physicalInstance, event.clientX, event.clientY, opener);
               }}
               className={`registration-preview-slot ${previewSide === "back" ? "is-back" : ""} ${isActive ? "is-active" : ""} ${dropTargetId === physicalInstance?.id || dropTargetId === "end" && canDropAtEnd ? "is-drop-target" : ""} ${dropTargetId === invalidDropTargetId ? "is-invalid-drop" : ""} ${dragSourceId === physicalInstance?.id ? "is-drag-source" : ""}`}
             >
@@ -549,13 +690,15 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
             {skipped.has(slot.index) && <rect x={slot.trim.xMm} y={slot.trim.yMm} width={slot.trim.widthMm} height={slot.trim.heightMm} fill="#f3e8ff" stroke="#7e22ce" strokeWidth={layers.trim ? "0.6" : "0"} />}
             {assigned.has(slot.index) && (() => {
               const physicalCard = physicalInstance?.card;
+              const displayedSide = physicalInstance ? localFaceOverrideByInstanceId[physicalInstance.id] ?? previewSide : previewSide;
+              const localInspection = displayedSide !== previewSide;
               const centerX = slot.trim.xMm + slot.trim.widthMm / 2;
               const centerY = slot.trim.yMm + slot.trim.heightMm / 2;
-              const artwork = previewArtwork(physicalCard);
+              const artwork = previewArtwork(physicalCard, displayedSide);
               const name = physicalCard?.identity?.name ?? physicalCard?.identityHints.name ?? physicalCard?.importSource.filename ?? "Custom card";
               const dfcLabel = physicalCard && isDoubleFacedIdentity(physicalCard.identity) ? " · DFC" : "";
               const clipId = `compositor-${activePageIndex}-${previewSide}-${slot.index}`;
-              const duplexRotationDegrees = previewSide === "back" ? pagePair.backPageTransform.artworkOrientation.rotationDegrees : 0;
+              const duplexRotationDegrees = displayedSide === "back" ? pagePair.backPageTransform.artworkOrientation.rotationDegrees : 0;
               const rotateArtwork = [
                 ...(artworkRotationDegrees ? [`rotate(${artworkRotationDegrees} ${centerX} ${centerY})`] : []),
                 ...(duplexRotationDegrees ? [`rotate(${duplexRotationDegrees} ${centerX} ${centerY})`] : []),
@@ -579,10 +722,15 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
                   transform={rotateArtwork}
                   role="img"
                   aria-label={artwork.label}
-                  data-compositor-artwork={previewSide === "front" ? physicalCard?.selectedArtworkByFace.front?.candidateId ?? artwork.url : physicalCard?.selectedArtworkByFace.back?.candidateId ?? physicalCard?.manualBackArtwork?.candidateId ?? artwork.url}
+                  data-compositor-artwork={artwork.referenceId}
+                  data-compositor-face={displayedSide}
                   data-compositor-source="preview-thumbnail"
                 />}
-                {!artwork.available && previewSide === "back" && <text x={centerX} y={slot.trim.yMm + slot.trim.heightMm * 0.76} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize * 0.62} fill="#475569">VERSO INDISPONÍVEL</text>}
+                {!artwork.available && displayedSide === "back" && <text x={centerX} y={slot.trim.yMm + slot.trim.heightMm * 0.76} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize * 0.62} fill="#475569">VERSO INDISPONÍVEL</text>}
+                {localInspection && <g className="compositor-local-inspection-indicator" pointerEvents="none" aria-hidden="true">
+                  <rect x={slot.trim.xMm + 1} y={slot.trim.yMm + slot.trim.heightMm - 5.5} width="24" height="4.2" rx="0.8" />
+                  <text x={slot.trim.xMm + 2.2} y={slot.trim.yMm + slot.trim.heightMm - 2.7}>INSPEÇÃO · {displayedSide === "front" ? "FRENTE" : "VERSO"}</text>
+                </g>}
               </>;
             })()}
             {layers.trim && assigned.has(slot.index) && <rect x={slot.trim.xMm} y={slot.trim.yMm} width={slot.trim.widthMm} height={slot.trim.heightMm} fill="none" stroke="#1d4ed8" strokeWidth="0.45" data-compositor-layer="trim" />}
@@ -601,11 +749,17 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               tabIndex={0}
               aria-label={`Slot ${slot.index + 1} · carta física ${physicalCardIndex! + 1} · ${cardName} · cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`}
               aria-current={isActive ? "true" : undefined}
-              onClick={() => activateInstance(physicalInstance)}
+              onPointerDown={() => {
+                if (suppressNextBodyActivationRef.current && !dragSourceId) suppressNextBodyActivationRef.current = false;
+              }}
+              onClick={(event) => activateBody(physicalInstance, event.currentTarget)}
               onKeyDown={(event: KeyboardEvent<SVGRectElement>) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
+                  event.stopPropagation();
                   activateInstance(physicalInstance);
+                  const displayedSide = localFaceOverrideByInstanceId[physicalInstance.id] ?? previewSide;
+                  openPickerForInstance(physicalInstance, displayedSide, event.currentTarget);
                 }
               }}
             />}
@@ -615,14 +769,14 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               aria-checked={isMultiSelected}
               aria-label={`Selecionar ${cardName}, cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`}
               tabIndex={0}
-              onPointerDown={(event) => { selectionPointerDownRef.current = true; event.stopPropagation(); }}
-              onPointerUp={() => { selectionPointerDownRef.current = false; }}
-              onPointerCancel={() => { selectionPointerDownRef.current = false; }}
-              onMouseDown={(event) => { selectionPointerDownRef.current = true; event.stopPropagation(); }}
-              onMouseUp={() => { selectionPointerDownRef.current = false; }}
+              onPointerDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
+              onPointerUp={() => { interactionControlPointerDownRef.current = false; }}
+              onPointerCancel={() => { interactionControlPointerDownRef.current = false; }}
+              onMouseDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
+              onMouseUp={() => { interactionControlPointerDownRef.current = false; }}
               onClick={(event) => {
                 event.stopPropagation();
-                selectionPointerDownRef.current = false;
+                interactionControlPointerDownRef.current = false;
                 onTogglePhysicalInstanceSelection(physicalInstance.id);
               }}
               onKeyDown={(event: KeyboardEvent<SVGGElement>) => {
@@ -636,12 +790,73 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
                 event.preventDefault();
                 event.stopPropagation();
               }}
-              onContextMenu={(event) => event.stopPropagation()}
+              onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
             >
               <rect x={slot.trim.xMm + 0.25} y={slot.trim.yMm + 0.25} width="8" height="8" fill="transparent" pointerEvents="all" />
               <rect className="compositor-selection-checkbox-box" x={slot.trim.xMm + 1.5} y={slot.trim.yMm + 1.5} width="5.5" height="5.5" rx="0.8" />
               <path className="compositor-selection-checkbox-mark" d={`M ${slot.trim.xMm + 2.65} ${slot.trim.yMm + 4.15} l 1.05 1.05 l 2.25 -2.55`} />
             </g>}
+            {physicalInstance && (() => {
+              const displayedSide = localFaceOverrideByInstanceId[physicalInstance.id] ?? previewSide;
+              const nextSide = displayedSide === "front" ? "back" : "front";
+              const canFlip = previewArtwork(physicalInstance.card, nextSide).available;
+              const isMenuOpen = contextMenu?.instanceId === physicalInstance.id && contextMenu.workingCardId === physicalInstance.workingCardId;
+              const localName = cardName ?? "Carta";
+              return <foreignObject
+                className="compositor-card-control-overlay"
+                x={slot.trim.xMm + slot.trim.widthMm - 12.4}
+                y={slot.trim.yMm + 0.7}
+                width="12"
+                height={canFlip ? "24" : "12"}
+                pointerEvents="none"
+                data-compositor-controls-for={physicalInstance.id}
+              >
+                <div className="compositor-card-controls">
+                  {canFlip && <button
+                    type="button"
+                    className="compositor-card-control-button compositor-local-flip"
+                    data-compositor-local-flip="true"
+                    draggable={false}
+                    aria-label={`Ver ${nextSide === "front" ? "frente" : "verso"} de ${localName}, cópia ${physicalInstance.copyNumber}`}
+                    aria-pressed={localFaceOverrideByInstanceId[physicalInstance.id] !== undefined}
+                    onPointerDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
+                    onPointerUp={() => { interactionControlPointerDownRef.current = false; }}
+                    onPointerCancel={() => { interactionControlPointerDownRef.current = false; }}
+                    onMouseDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
+                    onMouseUp={() => { interactionControlPointerDownRef.current = false; }}
+                    onClick={(event) => { event.preventDefault(); event.stopPropagation(); interactionControlPointerDownRef.current = false; toggleLocalFace(physicalInstance); }}
+                    onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                    onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                  >↻</button>}
+                  <button
+                    type="button"
+                    className="compositor-card-control-button compositor-context-trigger"
+                    data-compositor-context-trigger="true"
+                    draggable={false}
+                    aria-label={`Mais ações para ${localName}, cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`}
+                    aria-haspopup="menu"
+                    aria-expanded={isMenuOpen}
+                    onPointerDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
+                    onPointerUp={() => { interactionControlPointerDownRef.current = false; }}
+                    onPointerCancel={() => { interactionControlPointerDownRef.current = false; }}
+                    onMouseDown={(event) => { interactionControlPointerDownRef.current = true; event.stopPropagation(); }}
+                    onMouseUp={() => { interactionControlPointerDownRef.current = false; }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      interactionControlPointerDownRef.current = false;
+                      if (isMenuOpen) closeContextMenu(true);
+                      else {
+                        const bounds = event.currentTarget.getBoundingClientRect();
+                        openContextMenu(physicalInstance, bounds.left, bounds.bottom + 4, event.currentTarget);
+                      }
+                    }}
+                    onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                    onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                  >⋯</button>
+                </div>
+              </foreignObject>;
+            })()}
             {skipped.has(slot.index) && <>
               <line x1={slot.trim.xMm} y1={slot.trim.yMm} x2={slot.trim.xMm + slot.trim.widthMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
               <line x1={slot.trim.xMm + slot.trim.widthMm} y1={slot.trim.yMm} x2={slot.trim.xMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
@@ -665,5 +880,48 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     {!slotsCanBeSkipped && <p className="muted">Defina linhas e colunas antes de desativar slots.</p>}
     {previewSide === "back" && <p className="muted">O verso mantém a mesma página física e o pareamento duplex. Registration, cut paths e calibration acompanham a geometria refletida da folha; a orientação da artwork segue o modo {pagePair.flipMode}.</p>}
     <div className="registration-preview-legend"><span><i className="legend-bleed" /> Bleed</span><span><i className="legend-trim" /> Trim/card</span><span><i className="legend-cut-source" /> Cut path</span><span><i className="legend-skipped" /> Skipped slot/path</span><span><i className="legend-reserved" /> Reserved zone</span><span><i className="legend-mark" /> Registration mark</span></div>
+    {contextMenu && contextMenuInstance && typeof document !== "undefined" && createPortal(<div
+      ref={contextMenuElementRef}
+      className="compositor-context-menu"
+      role="menu"
+      aria-label={`Ações para ${contextMenuInstance.card.identity?.name ?? contextMenuInstance.card.identityHints.name ?? "Carta"}, cópia ${contextMenuInstance.copyNumber} de ${contextMenuInstance.totalCopies}`}
+      data-testid="compositor-context-menu"
+      data-physical-instance-id={contextMenuInstance.id}
+      data-working-card-id={contextMenuInstance.workingCardId}
+      onKeyDown={handleContextMenuKeyDown}
+      style={{
+        position: "fixed",
+        left: `${contextMenuPlacement?.instanceId === contextMenuInstance.id ? contextMenuPlacement.left : contextMenu.x}px`,
+        top: `${contextMenuPlacement?.instanceId === contextMenuInstance.id ? contextMenuPlacement.top : contextMenu.y}px`,
+        visibility: contextMenuPlacement?.instanceId === contextMenuInstance.id && contextMenuPlacement.ready ? "visible" : "hidden",
+      }}
+    >
+      <div className="compositor-context-menu-heading">
+        <strong>{contextMenuInstance.card.identity?.name ?? contextMenuInstance.card.identityHints.name ?? "Carta custom"}</strong>
+        <span>Cópia {contextMenuInstance.copyNumber}/{contextMenuInstance.totalCopies} · Carta física {contextMenuInstance.physicalCardIndex + 1}</span>
+      </div>
+      {(() => {
+        const displayedSide = localFaceOverrideByInstanceId[contextMenuInstance.id] ?? previewSide;
+        const opener = contextMenu.opener;
+        return <>
+          <button type="button" role="menuitem" disabled={interactionBusy || !onSelectArtwork} onClick={(event) => {
+            event.stopPropagation();
+            closeContextMenu(false);
+            if (!interactionBusy) onSelectArtwork?.(contextMenuInstance.workingCardId, contextMenuInstance.id, contextMenuInstance.physicalCardIndex, displayedSide, opener, contextMenuInstance.copyNumber, contextMenuInstance.totalCopies);
+          }}>Trocar artwork</button>
+          <button type="button" role="menuitem" disabled={interactionBusy || !onSelectArtwork} onClick={(event) => {
+            event.stopPropagation();
+            closeContextMenu(false);
+            if (!interactionBusy) onSelectArtwork?.(contextMenuInstance.workingCardId, contextMenuInstance.id, contextMenuInstance.physicalCardIndex, "back", opener, contextMenuInstance.copyNumber, contextMenuInstance.totalCopies);
+          }}>Configurar verso/face</button>
+        </>;
+      })()}
+      <button type="button" role="menuitem" disabled={interactionBusy || !onPhysicalAction} onClick={(event) => { event.stopPropagation(); runPhysicalMenuAction("increase"); }}>Aumentar quantidade</button>
+      {contextMenuInstance.totalCopies > 1 && <button type="button" role="menuitem" disabled={interactionBusy || !onPhysicalAction} onClick={(event) => { event.stopPropagation(); runPhysicalMenuAction("remove-copy"); }}>Remover uma cópia</button>}
+      <button type="button" role="menuitem" disabled={interactionBusy || !onPhysicalAction} onClick={(event) => { event.stopPropagation(); runPhysicalMenuAction("duplicate-copy"); }}>Duplicar como entrada independente</button>
+      <button type="button" role="menuitem" disabled={interactionBusy || !onPhysicalAction} onClick={(event) => { event.stopPropagation(); runPhysicalMenuAction("open-settings"); }}>Configurações completas</button>
+      <div className="compositor-context-menu-separator" role="separator" />
+      <button type="button" role="menuitem" className="is-destructive" disabled={interactionBusy || !onPhysicalAction} onClick={(event) => { event.stopPropagation(); runPhysicalMenuAction("delete-entry"); }}>Remover carta inteira</button>
+    </div>, document.body)}
   </section>;
 }

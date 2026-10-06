@@ -58,7 +58,7 @@ function compositorWorkspace(
   initialCards: readonly WorkingCard[] = [card()],
   initialSettings: ProjectSettingsV2 = { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } },
   enableSkippedSlotChanges = false,
-  onSelectArtwork?: (cardId: string, instanceId: string, physicalCardIndex: number, side: "front" | "back", opener: HTMLButtonElement, copyNumber: number, totalCopies: number) => void,
+  onSelectArtwork?: (cardId: string, instanceId: string, physicalCardIndex: number, side: "front" | "back", opener: HTMLElement | SVGElement, copyNumber: number, totalCopies: number) => void,
   enableReorder = false,
   initialPhysicalOrder?: PhysicalOrder,
   onPhysicalAction?: (action: "increase" | "remove-copy" | "duplicate-copy" | "delete-entry" | "open-settings", instanceId: string, cardId: string) => void,
@@ -199,6 +199,12 @@ function checkboxForPhysicalIndex(index: number) {
   return checkbox;
 }
 
+function flipButtonForPhysicalIndex(index: number) {
+  const button = slotForPhysicalIndex(index).querySelector<HTMLButtonElement>("[data-compositor-local-flip]");
+  if (!button) throw new Error(`Physical card ${index} has no local face inspection control.`);
+  return button;
+}
+
 function artworkForPhysicalIndex(index: number) {
   const artwork = slotForPhysicalIndex(index).querySelector("image[data-compositor-artwork]");
   if (!artwork) throw new Error("Physical card " + index + " has no preview artwork on this side.");
@@ -330,7 +336,7 @@ describe("canonical live compositor interactions", () => {
     await user.click(bodyButtonForPhysicalIndex(0));
     expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-1");
     expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "false");
-    expect(onSelectArtwork).not.toHaveBeenCalled();
+    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", "instance-1", 0, "front", bodyButtonForPhysicalIndex(0), 1, 3);
 
     await user.click(checkboxForPhysicalIndex(1));
     expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "true");
@@ -352,10 +358,9 @@ describe("canonical live compositor interactions", () => {
     expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-1");
     expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
     expect(screen.getByTestId("physical-order-ids")).toHaveTextContent(physicalOrder ?? "");
-    expect(onSelectArtwork).not.toHaveBeenCalled();
   });
 
-  it("keeps checkbox clicks out of the HUD and drag path while right click only activates", async () => {
+  it("keeps checkbox clicks out of the context menu and drag path while right click only activates", async () => {
     const user = userEvent.setup();
     const onPhysicalAction = vi.fn();
     render(compositorWorkspace([{ ...card(), quantity: 2 }], undefined, false, undefined, true, undefined, onPhysicalAction));
@@ -363,7 +368,7 @@ describe("canonical live compositor interactions", () => {
     await user.click(checkboxForPhysicalIndex(0));
     expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("none");
-    expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 
     const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-1") };
     fireEvent.pointerDown(checkboxForPhysicalIndex(0), { pointerType: "mouse" });
@@ -374,7 +379,7 @@ describe("canonical live compositor interactions", () => {
     expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("none");
 
     expect(fireEvent.contextMenu(bodyButtonForPhysicalIndex(1))).toBe(false);
-    expect(screen.getByTestId("compositor-instance-hud")).toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: /Ações para Island, cópia 2/i })).toBeInTheDocument();
     expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
     expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "true");
     expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "false");
@@ -434,7 +439,7 @@ describe("canonical live compositor interactions", () => {
     await user.click(checkboxForPhysicalIndex(2));
     await user.click(bodyButtonForPhysicalIndex(1));
     await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i }));
-    await user.click(screen.getByRole("button", { name: "Remover uma cópia" }));
+    await user.click(screen.getByRole("menuitem", { name: "Remover uma cópia" }));
 
     await waitFor(() => expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-3"));
     expect(screen.getByRole("checkbox", { name: "Selecionar Island, cópia 2 de 2" })).toHaveAttribute("aria-checked", "true");
@@ -449,7 +454,7 @@ describe("canonical live compositor interactions", () => {
     await user.click(checkboxForPhysicalIndex(1));
     await user.click(bodyButtonForPhysicalIndex(0));
     await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 1/i }));
-    await user.click(screen.getByRole("button", { name: "Duplicar como entrada independente" }));
+    await user.click(screen.getByRole("menuitem", { name: "Duplicar como entrada independente" }));
 
     expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2,instance-3");
     expect(screen.getByRole("checkbox", { name: "Selecionar Island, cópia 1 de 2" })).toHaveAttribute("aria-checked", "true");
@@ -471,7 +476,7 @@ describe("canonical live compositor interactions", () => {
     await user.click(checkboxForPhysicalIndex(1));
     await user.click(bodyButtonForPhysicalIndex(0));
     await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 1/i }));
-    await user.click(screen.getByRole("button", { name: "Remover carta inteira (1 cópia(s))" }));
+    await user.click(screen.getByRole("menuitem", { name: "Remover carta inteira" }));
 
     await waitFor(() => expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-2"));
     expect(screen.queryByRole("checkbox", { name: "Selecionar Island, cópia 1 de 1" })).not.toBeInTheDocument();
@@ -479,20 +484,21 @@ describe("canonical live compositor interactions", () => {
     expect(screen.getByRole("group", { name: "Ações de seleção" })).toBeInTheDocument();
   });
 
-  it("passes the exact active physical instance and visible side to the artwork picker entry action", async () => {
+  it("opens the picker immediately from the body for the exact physical copy and displayed side", async () => {
     const user = userEvent.setup();
     const onSelectArtwork = vi.fn();
     render(compositorWorkspace([{ ...card(), quantity: 3 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, onSelectArtwork));
 
-    await user.click(screen.getByRole("button", { name: /carta física 2.*cópia 2 de 3/i }));
     await user.click(screen.getByRole("button", { name: "Verso" }));
-    const openPicker = screen.getByRole("button", { name: "Selecionar arte" });
-    await user.click(openPicker);
+    const body = bodyButtonForPhysicalIndex(1);
+    await user.click(body);
 
-    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", "instance-2", 1, "back", openPicker, 2, 3);
+    expect(onSelectArtwork).toHaveBeenCalledTimes(1);
+    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", "instance-2", 1, "back", body, 2, 3);
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "false");
   });
 
-  it("opens M6 for the stable physical instance at its custom sequence index", async () => {
+  it("opens the picker for the stable physical instance at its custom sequence index", async () => {
     const user = userEvent.setup();
     const onSelectArtwork = vi.fn();
     const cards = [{ ...card(), quantity: 3 }];
@@ -503,13 +509,87 @@ describe("canonical live compositor interactions", () => {
     const physicalSecond = screen.getByRole("button", { name: /carta física 2.*cópia 2 de 3/i });
     expect(physicalSecond).toHaveAttribute("data-physical-instance-id", "instance-3");
     await user.click(physicalSecond);
-    const openPicker = screen.getByRole("button", { name: "Selecionar arte" });
-    await user.click(openPicker);
-
-    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", "instance-3", 1, "front", openPicker, 2, 3);
+    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", "instance-3", 1, "front", physicalSecond, 2, 3);
   });
 
-  it("opens the contextual HUD on right click and configures the semantic Back through M6", async () => {
+  it("opens the picker from Enter and Space on the body without changing selection", async () => {
+    const user = userEvent.setup();
+    const onSelectArtwork = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], undefined, false, onSelectArtwork));
+    const body = bodyButtonForPhysicalIndex(1);
+
+    body.focus();
+    await user.keyboard("{Enter}");
+    expect(onSelectArtwork).toHaveBeenCalledTimes(1);
+    expect(onSelectArtwork).toHaveBeenLastCalledWith("compositor-card", "instance-2", 1, "front", body, 2, 2);
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "false");
+
+    onSelectArtwork.mockClear();
+    body.focus();
+    await user.keyboard(" ");
+    expect(onSelectArtwork).toHaveBeenCalledTimes(1);
+    expect(onSelectArtwork).toHaveBeenLastCalledWith("compositor-card", "instance-2", 1, "front", body, 2, 2);
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("flips only the target physical copy for inspection and resets on global face change", async () => {
+    const user = userEvent.setup();
+    const onSelectArtwork = vi.fn();
+    const onPhysicalAction = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], undefined, false, onSelectArtwork, false, undefined, onPhysicalAction));
+    const revision = screen.getByTestId("project-revision").textContent;
+    const order = screen.getByTestId("physical-order-ids").textContent;
+
+    const flip = flipButtonForPhysicalIndex(0);
+    expect(flip).toHaveAccessibleName("Ver verso de Island, cópia 1");
+    expect(flip).toHaveAttribute("aria-pressed", "false");
+    await user.click(flip);
+
+    expect(flipButtonForPhysicalIndex(0)).toHaveAttribute("aria-pressed", "true");
+    expect(artworkForPhysicalIndex(0)).toHaveAttribute("data-compositor-artwork", artworkBack.candidateId);
+    expect(artworkForPhysicalIndex(1)).toHaveAttribute("data-compositor-artwork", artworkFront.candidateId);
+    expect(sheet()).toHaveAttribute("aria-label", expect.stringContaining("frente"));
+    expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("none");
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent(order ?? "");
+    expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
+    expect(onSelectArtwork).not.toHaveBeenCalled();
+    expect(onPhysicalAction).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Verso" }));
+    expect(flipButtonForPhysicalIndex(0)).toHaveAttribute("aria-pressed", "false");
+    expect(artworkForPhysicalIndex(0)).toHaveAttribute("data-compositor-artwork", artworkBack.candidateId);
+    expect(artworkForPhysicalIndex(1)).toHaveAttribute("data-compositor-artwork", artworkBack.candidateId);
+  });
+
+  it("keeps a local flip with its physical ID after legacy reorder and suppresses the residual click", () => {
+    const onSelectArtwork = vi.fn();
+    const order = createPhysicalOrder([{ ...card(), quantity: 3 }]);
+    render(compositorWorkspace([{ ...card(), quantity: 3 }], undefined, false, onSelectArtwork, true, order));
+    fireEvent.click(flipButtonForPhysicalIndex(1));
+
+    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-2") };
+    fireEvent.dragStart(slotForPhysicalIndex(1), { dataTransfer });
+    fireEvent.dragOver(slotForPhysicalIndex(2), { dataTransfer });
+    fireEvent.drop(slotForPhysicalIndex(2), { dataTransfer });
+
+    expect(slotForPhysicalIndex(2)).toHaveAttribute("data-physical-instance-id", "instance-2");
+    expect(artworkForPhysicalIndex(2)).toHaveAttribute("data-compositor-artwork", artworkBack.candidateId);
+    fireEvent.click(bodyButtonForPhysicalIndex(2));
+    expect(onSelectArtwork).not.toHaveBeenCalled();
+  });
+
+  it("does not offer local flip when no alternate artwork is available", () => {
+    render(compositorWorkspace([simpleCardWithBackMode("none")], {
+      ...DEFAULT_PROJECT_SETTINGS,
+      missingBackPolicy: "block",
+      layout: { skippedSlotIndices: [] },
+    }));
+
+    expect(slotForPhysicalIndex(0).querySelector("[data-compositor-local-flip]")).not.toBeInTheDocument();
+  });
+
+  it("opens the floating context menu on right click and configures semantic Back through the existing picker", async () => {
     const user = userEvent.setup();
     const onSelectArtwork = vi.fn();
     const onPhysicalAction = vi.fn();
@@ -517,105 +597,144 @@ describe("canonical live compositor interactions", () => {
     const firstSlot = slotForPhysicalIndex(0);
 
     expect(fireEvent.contextMenu(firstSlot)).toBe(false);
-    expect(screen.getByTestId("compositor-instance-hud")).toBeInTheDocument();
+    const menu = screen.getByRole("menu", { name: /Ações para Island, cópia 1/i });
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu).toHaveStyle({ position: "fixed" });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Trocar artwork",
+      "Configurar verso/face",
+      "Aumentar quantidade",
+      "Remover uma cópia",
+      "Duplicar como entrada independente",
+      "Configurações completas",
+      "Remover carta inteira",
+    ]);
+    expect(onSelectArtwork).not.toHaveBeenCalled();
+    expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "false");
     expect(fireEvent.contextMenu(sheet())).toBe(true);
 
-    const configureBack = screen.getByRole("button", { name: "Configurar verso / face · Back" });
+    const configureBack = within(menu).getByRole("menuitem", { name: "Configurar verso/face" });
     await user.click(configureBack);
-    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", "instance-1", 0, "back", configureBack, 1, 2);
+    expect(onSelectArtwork).toHaveBeenCalledWith("compositor-card", "instance-1", 0, "back", bodyButtonForPhysicalIndex(0), 1, 2);
     expect(onPhysicalAction).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Fechar ações" }));
-    expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("closes the previous HUD when another physical instance becomes active", async () => {
+  it("opens one menu for the kebab target and navigates it by keyboard", async () => {
     const user = userEvent.setup();
-    render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, false, undefined, vi.fn()));
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, vi.fn(), false, undefined, vi.fn()));
 
-    await user.click(bodyButtonForPhysicalIndex(0));
-    const firstActions = screen.getByRole("button", { name: /mais ações para Island, cópia 1/i });
-    await user.click(firstActions);
-    expect(screen.getByTestId("compositor-instance-hud")).toHaveAttribute("aria-label", "Ações para Island, cópia 1");
-    expect(firstActions).toHaveAttribute("aria-expanded", "true");
-
-    await user.click(bodyButtonForPhysicalIndex(1));
-
-    expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
-    expect(bodyButtonForPhysicalIndex(1)).toHaveAttribute("aria-current", "true");
-    expect(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i })).toHaveAttribute("aria-expanded", "false");
+    const secondActions = screen.getByRole("button", { name: "Mais ações para Island, cópia 2 de 2" });
+    await user.click(secondActions);
+    expect(secondActions).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Trocar artwork" }));
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Configurar verso/face" }));
+    await user.keyboard("{End}");
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Remover carta inteira" }));
+    expect(screen.queryByRole("menuitem", { name: /Mover antes|Mover depois|Girar|Disable slot/i })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(secondActions);
+    expect(secondActions).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("moves exactly the physical instance represented by the open HUD", async () => {
+  it("restores focus to the kebab after a non-destructive menu action", async () => {
     const user = userEvent.setup();
+    const onPhysicalAction = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], undefined, false, undefined, false, undefined, onPhysicalAction));
+
+    const actions = screen.getByRole("button", { name: "Mais ações para Island, cópia 1 de 2" });
+    await user.click(actions);
+    await user.click(screen.getByRole("menuitem", { name: "Aumentar quantidade" }));
+
+    expect(onPhysicalAction).toHaveBeenCalledWith("increase", "instance-1", "compositor-card");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(actions));
+  });
+
+  it("replaces the target on another right click without changing multi-selection", async () => {
     const order = createPhysicalOrder([{ ...card(), quantity: 3 }]);
     render(compositorWorkspace([{ ...card(), quantity: 3 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true, order, vi.fn()));
+    fireEvent.click(checkboxForPhysicalIndex(0));
 
-    await user.click(bodyButtonForPhysicalIndex(1));
-    await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i }));
-    expect(screen.getByTestId("compositor-instance-hud")).toHaveTextContent("Cópia 2/3");
-    await user.click(screen.getByRole("button", { name: "Mover depois" }));
+    expect(fireEvent.contextMenu(bodyButtonForPhysicalIndex(0), { clientX: 20, clientY: 30 })).toBe(false);
+    expect(screen.getByRole("menu")).toHaveTextContent("Cópia 1/3");
+    expect(fireEvent.contextMenu(bodyButtonForPhysicalIndex(1), { clientX: 40, clientY: 50 })).toBe(false);
 
-    expect(slotForPhysicalIndex(0)).toHaveAttribute("data-physical-instance-id", "instance-1");
-    expect(slotForPhysicalIndex(1)).toHaveAttribute("data-physical-instance-id", "instance-3");
-    expect(slotForPhysicalIndex(2)).toHaveAttribute("data-physical-instance-id", "instance-2");
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+    expect(screen.getByRole("menu")).toHaveTextContent("Cópia 2/3");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
+    expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "true");
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "false");
   });
 
-  it("replaces the HUD context on contextmenu and reorders the newly targeted instance", async () => {
-    const order = createPhysicalOrder([{ ...card(), quantity: 3 }]);
-    render(compositorWorkspace([{ ...card(), quantity: 3 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true, order, vi.fn()));
-
-    fireEvent.contextMenu(slotForPhysicalIndex(0));
-    expect(screen.getByTestId("compositor-instance-hud")).toHaveTextContent("Cópia 1/3");
-    fireEvent.contextMenu(slotForPhysicalIndex(1));
-
-    expect(screen.getAllByTestId("compositor-instance-hud")).toHaveLength(1);
-    expect(screen.getByTestId("compositor-instance-hud")).toHaveTextContent("Cópia 2/3");
-    expect(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i })).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Mover depois" }));
-
-    expect(slotForPhysicalIndex(0)).toHaveAttribute("data-physical-instance-id", "instance-1");
-    expect(slotForPhysicalIndex(1)).toHaveAttribute("data-physical-instance-id", "instance-3");
-    expect(slotForPhysicalIndex(2)).toHaveAttribute("data-physical-instance-id", "instance-2");
-  });
-
-  it("closes the HUD when its physical instance is removed and keeps it closed after undo restores that ID", async () => {
+  it("closes the context menu when its physical instance is removed and keeps it closed after undo restores that ID", async () => {
     const user = userEvent.setup();
     const cards = [{ ...card(), quantity: 2 }];
     const order = createPhysicalOrder(cards);
     render(compositorWorkspace(cards, { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, false, order, vi.fn(), false, true));
 
+    fireEvent.click(flipButtonForPhysicalIndex(1));
     await user.click(bodyButtonForPhysicalIndex(1));
     await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i }));
-    expect(screen.getByTestId("compositor-instance-hud")).toHaveTextContent("Cópia 2/2");
-    await user.click(screen.getByRole("button", { name: "Remover uma cópia" }));
+    expect(screen.getByRole("menu")).toHaveTextContent("Cópia 2/2");
+    await user.click(screen.getByRole("menuitem", { name: "Remover uma cópia" }));
 
-    expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Remover uma cópia" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Remover uma cópia" })).not.toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector(".compositor-sheet-scroll")));
     await user.click(screen.getByRole("button", { name: "Undo test removal" }));
-    expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(artworkForPhysicalIndex(1)).toHaveAttribute("data-compositor-artwork", artworkFront.candidateId);
   });
 
-  it("opens the explicit mobile HUD and offers keyboard reorder through the same insertion action", async () => {
+  it("closes the context menu on outside pointer, scroll, resize, and page change", async () => {
     const user = userEvent.setup();
-    const onPhysicalAction = vi.fn();
-    render(compositorWorkspace([{ ...card(), quantity: 3 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true, undefined, onPhysicalAction));
-    await user.click(bodyButtonForPhysicalIndex(0));
-    const moreActions = screen.getByRole("button", { name: /mais ações para Island, cópia 1/i });
-    await user.click(moreActions);
-    expect(screen.getByTestId("compositor-instance-hud")).toBeInTheDocument();
-    expect(moreActions).toHaveAttribute("aria-expanded", "true");
-
-    const moveAfter = screen.getByRole("button", { name: "Mover depois" });
-    moveAfter.focus();
-    await user.keyboard("{Enter}");
-    expect(sheet().querySelectorAll("g[data-physical-instance-id]")[0]).toHaveAttribute("data-physical-instance-id", "instance-2");
-    expect(sheet().querySelectorAll("g[data-physical-instance-id]")[1]).toHaveAttribute("data-physical-instance-id", "instance-1");
-    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-instance-id", "instance-1");
-    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
-    expect(onPhysicalAction).not.toHaveBeenCalled();
+    render(compositorWorkspace([{ ...card(), quantity: 11 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { rows: 1, columns: 3, skippedSlotIndices: [] } }, false, undefined, false, undefined, vi.fn()));
+    const openMenu = async () => user.click(screen.getByRole("button", { name: "Mais ações para Island, cópia 1 de 11" }));
+    await openMenu();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await openMenu();
+    fireEvent.scroll(sheet());
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await openMenu();
+    fireEvent(window, new Event("resize"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await openMenu();
+    await user.click(screen.getByRole("button", { name: "Próxima página" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("blocks HUD mutations and drag initiation while the compositor is busy", async () => {
+  it("clamps the right-click menu inside the viewport after measuring it", async () => {
+    const innerWidthDescriptor = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    const innerHeightDescriptor = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 360 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 240 });
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("compositor-context-menu")) {
+        return { x: 0, y: 0, left: 0, top: 0, right: 160, bottom: 180, width: 160, height: 180, toJSON: () => ({}) };
+      }
+      return originalRect.call(this);
+    });
+    try {
+      render(compositorWorkspace([{ ...card(), quantity: 1 }], undefined, false, undefined, false, undefined, vi.fn()));
+      fireEvent.contextMenu(bodyButtonForPhysicalIndex(0), { clientX: 350, clientY: 230 });
+      await waitFor(() => expect(screen.getByRole("menu")).toHaveStyle({ left: "192px", top: "52px" }));
+    } finally {
+      if (innerWidthDescriptor) Object.defineProperty(window, "innerWidth", innerWidthDescriptor);
+      if (innerHeightDescriptor) Object.defineProperty(window, "innerHeight", innerHeightDescriptor);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("blocks context-menu mutations and drag initiation while the compositor is busy", async () => {
     const user = userEvent.setup();
     const onPhysicalAction = vi.fn();
     render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true, undefined, onPhysicalAction, true));
@@ -623,8 +742,8 @@ describe("canonical live compositor interactions", () => {
     expect(slot).toHaveAttribute("draggable", "false");
     await user.click(slot);
     await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 1/i }));
-    expect(screen.getByRole("button", { name: "Aumentar quantidade" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Remover uma cópia" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Aumentar quantidade" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Duplicar como entrada independente" })).toBeDisabled();
 
     const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-1") };
     expect(fireEvent.dragStart(slot, { dataTransfer })).toBe(false);

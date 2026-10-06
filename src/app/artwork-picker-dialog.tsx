@@ -3,10 +3,13 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode, RefObject } from "react";
 
+export type FocusableElement = HTMLElement | SVGElement;
+
 export interface ArtworkPickerDialogProps {
   readonly title: string;
   readonly onClose: () => void;
-  readonly restoreFocusRef: RefObject<HTMLElement | null>;
+  readonly restoreFocusRef: RefObject<FocusableElement | null>;
+  readonly fallbackFocusRef?: RefObject<HTMLElement | null>;
   readonly children: ReactNode;
 }
 
@@ -20,7 +23,7 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
   });
 }
 
-export default function ArtworkPickerDialog({ title, onClose, restoreFocusRef, children }: ArtworkPickerDialogProps) {
+export default function ArtworkPickerDialog({ title, onClose, restoreFocusRef, fallbackFocusRef, children }: ArtworkPickerDialogProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
 
   useEffect(() => {
@@ -56,8 +59,12 @@ export default function ArtworkPickerDialog({ title, onClose, restoreFocusRef, c
       document.removeEventListener("keydown", handleKeyDown, true);
       const opener = restoreFocusRef.current;
       if (opener?.isConnected) opener.focus();
+      else {
+        const fallback = fallbackFocusRef?.current;
+        if (fallback?.isConnected) fallback.focus();
+      }
     };
-  }, [onClose, restoreFocusRef]);
+  }, [onClose, restoreFocusRef, fallbackFocusRef]);
 
   return <>
     <div className="artwork-picker-backdrop" aria-hidden="true" />
