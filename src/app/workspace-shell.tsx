@@ -9,6 +9,12 @@ import { WorkspaceProjectHeaderContext } from "./workspace-project-header-contex
 export { WORKSPACE_SECTIONS } from "./workspace-sidebar";
 export type { WorkspaceSection } from "./workspace-sidebar";
 
+const MOBILE_EDITOR_QUERY = "(max-width: 840px)";
+
+function isMobileEditorViewport(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia(MOBILE_EDITOR_QUERY).matches;
+}
+
 export interface WorkspaceSharedPanel {
   readonly id: string;
   readonly sections: readonly WorkspaceSection[];
@@ -69,8 +75,7 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
   }, []);
 
   const openAdvancedDiagnostics = (opener: HTMLButtonElement) => {
-    const isMobile = typeof window.matchMedia === "function"
-      && window.matchMedia("(max-width: 700px)").matches;
+    const isMobile = isMobileEditorViewport();
     if (isMobile) {
       if (drawerOpen) drawerOpenerRef.current = opener;
       else openDrawer(opener);
@@ -87,7 +92,10 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
 
   useEffect(() => {
     if (!drawerOpen) return;
-    sidebarRef.current?.querySelector<HTMLElement>(`#workspace-tab-${activeSection}`)?.focus();
+    const focusTarget = isMobileEditorViewport()
+      ? sidebarRef.current?.querySelector<HTMLElement>(".workspace-sidebar-close")
+      : sidebarRef.current?.querySelector<HTMLElement>(`#workspace-tab-${activeSection}`);
+    focusTarget?.focus();
   }, [activeSection, drawerOpen]);
 
   useEffect(() => {
@@ -195,7 +203,7 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
     <div className="workspace-layout">
       <WorkspacePreview hasCards={hasCards} onOpenCards={(opener) => {
         setActiveSection("cards");
-        if (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 700px)").matches) openDrawer(opener);
+        if (isMobileEditorViewport()) openDrawer(opener);
         else setSidebarCollapsed(false);
       }}>
         {preview}
