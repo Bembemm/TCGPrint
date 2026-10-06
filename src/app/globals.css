@@ -1176,3 +1176,175 @@ body { min-width: 0; min-height: 0; }
 .compositor-card-control {
   touch-action: manipulation;
 }
+
+
+/* Approved picker workspace: current artwork + visual gallery. */
+.artwork-picker-layout {
+  display: grid;
+  grid-template-columns: minmax(210px, 280px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.artwork-picker-current {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.artwork-picker-current-frame {
+  display: grid;
+  aspect-ratio: 63.5 / 88.9;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid #2e3237;
+  border-radius: 12px;
+  background: #0b0d0f;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 24%);
+}
+.artwork-picker-current-frame > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.artwork-picker-current-placeholder {
+  padding: 18px;
+  color: #777e87;
+  font-size: 11px;
+  text-align: center;
+}
+.artwork-picker-current-copy {
+  display: grid;
+  gap: 3px;
+  padding: 0 2px;
+}
+.artwork-picker-current-copy strong {
+  color: #f5f6f7;
+  font-size: 13px;
+}
+.artwork-picker-current-copy span {
+  color: #8e949d;
+  font-size: 10px;
+}
+.artwork-picker-gallery {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+.artwork-picker-bulk-toggle,
+.artwork-picker-scope-select {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 7px;
+  color: #a8adb5;
+  font-size: 10px;
+}
+.artwork-picker-bulk-toggle {
+  cursor: pointer;
+}
+.artwork-picker-bulk-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #f4f4f5;
+}
+.artwork-picker-scope-select select {
+  min-height: 30px;
+  border: 1px solid #383c42;
+  border-radius: 7px;
+  padding: 3px 24px 3px 7px;
+  color: #e5e7eb;
+  background: #191b1f;
+  font-size: 10px;
+}
+.artwork-picker-cancel-operation {
+  position: sticky;
+  bottom: 8px;
+  justify-self: end;
+  z-index: 2;
+}
+.artwork-picker-gallery .artwork-grid {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.artwork-picker-gallery .selected-artwork-line {
+  margin: 0;
+  color: #7f858e;
+  font-size: 9px;
+}
+.artwork-picker-gallery .restore-artwork-default {
+  width: fit-content;
+  min-height: 28px;
+  padding: 4px 8px;
+  color: #a9aeb6;
+  font-size: 9px;
+  background: transparent;
+}
+.artwork-picker-provider-status {
+  order: 20;
+}
+.artwork-picker-provider-status[open] {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #30343a;
+  border-radius: 8px;
+  background: #17191d;
+}
+
+@media (max-width: 900px) {
+  .artwork-picker-layout {
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+
+@media (max-width: 700px) {
+  .artwork-picker-layout {
+    display: block;
+  }
+  .artwork-picker-current {
+    position: static;
+    display: flex;
+    min-height: 54px;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    padding: 7px 8px;
+    border: 1px solid #2d3035;
+    border-radius: 10px;
+    background: #16181b;
+  }
+  .artwork-picker-current-frame {
+    width: 40px;
+    min-width: 40px;
+    height: 56px;
+    aspect-ratio: auto;
+    border-radius: 6px;
+    box-shadow: none;
+  }
+  .artwork-picker-current-copy {
+    min-width: 0;
+    flex: 1;
+  }
+  .artwork-picker-current-copy strong,
+  .artwork-picker-current-copy span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .artwork-picker-gallery {
+    gap: 8px;
+  }
+  .artwork-picker-gallery .artwork-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .artwork-picker-provider-status {
+    display: none;
+  }
+  .artwork-picker-bulk-toggle,
+  .artwork-picker-scope-select {
+    font-size: 9px;
+  }
+}
