@@ -2457,6 +2457,21 @@ Implementar/revisar drag:
 
 **Gate:** testes de reorder + export/duplex.
 
+**Status Slice 3: IMPLEMENTADO E APROVADO.**
+- commit principal: `f07864b3fec94cb50cdd8ecef36a1526c2875d8d` — `feat: add canonical pointer drag reorder`;
+- corretivo aprovado: `eb3c079ed0b0757091d89f5eaa48baea4a682f2a` — `fix: keep keyboard reorder focus on physical instance`;
+- drag HTML5 foi substituído por pointer drag com threshold de 6 CSS px;
+- reorder usa inserção `before/after` e continua passando pelo caminho canônico `reorder-physical-instance → reorderWorkingCardPhysicalInstance → movePhysicalInstance`;
+- pointer move mantém apenas estado efêmero; drop válido gera um único reorder editorial;
+- cross-page, skipped/reserved/invalid targets, end insertion e click residual foram cobertos;
+- ghost, source state e insertion indicator são apenas visuais e não alteram geometria;
+- multi-selection, active ID e flip local permanecem associados ao mesmo `physicalInstanceId`;
+- fallback de teclado usa `Alt+ArrowLeft/Right` e o foco acompanha a mesma instância, inclusive entre páginas;
+- Project/autosave/reopen persistem `physicalOrder`; proof fingerprint passa a incluir `physicalOrder`;
+- request/export final e duplex long-edge/short-edge refletem a nova ordem física sem mudança de engine/schema;
+- suíte final reportada: 1.360 testes passando, 1 ignorado, além de typecheck/build/diff-check verdes.
+
+
 ### Slice 4 — Alta fidelidade do compositor
 Implementar display asset de alta resolução:
 - separado do thumbnail de catálogo;
