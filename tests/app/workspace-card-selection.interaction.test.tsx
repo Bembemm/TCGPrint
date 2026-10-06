@@ -311,6 +311,10 @@ describe("Cartas workspace navigation", () => {
     expect(screen.getByRole("dialog", { name: /Mountain/ })).toBe(picker);
     await waitFor(() => expect(within(picker).getByText(/Estado atual:.*scryfall:mountain-front/)).toBeInTheDocument());
     expect(within(picker).getByRole("img", { name: /Artwork atual de Mountain/ })).toBeInTheDocument();
+    expect(picker.querySelector(".artwork-picker-current-display")).toHaveAttribute(
+      "src",
+      expect.stringContaining("/api/cards/artworks/scryfall%3Amountain-front/display?width=1024"),
+    );
     await user.click(within(picker).getByRole("button", { name: "Fechar seletor de arte" }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     await user.click(screen.getByRole("button", { name: /1\/2 · Island/ }));
