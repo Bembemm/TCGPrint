@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import { ScryfallClient } from "../providers/scryfall/client";
-import type { ScryfallCard, ScryfallFace } from "../providers/scryfall/types";
+import type { ScryfallCard, ScryfallFace, ScryfallPrintingPage } from "../providers/scryfall/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity } from "../core/cards/types";
 import type { ArtworkMetadataCache } from "./storage/metadata-cache";
 import type { ArtworkOriginalStore } from "./storage/original-store";
