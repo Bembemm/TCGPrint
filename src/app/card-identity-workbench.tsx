@@ -1879,11 +1879,9 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
 
     <div className="artwork-picker-face-tabs" role="tablist" aria-label="Face da carta">
       {(["front", "back"] as const).map((side) => <button key={side} type="button" role="tab" aria-selected={effectivePickerSide === side} className={`button ${effectivePickerSide === side ? "primary" : "secondary"}`} disabled={interactionBusy || (pickerIsDfc && !pickerCard.faces.some((item) => item.side === side))} onClick={() => changeArtworkPickerSide(side)}>
-        {side === "front" ? "Front" : "Back"}{pickerIsDfc && pickerCard.faces.find((item) => item.side === side)?.name ? ` · ${pickerCard.faces.find((item) => item.side === side)?.name}` : ""}
+        {side === "front" ? "Frente" : "Verso"}{pickerIsDfc && pickerCard.faces.find((item) => item.side === side)?.name ? ` · ${pickerCard.faces.find((item) => item.side === side)?.name}` : ""}
       </button>)}
     </div>
-
-    {pickerIsDfc && <p className="multiface-label">Carta dupla-face · {pickerCard.faces.map((item) => `${item.side === "front" ? "Front" : "Back"} · ${item.name ?? "face sem nome"}`).join(" · ")}</p>}
 
     {!manualPhysicalBackPicker && <div className="artwork-filter-row picker-provider-tabs" role="group" aria-label="Filtrar provider">
       {(pickerCard.identity
