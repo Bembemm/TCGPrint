@@ -1010,14 +1010,16 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     let current = true;
     const requestKey = currentArtworkRequestKey;
     const progressiveMpc = artworkRequest?.source === "mpc" && !manualPhysicalBackPicker;
+    const progressiveScryfall = artworkRequest?.source === "scryfall" && !manualPhysicalBackPicker;
     setArtworkProgressiveLoading(false);
-    const requestBody = (offset?: number, limit?: number) => ({
+    const requestBody = (offset?: number, limit?: number, progressive = progressiveScryfall) => ({
       faceId: artworkRequest?.faceId,
       source: artworkRequest?.source,
       physicalBackArtwork: manualPhysicalBackPicker,
       mpcReferences: artworkRequest?.mpcReferences,
       ...(artworkRequest?.mpcFilters ? { mpcFilters: artworkRequest.mpcFilters } : {}),
       ...(artworkRequest?.forceMpcRefresh ? { forceMpcRefresh: true } : {}),
+      ...(progressive ? { progressive: true } : {}),
       ...(offset !== undefined ? { offset } : {}),
       ...(limit !== undefined ? { limit } : {}),
     });
@@ -1052,6 +1054,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             body: JSON.stringify(requestBody(
               progressiveMpc ? 0 : undefined,
               progressiveMpc ? MPC_INITIAL_GALLERY_BATCH : undefined,
+              progressiveScryfall,
             )),
           });
           return jsonResponse<ArtworkCatalogResponse>(response);
@@ -1077,6 +1080,40 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         setProviderHealth((current) => ({ ...current, ...result.providerHealth }));
         setMpcDiagnostic(result.mpcDiagnostic ?? null);
 
+        if (progressiveScryfall && artworkRequest && result.catalogTotalComplete === false) {
+          setArtworkProgressiveLoading(true);
+          void fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody(undefined, undefined, false)),
+          })
+            .then((response) => jsonResponse<ArtworkCatalogResponse>(response))
+            .then((complete) => {
+              if (!current || artworkRequestKeyRef.current !== requestKey) return;
+              const completedState: KeyedArtworkCatalogResult<CandidateDto> = {
+                requestKey,
+                candidates: complete.candidates,
+                catalogTotal: complete.catalogTotal,
+                catalogTotalComplete: complete.catalogTotalComplete,
+              };
+              setArtworkCatalogState(completedState);
+              updateResolvedRequestCache(artworkCatalogRequests.current, artworkRequest.cacheKey, () => complete);
+              setProviderHealth((current) => ({ ...current, ...complete.providerHealth }));
+            })
+            .catch((error: unknown) => {
+              if (!current || artworkRequestKeyRef.current !== requestKey || !artworkTargetCard) return;
+              setArtworkProblem({
+                message: error instanceof Error ? error.message : "O restante do catálogo Scryfall não pôde ser carregado.",
+                cardId: artworkTargetCard.id,
+                requestKey: artworkRequest.cacheKey,
+              });
+            })
+            .finally(() => {
+              if (current && artworkRequestKeyRef.current === requestKey) setArtworkProgressiveLoading(false);
+            });
+          return;
+        }
+
         if (!progressiveMpc || !artworkRequest || result.catalogTotal <= MPC_INITIAL_GALLERY_BATCH) {
           setArtworkProgressiveLoading(false);
           return;
@@ -1087,7 +1124,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(requestBody(offset, MPC_BACKGROUND_GALLERY_BATCH)),
+              body: JSON.stringify(requestBody(offset, MPC_BACKGROUND_GALLERY_BATCH, false)),
             });
             const page = await jsonResponse<ArtworkCatalogResponse>(response);
             if (!current || artworkRequestKeyRef.current !== requestKey) return;
