@@ -5,13 +5,29 @@ import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkingCard } from "../../core/cards/types";
 import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 import RegistrationLayoutPreview from "../../src/app/registration-layout-preview";
 import WorkspaceShell, { WORKSPACE_SECTIONS, type WorkspaceSection } from "../../src/app/workspace-shell";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+function stubMobileViewport() {
+  vi.stubGlobal("matchMedia", (media: string) => ({
+    matches: media === "(max-width: 700px)",
+    media,
+    onchange: null,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => false,
+  }) as MediaQueryList);
+}
 
 function DraftField({ label }: { readonly label: string }) {
   const [value, setValue] = useState("");
@@ -127,6 +143,66 @@ describe("workspace shell interactions", () => {
     const close = screen.getByRole("button", { name: "Fechar diagnóstico" });
     expect(close).toHaveFocus();
     await user.click(close);
+    expect(trigger).toHaveFocus();
+  });
+
+  it("opens advanced diagnostics from a collapsed desktop sidebar and focuses its close button", async () => {
+    const user = userEvent.setup();
+    render(<WorkspaceShell
+      sections={{ cards: <p>cards</p>, settings: <p>settings</p>, export: <p>export</p> }}
+      preview={<div />}
+      hasCards
+      advancedContent={<p>Provider health</p>}
+    />);
+
+    await user.click(screen.getByRole("button", { name: "Recolher painel" }));
+    await user.click(screen.getByText("···"));
+    await user.click(screen.getByText("Developer"));
+    const trigger = screen.getByRole("button", { name: "Diagnóstico" });
+    await user.click(trigger);
+
+    expect(screen.getByRole("complementary", { name: "Painel lateral" })).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByRole("region", { name: "Developer · Diagnóstico" })).toBeVisible();
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.queryByRole("tab", { name: "Diagnóstico" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Fechar diagnóstico" })).toHaveFocus();
+  });
+
+  it("opens diagnostics through the closed mobile drawer and restores focus on close", async () => {
+    stubMobileViewport();
+    const user = userEvent.setup();
+    render(<WorkspaceShell
+      sections={{ cards: <p>cards</p>, settings: <p>settings</p>, export: <p>export</p> }}
+      preview={<div />}
+      hasCards
+      advancedContent={<p>Provider health</p>}
+    />);
+
+    await user.click(screen.getByText("···"));
+    await user.click(screen.getByText("Developer"));
+    const trigger = screen.getByRole("button", { name: "Diagnóstico" });
+    await user.click(trigger);
+
+    const drawer = screen.getByRole("dialog", { name: "Painel lateral" });
+    expect(drawer).toHaveAttribute("data-drawer-open", "true");
+    const diagnostics = screen.getByRole("region", { name: "Developer · Diagnóstico" });
+    expect(diagnostics).toBeVisible();
+    const close = screen.getByRole("button", { name: "Fechar diagnóstico" });
+    expect(close).toHaveFocus();
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.queryByRole("tab", { name: "Diagnóstico" })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(drawer).toHaveAttribute("data-drawer-open", "false");
+    expect(diagnostics).toHaveAttribute("hidden");
+    expect(trigger).toHaveFocus();
+
+    await user.click(trigger);
+    expect(drawer).toHaveAttribute("data-drawer-open", "true");
+    expect(screen.getByRole("button", { name: "Fechar diagnóstico" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Fechar diagnóstico" }));
+    expect(drawer).toHaveAttribute("data-drawer-open", "false");
+    expect(diagnostics).toHaveAttribute("hidden");
     expect(trigger).toHaveFocus();
   });
 

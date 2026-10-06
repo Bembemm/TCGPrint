@@ -24,7 +24,7 @@ export interface WorkspaceShellProps {
   readonly ariaHidden?: boolean;
 }
 
-function isFocusable(element: Element): element is HTMLElement {
+function isFocusable(element: Element | null): element is HTMLElement {
   if (!(element instanceof HTMLElement)
     || element.hasAttribute("disabled")
     || element.closest("[hidden]")
@@ -58,8 +58,26 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
   };
   const closeDrawer = useCallback(() => {
     setDrawerOpen(false);
+    setAdvancedOpen(false);
     drawerOpenerRef.current?.focus();
   }, []);
+
+  const openAdvancedDiagnostics = (opener: HTMLButtonElement) => {
+    const isMobile = typeof window.matchMedia === "function"
+      && window.matchMedia("(max-width: 700px)").matches;
+    if (isMobile) {
+      if (drawerOpen) drawerOpenerRef.current = opener;
+      else openDrawer(opener);
+    } else {
+      setSidebarCollapsed(false);
+    }
+    setAdvancedOpen(true);
+  };
+
+  const closeAdvancedDiagnostics = () => {
+    if (drawerOpen) closeDrawer();
+    else setAdvancedOpen(false);
+  };
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -67,10 +85,10 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
   }, [activeSection, drawerOpen]);
 
   useEffect(() => {
-    if (advancedOpen) advancedCloseRef.current?.focus();
-    else if (wasAdvancedOpenRef.current) advancedTriggerRef.current?.focus();
+    if (advancedOpen && isFocusable(advancedCloseRef.current)) advancedCloseRef.current?.focus();
+    else if (!advancedOpen && wasAdvancedOpenRef.current && isFocusable(advancedTriggerRef.current)) advancedTriggerRef.current?.focus();
     wasAdvancedOpenRef.current = advancedOpen;
-  }, [advancedOpen]);
+  }, [advancedOpen, drawerOpen, sidebarCollapsed]);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -150,7 +168,7 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
                 type="button"
                 aria-expanded={advancedOpen}
                 aria-controls="workspace-advanced-panel"
-                onClick={() => setAdvancedOpen((open) => !open)}
+                onClick={(event) => openAdvancedDiagnostics(event.currentTarget)}
               >Diagnóstico</button>
             </details>
           </div>
@@ -196,7 +214,7 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
         >
           <header className="workspace-advanced-heading">
             <h2>Diagnóstico</h2>
-            <button ref={advancedCloseRef} type="button" className="button secondary" onClick={() => setAdvancedOpen(false)}>Fechar diagnóstico</button>
+            <button ref={advancedCloseRef} type="button" className="button secondary" onClick={closeAdvancedDiagnostics}>Fechar diagnóstico</button>
           </header>
           {advancedContent}
         </section>}
