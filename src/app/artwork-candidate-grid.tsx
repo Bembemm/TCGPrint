@@ -125,6 +125,7 @@ export interface ArtworkCandidateGridProps {
   readonly catalogTotal: number;
   readonly catalogTotalComplete?: boolean;
   readonly filterTotal: number;
+  readonly progressiveLoading?: boolean;
   readonly catalogLabel: string;
   readonly cardName: string;
   readonly selectedCandidateId?: string;
@@ -144,6 +145,7 @@ export function ArtworkCandidateGrid({
   catalogTotal,
   catalogTotalComplete = true,
   filterTotal,
+  progressiveLoading = false,
   catalogLabel,
   cardName,
   selectedCandidateId,
@@ -164,10 +166,13 @@ export function ArtworkCandidateGrid({
   return <>
     <p className="artwork-catalog-count" aria-live="polite">
       {catalogLabel} · {catalogTotal} artworks{catalogTotalComplete ? "" : " conhecidas · catálogo parcial"}
-      {paginated
-        ? <span> · {firstResult}{lastResult > 0 ? `–${lastResult}` : ""} de {filterTotal} nesta busca</span>
-        : <span> · {visibleCandidates.length} de {catalogTotal} exibidas · {filterTotal} de {catalogTotal}{catalogTotalComplete ? "" : " conhecidas"} correspondem ao filtro</span>}
+      {progressiveLoading
+        ? <span> · {candidates.length} carregadas até agora</span>
+        : paginated
+          ? <span> · {firstResult}{lastResult > 0 ? `–${lastResult}` : ""} de {filterTotal} nesta busca</span>
+          : <span> · {visibleCandidates.length} de {catalogTotal} exibidas · {filterTotal} de {catalogTotal}{catalogTotalComplete ? "" : " conhecidas"} correspondem ao filtro</span>}
     </p>
+    {progressiveLoading && <p className="artwork-progressive-status" role="status">Carregando mais artworks em segundo plano…</p>}
     {paginated && <div className="artwork-pagination" role="group" aria-label="Navegação do catálogo">
       <button className="button secondary" type="button" disabled={pageIndex === 0} onClick={() => onPageChange(Math.max(0, pageIndex - 1))}>Anterior</button>
       <span>Página {Math.min(pageIndex + 1, pageCount)} de {pageCount}</span>
