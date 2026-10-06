@@ -586,6 +586,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const face = editorState.face;
   useEffect(() => { setCompositorSide(face); }, [face]);
   const [artworkCatalogState, setArtworkCatalogState] = useState<KeyedArtworkCatalogResult<CandidateDto> | null>(null);
+  const [artworkProgressiveLoading, setArtworkProgressiveLoading] = useState(false);
   const [artworkPageIndex, setArtworkPageIndex] = useState(0);
   const [artworkSearch, setArtworkSearch] = useState("");
   const [artworkSort, setArtworkSort] = useState<ArtworkSort>("recommended");
@@ -1009,6 +1010,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     let current = true;
     const requestKey = currentArtworkRequestKey;
     const progressiveMpc = artworkRequest?.source === "mpc" && !manualPhysicalBackPicker;
+    setArtworkProgressiveLoading(false);
     const requestBody = (offset?: number, limit?: number) => ({
       faceId: artworkRequest?.faceId,
       source: artworkRequest?.source,
@@ -1075,7 +1077,11 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         setProviderHealth((current) => ({ ...current, ...result.providerHealth }));
         setMpcDiagnostic(result.mpcDiagnostic ?? null);
 
-        if (!progressiveMpc || !artworkRequest || result.catalogTotal <= MPC_INITIAL_GALLERY_BATCH) return;
+        if (!progressiveMpc || !artworkRequest || result.catalogTotal <= MPC_INITIAL_GALLERY_BATCH) {
+          setArtworkProgressiveLoading(false);
+          return;
+        }
+        setArtworkProgressiveLoading(true);
         void (async () => {
           for (let offset = MPC_INITIAL_GALLERY_BATCH; current && artworkRequestKeyRef.current === requestKey && offset < result.catalogTotal; offset += MPC_BACKGROUND_GALLERY_BATCH) {
             const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
@@ -1117,10 +1123,13 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             cardId: artworkTargetCard.id,
             requestKey: artworkRequest.cacheKey,
           });
+        }).finally(() => {
+          if (current && artworkRequestKeyRef.current === requestKey) setArtworkProgressiveLoading(false);
         });
       })
       .catch((error: unknown) => {
         if (current && artworkRequestKeyRef.current === requestKey && artworkTargetCard && artworkRequest) {
+          setArtworkProgressiveLoading(false);
           setArtworkCatalogState((existing) => existing?.requestKey === requestKey
             ? existing
             : { requestKey, candidates: [], catalogTotal: 0, catalogTotalComplete: false });
@@ -1935,7 +1944,12 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           : undefined;
 
   const mpcAdvancedFilters = <details className="mpc-advanced-filters">
-    <summary>Filtros avançados MPC</summary>
+    <summary>Avançado</summary>
+    <button className="button secondary mpc-refresh-action" type="button" disabled={interactionBusy} onClick={() => {
+      const revision = artworkCatalogRevision + 1;
+      setForcedMpcRefreshRevision(revision);
+      setArtworkCatalogRevision(revision);
+    }}>Atualizar catálogo MPC</button>
     {mpcCatalogProblem && <p className="muted" role="status">Catálogos de filtros indisponíveis; a busca básica MPC continua disponível. {mpcCatalogProblem} <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => { setMpcCatalogs(null); setMpcCatalogRetry((revision) => revision + 1); }}>Tentar novamente</button></p>}
     {!mpcCatalogs && !mpcCatalogProblem && <p className="muted">Carregando catálogos MPC…</p>}
     {(!mpcDiagnostic?.capabilities.filters.dpi) && <p className="muted" role="status">Os filtros MPC aparecem quando o suporte do provider for confirmado. Atualize os resultados para consultar o protocolo atual.</p>}
@@ -2073,11 +2087,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     </section>}
 
     {(manualPhysicalBackPicker || artworkFilter === "mpc") && <div className="picker-mpc-controls">
-      <div className="picker-mpc-heading"><strong>{manualPhysicalBackPicker ? "MPC Autofill · cardbacks validados" : "MPC Autofill"}</strong><button className="button secondary" type="button" disabled={interactionBusy} onClick={() => {
-        const revision = artworkCatalogRevision + 1;
-        setForcedMpcRefreshRevision(revision);
-        setArtworkCatalogRevision(revision);
-      }}>Atualizar resultados MPC</button></div>
+      <div className="picker-mpc-heading"><strong>{manualPhysicalBackPicker ? "MPC Autofill · cardbacks" : "MPC Autofill"}</strong></div>
       {mpcDiagnostic && (mpcDiagnostic.degraded || !mpcDiagnostic.available) && <p className="muted" role="status">MPC está {mpcDiagnostic.available ? "degradado ou em modo de cache" : "offline"}. Outros providers e a seleção anterior continuam disponíveis.</p>}
       {mpcAdvancedFilters}
     </div>}
@@ -2110,6 +2120,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       catalogTotal={artworkCatalogTotal}
       catalogTotalComplete={currentArtworkCatalog.catalogTotalComplete}
       filterTotal={filteredArtworkCandidates.length}
+      progressiveLoading={artworkProgressiveLoading}
       catalogLabel={manualPhysicalBackPicker ? "MPC cardbacks" : artworkRequest?.source && artworkRequest.source !== "all" ? labelSource(artworkRequest.source) : "Catálogo de arte"}
       cardName={displayCard(pickerCard)}
       selectedCandidateId={pendingArtwork?.id ?? selected?.candidateId}
