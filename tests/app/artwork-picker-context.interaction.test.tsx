@@ -127,7 +127,7 @@ describe("M6 Artwork Picker face context", () => {
       return screen.findByRole("dialog", { name: /Delver of Secrets/ });
     };
 
-    let dialog = await openPicker();
+    const dialog = await openPicker();
     expect(within(dialog).getByText("Carta dupla-face")).toBeInTheDocument();
     expect(within(dialog).getByText(/Carta dupla-face · Front · Delver of Secrets · Back · Insectile Aberration/)).toBeInTheDocument();
     const providerGroup = within(dialog).getByRole("group", { name: "Filtrar provider" });
@@ -140,9 +140,9 @@ describe("M6 Artwork Picker face context", () => {
     const frontCard = frontCandidate.closest<HTMLElement>(".artwork-candidate")!;
     await user.click(within(frontCard).getByRole("button", { name: "Selecionar arte" }));
     await waitFor(() => expect(resolveRequests.at(-1)).toMatchObject({ action: "apply-artwork-scope", faceId: "front", scope: "entry" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Delver of Secrets/ })).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog", { name: /Delver of Secrets/ })).toBe(dialog);
+    await waitFor(() => expect(within(dialog).getByText(/Estado atual:.*scryfall:/i)).toBeInTheDocument());
 
-    dialog = await openPicker();
     const backTab = within(dialog).getByRole("tab", { name: "Back · Insectile Aberration" });
     await user.click(backTab);
     expect(backTab).toHaveAttribute("aria-selected", "true");
@@ -156,18 +156,16 @@ describe("M6 Artwork Picker face context", () => {
     const backScryfallCandidate = await within(dialog).findByText("Insectile Aberration · scryfall");
     await user.click(within(backScryfallCandidate.closest<HTMLElement>(".artwork-candidate")!).getByRole("button", { name: "Selecionar arte" }));
     await waitFor(() => expect(resolveRequests.at(-1)).toMatchObject({ action: "apply-artwork-scope", faceId: "back", scope: "same-identity" }));
+    expect(screen.getByRole("dialog", { name: /Delver of Secrets/ })).toBe(dialog);
 
-    dialog = await openPicker();
-    await user.click(within(dialog).getByRole("tab", { name: "Back · Insectile Aberration" }));
+    await user.click(bulkToggle);
+    expect(bulkToggle).not.toBeChecked();
     await user.click(within(dialog).getByRole("button", { name: "MPC Autofill" }));
     const backMpcCandidate = await within(dialog).findByText("Insectile Aberration · mpc");
     const backMpcCard = backMpcCandidate.closest<HTMLElement>(".artwork-candidate")!;
     await user.click(within(backMpcCard).getByRole("button", { name: "Selecionar arte" }));
     await waitFor(() => expect(resolveRequests.at(-1)).toMatchObject({ action: "apply-artwork-scope", faceId: "back", scope: "entry" }));
     expect(artworkRequests.some((request) => request.faceId === "back" && request.source === "mpc" && request.physicalBackArtwork === false)).toBe(true);
-
-    dialog = await openPicker();
-    await user.click(within(dialog).getByRole("tab", { name: "Back · Insectile Aberration" }));
     expect(within(dialog).queryByRole("button", { name: "Meus uploads" })).not.toBeInTheDocument();
   }, 15_000);
 
