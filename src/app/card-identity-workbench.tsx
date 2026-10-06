@@ -1843,7 +1843,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         <div className="artwork-picker-current-copy">
           <strong>{displayCard(pickerCard)}</strong>
           <span>{effectivePickerSide === "front" ? "Frente" : "Verso"} · {pickerFaceName}</span>
-          {selected && <span>{labelSource(selected.source)}{selected.effectiveDpi ? ` · ${selected.effectiveDpi} DPI` : ""}</span>}
+          {selected && <span>{labelSource(selected.source)}</span>}
           {pickerContext?.physicalCardIndex !== undefined && <span>Cópia {pickerContext.physicalCopyNumber}/{pickerContext.physicalTotalCopies}</span>}
         </div>
       </aside>
