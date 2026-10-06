@@ -1157,3 +1157,22 @@ body { min-width: 0; min-height: 0; }
 @media (hover: none) {
   .compositor-card-control { opacity: 0.62; }
 }
+
+
+/* Suppress Android/Chrome native SVG focus halo; custom focus remains on the control surface. */
+.compositor-selection-checkbox,
+.compositor-selection-checkbox:focus,
+.compositor-selection-checkbox:focus-visible,
+.compositor-card-control,
+.compositor-card-control:focus,
+.compositor-card-control:focus-visible {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.compositor-selection-checkbox,
+.compositor-card-control {
+  touch-action: manipulation;
+}
