@@ -3066,3 +3066,58 @@ body { min-width: 0; min-height: 0; }
   color: #7b8189;
   font-size: 8px;
 }
+
+
+/* Secondary Settings tools — structured without hiding existing capability. */
+.workspace-project-settings-content {
+  display: grid;
+  gap: 8px;
+}
+.workspace-settings-tool-group {
+  overflow: hidden;
+  border: 1px solid #d9dde1;
+  border-radius: 9px;
+  background: #fff;
+}
+.workspace-settings-tool-group > summary {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  color: #31363c;
+  cursor: pointer;
+  list-style: none;
+  font-size: 10px;
+  font-weight: 700;
+}
+.workspace-settings-tool-group > summary::-webkit-details-marker { display: none; }
+.workspace-settings-tool-group > summary::after {
+  color: #848a92;
+  content: "›";
+  font-size: 17px;
+  transition: transform 120ms ease;
+}
+.workspace-settings-tool-group[open] > summary::after {
+  transform: rotate(90deg);
+}
+.workspace-settings-tool-group > summary:hover {
+  background: #f3f4f5;
+}
+.workspace-settings-tool-group > summary:focus-visible {
+  outline: 2px solid #202328;
+  outline-offset: -2px;
+}
+.workspace-settings-tool-body {
+  border-top: 1px solid #e8eaec;
+  padding: 7px;
+  background: #fafafa;
+}
+.workspace-settings-tool-body > .panel,
+.workspace-settings-tool-body > section.panel {
+  margin: 0;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+}
