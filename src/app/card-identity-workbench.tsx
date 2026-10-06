@@ -76,6 +76,9 @@ type ArtworkSort = ArtworkSortMode;
 type PickerScope = "entry" | "physical-copy" | "same-identity" | "all-simple-project";
 type CandidateDto = ArtworkCandidateView;
 
+const MPC_INITIAL_GALLERY_BATCH = 20;
+const MPC_BACKGROUND_GALLERY_BATCH = 60;
+
 interface ArtworkPickerContext {
   readonly cardId: string;
   readonly physicalInstanceId?: string;
@@ -95,7 +98,7 @@ interface Props {
 interface ApiErrorBody { readonly code?: string; readonly message?: string; }
 interface IdentityDetails extends CardIdentity { readonly layout?: string; readonly relatedCards: readonly { readonly id: string; readonly component: string; readonly name: string; readonly typeLine?: string }[]; }
 type ProviderHealth = Record<string, { available: boolean; degraded: boolean; message?: string }>;
-interface ArtworkCatalogResponse { readonly candidates: CandidateDto[]; readonly catalogTotal: number; readonly catalogTotalComplete?: boolean; readonly providerHealth: ProviderHealth; readonly mpcDiagnostic?: MpcArtworkProviderDiagnostic; }
+interface ArtworkCatalogResponse { readonly candidates: CandidateDto[]; readonly catalogTotal: number; readonly catalogTotalComplete?: boolean; readonly offset?: number; readonly limit?: number; readonly providerHealth: ProviderHealth; readonly mpcDiagnostic?: MpcArtworkProviderDiagnostic; }
 interface MpcFilterCatalogResult { readonly catalogs: MpcFilterCatalogs; readonly diagnostic?: MpcArtworkProviderDiagnostic; }
 interface FinalPdfProof {
   readonly frontUrl: string;
@@ -970,6 +973,29 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   useEffect(() => {
     let current = true;
     const requestKey = currentArtworkRequestKey;
+    const progressiveMpc = artworkRequest?.source === "mpc" && !manualPhysicalBackPicker;
+    const requestBody = (offset?: number, limit?: number) => ({
+      faceId: artworkRequest?.faceId,
+      source: artworkRequest?.source,
+      physicalBackArtwork: manualPhysicalBackPicker,
+      mpcReferences: artworkRequest?.mpcReferences,
+      ...(artworkRequest?.mpcFilters ? { mpcFilters: artworkRequest.mpcFilters } : {}),
+      ...(artworkRequest?.forceMpcRefresh ? { forceMpcRefresh: true } : {}),
+      ...(offset !== undefined ? { offset } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
+
+    const mergeProgressiveResult = (existing: KeyedArtworkCatalogResult<CandidateDto>, page: ArtworkCatalogResponse) => {
+      const candidates = new Map(existing.candidates.map((candidate) => [candidate.id, candidate]));
+      for (const candidate of page.candidates) candidates.set(candidate.id, candidate);
+      return {
+        requestKey,
+        candidates: [...candidates.values()],
+        catalogTotal: Math.max(existing.catalogTotal, page.catalogTotal),
+        catalogTotalComplete: existing.catalogTotalComplete !== false && page.catalogTotalComplete !== false,
+      };
+    };
+
     const request = runProjectRestoreProviderLookup(
       projectRestoreLookupGate.current,
       projectRestoreVersion,
@@ -982,7 +1008,10 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ faceId: artworkRequest.faceId, source: artworkRequest.source, physicalBackArtwork: manualPhysicalBackPicker, mpcReferences: artworkRequest.mpcReferences, ...(artworkRequest.mpcFilters ? { mpcFilters: artworkRequest.mpcFilters } : {}), ...(forceMpcRefresh ? { forceMpcRefresh: true } : {}) }),
+            body: JSON.stringify(requestBody(
+              progressiveMpc ? 0 : undefined,
+              progressiveMpc ? MPC_INITIAL_GALLERY_BATCH : undefined,
+            )),
           });
           return jsonResponse<ArtworkCatalogResponse>(response);
         });
@@ -997,9 +1026,49 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         }
         const result = outcome.value;
         setArtworkProblem(null);
-        setArtworkCatalogState({ requestKey, candidates: result.candidates, catalogTotal: result.catalogTotal, catalogTotalComplete: result.catalogTotalComplete });
+        const initialState: KeyedArtworkCatalogResult<CandidateDto> = {
+          requestKey,
+          candidates: result.candidates,
+          catalogTotal: result.catalogTotal,
+          catalogTotalComplete: result.catalogTotalComplete,
+        };
+        setArtworkCatalogState(initialState);
         setProviderHealth((current) => ({ ...current, ...result.providerHealth }));
         setMpcDiagnostic(result.mpcDiagnostic ?? null);
+
+        if (!progressiveMpc || !artworkRequest || result.catalogTotal <= MPC_INITIAL_GALLERY_BATCH) return;
+        void (async () => {
+          for (let offset = MPC_INITIAL_GALLERY_BATCH; current && artworkRequestKeyRef.current === requestKey && offset < result.catalogTotal; offset += MPC_BACKGROUND_GALLERY_BATCH) {
+            const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(requestBody(offset, MPC_BACKGROUND_GALLERY_BATCH)),
+            });
+            const page = await jsonResponse<ArtworkCatalogResponse>(response);
+            if (!current || artworkRequestKeyRef.current !== requestKey) return;
+            setArtworkCatalogState((existing) => {
+              if (!existing || existing.requestKey !== requestKey) return existing;
+              return mergeProgressiveResult(existing, page);
+            });
+            updateResolvedRequestCache(artworkCatalogRequests.current, artworkRequest.cacheKey, (cached) => mergeProgressiveResult({
+              requestKey,
+              candidates: cached.candidates,
+              catalogTotal: cached.catalogTotal,
+              catalogTotalComplete: cached.catalogTotalComplete,
+            }, page));
+            setProviderHealth((current) => ({ ...current, ...page.providerHealth }));
+            setMpcDiagnostic(page.mpcDiagnostic ?? null);
+            if (page.candidates.length === 0 && offset + MPC_BACKGROUND_GALLERY_BATCH >= page.catalogTotal) return;
+            await new Promise<void>((resolve) => setTimeout(resolve, 40));
+          }
+        })().catch((error: unknown) => {
+          if (!current || artworkRequestKeyRef.current !== requestKey || !artworkTargetCard || !artworkRequest) return;
+          setArtworkProblem({
+            message: error instanceof Error ? error.message : "O restante do catálogo MPC não pôde ser carregado.",
+            cardId: artworkTargetCard.id,
+            requestKey: artworkRequest.cacheKey,
+          });
+        });
       })
       .catch((error: unknown) => {
         if (current && artworkRequestKeyRef.current === requestKey && artworkTargetCard && artworkRequest) {
@@ -1955,7 +2024,12 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     {!manualPhysicalBackPicker && !pickerCard.identity && <p className="muted">Sem CardIdentity resolvida: “todas iguais” fica indisponível até a identidade ser confirmada.</p>}
     {!manualPhysicalBackPicker && <button className="button secondary restore-artwork-default" type="button" disabled={interactionBusy || !pickerCard.identity || !activeFaceExists} title={!pickerCard.identity ? "Não há identidade resolvida para determinar uma artwork padrão." : undefined} onClick={() => void restoreArtworkDefault(pickerCard, effectivePickerSide)}>Usar padrão</button>}
     {visibleArtworkProblem && <p className="error-message" role="alert">{visibleArtworkProblem}</p>}
-    {artworkCatalogState?.requestKey !== currentArtworkRequestKey && !visibleArtworkProblem && <p className="muted" role="status">Carregando artworks…</p>}
+    {artworkCatalogState?.requestKey !== currentArtworkRequestKey && !visibleArtworkProblem && <>
+      <p className="muted" role="status">Carregando artworks…</p>
+      <div className="artwork-loading-grid" aria-hidden="true">
+        {Array.from({ length: 8 }, (_, index) => <span className="artwork-loading-card" key={index}><span /></span>)}
+      </div>
+    </>}
     {artworkCatalogState?.requestKey === currentArtworkRequestKey && filteredArtworkCandidates.length === 0 && !visibleArtworkProblem && <p className="muted" role="status">Nenhum resultado corresponde a esta busca. Se um provider falhou, os demais resultados continuam disponíveis.</p>}
 
     <ArtworkCandidateGrid
