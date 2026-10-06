@@ -337,7 +337,7 @@ describe("Cartas workspace navigation", () => {
     const composer = screen.getByRole("group", { name: /Compositor live frente/ });
     const initialSlotX = composer.querySelector("g[data-slot-x-mm]")?.getAttribute("data-slot-x-mm");
     const generate = screen.getByRole("button", { name: "Gerar PDF final" });
-    expect(screen.getByText(/Project: sem Project aberto · Working Set local/)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Exportação final" })).toHaveTextContent("Pronto");
     expect(generate).toBeEnabled();
     await user.click(generate);
     const cancel = await screen.findByRole("button", { name: "Cancelar exportação do PDF" });
