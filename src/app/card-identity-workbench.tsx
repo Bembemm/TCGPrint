@@ -1963,12 +1963,12 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
 
   const artworkPickerContent = pickerCard && pickerIsOpen ? <div className="artwork-picker-content">
     <div className="artwork-picker-context">
-      <strong>{pickerIsDfc ? "Carta dupla-face" : "Carta simples"}</strong>
-      <span>{effectivePickerSide === "front" ? "Front" : "Back"} · {pickerFaceName}</span>
+      <span>{pickerIsDfc ? "Dupla face" : "Carta simples"}</span>
+      <span>{effectivePickerSide === "front" ? "Frente" : "Verso"} · {pickerFaceName}</span>
       {pickerContext?.physicalCardIndex !== undefined
-        ? <span>Carta física {pickerContext.physicalCardIndex + 1} · cópia original {pickerContext.physicalCopyNumber}/{pickerContext.physicalTotalCopies}</span>
-        : <span>Entrada {pickerCard.order + 1} · {pickerCard.quantity} cópia(s)</span>}
-      {pickerCard.manualBackArtwork?.source === "scryfall" && manualPhysicalBackPicker && <span role="status">Verso Scryfall legado preservado; essa fonte não pode ser escolhida novamente para cartas simples.</span>}
+        ? <span>Cópia {pickerContext.physicalCopyNumber} de {pickerContext.physicalTotalCopies}</span>
+        : pickerCard.quantity > 1 ? <span>{pickerCard.quantity} cópias</span> : null}
+      {pickerCard.manualBackArtwork?.source === "scryfall" && manualPhysicalBackPicker && <span role="status">Verso Scryfall legado preservado.</span>}
     </div>
 
     <div className="artwork-picker-layout">
