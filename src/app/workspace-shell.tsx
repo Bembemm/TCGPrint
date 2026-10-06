@@ -58,6 +58,10 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
     drawerOpenerRef.current = opener;
     setDrawerOpen(true);
   };
+  const openSectionDrawer = (section: WorkspaceSection, opener: HTMLElement) => {
+    setActiveSection(section);
+    openDrawer(opener);
+  };
   const closeDrawer = useCallback(() => {
     setDrawerOpen(false);
     setAdvancedOpen(false);
@@ -183,7 +187,7 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
           aria-expanded={drawerOpen}
           aria-controls="workspace-sidebar"
           data-testid="workspace-mobile-open"
-          onClick={(event) => openDrawer(event.currentTarget)}
+          onClick={(event) => openSectionDrawer(activeSection, event.currentTarget)}
         >Painel</button>
       </div>
     </header>
@@ -224,5 +228,23 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
       </WorkspaceSidebar>
       {sidebarCollapsed && <button type="button" className="workspace-reopen" aria-label="Abrir painel" aria-controls="workspace-sidebar" data-testid="workspace-reopen" onClick={() => setSidebarCollapsed(false)}>›</button>}
     </div>
+
+    <nav className="workspace-mobile-nav" aria-label="Área de trabalho">
+      {WORKSPACE_SECTIONS.map(({ id, label }) => <button
+        key={id}
+        type="button"
+        className={activeSection === id ? "is-active" : ""}
+        aria-current={activeSection === id ? "page" : undefined}
+        aria-expanded={drawerOpen && activeSection === id}
+        aria-controls="workspace-sidebar"
+        onClick={(event) => {
+          if (drawerOpen && activeSection === id) closeDrawer();
+          else openSectionDrawer(id, event.currentTarget);
+        }}
+      >
+        <span className="workspace-mobile-nav-icon" aria-hidden="true">{id === "cards" ? "▦" : id === "settings" ? "⌘" : "⇩"}</span>
+        <span>{id === "settings" ? "Ajustes" : label}</span>
+      </button>)}
+    </nav>
   </div></WorkspaceProjectHeaderContext.Provider>;
 }
