@@ -309,7 +309,7 @@ describe("Cartas workspace navigation", () => {
     let picker = await openPicker();
     await user.click(within(await picker).getByRole("button", { name: "Selecionar arte" }));
     expect(screen.getByRole("dialog", { name: /Mountain/ })).toBe(picker);
-    await waitFor(() => expect(within(picker).getByText(/Estado atual:.*scryfall:mountain-front/)).toBeInTheDocument());
+    await waitFor(() => expect(within(picker).getByText(/Atual · Scryfall/)).toBeInTheDocument());
     expect(within(picker).getByRole("img", { name: /Artwork atual de Mountain/ })).toBeInTheDocument();
     expect(picker.querySelector(".artwork-picker-current-display")).toHaveAttribute(
       "src",
@@ -322,7 +322,7 @@ describe("Cartas workspace navigation", () => {
     picker = await openPicker();
     await user.click(within(picker).getByRole("button", { name: "Selecionar arte" }));
     expect(screen.getByRole("dialog", { name: /Island/ })).toBe(picker);
-    await waitFor(() => expect(within(picker).getByText(/Estado atual:.*scryfall:island-front/)).toBeInTheDocument());
+    await waitFor(() => expect(within(picker).getByText(/Atual · Scryfall/)).toBeInTheDocument());
     await user.click(within(picker).getByRole("button", { name: "Fechar seletor de arte" }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     await user.click(screen.getByRole("button", { name: /2\/2 · Mountain/ }));
@@ -330,7 +330,7 @@ describe("Cartas workspace navigation", () => {
     expect(screen.getByRole("button", { name: /2\/2 · Mountain/ })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     picker = await openPicker();
-    expect(within(picker).getByText(/Estado atual:.*scryfall:mountain-front/)).toBeInTheDocument();
+    expect(within(picker).getByText(/Atual · Scryfall/)).toBeInTheDocument();
     await user.click(within(picker).getByRole("button", { name: "Fechar seletor de arte" }));
 
     await user.click(screen.getByRole("tab", { name: "Exportar" }));
@@ -378,7 +378,7 @@ describe("Cartas workspace navigation", () => {
     if (!secondCardBody) throw new Error("The second physical card has no body activation target.");
     await user.click(secondCardBody);
     const physicalPicker = await screen.findByRole("dialog", { name: /Mountain · cópia 1\/1/ });
-    expect(within(physicalPicker).getByText("Carta física 2 · cópia original 1/1")).toBeInTheDocument();
+    expect(within(physicalPicker).getByText("Cópia 1 de 1")).toBeInTheDocument();
     expect(compositorShell).toHaveAttribute("inert");
     expect(compositorShell).toHaveAttribute("aria-hidden", "true");
     expect(document.querySelector(".workspace-live-compositor")).toBeInTheDocument();
@@ -392,7 +392,7 @@ describe("Cartas workspace navigation", () => {
     const contextMenu = screen.getByRole("menu", { name: /Ações para Mountain, cópia 1 de 1/ });
     await user.click(within(contextMenu).getByRole("menuitem", { name: "Trocar artwork" }));
     const menuPicker = await screen.findByRole("dialog", { name: /Mountain · cópia 1\/1/ });
-    expect(within(menuPicker).getByText("Carta física 2 · cópia original 1/1")).toBeInTheDocument();
+    expect(within(menuPicker).getByText("Cópia 1 de 1")).toBeInTheDocument();
     const bulkToggle = within(menuPicker).getByRole("checkbox", { name: "Aplicar também às cópias iguais" });
     expect(bulkToggle).not.toBeChecked();
     await user.click(within(menuPicker).getByRole("button", { name: "Fechar seletor de arte" }));
