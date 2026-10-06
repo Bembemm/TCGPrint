@@ -2372,10 +2372,13 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     </div>
     {pdfProof && <section className="compositor-proof-overlay" role="dialog" aria-label="Conferir PDF final" aria-modal="false">
       <header className="compositor-proof-heading">
-        <div><h2>Conferir PDF final</h2><p>Arquivo lossless gerado pelo pipeline de impressão com originals validados.</p></div>
-        <button ref={pdfProofCloseRef} className="button secondary" type="button" aria-label="Fechar conferência do PDF final" onClick={() => setPdfProof(null)}>Voltar ao compositor</button>
+        <div className="compositor-proof-title">
+          <span className="compositor-proof-badge">PDF REAL</span>
+          <div><h2>Prévia de impressão</h2><p>Este é o arquivo final gerado para impressão, não a simulação do compositor.</p></div>
+        </div>
+        <button ref={pdfProofCloseRef} className="button secondary" type="button" aria-label="Fechar conferência do PDF final" onClick={() => setPdfProof(null)}>Voltar ao editor</button>
       </header>
-      {pdfProofIsStale && <p className="compositor-proof-stale" role="status" aria-live="polite">PDF conferido anteriormente está desatualizado. O compositor live continua atualizado; feche esta conferência para voltar a ele.</p>}
+      {pdfProofIsStale && <p className="compositor-proof-stale" role="status" aria-live="polite">Esta prévia ficou desatualizada porque o projeto mudou. Volte ao editor e gere uma nova conferência.</p>}
       {pdfProof.separated && <div className="compositor-proof-side-controls" role="group" aria-label="PDFs finais separados">
         <button className={`button ${pdfProofSide === "front" ? "primary" : "secondary"}`} type="button" aria-pressed={pdfProofSide === "front"} onClick={() => setPdfProofSide("front")}>Frente final</button>
         <button className={`button ${pdfProofSide === "back" ? "primary" : "secondary"}`} type="button" aria-pressed={pdfProofSide === "back"} onClick={() => setPdfProofSide("back")}>Verso final</button>
