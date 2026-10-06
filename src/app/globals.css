@@ -2860,3 +2860,83 @@ body { min-width: 0; min-height: 0; }
     max-width: min(280px, calc(100vw - 16px));
   }
 }
+
+
+/* Real PDF proof — clearly distinct from the live SVG compositor. */
+.compositor-proof-overlay {
+  background: #111315;
+}
+.compositor-proof-heading {
+  min-height: 58px;
+  border-bottom: 1px solid #30343a;
+  padding: 8px 10px;
+  color: #e8eaed;
+  background: #17191d;
+}
+.compositor-proof-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+.compositor-proof-title h2 {
+  margin: 0 0 2px;
+  color: #f4f5f6;
+  font-size: 14px;
+}
+.compositor-proof-title p {
+  margin: 0;
+  color: #9298a1;
+  font-size: 9px;
+}
+.compositor-proof-badge {
+  flex: none;
+  border: 1px solid #555b63;
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: #f5f6f7;
+  background: #25282d;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+.compositor-proof-heading > .button {
+  min-height: 32px;
+  border-color: #3b4046;
+  border-radius: 8px;
+  color: #e2e4e7;
+  background: #24272c;
+}
+.compositor-proof-frame {
+  border: 0;
+  background: #26292e;
+}
+.compositor-proof-stale {
+  margin: 8px;
+  border: 1px solid #685a32;
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: #e7d69f;
+  background: #2b271b;
+  font-size: 9px;
+}
+.compositor-proof-side-controls {
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #30343a;
+  background: #17191d;
+}
+@media (max-width: 840px) {
+  .compositor-proof-heading {
+    gap: 7px;
+  }
+  .compositor-proof-title p {
+    display: none;
+  }
+  .compositor-proof-badge {
+    padding-inline: 6px;
+  }
+  .compositor-proof-heading > .button {
+    font-size: 9px;
+  }
+}
