@@ -140,6 +140,52 @@ describe("MPC artwork provider", () => {
     database.close();
   }, 30_000);
 
+  it("returns the first MPC gallery page without hydrating the whole catalog", async () => {
+    const ids = Array.from({ length: 1200 }, (_, index) => `progressive_${String(index).padStart(4, "0")}`);
+    const hydratedIds: string[] = [];
+    let searchRequests = 0;
+    let hydrationBatches = 0;
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/2/sources/") return jsonResponse({ results: { "41": { pk: 41, sourceType: "Google Drive" } } });
+      if (url.pathname === "/3/editorSearch/") {
+        searchRequests += 1;
+        const body = JSON.parse(String(init.body)) as { queries: Record<string, unknown> };
+        return jsonResponse({ results: { [Object.keys(body.queries)[0]!]: ids } });
+      }
+      if (url.pathname === "/2/cards/") {
+        hydrationBatches += 1;
+        const body = JSON.parse(String(init.body)) as { cardIdentifiers: string[] };
+        hydratedIds.push(...body.cardIdentifiers);
+        return jsonResponse({ results: Object.fromEntries(body.cardIdentifiers.map((identifier) => [identifier, {
+          identifier, cardType: "CARD", name: identifier, sourceId: 41, sourceType: "Google Drive", extension: "png", size: 8000, dpi: 800,
+          smallThumbnailUrl: `https://drive.google.com/thumbnail?id=${identifier}`,
+        }])) });
+      }
+      throw new Error(`Unexpected MPC request: ${url.pathname}`);
+    };
+    const { database, provider } = await setup(fetchImpl, { timeoutMs: 30_000 });
+
+    const first = await provider.searchArtworkAdvancedWithTotal(identity, { offset: 0, limit: 20 });
+    expect(first.catalogTotal).toBe(1200);
+    expect(first.candidates).toHaveLength(20);
+    expect(first.candidates[0]?.metadata?.providerRank).toBe(0);
+    expect(first.candidates.at(-1)?.metadata?.providerRank).toBe(19);
+    expect(hydratedIds).toEqual(ids.slice(0, 20));
+    expect(hydrationBatches).toBe(1);
+    expect(searchRequests).toBe(1);
+
+    const next = await provider.searchArtworkAdvancedWithTotal(identity, { offset: 20, limit: 60 });
+    expect(next.catalogTotal).toBe(1200);
+    expect(next.candidates).toHaveLength(60);
+    expect(next.candidates[0]?.metadata?.providerRank).toBe(20);
+    expect(next.candidates.at(-1)?.metadata?.providerRank).toBe(79);
+    expect(hydratedIds).toEqual(ids.slice(0, 80));
+    expect(hydrationBatches).toBe(4);
+    expect(searchRequests).toBe(1);
+    await database.close();
+  }, 30_000);
+
   it("lets a late candidate satisfy whole-catalog filters and outrank the first provider result by reported DPI", async () => {
     const ids = Array.from({ length: 1200 }, (_, index) => `rank_${String(index).padStart(5, "0")}`);
     const fetchImpl: typeof fetch = async (input, init = {}) => {
