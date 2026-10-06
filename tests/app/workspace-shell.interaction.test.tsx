@@ -18,7 +18,7 @@ afterEach(() => {
 
 function stubMobileViewport() {
   vi.stubGlobal("matchMedia", (media: string) => ({
-    matches: media === "(max-width: 700px)",
+    matches: media === "(max-width: 840px)",
     media,
     onchange: null,
     addListener: () => undefined,
@@ -282,7 +282,7 @@ describe("workspace shell interactions", () => {
     expect(screen.getByLabelText("cards draft")).toBeInTheDocument();
   });
 
-  it("opens a right drawer, keeps clicks inside open, closes with Escape, and restores focus", async () => {
+  it("opens the mobile bottom sheet, closes with Escape, and restores focus", async () => {
     const user = userEvent.setup();
     render(workspace());
     const trigger = screen.getByTestId("workspace-mobile-open");
@@ -290,7 +290,7 @@ describe("workspace shell interactions", () => {
     await user.click(trigger);
     const drawer = screen.getByRole("dialog", { name: "Painel lateral" });
     expect(drawer).toHaveAttribute("aria-modal", "true");
-    expect(screen.getByRole("tab", { name: "Cartas" })).toHaveFocus();
+    expect(within(drawer).getByRole("button", { name: "Fechar painel" })).toHaveFocus();
 
     await user.click(within(drawer).getByRole("tab", { name: "Configurações" }));
     expect(drawer).toHaveAttribute("data-drawer-open", "true");
@@ -308,7 +308,26 @@ describe("workspace shell interactions", () => {
     await user.click(screen.getByTestId("workspace-mobile-open"));
 
     expect(screen.getByRole("dialog", { name: "Painel lateral" })).toHaveAttribute("data-collapsed", "false");
-    expect(screen.getByRole("tab", { name: "Cartas" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Fechar painel" })).toHaveFocus();
+  });
+
+  it("uses bottom navigation to open the requested mobile editor section", async () => {
+    const user = userEvent.setup();
+    stubMobileViewport();
+    render(workspace());
+
+    const mobileNav = screen.getByRole("navigation", { name: "Área de trabalho" });
+    const settings = within(mobileNav).getByRole("button", { name: /Ajustes/ });
+    await user.click(settings);
+
+    const drawer = screen.getByRole("dialog", { name: "Painel lateral" });
+    expect(drawer).toHaveAttribute("data-drawer-open", "true");
+    expect(screen.getByRole("tab", { name: "Configurações" })).toHaveAttribute("aria-selected", "true");
+    expect(within(drawer).getByRole("button", { name: "Fechar painel" })).toHaveFocus();
+
+    await user.click(settings);
+    expect(drawer).toHaveAttribute("data-drawer-open", "false");
+    expect(settings).toHaveFocus();
   });
 
   it("closes from backdrop or close button and returns focus to the opener", async () => {
