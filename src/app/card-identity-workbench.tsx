@@ -1766,9 +1766,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const pickerTitle = pickerCard
     ? `${displayCard(pickerCard)}${pickerContext?.physicalCardIndex !== undefined ? ` · cópia ${pickerContext.physicalCopyNumber}/${pickerContext.physicalTotalCopies}` : ` · ${pickerCard.quantity} cópia(s)`}`
     : "Artwork Picker";
-  const sameIdentityCards = pickerCard?.identity
-    ? workingCards.filter((card) => card.identity?.id === pickerCard.identity?.id && card.identity?.provider === pickerCard.identity?.provider)
-    : [];
   const defaultPickerScope: PickerScope = pickerContext?.physicalCardIndex === undefined ? "entry" : "physical-copy";
   const selectedBackAssetId = pickerCard?.manualBackAsset?.assetId;
   const currentSimpleBack = manualPhysicalBackPicker && pickerCard
@@ -1789,6 +1786,16 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const pickerBackLibraryAssets = backLibraryAssets.filter((asset) =>
     (asset.selectable !== false && !asset.retired) || asset.assetId === selectedBackAssetId,
   );
+
+  const currentArtworkPreviewUrl = selected?.candidateId
+    ? `/api/cards/artworks/${encodeURIComponent(selected.candidateId)}/preview`
+    : currentSimpleBack?.mode === "artwork"
+      ? `/api/cards/artworks/${encodeURIComponent(currentSimpleBack.candidateId)}/preview`
+      : currentSimpleBack?.mode === "library"
+        ? `/api/back-library/${encodeURIComponent(currentSimpleBack.assetId)}/preview`
+        : currentSimpleBack?.mode === "project-default" && projectDefaultBack
+          ? `/api/back-library/${encodeURIComponent(projectDefaultBack.assetId)}/preview`
+          : undefined;
 
   const mpcAdvancedFilters = <details className="mpc-advanced-filters">
     <summary>Filtros avançados MPC</summary>
@@ -1827,6 +1834,22 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       {pickerCard.manualBackArtwork?.source === "scryfall" && manualPhysicalBackPicker && <span role="status">Verso Scryfall legado preservado; essa fonte não pode ser escolhida novamente para cartas simples.</span>}
     </div>
 
+    <div className="artwork-picker-layout">
+      <aside className="artwork-picker-current" aria-label="Artwork atual">
+        <div className="artwork-picker-current-frame">
+          {currentArtworkPreviewUrl
+            ? <Image src={currentArtworkPreviewUrl} alt={`Artwork atual de ${displayCard(pickerCard)}`} width={360} height={504} unoptimized priority />
+            : <div className="artwork-picker-current-placeholder">{currentSimpleBack?.mode === "none" ? "Sem verso" : "Nenhuma artwork aplicada"}</div>}
+        </div>
+        <div className="artwork-picker-current-copy">
+          <strong>{displayCard(pickerCard)}</strong>
+          <span>{effectivePickerSide === "front" ? "Frente" : "Verso"} · {pickerFaceName}</span>
+          {selected && <span>{labelSource(selected.source)}{selected.effectiveDpi ? ` · ${selected.effectiveDpi} DPI` : ""}</span>}
+          {pickerContext?.physicalCardIndex !== undefined && <span>Cópia {pickerContext.physicalCopyNumber}/{pickerContext.physicalTotalCopies}</span>}
+        </div>
+      </aside>
+
+      <div className="artwork-picker-gallery">
     <details className="artwork-picker-provider-status">
       <summary>Estado dos provedores</summary>
       {providerStatus()}
@@ -1934,7 +1957,9 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       onLoadMore={() => undefined}
     />
 
-    {abortableOperation === "artwork" && <button className="button secondary" type="button" aria-label="Cancelar download e seleção da arte" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar download/seleção</button>}
+    {abortableOperation === "artwork" && <button className="button secondary artwork-picker-cancel-operation" type="button" aria-label="Cancelar download e seleção da arte" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar</button>}
+      </div>
+    </div>
   </div> : null;
 
   const exportActionDisabled = interactionBusy
