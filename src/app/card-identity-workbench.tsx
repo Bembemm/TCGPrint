@@ -1838,41 +1838,52 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             {isDoubleFacedIdentity(activeCard.identity) && <span className="multiface-label" aria-label="Carta dupla-face">Carta dupla-face · Front ↔ Back</span>}
           </div>
 
-          <WorkingCardDetailsSummary card={activeCard} identityLayout={identityDetails?.layout} artworkCandidates={artworkCandidates} />
-          <div className="card-identity-actions">
-            {selectedFor(activeCard, face) && <span>Arte atual: {labelSource(selectedFor(activeCard, face)!.source)} · {selectedFor(activeCard, face)!.candidateId}</span>}
-            {activeCard.manualBackArtwork?.source === "scryfall" && <span>Verso Scryfall legado preservado.</span>}
-            <button className="button secondary" type="button" disabled={interactionBusy} onClick={(event) => openArtworkPicker(activeCard.id, face, event.currentTarget)}>Selecionar arte</button>
-            <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void reresolveCard(activeCard)}>Re-resolver esta carta</button>
+          <div className="card-primary-actions">
+            <div className="card-primary-artwork">
+              <span>{face === "front" ? "Frente" : "Verso"}</span>
+              <strong>{selectedFor(activeCard, face) ? labelSource(selectedFor(activeCard, face)!.source) : "Sem artwork"}</strong>
+            </div>
+            <button className="button primary" type="button" disabled={interactionBusy} onClick={(event) => openArtworkPicker(activeCard.id, face, event.currentTarget)}>Trocar artwork</button>
           </div>
 
           {(activeCard.identityResolution.candidates.length > 0 || activeCard.identityResolution.status === "suggested" || activeCard.identityResolution.status === "ambiguous") && <div className="identity-suggestions">
-            <strong>Confirme uma sugestão</strong>
-            {activeCard.identityResolution.candidates.map(({ identity: candidateIdentity, score, reason }) => (
+            <strong>Esta carta precisa de confirmação</strong>
+            {activeCard.identityResolution.candidates.map(({ identity: candidateIdentity, score }) => (
               <div className="identity-option" key={candidateIdentity.id}>
-                <span>{candidateIdentity.name} · {(score * 100).toFixed(0)}% · {reason}</span>
-                <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void confirmIdentity(activeCard, candidateIdentity)}>Usar esta identidade</button>
+                <span>{candidateIdentity.name} · {(score * 100).toFixed(0)}%</span>
+                <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void confirmIdentity(activeCard, candidateIdentity)}>Usar</button>
               </div>
             ))}
           </div>}
 
-          <div className="manual-identity-search">
-            <label className="field-label" htmlFor="manual-card-search">Escolher outra identidade</label>
-            <div className="manual-search-row">
-              <input id="manual-card-search" value={manualQuery} disabled={interactionBusy} onChange={(event) => { setAutocompleteEnabled(true); setManualQuery(event.currentTarget.value); }} onKeyDown={(event) => { if (event.key === "Enter") void searchIdentities(); }} placeholder="Nome da carta" />
-              <button className="button secondary" type="button" disabled={interactionBusy || manualQuery.trim().length < 2} onClick={() => void searchIdentities()}>Buscar</button>
-            </div>
-            {autocompleteEnabled && autocompleteNames.length > 0 && <div className="autocomplete-list" role="listbox" aria-label="Autocompletar carta">
-              {autocompleteNames.map((name) => <button type="button" role="option" key={name} disabled={interactionBusy} onClick={() => { setManualQuery(name); void searchIdentities(name); }}>{name}</button>)}
-            </div>}
-            {manualIdentities.map((identity) => <div className="identity-option manual-result" key={identity.id}>
-              <span>{identity.name}{identity.setCode ? ` · ${identity.setCode.toUpperCase()} #${identity.collectorNumber ?? "?"}` : ""}</span>
-              <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void confirmIdentity(activeCard, identity)}>Usar esta identidade</button>
-            </div>)}
-            <button className="button secondary custom-button" type="button" disabled={interactionBusy} onClick={() => void keepCustom(activeCard)}>Manter como custom</button>
-          </div>
+          <details className="card-advanced-details">
+            <summary>Identidade e detalhes avançados</summary>
+            <div className="card-advanced-details-body">
+              <WorkingCardDetailsSummary card={activeCard} identityLayout={identityDetails?.layout} artworkCandidates={artworkCandidates} />
+              <div className="card-identity-actions">
+                {activeCard.manualBackArtwork?.source === "scryfall" && <span>Verso Scryfall legado preservado.</span>}
+                <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void reresolveCard(activeCard)}>Re-resolver identidade</button>
+              </div>
 
-          {(identityDetails?.relatedCards.length || relatedCardNames(activeCard).length) > 0 && <div className="related-card-list"><strong>Related cards / tokens:</strong> {(identityDetails?.relatedCards ?? relatedCardNames(activeCard)).map((item) => `${item.name}${item.component === "token" ? " (token; não adicionado)" : ""}`).join(" · ")}</div>}
+              <div className="manual-identity-search">
+                <label className="field-label" htmlFor="manual-card-search">Escolher outra identidade</label>
+                <div className="manual-search-row">
+                  <input id="manual-card-search" value={manualQuery} disabled={interactionBusy} onChange={(event) => { setAutocompleteEnabled(true); setManualQuery(event.currentTarget.value); }} onKeyDown={(event) => { if (event.key === "Enter") void searchIdentities(); }} placeholder="Nome da carta" />
+                  <button className="button secondary" type="button" disabled={interactionBusy || manualQuery.trim().length < 2} onClick={() => void searchIdentities()}>Buscar</button>
+                </div>
+                {autocompleteEnabled && autocompleteNames.length > 0 && <div className="autocomplete-list" role="listbox" aria-label="Autocompletar carta">
+                  {autocompleteNames.map((name) => <button type="button" role="option" key={name} disabled={interactionBusy} onClick={() => { setManualQuery(name); void searchIdentities(name); }}>{name}</button>)}
+                </div>}
+                {manualIdentities.map((identity) => <div className="identity-option manual-result" key={identity.id}>
+                  <span>{identity.name}{identity.setCode ? ` · ${identity.setCode.toUpperCase()} #${identity.collectorNumber ?? "?"}` : ""}</span>
+                  <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void confirmIdentity(activeCard, identity)}>Usar esta identidade</button>
+                </div>)}
+                <button className="button secondary custom-button" type="button" disabled={interactionBusy} onClick={() => void keepCustom(activeCard)}>Manter como custom</button>
+              </div>
+
+              {(identityDetails?.relatedCards.length || relatedCardNames(activeCard).length) > 0 && <div className="related-card-list"><strong>Relacionadas / tokens:</strong> {(identityDetails?.relatedCards ?? relatedCardNames(activeCard)).map((item) => `${item.name}${item.component === "token" ? " (token)" : ""}`).join(" · ")}</div>}
+            </div>
+          </details>
         </div>}
       </div>}
   </div>;
