@@ -80,7 +80,7 @@ export default function ArtworkPickerDialog({ title, onClose, restoreFocusRef, f
     >
       <header className="artwork-picker-heading">
         <h2 id="artwork-picker-title">{title}</h2>
-        <button className="button secondary" type="button" aria-label="Fechar seletor de arte" onClick={onClose}>Fechar</button>
+        <button className="artwork-picker-close" type="button" aria-label="Fechar seletor de arte" onClick={onClose}><span aria-hidden="true">×</span></button>
       </header>
       <div className="artwork-picker-dialog-content">{children}</div>
     </dialog>
