@@ -128,8 +128,8 @@ describe("M6 Artwork Picker face context", () => {
     };
 
     const dialog = await openPicker();
-    expect(within(dialog).getByText("Carta dupla-face")).toBeInTheDocument();
-    expect(within(dialog).getByText(/Carta dupla-face · Front · Delver of Secrets · Back · Insectile Aberration/)).toBeInTheDocument();
+    expect(within(dialog).getByText("Dupla face")).toBeInTheDocument();
+    expect(within(dialog).getByRole("tab", { name: "Frente · Delver of Secrets" })).toBeInTheDocument();
     const providerGroup = within(dialog).getByRole("group", { name: "Filtrar provider" });
     expect(providerGroup).toHaveTextContent("Scryfall");
     expect(providerGroup).toHaveTextContent("MPC Autofill");
@@ -141,9 +141,9 @@ describe("M6 Artwork Picker face context", () => {
     await user.click(within(frontCard).getByRole("button", { name: "Selecionar arte" }));
     await waitFor(() => expect(resolveRequests.at(-1)).toMatchObject({ action: "apply-artwork-scope", faceId: "front", scope: "entry" }));
     expect(screen.getByRole("dialog", { name: /Delver of Secrets/ })).toBe(dialog);
-    await waitFor(() => expect(within(dialog).getByText(/Estado atual:.*scryfall:/i)).toBeInTheDocument());
+    await waitFor(() => expect(within(dialog).getByText(/Atual · Scryfall/i)).toBeInTheDocument());
 
-    const backTab = within(dialog).getByRole("tab", { name: "Back · Insectile Aberration" });
+    const backTab = within(dialog).getByRole("tab", { name: "Verso · Insectile Aberration" });
     await user.click(backTab);
     expect(backTab).toHaveAttribute("aria-selected", "true");
     expect(within(dialog).getAllByText("Back · Insectile Aberration").length).toBeGreaterThan(0);
@@ -226,7 +226,7 @@ describe("M6 Artwork Picker face context", () => {
     const openBackPicker = async () => {
       await user.click(await screen.findByRole("button", { name: "Selecionar arte" }));
       const picker = await screen.findByRole("dialog", { name: /Island/ });
-      await user.click(within(picker).getByRole("tab", { name: "Back" }));
+      await user.click(within(picker).getByRole("tab", { name: "Verso" }));
       return picker;
     };
 
