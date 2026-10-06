@@ -640,3 +640,471 @@ body { min-width: 0; min-height: 0; }
 @media (prefers-reduced-motion: reduce) {
   .workspace-sidebar { transition: none; }
 }
+
+
+/* Visual rescue — compositor interactions + Artwork Picker */
+.workspace-preview {
+  padding: 18px;
+  background: #17191c;
+}
+.workspace-preview-content {
+  align-items: stretch;
+}
+.canonical-compositor {
+  gap: 10px;
+}
+.compositor-toolbar {
+  align-self: center;
+  width: max-content;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  gap: 6px;
+  border: 1px solid #35383d;
+  border-radius: 999px;
+  padding: 5px 6px;
+  color: #f4f4f5;
+  background: rgb(24 26 30 / 94%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 28%);
+  backdrop-filter: blur(12px);
+}
+.compositor-toolbar .button,
+.compositor-page-controls select {
+  min-height: 28px;
+  border: 1px solid #3f4349;
+  border-radius: 999px;
+  color: #f4f4f5;
+  background: #202328;
+  box-shadow: none;
+}
+.compositor-toolbar .button:hover,
+.compositor-page-controls select:hover {
+  background: #2a2d32;
+}
+.compositor-page-controls {
+  gap: 3px;
+  color: #b8bdc5;
+}
+.compositor-page-controls > span {
+  min-width: 68px;
+}
+.compositor-sheet-scroll {
+  border-radius: 12px;
+}
+.compositor-sheet {
+  filter: drop-shadow(0 12px 30px rgb(0 0 0 / 34%));
+}
+.compositor-card-controls {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.compositor-card-control-button {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 7px;
+  padding: 0;
+  color: #fff;
+  background: rgb(17 19 23 / 74%);
+  box-shadow: none;
+  font: 650 15px/1 ui-sans-serif, system-ui, sans-serif;
+  opacity: 0.16;
+  backdrop-filter: blur(6px);
+  transition: opacity 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+.compositor-card-control-button:hover {
+  background: rgb(17 19 23 / 92%);
+  transform: translateY(-1px);
+}
+.registration-preview-slot:hover .compositor-card-control-button {
+  opacity: 0.82;
+}
+.compositor-card-control-button:focus-visible,
+.compositor-card-control-button[aria-expanded="true"],
+.compositor-local-flip[aria-pressed="true"] {
+  opacity: 1;
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.compositor-selection-checkbox {
+  opacity: 0.14;
+}
+.registration-preview-slot:hover .compositor-selection-checkbox,
+.compositor-selection-checkbox:focus-visible {
+  opacity: 0.86;
+}
+.compositor-selection-checkbox[aria-checked="true"] {
+  opacity: 1;
+}
+.compositor-selection-checkbox-box {
+  fill: #111317;
+  fill-opacity: 0.72;
+  stroke: #fff;
+  stroke-opacity: 0.5;
+  stroke-width: 0.42;
+}
+.compositor-selection-checkbox[aria-checked="true"] .compositor-selection-checkbox-box {
+  fill: #111317;
+  stroke: #fff;
+  stroke-opacity: 0.95;
+}
+.compositor-selection-checkbox-mark {
+  stroke-width: 0.78;
+}
+.compositor-selection-checkbox:focus-visible .compositor-selection-checkbox-box {
+  stroke: #fff;
+  stroke-width: 0.72;
+}
+.compositor-card-body:focus-visible {
+  stroke: #fff;
+  stroke-width: 0.42;
+}
+.compositor-selection-bar {
+  inset-block-end: max(14px, env(safe-area-inset-bottom));
+  gap: 2px;
+  border: 1px solid #3b3e43;
+  border-radius: 999px;
+  padding: 4px;
+  color: #f4f4f5;
+  background: rgb(24 26 30 / 94%);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 34%);
+  backdrop-filter: blur(12px);
+}
+.compositor-selection-bar button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 11px;
+  color: #e6e7ea;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 650;
+}
+.compositor-selection-bar button:hover {
+  color: #fff;
+  background: #303338;
+}
+.compositor-selection-bar button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Picker is a gallery surface, not a diagnostics panel. */
+.artwork-picker-backdrop {
+  background: rgb(0 0 0 / 68%);
+  backdrop-filter: blur(5px);
+}
+.artwork-picker-dialog {
+  inset: 4vh 4vw;
+  width: min(1480px, 92vw);
+  max-height: 92dvh;
+  border: 1px solid #2e3136;
+  border-radius: 16px;
+  color: #e8eaed;
+  background: #111315;
+  box-shadow: 0 28px 90px rgb(0 0 0 / 52%);
+}
+.artwork-picker-heading {
+  min-height: 54px;
+  border-bottom: 1px solid #2b2e33;
+  padding: 8px 12px 8px 16px;
+  background: #15171a;
+}
+.artwork-picker-heading h2 {
+  color: #f5f5f5;
+  font-size: 16px;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+}
+.artwork-picker-close {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid #34373c;
+  border-radius: 999px;
+  padding: 0;
+  color: #d7d9dd;
+  background: #202328;
+  cursor: pointer;
+  font: 400 24px/1 ui-sans-serif, system-ui, sans-serif;
+}
+.artwork-picker-close:hover {
+  color: #fff;
+  background: #2b2e33;
+}
+.artwork-picker-close:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.artwork-picker-dialog-content {
+  max-height: calc(92dvh - 54px);
+  padding: 14px 16px 20px;
+  background: #111315;
+}
+.artwork-picker-content {
+  gap: 10px;
+}
+.artwork-picker-context {
+  gap: 4px 12px;
+  border-bottom: 0;
+  padding: 0 2px 2px;
+  color: #9298a1;
+  font-size: 11px;
+}
+.artwork-picker-context strong {
+  color: #f1f2f4;
+}
+.artwork-picker-provider-status {
+  width: fit-content;
+  max-width: 100%;
+  color: #8f959e;
+  font-size: 10px;
+}
+.artwork-picker-provider-status > summary {
+  cursor: pointer;
+  color: #9fa4ad;
+  font-size: 10px;
+}
+.artwork-picker-provider-status .provider-health {
+  margin: 6px 0 0;
+}
+.artwork-picker-face-tabs,
+.picker-provider-tabs {
+  gap: 5px;
+}
+.artwork-picker-dialog .button {
+  border-color: #393d43;
+  border-radius: 8px;
+  color: #dfe2e6;
+  background: #202328;
+  box-shadow: none;
+}
+.artwork-picker-dialog .button:hover:not(:disabled) {
+  background: #2a2d32;
+}
+.artwork-picker-dialog .button.primary {
+  border-color: #f0f1f2;
+  color: #111315;
+  background: #f0f1f2;
+}
+.artwork-picker-dialog .button.primary:hover:not(:disabled) {
+  background: #fff;
+}
+.artwork-picker-dialog .button:focus-visible,
+.artwork-picker-dialog input:focus-visible,
+.artwork-picker-dialog select:focus-visible,
+.artwork-picker-dialog summary:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.artwork-picker-search-row {
+  grid-template-columns: minmax(240px, 1fr) minmax(180px, 260px);
+  gap: 8px;
+}
+.artwork-picker-search-row label,
+.artwork-pagination form label {
+  color: #969ca5;
+}
+.artwork-picker-search-row input,
+.artwork-picker-search-row select,
+.artwork-pagination input {
+  min-height: 36px;
+  border-color: #373a40;
+  border-radius: 8px;
+  color: #f1f2f4;
+  background: #191b1f;
+}
+.artwork-catalog-count,
+.artwork-pagination {
+  color: #858b94;
+}
+.artwork-grid {
+  grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+  gap: 12px;
+}
+.artwork-candidate {
+  position: relative;
+  gap: 0;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  padding: 6px;
+  overflow: hidden;
+  color: #e5e7eb;
+  background: #181a1e;
+  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+.artwork-candidate:hover {
+  border-color: #3b3f45;
+  background: #1d2024;
+  transform: translateY(-1px);
+}
+.artwork-candidate.is-selected {
+  border-color: #f3f4f6;
+  box-shadow: 0 0 0 1px #f3f4f6;
+}
+.artwork-candidate-preview {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 63.5 / 88.9;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  background: #0c0e10;
+  cursor: pointer;
+}
+.artwork-candidate-preview:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.artwork-candidate-preview > img,
+.artwork-candidate-preview > .artwork-reference-thumb {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  align-items: center;
+  justify-content: center;
+  background: #0c0e10;
+  color: #8d939c;
+  object-fit: contain;
+}
+.artwork-quality-badge,
+.artwork-selected-badge {
+  position: absolute;
+  top: 7px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: #fff;
+  background: rgb(10 12 14 / 82%);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 30%);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  backdrop-filter: blur(5px);
+}
+.artwork-quality-badge { left: 7px; }
+.artwork-selected-badge { right: 7px; }
+.candidate-primary {
+  display: grid;
+  gap: 2px;
+  padding: 8px 4px 6px;
+}
+.candidate-primary strong {
+  overflow: hidden;
+  color: #f1f2f4;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.candidate-primary span {
+  overflow: hidden;
+  color: #8f959e;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.candidate-technical {
+  margin: 0 4px 5px;
+  color: #8e949d;
+  font-size: 9px;
+}
+.candidate-technical > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #858b94;
+  font-size: 9px;
+}
+.candidate-technical .candidate-meta {
+  min-height: 0;
+  gap: 3px;
+  padding: 7px 0 2px;
+}
+.candidate-technical .candidate-meta strong,
+.candidate-technical .candidate-meta span {
+  color: #9aa0a9;
+  font-size: 9px;
+}
+.candidate-actions {
+  display: grid;
+  gap: 5px;
+  margin-top: auto;
+}
+.candidate-actions .button {
+  min-height: 30px;
+  margin: 0;
+  font-size: 10px;
+}
+.simple-back-options,
+.artwork-apply-scope,
+.selected-artwork-summary {
+  border-color: #30343a;
+  color: #dfe2e6;
+  background: #17191d;
+}
+.simple-back-options h3,
+.artwork-apply-scope h3,
+.picker-back-library h4,
+.selected-artwork-summary strong {
+  color: #f1f2f4;
+}
+.artwork-scope-options label {
+  color: #c7cbd1;
+}
+.artwork-scope-options input {
+  accent-color: #f3f4f6;
+}
+.artwork-bulk-impact {
+  color: #d5d8dd;
+  background: #202328;
+}
+
+@media (hover: none) {
+  .compositor-selection-checkbox { opacity: 0.52; }
+  .compositor-card-control-button { opacity: 0.58; }
+}
+
+@media (max-width: 700px) {
+  .workspace-preview {
+    padding: 8px;
+  }
+  .canonical-compositor {
+    padding: 0;
+  }
+  .compositor-toolbar {
+    width: min(100%, max-content);
+    max-width: calc(100vw - 16px);
+    overflow-x: auto;
+    border-radius: 12px;
+  }
+  .artwork-picker-dialog {
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    max-width: 100vw;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .artwork-picker-dialog-content {
+    height: calc(100dvh - 54px);
+    max-height: none;
+    padding: 10px;
+  }
+  .artwork-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .artwork-picker-context {
+    font-size: 10px;
+  }
+  .candidate-primary {
+    padding-inline: 2px;
+  }
+}
