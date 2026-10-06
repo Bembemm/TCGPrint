@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { useState } from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useEffect, useState } from "react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -65,6 +64,8 @@ function compositorWorkspace(
   onPhysicalAction?: (action: "increase" | "remove-copy" | "duplicate-copy" | "delete-entry" | "open-settings", instanceId: string, cardId: string) => void,
   interactionBusy = false,
   simulateRemoveCopy = false,
+  simulateDuplicateCopy = false,
+  simulateDeleteEntry = false,
 ) {
   function Harness() {
     const [settings, setSettings] = useState(initialSettings);
@@ -72,6 +73,15 @@ function compositorWorkspace(
     const [physicalOrder, setPhysicalOrder] = useState(() => initialPhysicalOrder ?? createPhysicalOrder(initialCards));
     const [projectRevision, setProjectRevision] = useState(1);
     const [pageNumber, setPageNumber] = useState(1);
+    const [activePhysicalInstanceId, setActivePhysicalInstanceId] = useState<string | null>(null);
+    const [selectedPhysicalInstanceIds, setSelectedPhysicalInstanceIds] = useState<Set<string>>(() => new Set());
+    useEffect(() => {
+      const existingIds = new Set(physicalOrder.instances.map(({ id }) => id));
+      setSelectedPhysicalInstanceIds((current) => {
+        const next = new Set([...current].filter((id) => existingIds.has(id)));
+        return next.size === current.size ? current : next;
+      });
+    }, [physicalOrder]);
     const changeSettings = (update: (current: typeof settings) => typeof settings) => {
       setSettings(update);
       setProjectRevision((revision) => revision + 1);
@@ -88,6 +98,8 @@ function compositorWorkspace(
     };
     return <>
       <output data-testid="project-revision">{projectRevision}</output>
+      <output data-testid="active-physical-instance-id">{activePhysicalInstanceId ?? "none"}</output>
+      <output data-testid="physical-order-ids">{physicalOrder.instances.map(({ id }) => id).join(",")}</output>
       {simulateRemoveCopy && <button type="button" onClick={() => { setCards([...initialCards]); setPhysicalOrder(initialPhysicalOrder ?? createPhysicalOrder(initialCards)); }}>Undo test removal</button>}
       <WorkspaceShell
         hasCards
@@ -97,15 +109,43 @@ function compositorWorkspace(
           cardCount={cards.reduce((sum, entry) => sum + entry.quantity, 0)}
           cards={cards}
           physicalOrder={physicalOrder}
+          activePhysicalInstanceId={activePhysicalInstanceId}
+          selectedPhysicalInstanceIds={selectedPhysicalInstanceIds}
           interactionBusy={interactionBusy}
           selectedPageNumber={pageNumber}
           onSelectPage={setPageNumber}
+          onActivatePhysicalInstance={(instanceId) => setActivePhysicalInstanceId(instanceId)}
+          onTogglePhysicalInstanceSelection={(instanceId) => setSelectedPhysicalInstanceIds((current) => {
+            const next = new Set(current);
+            if (next.has(instanceId)) next.delete(instanceId);
+            else next.add(instanceId);
+            return next;
+          })}
+          onSelectAllPhysicalInstances={(instanceIds) => setSelectedPhysicalInstanceIds(new Set(instanceIds))}
+          onClearPhysicalInstanceSelection={() => setSelectedPhysicalInstanceIds(new Set())}
           onSelectArtwork={onSelectArtwork}
           onPhysicalAction={onPhysicalAction ? (action, instanceId, cardId) => {
             onPhysicalAction(action, instanceId, cardId);
             if (simulateRemoveCopy && action === "remove-copy") {
               setCards((current) => current.map((entry) => entry.id === cardId ? { ...entry, quantity: entry.quantity - 1 } : entry));
               setPhysicalOrder((current) => ({ ...current, instances: current.instances.filter((reference) => reference.id !== instanceId) }));
+            }
+            if (simulateDuplicateCopy && action === "duplicate-copy") {
+              const nextCardId = `${cardId}-duplicate`;
+              setCards((current) => {
+                const source = current.find((entry) => entry.id === cardId);
+                return source ? [...current, { ...source, id: nextCardId, quantity: 1, order: current.length }] : current;
+              });
+              setPhysicalOrder((current) => ({
+                nextInstanceId: current.nextInstanceId + 1,
+                instances: [...current.instances, { id: `instance-${current.nextInstanceId}`, workingCardId: nextCardId }],
+              }));
+              setActivePhysicalInstanceId(`instance-${physicalOrder.nextInstanceId}`);
+            }
+            if (simulateDeleteEntry && action === "delete-entry") {
+              setCards((current) => current.filter((entry) => entry.id !== cardId));
+              setPhysicalOrder((current) => ({ ...current, instances: current.instances.filter((reference) => reference.workingCardId !== cardId) }));
+              setActivePhysicalInstanceId(null);
             }
           } : undefined}
           onReorderPhysicalInstance={enableReorder ? (instanceId, targetInstanceId, placement) => setPhysicalOrder((current) => movePhysicalInstance(current, instanceId, targetInstanceId, placement)) : undefined}
@@ -145,6 +185,18 @@ function slotForPhysicalIndex(index: number) {
   const slot = sheet().querySelector(`g[data-physical-card-index="${index}"]`);
   if (!(slot instanceof SVGGElement)) throw new Error(`Physical card ${index} is not rendered in the current page.`);
   return slot;
+}
+
+function bodyButtonForPhysicalIndex(index: number) {
+  const button = slotForPhysicalIndex(index).querySelector('[data-compositor-card-body="true"]');
+  if (!(button instanceof SVGElement)) throw new Error(`Physical card ${index} has no body activation control.`);
+  return button;
+}
+
+function checkboxForPhysicalIndex(index: number) {
+  const checkbox = slotForPhysicalIndex(index).querySelector('[role="checkbox"]');
+  if (!(checkbox instanceof SVGElement)) throw new Error(`Physical card ${index} has no selection checkbox.`);
+  return checkbox;
 }
 
 function artworkForPhysicalIndex(index: number) {
@@ -218,7 +270,7 @@ describe("canonical live compositor interactions", () => {
       .toHaveAttribute("transform", sheet().getAttribute("data-compositor-calibration-matrix"));
   });
 
-  it("selects a physical copy by pointer and keyboard, and keeps that copy paired across Front and Back", async () => {
+  it("activates a physical copy by pointer and keyboard, and keeps that copy paired across Front and Back", async () => {
     const user = userEvent.setup();
     render(compositorWorkspace([{ ...card(), quantity: 3 }]));
     const revision = screen.getByTestId("project-revision").textContent;
@@ -229,31 +281,31 @@ describe("canonical live compositor interactions", () => {
     expect(thirdCopy).toHaveAttribute("data-physical-card-index", "2");
     await user.click(secondCopy);
     expect(secondCopy).toHaveAttribute("data-physical-card-index", "1");
-    expect(secondCopy).toHaveAttribute("data-working-card-id", "compositor-card");
-    expect(secondCopy).toHaveAttribute("data-copy-number", "2");
-    expect(secondCopy).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
-    expect(screen.getByTestId("selected-physical-card")).toHaveTextContent("Carta física 2 · Island · cópia 2/3");
-    expect(secondCopy.querySelector("image[data-compositor-artwork]"))
+    expect(slotForPhysicalIndex(1)).toHaveAttribute("data-working-card-id", "compositor-card");
+    expect(slotForPhysicalIndex(1)).toHaveAttribute("data-copy-number", "2");
+    expect(secondCopy).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
+    expect(screen.getByTestId("active-physical-card")).toHaveTextContent("Carta física 2 · Island · cópia 2/3");
+    expect(slotForPhysicalIndex(1).querySelector("image[data-compositor-artwork]"))
       .toHaveAttribute("aria-label", "Island · frente");
-    expect(secondCopy.querySelector("image[data-compositor-artwork]"))
+    expect(slotForPhysicalIndex(1).querySelector("image[data-compositor-artwork]"))
       .toHaveAttribute("data-compositor-artwork", artworkFront.candidateId);
 
     await user.click(screen.getByRole("button", { name: "Verso" }));
     const pairedBackCopy = slotForPhysicalIndex(1);
     expect(pairedBackCopy).toHaveAttribute("data-physical-card-index", "1");
-    expect(pairedBackCopy).toHaveAttribute("aria-pressed", "true");
+    expect(bodyButtonForPhysicalIndex(1)).toHaveAttribute("aria-current", "true");
     expect(pairedBackCopy).toHaveAttribute("data-working-card-id", "compositor-card");
     expect(pairedBackCopy).toHaveAttribute("data-copy-number", "2");
     expect(pairedBackCopy).toHaveAttribute("data-copy-count", "3");
-    expect(screen.getByTestId("selected-physical-card")).toHaveTextContent("Carta física 2 · Island · cópia 2/3");
+    expect(screen.getByTestId("active-physical-card")).toHaveTextContent("Carta física 2 · Island · cópia 2/3");
     expect(pairedBackCopy.querySelector("image[data-compositor-artwork]"))
       .toHaveAttribute("aria-label", "Island · verso");
     expect(pairedBackCopy.querySelector("image[data-compositor-artwork]"))
       .toHaveAttribute("data-compositor-artwork", artworkBack.candidateId);
 
     await user.click(screen.getByRole("button", { name: "Frente" }));
-    expect(slotForPhysicalIndex(1)).toHaveAttribute("aria-pressed", "true");
+    expect(bodyButtonForPhysicalIndex(1)).toHaveAttribute("aria-current", "true");
     expect(artworkForPhysicalIndex(1)).toHaveAttribute("aria-label", "Island · frente");
     expect(artworkForPhysicalIndex(1)).toHaveAttribute("data-compositor-artwork", artworkFront.candidateId);
 
@@ -261,14 +313,173 @@ describe("canonical live compositor interactions", () => {
     firstCopy.focus();
     expect(document.activeElement).toBe(firstCopy);
     await user.keyboard("{Enter}");
-    expect(firstCopy).toHaveAttribute("aria-pressed", "true");
+    expect(firstCopy).toHaveAttribute("aria-current", "true");
     secondCopy.focus();
     await user.keyboard(" ");
-    expect(secondCopy).toHaveAttribute("aria-pressed", "true");
+    expect(secondCopy).toHaveAttribute("aria-current", "true");
     expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
   });
 
-  it("passes the exact selected physical instance and visible side to the artwork picker entry action", async () => {
+  it("keeps body activation independent from checkbox multi-selection and clear", async () => {
+    const user = userEvent.setup();
+    const onSelectArtwork = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 3 }], undefined, false, onSelectArtwork));
+    const revision = screen.getByTestId("project-revision").textContent;
+    const physicalOrder = screen.getByTestId("physical-order-ids").textContent;
+
+    await user.click(bodyButtonForPhysicalIndex(0));
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-1");
+    expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "false");
+    expect(onSelectArtwork).not.toHaveBeenCalled();
+
+    await user.click(checkboxForPhysicalIndex(1));
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-1");
+    await user.click(checkboxForPhysicalIndex(2));
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "true");
+    expect(checkboxForPhysicalIndex(2)).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-1");
+
+    await user.click(screen.getByRole("button", { name: "Verso" }));
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "true");
+    expect(checkboxForPhysicalIndex(2)).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("button", { name: "Frente" }));
+
+    await user.click(screen.getByRole("button", { name: "Desmarcar" }));
+    expect(screen.queryByRole("group", { name: "Ações de seleção" })).not.toBeInTheDocument();
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "false");
+    expect(checkboxForPhysicalIndex(2)).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-1");
+    expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent(physicalOrder ?? "");
+    expect(onSelectArtwork).not.toHaveBeenCalled();
+  });
+
+  it("keeps checkbox clicks out of the HUD and drag path while right click only activates", async () => {
+    const user = userEvent.setup();
+    const onPhysicalAction = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], undefined, false, undefined, true, undefined, onPhysicalAction));
+
+    await user.click(checkboxForPhysicalIndex(0));
+    expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("none");
+    expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
+
+    const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-1") };
+    fireEvent.pointerDown(checkboxForPhysicalIndex(0), { pointerType: "mouse" });
+    expect(fireEvent.dragStart(slotForPhysicalIndex(0), { dataTransfer })).toBe(false);
+    expect(slotForPhysicalIndex(0)).not.toHaveClass("is-drag-source");
+    expect(fireEvent.dragStart(checkboxForPhysicalIndex(0), { dataTransfer })).toBe(false);
+    expect(slotForPhysicalIndex(0)).not.toHaveClass("is-drag-source");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("none");
+
+    expect(fireEvent.contextMenu(bodyButtonForPhysicalIndex(1))).toBe(false);
+    expect(screen.getByTestId("compositor-instance-hud")).toBeInTheDocument();
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
+    expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "true");
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "false");
+    expect(onPhysicalAction).not.toHaveBeenCalled();
+  });
+
+  it("selects every physical ID across pages and excludes unassigned slots", async () => {
+    const user = userEvent.setup();
+    render(compositorWorkspace([{ ...card(), quantity: 5 }], {
+      ...DEFAULT_PROJECT_SETTINGS,
+      layout: { rows: 1, columns: 3, skippedSlotIndices: [1] },
+    }));
+
+    expect(sheet().querySelectorAll('[role="checkbox"]')).toHaveLength(2);
+    expect(sheet().querySelector('g[aria-label^="Slot 2 desativado"] [role="checkbox"]')).toBeNull();
+    await user.click(checkboxForPhysicalIndex(0));
+    const actionBar = screen.getByRole("group", { name: "Ações de seleção" });
+    expect(within(actionBar).getAllByRole("button").map((button) => button.textContent))
+      .toEqual(["Selecionar tudo", "Desmarcar"]);
+    await user.click(within(actionBar).getByRole("button", { name: "Selecionar tudo" }));
+
+    expect(sheet()).toHaveAttribute("data-compositor-page", "1");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("none");
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2,instance-3,instance-4,instance-5");
+    expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "true");
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("button", { name: "Próxima página" }));
+    expect(checkboxForPhysicalIndex(2)).toHaveAttribute("aria-checked", "true");
+    expect(checkboxForPhysicalIndex(3)).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("button", { name: "Próxima página" }));
+    expect(checkboxForPhysicalIndex(4)).toHaveAttribute("aria-checked", "true");
+
+    await user.click(screen.getByRole("button", { name: "Desmarcar" }));
+    expect(screen.queryByRole("group", { name: "Ações de seleção" })).not.toBeInTheDocument();
+    expect(checkboxForPhysicalIndex(4)).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("preserves checkbox membership while navigating between pages", async () => {
+    const user = userEvent.setup();
+    render(compositorWorkspace([card()]));
+
+    await user.click(checkboxForPhysicalIndex(0));
+    await user.click(screen.getByRole("button", { name: "Próxima página" }));
+    await user.click(checkboxForPhysicalIndex(9));
+    expect(checkboxForPhysicalIndex(9)).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("button", { name: "Página anterior" }));
+    expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("button", { name: "Próxima página" }));
+    expect(checkboxForPhysicalIndex(9)).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("prunes a removed physical ID and keeps surviving checkbox IDs", async () => {
+    const user = userEvent.setup();
+    render(compositorWorkspace([{ ...card(), quantity: 3 }], undefined, false, undefined, false, undefined, vi.fn(), false, true));
+
+    await user.click(checkboxForPhysicalIndex(1));
+    await user.click(checkboxForPhysicalIndex(2));
+    await user.click(bodyButtonForPhysicalIndex(1));
+    await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i }));
+    await user.click(screen.getByRole("button", { name: "Remover uma cópia" }));
+
+    await waitFor(() => expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-3"));
+    expect(screen.getByRole("checkbox", { name: "Selecionar Island, cópia 2 de 2" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("does not add a duplicated physical copy to checkbox selection", async () => {
+    const user = userEvent.setup();
+    const onPhysicalAction = vi.fn();
+    render(compositorWorkspace([{ ...card(), quantity: 2 }], undefined, false, undefined, false, undefined, onPhysicalAction, false, false, true));
+
+    await user.click(checkboxForPhysicalIndex(0));
+    await user.click(checkboxForPhysicalIndex(1));
+    await user.click(bodyButtonForPhysicalIndex(0));
+    await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 1/i }));
+    await user.click(screen.getByRole("button", { name: "Duplicar como entrada independente" }));
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2,instance-3");
+    expect(screen.getByRole("checkbox", { name: "Selecionar Island, cópia 1 de 2" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("checkbox", { name: "Selecionar Island, cópia 2 de 2" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("checkbox", { name: "Selecionar Island, cópia 1 de 1" })).toHaveAttribute("aria-checked", "false");
+    expect(onPhysicalAction).toHaveBeenCalledWith("duplicate-copy", "instance-1", "compositor-card");
+  });
+
+  it("prunes deleted WorkingCard IDs while preserving selected surviving IDs", async () => {
+    const user = userEvent.setup();
+    const onPhysicalAction = vi.fn();
+    const cards = [
+      { ...card(), id: "island-entry", quantity: 1 },
+      { ...card(), id: "mountain-entry", order: 1, quantity: 1, identityHints: { name: "Mountain" }, faces: [{ id: "front", side: "front" as const, name: "Mountain" }] },
+    ];
+    render(compositorWorkspace(cards, undefined, false, undefined, false, undefined, onPhysicalAction, false, false, false, true));
+
+    await user.click(checkboxForPhysicalIndex(0));
+    await user.click(checkboxForPhysicalIndex(1));
+    await user.click(bodyButtonForPhysicalIndex(0));
+    await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 1/i }));
+    await user.click(screen.getByRole("button", { name: "Remover carta inteira (1 cópia(s))" }));
+
+    await waitFor(() => expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-2"));
+    expect(screen.queryByRole("checkbox", { name: "Selecionar Island, cópia 1 de 1" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Selecionar Mountain, cópia 1 de 1" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("group", { name: "Ações de seleção" })).toBeInTheDocument();
+  });
+
+  it("passes the exact active physical instance and visible side to the artwork picker entry action", async () => {
     const user = userEvent.setup();
     const onSelectArtwork = vi.fn();
     render(compositorWorkspace([{ ...card(), quantity: 3 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, onSelectArtwork));
@@ -317,20 +528,20 @@ describe("canonical live compositor interactions", () => {
     expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
   });
 
-  it("closes the previous HUD when another physical instance is explicitly selected", async () => {
+  it("closes the previous HUD when another physical instance becomes active", async () => {
     const user = userEvent.setup();
     render(compositorWorkspace([{ ...card(), quantity: 2 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, false, undefined, vi.fn()));
 
-    await user.click(slotForPhysicalIndex(0));
+    await user.click(bodyButtonForPhysicalIndex(0));
     const firstActions = screen.getByRole("button", { name: /mais ações para Island, cópia 1/i });
     await user.click(firstActions);
     expect(screen.getByTestId("compositor-instance-hud")).toHaveAttribute("aria-label", "Ações para Island, cópia 1");
     expect(firstActions).toHaveAttribute("aria-expanded", "true");
 
-    await user.click(slotForPhysicalIndex(1));
+    await user.click(bodyButtonForPhysicalIndex(1));
 
     expect(screen.queryByTestId("compositor-instance-hud")).not.toBeInTheDocument();
-    expect(slotForPhysicalIndex(1)).toHaveAttribute("aria-pressed", "true");
+    expect(bodyButtonForPhysicalIndex(1)).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i })).toHaveAttribute("aria-expanded", "false");
   });
 
@@ -339,7 +550,7 @@ describe("canonical live compositor interactions", () => {
     const order = createPhysicalOrder([{ ...card(), quantity: 3 }]);
     render(compositorWorkspace([{ ...card(), quantity: 3 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true, order, vi.fn()));
 
-    await user.click(slotForPhysicalIndex(1));
+    await user.click(bodyButtonForPhysicalIndex(1));
     await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i }));
     expect(screen.getByTestId("compositor-instance-hud")).toHaveTextContent("Cópia 2/3");
     await user.click(screen.getByRole("button", { name: "Mover depois" }));
@@ -373,7 +584,7 @@ describe("canonical live compositor interactions", () => {
     const order = createPhysicalOrder(cards);
     render(compositorWorkspace(cards, { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, false, order, vi.fn(), false, true));
 
-    await user.click(slotForPhysicalIndex(1));
+    await user.click(bodyButtonForPhysicalIndex(1));
     await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i }));
     expect(screen.getByTestId("compositor-instance-hud")).toHaveTextContent("Cópia 2/2");
     await user.click(screen.getByRole("button", { name: "Remover uma cópia" }));
@@ -388,7 +599,7 @@ describe("canonical live compositor interactions", () => {
     const user = userEvent.setup();
     const onPhysicalAction = vi.fn();
     render(compositorWorkspace([{ ...card(), quantity: 3 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true, undefined, onPhysicalAction));
-    await user.click(slotForPhysicalIndex(0));
+    await user.click(bodyButtonForPhysicalIndex(0));
     const moreActions = screen.getByRole("button", { name: /mais ações para Island, cópia 1/i });
     await user.click(moreActions);
     expect(screen.getByTestId("compositor-instance-hud")).toBeInTheDocument();
@@ -399,8 +610,8 @@ describe("canonical live compositor interactions", () => {
     await user.keyboard("{Enter}");
     expect(sheet().querySelectorAll("g[data-physical-instance-id]")[0]).toHaveAttribute("data-physical-instance-id", "instance-2");
     expect(sheet().querySelectorAll("g[data-physical-instance-id]")[1]).toHaveAttribute("data-physical-instance-id", "instance-1");
-    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-instance-id", "instance-1");
-    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
+    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-instance-id", "instance-1");
+    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
     expect(onPhysicalAction).not.toHaveBeenCalled();
   });
 
@@ -466,7 +677,7 @@ describe("canonical live compositor interactions", () => {
     expect(sheet().querySelector('g[data-physical-card-index="0"]')).toHaveAttribute("data-physical-instance-id", "instance-1");
   });
 
-  it("renders one zoom-stable selection indicator without changing the artwork, trim, or Project state", async () => {
+  it("uses an accessible checkbox as selection feedback without changing artwork, geometry, or Project state", async () => {
     const user = userEvent.setup();
     render(compositorWorkspace([{ ...card(), quantity: 2 }]));
     const revision = screen.getByTestId("project-revision").textContent;
@@ -478,65 +689,19 @@ describe("canonical live compositor interactions", () => {
     const originalSelectedArtwork = secondSlot.querySelector("image[data-compositor-artwork]")?.outerHTML;
 
     expect(sheet().querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(0);
-    await user.click(secondSlot);
+    expect(screen.queryByRole("group", { name: "Ações de seleção" })).not.toBeInTheDocument();
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-label", "Selecionar Island, cópia 2 de 2");
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "false");
+    await user.click(checkboxForPhysicalIndex(1));
 
-    expect(secondSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
-    expect(firstSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(0);
-    expect(sheet().querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
-    const outline = secondSlot.querySelector("[data-compositor-selection-outline]");
-    const trim = secondSlot.querySelector('[data-compositor-layer="trim"]');
-    expect(outline).toHaveAttribute("fill", "none");
-    expect(outline).toHaveAttribute("stroke", "#7e22ce");
-    expect(outline).toHaveAttribute("stroke-width", "2");
-    expect(outline).toHaveAttribute("vector-effect", "non-scaling-stroke");
-    expect(outline).toHaveAttribute("rx", "0");
-    expect(["x", "y", "width", "height"].map((attribute) => outline?.getAttribute(attribute)))
-      .toEqual(["x", "y", "width", "height"].map((attribute) => trim?.getAttribute(attribute)));
+    expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "true");
+    expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("group", { name: "Ações de seleção" })).toBeInTheDocument();
+    expect(sheet().querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(0);
     expect(["x", "y", "width", "height"].map((attribute) => firstSlot.querySelector('[data-compositor-layer="trim"]')?.getAttribute(attribute)))
       .toEqual(originalTrimGeometry);
     expect(secondSlot.querySelector("image[data-compositor-artwork]")?.outerHTML).toBe(originalSelectedArtwork);
     expect(sheet()).toHaveAttribute("viewBox", originalViewBox);
-    expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
-
-    const selectedOutlineGeometry = ["x", "y", "width", "height"].map((attribute) => outline?.getAttribute(attribute));
-    await user.click(screen.getByText("Layers"));
-    const trimToggle = screen.getByRole("checkbox", { name: "Trim" });
-    await user.click(trimToggle);
-    expect(secondSlot.querySelector('[data-compositor-layer="trim"]')).toBeNull();
-    expect(secondSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
-    expect(["x", "y", "width", "height"].map((attribute) => secondSlot.querySelector("[data-compositor-selection-outline]")?.getAttribute(attribute)))
-      .toEqual(selectedOutlineGeometry);
-    await user.click(trimToggle);
-    expect(secondSlot.querySelector('[data-compositor-layer="trim"]')).toBeInTheDocument();
-
-    const bleedToggle = screen.getByRole("checkbox", { name: "Bleed" });
-    const bleedMm = sheet().getAttribute("data-compositor-bleed-mm");
-    await user.click(bleedToggle);
-    expect(secondSlot.querySelector('[data-compositor-layer="bleed"]')).toBeNull();
-    expect(secondSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
-    expect(sheet()).toHaveAttribute("data-compositor-bleed-mm", bleedMm);
-    await user.click(bleedToggle);
-    expect(secondSlot.querySelector('[data-compositor-layer="bleed"]')).toBeInTheDocument();
-
-    await user.click(firstSlot);
-    expect(firstSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
-    expect(secondSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(0);
-    expect(sheet().querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
-    await user.click(secondSlot);
-    expect(secondSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
-    expect(firstSlot.querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(0);
-    expect(sheet().querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(1);
-
-    for (const label of ["Fit Page", "Fit Width", "100%", "Reduzir zoom", "Aumentar zoom"]) {
-      await user.click(screen.getByRole("button", { name: label }));
-      const zoomedOutline = slotForPhysicalIndex(1).querySelector("[data-compositor-selection-outline]");
-      expect(zoomedOutline).toHaveAttribute("stroke-width", "2");
-      expect(zoomedOutline).toHaveAttribute("vector-effect", "non-scaling-stroke");
-    }
-    await user.click(screen.getByRole("button", { name: "Aumentar zoom" }));
-    expect(Number(sheet().getAttribute("data-compositor-zoom-scale"))).toBeGreaterThan(1);
-    expect(slotForPhysicalIndex(1).querySelector("[data-compositor-selection-outline]"))
-      .toHaveAttribute("vector-effect", "non-scaling-stroke");
     expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
   });
 
@@ -548,16 +713,13 @@ describe("canonical live compositor interactions", () => {
       layout: { skippedSlotIndices: [] },
     }));
 
-    await user.click(slotForPhysicalIndex(0));
-    expect(slotForPhysicalIndex(0).querySelector("[data-compositor-selection-outline]"))
-      .toHaveAttribute("rx", "3.175");
-
-    const css = readFileSync("src/app/globals.css", "utf8");
-    expect(css).toMatch(/\.registration-preview-slot\s*\{[^}]*-webkit-tap-highlight-color:\s*transparent/s);
-    expect(css).toMatch(/\.registration-preview-slot:focus:not\(:focus-visible\)\s*\{[^}]*outline:\s*none/s);
-    expect(css).toMatch(/\.registration-preview-slot:focus-visible\s*\{[^}]*outline:\s*2px solid #145c92/s);
-    expect(css).toMatch(/\.registration-preview-slot:focus-visible\.is-selected\s*\{[^}]*outline:\s*none/s);
-    expect(css).toMatch(/\.registration-preview-slot:focus-visible\.is-selected \.compositor-selection-outline\s*\{[^}]*stroke:\s*#145c92/s);
+    const checkbox = checkboxForPhysicalIndex(0);
+    expect(checkbox).toHaveAttribute("aria-checked", "false");
+    checkbox.focus();
+    expect(document.activeElement).toBe(checkbox);
+    await user.keyboard(" ");
+    expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "true");
+    expect(slotForPhysicalIndex(0).querySelector("[data-compositor-selection-outline]")).toBeNull();
   });
 
   it("uses DFC faces and each simple card's effective physical back", async () => {
@@ -629,27 +791,28 @@ describe("canonical live compositor interactions", () => {
     expect(slotForPhysicalIndex(0).textContent).toContain("Verso sem artwork disponível");
   });
 
-  it("keeps physical selection stable while browsing a different page", async () => {
+  it("keeps the active physical context stable while browsing a different page", async () => {
     const user = userEvent.setup();
     render(compositorWorkspace([card()]));
 
     await user.click(screen.getByRole("button", { name: /carta física 2.*cópia 2 de 10/i }));
-    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
+    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
     await user.click(screen.getByRole("button", { name: "Próxima página" }));
-    expect(screen.getByRole("group", { name: /Compositor live frente.*página 2 de 2/ })).toHaveAttribute("data-selected-physical-card-index", "none");
-    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
+    expect(screen.getByRole("group", { name: /Compositor live frente.*página 2 de 2/ })).toHaveAttribute("data-active-physical-card-index", "none");
+    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
     expect(screen.queryByRole("button", { name: /carta física 2.*cópia 2 de 10/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Página anterior" }));
-    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
-    expect(slotForPhysicalIndex(1)).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
+    expect(bodyButtonForPhysicalIndex(1)).toHaveAttribute("aria-current", "true");
   });
 
-  it("follows the selected physical instance to its new page after a cross-page reorder", async () => {
+  it("keeps checkbox selection keyed to the physical ID after a cross-page reorder", async () => {
     const user = userEvent.setup();
     render(compositorWorkspace([{ ...card(), quantity: 10 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }, false, undefined, true));
 
-    await user.click(screen.getByRole("button", { name: /carta física 2.*cópia 2 de 10/i }));
+    await user.click(checkboxForPhysicalIndex(1));
+    await user.click(bodyButtonForPhysicalIndex(1));
     const dataTransfer = { effectAllowed: "none", setData: vi.fn(), getData: vi.fn(() => "instance-2") };
     fireEvent.dragStart(slotForPhysicalIndex(1), { dataTransfer });
     fireEvent.dragOver(screen.getByRole("button", { name: "Próxima página" }), { dataTransfer });
@@ -659,9 +822,10 @@ describe("canonical live compositor interactions", () => {
 
     expect(sheet()).toHaveAttribute("data-compositor-page", "2");
     expect(slotForPhysicalIndex(9)).toHaveAttribute("data-physical-instance-id", "instance-2");
-    expect(slotForPhysicalIndex(9)).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-instance-id", "instance-2");
-    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "9");
+    expect(bodyButtonForPhysicalIndex(9)).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-instance-id", "instance-2");
+    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "9");
+    expect(checkboxForPhysicalIndex(9)).toHaveAttribute("aria-checked", "true");
   });
 
   it("drops on a final eligible empty slot as insertion at the end of the physical sequence", () => {
@@ -675,7 +839,7 @@ describe("canonical live compositor interactions", () => {
 
     expect(sheet().querySelector('g[data-physical-card-index="0"]')).toHaveAttribute("data-physical-instance-id", "instance-2");
     expect(sheet().querySelector('g[data-physical-card-index="1"]')).toHaveAttribute("data-physical-instance-id", "instance-1");
-    expect(screen.getByTestId("selected-physical-card")).toHaveAttribute("data-selected-physical-card-index", "1");
+    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
   });
 
   it("keeps explicit skipped-slot editing available without using selection clicks as Project edits", async () => {
@@ -690,7 +854,7 @@ describe("canonical live compositor interactions", () => {
     expect(Number(screen.getByTestId("project-revision").textContent)).toBe(revision);
     const startingX = Number(slotForPhysicalIndex(0).getAttribute("data-slot-x-mm"));
 
-    await user.click(screen.getByRole("button", { name: "Desativar slot da carta selecionada" }));
+    await user.click(screen.getByRole("button", { name: "Desativar slot da carta ativa" }));
 
     expect(Number(screen.getByTestId("project-revision").textContent)).toBe(revision + 1);
     expect(Number(slotForPhysicalIndex(0).getAttribute("data-slot-x-mm"))).not.toBe(startingX);

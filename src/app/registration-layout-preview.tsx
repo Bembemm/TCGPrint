@@ -20,19 +20,25 @@ interface RegistrationLayoutPreviewProps {
   readonly cardCount: number;
   readonly cards: readonly WorkingCard[];
   readonly physicalOrder?: PhysicalOrder;
-  readonly selectedPhysicalInstanceId?: string | null;
+  readonly activePhysicalInstanceId?: string | null;
+  readonly selectedPhysicalInstanceIds?: ReadonlySet<string>;
   readonly face?: "front" | "back";
   readonly interactionBusy?: boolean;
   readonly cutPreview?: CutPreviewDto | null;
   readonly selectedPageNumber: number;
   readonly onSelectPage: (pageNumber: number) => void;
   readonly onToggleSkippedSlot: (index: number) => void;
-  readonly onSelectPhysicalInstance?: (instanceId: string, cardId: string, side: "front" | "back") => void;
+  readonly onActivatePhysicalInstance?: (instanceId: string, cardId: string, side: "front" | "back") => void;
+  readonly onTogglePhysicalInstanceSelection?: (instanceId: string) => void;
+  readonly onSelectAllPhysicalInstances?: (instanceIds: readonly string[]) => void;
+  readonly onClearPhysicalInstanceSelection?: () => void;
   readonly onFaceChange?: (side: "front" | "back") => void;
   readonly onSelectArtwork?: (cardId: string, instanceId: string, physicalCardIndex: number, side: "front" | "back", opener: HTMLButtonElement, copyNumber: number, totalCopies: number) => void;
   readonly onPhysicalAction?: (action: "increase" | "remove-copy" | "duplicate-copy" | "delete-entry" | "open-settings", instanceId: string, cardId: string) => void;
   readonly onReorderPhysicalInstance?: (instanceId: string, targetInstanceId: string | null, placement: "before" | "after") => void;
 }
+
+const EMPTY_PHYSICAL_INSTANCE_IDS: ReadonlySet<string> = new Set();
 
 type CompositorLayer = "artwork" | "bleed" | "trim" | "cut" | "silhouette" | "registration" | "reserved" | "margins" | "calibration";
 interface PhysicalCardInstance {
@@ -90,14 +96,13 @@ function calibrationSvgMatrix(matrix: { readonly a: number; readonly b: number; 
   return `matrix(${matrix.a} ${matrix.b} ${matrix.c} ${matrix.d} ${matrix.e} ${matrix.f})`;
 }
 
-export default function RegistrationLayoutPreview({ settings, cardCount, cards, physicalOrder: suppliedPhysicalOrder, selectedPhysicalInstanceId, face, interactionBusy = false, cutPreview = null, selectedPageNumber, onSelectPage, onToggleSkippedSlot, onSelectPhysicalInstance, onFaceChange, onSelectArtwork, onPhysicalAction, onReorderPhysicalInstance }: RegistrationLayoutPreviewProps) {
+export default function RegistrationLayoutPreview({ settings, cardCount, cards, physicalOrder: suppliedPhysicalOrder, activePhysicalInstanceId = null, selectedPhysicalInstanceIds = EMPTY_PHYSICAL_INSTANCE_IDS, face, interactionBusy = false, cutPreview = null, selectedPageNumber, onSelectPage, onToggleSkippedSlot, onActivatePhysicalInstance, onTogglePhysicalInstanceSelection, onSelectAllPhysicalInstances, onClearPhysicalInstanceSelection, onFaceChange, onSelectArtwork, onPhysicalAction, onReorderPhysicalInstance }: RegistrationLayoutPreviewProps) {
   const physicalOrder = suppliedPhysicalOrder ?? createPhysicalOrder(cards);
   const [uncontrolledSide, setUncontrolledSide] = useState<"front" | "back">("front");
   const previewSide = face ?? uncontrolledSide;
-  const [uncontrolledSelectedInstanceId, setUncontrolledSelectedInstanceId] = useState<string | null>(null);
-  const selectedInstanceId = selectedPhysicalInstanceId === undefined ? uncontrolledSelectedInstanceId : selectedPhysicalInstanceId;
   const [hudTarget, setHudTarget] = useState<ContextualHudTarget | null>(null);
   const [dragSourceId, setDragSourceId] = useState<string | null>(null);
+  const selectionPointerDownRef = useRef(false);
   const [dropFeedback, setDropFeedback] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [manualZoomScale, setManualZoomScale] = useState(1);
@@ -151,39 +156,39 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   const pageCount = result.pages?.length ?? 1;
   const activePageIndex = Math.min(Math.max(selectedPageNumber, 1), pageCount) - 1;
   const activePage = result.pages?.[activePageIndex];
-  const selectedPhysicalCardIndex = selectedInstanceId === null
+  const activePhysicalCardIndex = activePhysicalInstanceId === null
     ? null
-    : physicalCards.find(({ id }) => id === selectedInstanceId)?.physicalCardIndex ?? null;
+    : physicalCards.find(({ id }) => id === activePhysicalInstanceId)?.physicalCardIndex ?? null;
   const physicalOrderSignature = physicalOrder.instances.map(({ id }) => id).join("\u0000");
   const pageLayoutSignature = result.pages?.map(({ startCardIndex, endCardIndex }) => `${startCardIndex}:${endCardIndex}`).join("|") ?? "";
   const previousSelectionLocation = useRef({
-    instanceId: selectedInstanceId,
-    physicalIndex: selectedPhysicalCardIndex,
+    instanceId: activePhysicalInstanceId,
+    physicalIndex: activePhysicalCardIndex,
     physicalOrderSignature,
     pageLayoutSignature,
   });
-  const visibleSelectedPhysicalCardIndex = activePage
-    && selectedPhysicalCardIndex !== null
-    && selectedPhysicalCardIndex >= activePage.startCardIndex
-    && selectedPhysicalCardIndex < activePage.endCardIndex
-    ? selectedPhysicalCardIndex
+  const visibleActivePhysicalCardIndex = activePage
+    && activePhysicalCardIndex !== null
+    && activePhysicalCardIndex >= activePage.startCardIndex
+    && activePhysicalCardIndex < activePage.endCardIndex
+    ? activePhysicalCardIndex
     : null;
   useEffect(() => {
     const previous = previousSelectionLocation.current;
-    const selectionMoved = selectedInstanceId !== previous.instanceId
+    const selectionMoved = activePhysicalInstanceId !== previous.instanceId
       || physicalOrderSignature !== previous.physicalOrderSignature
       || pageLayoutSignature !== previous.pageLayoutSignature;
-    if (selectionMoved && selectedPhysicalCardIndex !== null && result.pages) {
-      const selectedPage = result.pages.find(({ startCardIndex, endCardIndex }) => selectedPhysicalCardIndex >= startCardIndex && selectedPhysicalCardIndex < endCardIndex);
-      if (selectedPage && selectedPage.pageIndex + 1 !== selectedPageNumber) onSelectPage(selectedPage.pageIndex + 1);
+    if (selectionMoved && activePhysicalCardIndex !== null && result.pages) {
+      const activePage = result.pages.find(({ startCardIndex, endCardIndex }) => activePhysicalCardIndex >= startCardIndex && activePhysicalCardIndex < endCardIndex);
+      if (activePage && activePage.pageIndex + 1 !== selectedPageNumber) onSelectPage(activePage.pageIndex + 1);
     }
     previousSelectionLocation.current = {
-      instanceId: selectedInstanceId,
-      physicalIndex: selectedPhysicalCardIndex,
+      instanceId: activePhysicalInstanceId,
+      physicalIndex: activePhysicalCardIndex,
       physicalOrderSignature,
       pageLayoutSignature,
     };
-  }, [selectedInstanceId, selectedPhysicalCardIndex, physicalOrderSignature, pageLayoutSignature, result.pages, selectedPageNumber, onSelectPage]);
+  }, [activePhysicalInstanceId, activePhysicalCardIndex, physicalOrderSignature, pageLayoutSignature, result.pages, selectedPageNumber, onSelectPage]);
 
   useEffect(() => {
     const viewport = sheetViewportRef.current;
@@ -286,27 +291,26 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     return { url: undefined, label: "Verso sem artwork disponível", available: false };
   }
 
-  const selectedInstance = selectedInstanceId === null
+  const activeInstance = activePhysicalInstanceId === null
     ? undefined
-    : physicalCards.find(({ id }) => id === selectedInstanceId);
+    : physicalCards.find(({ id }) => id === activePhysicalInstanceId);
   const hudInstance = hudTarget === null
     ? undefined
     : physicalCards.find(({ id, workingCardId }) => id === hudTarget.instanceId && workingCardId === hudTarget.workingCardId);
   useEffect(() => {
     if (hudTarget !== null && !hudInstance) setHudTarget(null);
   }, [hudTarget, hudInstance]);
-  const selectedPageSlot = visibleSelectedPhysicalCardIndex === null
+  const activePageSlot = visibleActivePhysicalCardIndex === null
     ? undefined
-    : placement.slots.find((slot) => pagePlacement.startCardIndex + slot.cardIndex! === visibleSelectedPhysicalCardIndex);
-  const selectedCardName = selectedInstance
-    ? selectedInstance.card.identity?.name ?? selectedInstance.card.identityHints.name ?? selectedInstance.card.importSource.filename ?? "Carta custom"
+    : placement.slots.find((slot) => pagePlacement.startCardIndex + slot.cardIndex! === visibleActivePhysicalCardIndex);
+  const activeCardName = activeInstance
+    ? activeInstance.card.identity?.name ?? activeInstance.card.identityHints.name ?? activeInstance.card.importSource.filename ?? "Carta custom"
     : undefined;
   const lastAssignedGridSlot = placement.gridSlots.reduce((last, slot) => assigned.has(slot.index) ? Math.max(last, slot.index) : last, -1);
 
-  function selectInstance(instance: PhysicalCardInstance) {
-    setUncontrolledSelectedInstanceId(instance.id);
+  function activateInstance(instance: PhysicalCardInstance) {
     setHudTarget(null);
-    onSelectPhysicalInstance?.(instance.id, instance.workingCardId, previewSide);
+    onActivatePhysicalInstance?.(instance.id, instance.workingCardId, previewSide);
   }
 
   function beginSlotDrag(event: DragEvent<SVGGElement>, instance: PhysicalCardInstance) {
@@ -314,7 +318,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       event.preventDefault();
       return;
     }
-    selectInstance(instance);
+    activateInstance(instance);
     setDragSourceId(instance.id);
     setDropFeedback(null);
     setDropTargetId(null);
@@ -395,18 +399,18 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     <p className="compositor-side-context">{previewSide === "front"
       ? "Frente física · artwork da face selecionada"
       : `Verso físico · ${pagePair.flipMode} · grade duplex pareada em coordenadas físicas`} · registration {settings.registration.type}/{settings.registration.orientation}</p>
-    <p className="compositor-selected-card" aria-live="polite" data-testid="selected-physical-card" data-selected-physical-card-index={selectedInstance?.physicalCardIndex ?? "none"} data-selected-physical-instance-id={selectedInstance?.id ?? "none"}>
-      {selectedInstance
-        ? `Carta física ${selectedInstance.physicalCardIndex + 1} · ${selectedCardName} · cópia ${selectedInstance.copyNumber}/${selectedInstance.totalCopies}${isDoubleFacedIdentity(selectedInstance.card.identity) ? " · DFC" : ""}`
+    <p className="compositor-active-card" aria-live="polite" data-testid="active-physical-card" data-active-physical-card-index={activeInstance?.physicalCardIndex ?? "none"} data-active-physical-instance-id={activeInstance?.id ?? "none"}>
+      {activeInstance
+        ? `Carta física ${activeInstance.physicalCardIndex + 1} · ${activeCardName} · cópia ${activeInstance.copyNumber}/${activeInstance.totalCopies}${isDoubleFacedIdentity(activeInstance.card.identity) ? " · DFC" : ""}`
         : "Selecione uma carta física no compositor"}
-      {selectedInstance && onSelectArtwork && <button
+      {activeInstance && onSelectArtwork && <button
         type="button"
         className="button secondary compositor-select-artwork"
         data-testid="compositor-select-artwork"
-        onClick={(event) => onSelectArtwork(selectedInstance.workingCardId, selectedInstance.id, selectedInstance.physicalCardIndex, previewSide, event.currentTarget, selectedInstance.copyNumber, selectedInstance.totalCopies)}
+        onClick={(event) => onSelectArtwork(activeInstance.workingCardId, activeInstance.id, activeInstance.physicalCardIndex, previewSide, event.currentTarget, activeInstance.copyNumber, activeInstance.totalCopies)}
       >Selecionar arte</button>}
-      {selectedInstance && onPhysicalAction && <button type="button" className="button secondary compositor-hud-open" aria-label={`Mais ações para ${selectedCardName}, cópia ${selectedInstance.copyNumber}`} aria-expanded={hudInstance?.id === selectedInstance.id && hudInstance.workingCardId === selectedInstance.workingCardId} onClick={() => setHudTarget((current) => current?.instanceId === selectedInstance.id && current.workingCardId === selectedInstance.workingCardId ? null : { instanceId: selectedInstance.id, workingCardId: selectedInstance.workingCardId })}>…</button>}
-      {selectedPageSlot && slotsCanBeSkipped && previewSide === "front" && <button type="button" className="link-button" onClick={() => toggle(selectedPageSlot.index)}>Desativar slot da carta selecionada</button>}
+      {activeInstance && onPhysicalAction && <button type="button" className="button secondary compositor-hud-open" aria-label={`Mais ações para ${activeCardName}, cópia ${activeInstance.copyNumber}`} aria-expanded={hudInstance?.id === activeInstance.id && hudInstance.workingCardId === activeInstance.workingCardId} onClick={() => setHudTarget((current) => current?.instanceId === activeInstance.id && current.workingCardId === activeInstance.workingCardId ? null : { instanceId: activeInstance.id, workingCardId: activeInstance.workingCardId })}>…</button>}
+      {activePageSlot && slotsCanBeSkipped && previewSide === "front" && <button type="button" className="link-button" onClick={() => toggle(activePageSlot.index)}>Desativar slot da carta ativa</button>}
     </p>
     {dropFeedback && <p role="status" className="compositor-drop-feedback">{dropFeedback}</p>}
     {hudInstance && onPhysicalAction && <section className="compositor-instance-hud" aria-label={`Ações para ${hudInstance.card.identity?.name ?? hudInstance.card.identityHints.name ?? "Carta"}, cópia ${hudInstance.copyNumber}`} data-testid="compositor-instance-hud">
@@ -429,8 +433,9 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
         ? <>Perfil {settings.printerProfileSelection.name} v{settings.printerProfileSelection.version} · {settings.printerDuplexMode} · {previewSide === "front" ? "frente" : "verso"}: ΔX {settings.printerProfileSelection[previewSide].offsetXUm} µm, ΔY {settings.printerProfileSelection[previewSide].offsetYUm} µm, rotação {settings.printerProfileSelection[previewSide].rotationDeg}°, escala {settings.printerProfileSelection[previewSide].scaleX}/{settings.printerProfileSelection[previewSide].scaleY}, skew {settings.printerProfileSelection[previewSide].skewXDeg ?? 0}°/{settings.printerProfileSelection[previewSide].skewYDeg ?? 0}° · {calibrationTransform ? layers.calibration ? "transformação calibrada visível" : "geometria nominal visível" : "transformação identidade"}.</>
         : <>Sem perfil de calibração selecionado; geometria nominal visível.</>} Conteúdo impresso segue a calibração; paths SVG/DXF de Silhouette permanecem nominais.
     </p>
+    <div className="compositor-sheet-frame">
     <div className="compositor-sheet-scroll" ref={sheetViewportRef}>
-      <svg className="registration-sheet-preview compositor-sheet" style={{ width: `${page.widthMm * COMPOSITOR_CSS_PX_PER_MM * zoomScale}px`, height: `${page.heightMm * COMPOSITOR_CSS_PX_PER_MM * zoomScale}px`, maxWidth: "none", maxHeight: "none" }} viewBox={`0 0 ${page.widthMm} ${page.heightMm}`} role="group" aria-label={`Compositor live ${previewSide === "front" ? "frente" : "verso"} ${settings.paperFormat.name} ${settings.pageOrientation}, página ${activePageIndex + 1} de ${pageCount}`} data-compositor-page={activePageIndex + 1} data-selected-physical-card-index={visibleSelectedPhysicalCardIndex ?? "none"} data-compositor-bleed-mm={settings.bleedMm} data-compositor-calibration-matrix={visibleCalibrationMatrix ?? "identity"} data-compositor-profile-version={settings.printerProfileSelection?.version ?? "none"} data-compositor-printer-mode={settings.printerDuplexMode} data-compositor-zoom-mode={zoomMode} data-compositor-zoom-scale={zoomScale}>
+      <svg className="registration-sheet-preview compositor-sheet" style={{ width: `${page.widthMm * COMPOSITOR_CSS_PX_PER_MM * zoomScale}px`, height: `${page.heightMm * COMPOSITOR_CSS_PX_PER_MM * zoomScale}px`, maxWidth: "none", maxHeight: "none" }} viewBox={`0 0 ${page.widthMm} ${page.heightMm}`} role="group" aria-label={`Compositor live ${previewSide === "front" ? "frente" : "verso"} ${settings.paperFormat.name} ${settings.pageOrientation}, página ${activePageIndex + 1} de ${pageCount}`} data-compositor-page={activePageIndex + 1} data-active-physical-card-index={visibleActivePhysicalCardIndex ?? "none"} data-compositor-bleed-mm={settings.bleedMm} data-compositor-calibration-matrix={visibleCalibrationMatrix ?? "identity"} data-compositor-profile-version={settings.printerProfileSelection?.version ?? "none"} data-compositor-printer-mode={settings.printerDuplexMode} data-compositor-zoom-mode={zoomMode} data-compositor-zoom-scale={zoomScale}>
         <defs>
           {placement.gridSlots.filter(({ cardIndex }) => cardIndex !== undefined).map((slot) => {
             const centerX = slot.trim.xMm + slot.trim.widthMm / 2;
@@ -465,7 +470,8 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
           {placement.gridSlots.map((slot) => {
             const physicalCardIndex = slot.cardIndex === undefined ? undefined : pagePlacement.startCardIndex + slot.cardIndex;
             const physicalInstance = physicalCardIndex === undefined ? undefined : physicalCards[physicalCardIndex];
-            const isSelected = physicalInstance?.id === selectedInstanceId;
+            const isActive = physicalInstance?.id === activePhysicalInstanceId;
+            const isMultiSelected = physicalInstance ? selectedPhysicalInstanceIds.has(physicalInstance.id) : false;
             const cardName = physicalInstance
               ? physicalInstance.card.identity?.name ?? physicalInstance.card.identityHints.name ?? physicalInstance.card.importSource.filename ?? "Carta custom"
               : undefined;
@@ -481,39 +487,49 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
                 ? "Drop rejeitado: slot reservado permanece vazio."
                 : !physicalInstance && !canDropAtEnd ? "Drop rejeitado: somente um slot elegível vazio após a última carta pode receber a cópia." : undefined;
             const invalidDropTargetId = `invalid:${activePageIndex}:${slot.index}`;
-            const canSelectCard = Boolean(physicalInstance);
-            const role = canSelectCard || canToggleSkippedSlot ? "button" : undefined;
+            const role = canToggleSkippedSlot ? "button" : undefined;
             const label = physicalInstance
               ? `Slot ${slot.index + 1} · carta física ${physicalCardIndex! + 1} · ${cardName} · cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`
               : `Slot ${slot.index + 1}${skipped.has(slot.index) ? " desativado" : reserved.has(slot.index) ? " reservado" : " vazio"}`;
-            const activate = () => {
-              if (physicalInstance) selectInstance(physicalInstance);
-              else if (canToggleSkippedSlot) toggle(slot.index);
-            };
+            const activateSkippedSlot = () => { if (canToggleSkippedSlot) toggle(slot.index); };
             return <g
               key={`slot-${slot.index}`}
               {...(role ? { role, tabIndex: 0 } : {})}
               aria-label={label}
-              {...(role ? { "aria-pressed": physicalInstance ? isSelected : skipped.has(slot.index) } : {})}
+              {...(role ? { "aria-pressed": skipped.has(slot.index) } : {})}
               data-physical-card-index={physicalCardIndex}
               data-physical-instance-id={physicalInstance?.id}
+              data-active-physical-instance={isActive ? "true" : "false"}
+              data-multi-selected={isMultiSelected ? "true" : "false"}
               data-working-card-id={physicalInstance?.workingCardId}
               data-copy-number={physicalInstance?.copyNumber}
               data-copy-count={physicalInstance?.totalCopies}
               data-slot-x-mm={slot.trim.xMm}
               data-slot-y-mm={slot.trim.yMm}
               {...(role ? {
-                onClick: activate,
                 onKeyDown: (event: KeyboardEvent<SVGGElement>) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    activate();
+                    activateSkippedSlot();
                   }
                 },
               } : {})}
+              onClick={(event) => {
+                if (physicalInstance) {
+                  if (event.target === event.currentTarget) activateInstance(physicalInstance);
+                } else activateSkippedSlot();
+              }}
               {...({ draggable: Boolean(physicalInstance && onReorderPhysicalInstance && !interactionBusy) } as Record<string, boolean>)}
-              onDragStart={physicalInstance ? (event) => beginSlotDrag(event, physicalInstance) : undefined}
-              onDragEnd={() => { setDragSourceId(null); setDropTargetId(null); }}
+              onDragStart={physicalInstance ? (event) => {
+                if (selectionPointerDownRef.current) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  selectionPointerDownRef.current = false;
+                  return;
+                }
+                beginSlotDrag(event, physicalInstance);
+              } : undefined}
+              onDragEnd={() => { selectionPointerDownRef.current = false; setDragSourceId(null); setDropTargetId(null); }}
               onDragOver={(event) => {
                 if (!dragSourceId || interactionBusy) return;
                 event.preventDefault();
@@ -524,10 +540,10 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               onContextMenu={(event) => {
                 if (!physicalInstance || !onPhysicalAction) return;
                 event.preventDefault();
-                selectInstance(physicalInstance);
+                activateInstance(physicalInstance);
                 setHudTarget({ instanceId: physicalInstance.id, workingCardId: physicalInstance.workingCardId });
               }}
-              className={`registration-preview-slot ${previewSide === "back" ? "is-back" : ""} ${isSelected ? "is-selected" : ""} ${dropTargetId === physicalInstance?.id || dropTargetId === "end" && canDropAtEnd ? "is-drop-target" : ""} ${dropTargetId === invalidDropTargetId ? "is-invalid-drop" : ""} ${dragSourceId === physicalInstance?.id ? "is-drag-source" : ""}`}
+              className={`registration-preview-slot ${previewSide === "back" ? "is-back" : ""} ${isActive ? "is-active" : ""} ${dropTargetId === physicalInstance?.id || dropTargetId === "end" && canDropAtEnd ? "is-drop-target" : ""} ${dropTargetId === invalidDropTargetId ? "is-invalid-drop" : ""} ${dragSourceId === physicalInstance?.id ? "is-drag-source" : ""}`}
             >
             {layers.bleed && <rect x={slot.slotXmm} y={slot.slotYmm} width={slot.slotWidthMm} height={slot.slotHeightMm} fill="#dbeafe" fillOpacity="0.72" stroke="#2563eb" strokeWidth="0.25" strokeDasharray="1.2 0.8" data-compositor-layer="bleed" />}
             {skipped.has(slot.index) && <rect x={slot.trim.xMm} y={slot.trim.yMm} width={slot.trim.widthMm} height={slot.trim.heightMm} fill="#f3e8ff" stroke="#7e22ce" strokeWidth={layers.trim ? "0.6" : "0"} />}
@@ -570,21 +586,62 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               </>;
             })()}
             {layers.trim && assigned.has(slot.index) && <rect x={slot.trim.xMm} y={slot.trim.yMm} width={slot.trim.widthMm} height={slot.trim.heightMm} fill="none" stroke="#1d4ed8" strokeWidth="0.45" data-compositor-layer="trim" />}
-            {isSelected && <rect
-              className="compositor-selection-outline"
+            {physicalInstance && <rect
+              className="compositor-card-body"
+              data-compositor-card-body="true"
+              data-physical-card-index={physicalCardIndex}
+              data-physical-instance-id={physicalInstance.id}
               x={slot.trim.xMm}
               y={slot.trim.yMm}
               width={slot.trim.widthMm}
               height={slot.trim.heightMm}
-              rx={settings.roundedCorners ? settings.cardFormat.cornerRadiusMm ?? 3.175 : 0}
-              ry={settings.roundedCorners ? settings.cardFormat.cornerRadiusMm ?? 3.175 : 0}
-              fill="none"
-              stroke="#7e22ce"
-              strokeWidth="2"
-              vectorEffect="non-scaling-stroke"
-              pointerEvents="none"
-              data-compositor-selection-outline={physicalCardIndex}
+              fill="transparent"
+              pointerEvents="all"
+              role="button"
+              tabIndex={0}
+              aria-label={`Slot ${slot.index + 1} · carta física ${physicalCardIndex! + 1} · ${cardName} · cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`}
+              aria-current={isActive ? "true" : undefined}
+              onClick={() => activateInstance(physicalInstance)}
+              onKeyDown={(event: KeyboardEvent<SVGRectElement>) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  activateInstance(physicalInstance);
+                }
+              }}
             />}
+            {physicalInstance && onTogglePhysicalInstanceSelection && <g
+              className="compositor-selection-checkbox"
+              role="checkbox"
+              aria-checked={isMultiSelected}
+              aria-label={`Selecionar ${cardName}, cópia ${physicalInstance.copyNumber} de ${physicalInstance.totalCopies}`}
+              tabIndex={0}
+              onPointerDown={(event) => { selectionPointerDownRef.current = true; event.stopPropagation(); }}
+              onPointerUp={() => { selectionPointerDownRef.current = false; }}
+              onPointerCancel={() => { selectionPointerDownRef.current = false; }}
+              onMouseDown={(event) => { selectionPointerDownRef.current = true; event.stopPropagation(); }}
+              onMouseUp={() => { selectionPointerDownRef.current = false; }}
+              onClick={(event) => {
+                event.stopPropagation();
+                selectionPointerDownRef.current = false;
+                onTogglePhysicalInstanceSelection(physicalInstance.id);
+              }}
+              onKeyDown={(event: KeyboardEvent<SVGGElement>) => {
+                event.stopPropagation();
+                if (event.key === " ") {
+                  event.preventDefault();
+                  onTogglePhysicalInstanceSelection(physicalInstance.id);
+                }
+              }}
+              onDragStart={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onContextMenu={(event) => event.stopPropagation()}
+            >
+              <rect x={slot.trim.xMm + 0.25} y={slot.trim.yMm + 0.25} width="8" height="8" fill="transparent" pointerEvents="all" />
+              <rect className="compositor-selection-checkbox-box" x={slot.trim.xMm + 1.5} y={slot.trim.yMm + 1.5} width="5.5" height="5.5" rx="0.8" />
+              <path className="compositor-selection-checkbox-mark" d={`M ${slot.trim.xMm + 2.65} ${slot.trim.yMm + 4.15} l 1.05 1.05 l 2.25 -2.55`} />
+            </g>}
             {skipped.has(slot.index) && <>
               <line x1={slot.trim.xMm} y1={slot.trim.yMm} x2={slot.trim.xMm + slot.trim.widthMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
               <line x1={slot.trim.xMm + slot.trim.widthMm} y1={slot.trim.yMm} x2={slot.trim.xMm} y2={slot.trim.yMm + slot.trim.heightMm} stroke="#7e22ce" strokeWidth="1" />
@@ -599,6 +656,11 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
           {layers.registration && <g data-compositor-layer="registration">{registrationForPage.marks.flatMap((mark) => mark.primitives.map((primitive, index) => primitiveElement(primitive, `${mark.id}-${index}`)))}</g>}
         </g>
       </svg>
+    </div>
+    {selectedPhysicalInstanceIds.size > 0 && onSelectAllPhysicalInstances && onClearPhysicalInstanceSelection && <div className="compositor-selection-bar" role="group" aria-label="Ações de seleção">
+      <button type="button" className="button secondary" onClick={() => onSelectAllPhysicalInstances(physicalOrder.instances.map(({ id }) => id))}>Selecionar tudo</button>
+      <button type="button" className="button secondary" onClick={onClearPhysicalInstanceSelection}>Desmarcar</button>
+    </div>}
     </div>
     {!slotsCanBeSkipped && <p className="muted">Defina linhas e colunas antes de desativar slots.</p>}
     {previewSide === "back" && <p className="muted">O verso mantém a mesma página física e o pareamento duplex. Registration, cut paths e calibration acompanham a geometria refletida da folha; a orientação da artwork segue o modo {pagePair.flipMode}.</p>}

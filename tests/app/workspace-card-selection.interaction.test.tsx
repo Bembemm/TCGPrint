@@ -66,6 +66,86 @@ function deferred<T>() {
 }
 
 describe("Cartas workspace navigation", () => {
+  it("keeps physical checkbox selection out of the active Project and autosave", async () => {
+    const user = userEvent.setup();
+    const imported = [card("island-card", "Island", 0), card("mountain-card", "Mountain", 1)];
+    const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
+    const savedProjects: Array<Record<string, unknown>> = [];
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.startsWith("/api/projects")) {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : undefined;
+        requests.push({ url, method, ...(body ? { body } : {}) });
+      }
+      if (url === "/api/projects") {
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : undefined;
+        if (method === "POST") {
+          const project = {
+            id: `project-selection-test-${savedProjects.length + 1}`,
+            name: `Selection test ${savedProjects.length + 1}`,
+            projectSchemaVersion: 2,
+            revision: 1,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            snapshot: body?.snapshot,
+            templateSelection: body?.templateSelection ?? null,
+          };
+          savedProjects.push(project);
+          return Response.json(project);
+        }
+        return Response.json({ projects: [] });
+      }
+      if (url === "/api/cards/import") return Response.json({ workingCards: imported, report: { summary: {}, sources: [], selectedImporters: [], warnings: [], errors: [], pairings: [] }, providerHealth });
+      if (url === "/api/cards/resolve") {
+        const body = JSON.parse(String(init?.body)) as { cards?: WorkingCard[] };
+        return Response.json({ workingCards: body.cards ?? imported, providerHealth });
+      }
+      if (url === "/api/back-library") return Response.json({ assets: [] });
+      if (url === "/api/templates") return Response.json({ templates: [] });
+      if (url === "/api/printer-profiles") return Response.json({ profiles: [] });
+      return Response.json({ message: `Rota não simulada: ${url}` }, { status: 404 });
+    }));
+
+    render(<HomePage />);
+    await user.type(screen.getByRole("textbox", { name: "Cole uma decklist ou URL" }), "1 Island\n1 Mountain");
+    await user.click(screen.getByRole("button", { name: "Adicionar cartas" }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Selecionar Island, cópia 1 de 1" })).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Salvar como projeto" }));
+    await waitFor(() => expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Salvo"));
+    expect(savedProjects).toHaveLength(1);
+    const snapshot = savedProjects[0]?.snapshot;
+    expect(snapshot).toMatchObject({ physicalOrder: { instances: [{ id: "instance-1" }, { id: "instance-2" }] } });
+    expect(snapshot).not.toHaveProperty("activePhysicalInstanceId");
+    expect(snapshot).not.toHaveProperty("selectedPhysicalInstanceIds");
+
+    await user.click(screen.getByRole("checkbox", { name: "Selecionar Island, cópia 1 de 1" }));
+    expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Salvo");
+    await user.click(screen.getByRole("button", { name: "Selecionar tudo" }));
+    expect(screen.getByRole("checkbox", { name: "Selecionar Island, cópia 1 de 1" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("checkbox", { name: "Selecionar Mountain, cópia 1 de 1" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("button", { name: "Desmarcar" }));
+    expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Salvo");
+    expect(screen.queryByRole("group", { name: "Ações de seleção" })).not.toBeInTheDocument();
+
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Salvo");
+    expect(savedProjects[0]?.snapshot).toEqual(snapshot);
+    expect(requests.filter(({ url }) => url.includes("/recovery") || url.includes("project-selection-test"))).toHaveLength(0);
+    expect(requests.filter(({ method }) => method === "PUT")).toHaveLength(0);
+
+    await user.click(screen.getByRole("checkbox", { name: "Selecionar Island, cópia 1 de 1" }));
+    await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
+    await user.click(screen.getByRole("button", { name: "Novo projeto" }));
+    await waitFor(() => expect(savedProjects).toHaveLength(2));
+    expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Salvo");
+    expect(savedProjects[1]?.snapshot).toMatchObject({ cards: [], physicalOrder: { instances: [] } });
+    expect(screen.queryByRole("group", { name: "Ações de seleção" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Selecionar Island, cópia 1 de 1" })).not.toBeInTheDocument();
+  }, 15_000);
+
   it("keeps the selected Working Card and Artwork Picker reachable in Cartas", async () => {
     const user = userEvent.setup();
     const imported = [card("island-card", "Island", 0), card("mountain-card", "Mountain", 1)];
@@ -183,7 +263,9 @@ describe("Cartas workspace navigation", () => {
     const compositorShell = document.querySelector(".workspace-shell");
     const secondPhysicalCard = composer.querySelector('g[data-physical-card-index="1"]');
     if (!secondPhysicalCard) throw new Error("The second physical card is not rendered in the live compositor.");
-    await user.click(secondPhysicalCard);
+    const secondCardBody = secondPhysicalCard.querySelector('[data-compositor-card-body="true"]');
+    if (!secondCardBody) throw new Error("The second physical card has no body activation target.");
+    await user.click(secondCardBody);
     const pickerOpener = screen.getByRole("button", { name: "Selecionar arte" });
     await user.click(pickerOpener);
     const physicalPicker = await screen.findByRole("dialog", { name: /Mountain · cópia 1\/1/ });
@@ -198,7 +280,7 @@ describe("Cartas workspace navigation", () => {
     const exportRequestBeforePhysicalSelection = exportRequests[0]?.body;
     const selectedPhysicalCard = composer.querySelector('g[data-physical-card-index="1"]');
     if (!selectedPhysicalCard) throw new Error("The second physical card is not rendered in the live compositor.");
-    expect(selectedPhysicalCard).toHaveAttribute("aria-pressed", "true");
+    expect(selectedPhysicalCard?.querySelector('[data-compositor-card-body="true"]')).toHaveAttribute("aria-current", "true");
 
     await user.click(screen.getByRole("button", { name: "Gerar PDF final" }));
     expect(await screen.findByRole("link", { name: "Baixar tcgprint-m4.pdf" })).toHaveAttribute("download", "tcgprint-m4.pdf");
@@ -256,7 +338,7 @@ describe("Cartas workspace navigation", () => {
     await user.click(screen.getByRole("button", { name: "Adicionar cartas" }));
     await waitFor(() => expect(screen.getByRole("button", { name: /2\/2 · Forest/ })).toBeInTheDocument());
     expect(composer.querySelector('g[data-physical-card-index="1"]')).toHaveAttribute("data-physical-instance-id", "instance-2");
-    expect(composer.querySelector('g[data-physical-card-index="1"]')).toHaveAttribute("aria-pressed", "false");
+    expect(composer.querySelector('g[data-physical-card-index="1"] [role="checkbox"]')).toHaveAttribute("aria-checked", "false");
 
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
     await user.click(await screen.findByRole("button", { name: "Associar ao Project" }));

@@ -206,12 +206,14 @@ describe("workspace shell interactions", () => {
     expect(trigger).toHaveFocus();
   });
 
-  it("keeps skipped-slot editing active through the selected-copy action while navigating", async () => {
+  it("keeps skipped-slot editing attached to the active copy while navigating", async () => {
     const user = userEvent.setup();
     const cards = [previewCard("Island", 0), previewCard("Mountain", 1)];
     const sections = Object.fromEntries(WORKSPACE_SECTIONS.map(({ id }) => [id, <p key={id}>{id}</p>])) as Record<WorkspaceSection, ReactNode>;
     function PreviewHarness() {
       const [skippedSlotIndices, setSkippedSlotIndices] = useState<readonly number[]>([]);
+      const [activePhysicalInstanceId, setActivePhysicalInstanceId] = useState<string | null>(null);
+      const [selectedPhysicalInstanceIds, setSelectedPhysicalInstanceIds] = useState<ReadonlySet<string>>(() => new Set());
       return <WorkspaceShell
         sections={sections}
         hasCards
@@ -219,19 +221,30 @@ describe("workspace shell interactions", () => {
           settings={{ ...DEFAULT_PROJECT_SETTINGS, layout: { rows: 1, columns: 2, skippedSlotIndices } }}
           cardCount={2}
           cards={cards}
+          activePhysicalInstanceId={activePhysicalInstanceId}
+          selectedPhysicalInstanceIds={selectedPhysicalInstanceIds}
           selectedPageNumber={1}
           onSelectPage={() => undefined}
           onToggleSkippedSlot={(index) => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index])}
+          onActivatePhysicalInstance={(instanceId) => setActivePhysicalInstanceId(instanceId)}
+          onTogglePhysicalInstanceSelection={(instanceId) => setSelectedPhysicalInstanceIds((current) => {
+            const next = new Set(current);
+            if (next.has(instanceId)) next.delete(instanceId);
+            else next.add(instanceId);
+            return next;
+          })}
+          onSelectAllPhysicalInstances={(instanceIds) => setSelectedPhysicalInstanceIds(new Set(instanceIds))}
+          onClearPhysicalInstanceSelection={() => setSelectedPhysicalInstanceIds(new Set())}
         />}
       />;
     }
     render(<PreviewHarness />);
 
     expect(screen.getByRole("main", { name: "Preview e compositor atual" })).toContainElement(screen.getByRole("region", { name: "Compositor live" }));
-    const firstSlot = screen.getByRole("button", { name: /Slot 1 · carta física 1/ });
-    await user.click(firstSlot);
-    expect(firstSlot).toHaveAttribute("aria-pressed", "true");
-    await user.click(screen.getByRole("button", { name: "Desativar slot da carta selecionada" }));
+    const firstBody = screen.getByRole("button", { name: /Slot 1 · carta física 1/ });
+    await user.click(firstBody);
+    expect(firstBody).toHaveAttribute("aria-current", "true");
+    await user.click(screen.getByRole("button", { name: "Desativar slot da carta ativa" }));
     expect(screen.queryByText("SKIP 1")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
     expect(screen.getByRole("button", { name: "Slot 1 desativado" })).toHaveAttribute("aria-pressed", "true");

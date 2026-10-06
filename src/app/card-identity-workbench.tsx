@@ -574,7 +574,8 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const workingCards = editorState.cards;
   const physicalOrder = editorState.physicalOrder;
   const selectedCardId = editorState.selectedCardId;
-  const [selectedPhysicalInstanceId, setSelectedPhysicalInstanceId] = useState<string | null>(null);
+  const [activePhysicalInstanceId, setActivePhysicalInstanceId] = useState<string | null>(null);
+  const [selectedPhysicalInstanceIds, setSelectedPhysicalInstanceIds] = useState<Set<string>>(() => new Set());
   const [compositorSide, setCompositorSide] = useState<CardFaceSide>(editorState.face);
   const face = editorState.face;
   useEffect(() => { setCompositorSide(face); }, [face]);
@@ -799,7 +800,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     const target = workingCards.find((card) => card.id === cardId);
     if (!target) return;
     pickerOpenerRef.current = opener;
-    if (physical) setSelectedPhysicalInstanceId(physical.instanceId);
+    if (physical) setActivePhysicalInstanceId(physical.instanceId);
     if (selectedCardId !== target.id) dispatchEditor({ type: "select-card", cardId: target.id });
     if (isDoubleFacedIdentity(target.identity) && target.faces.some((item) => item.side === side)) dispatchEditor({ type: "set-face", side });
     setPickerSide(side);
@@ -851,10 +852,15 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     });
   }, [workingCards, physicalOrder]);
   useEffect(() => {
-    if (selectedPhysicalInstanceId && !physicalOrder.instances.some(({ id }) => id === selectedPhysicalInstanceId)) {
-      setSelectedPhysicalInstanceId(physicalOrder.instances[0]?.id ?? null);
+    const physicalInstanceIds = new Set(physicalOrder.instances.map(({ id }) => id));
+    setSelectedPhysicalInstanceIds((current) => {
+      const next = new Set([...current].filter((id) => physicalInstanceIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+    if (activePhysicalInstanceId && !physicalInstanceIds.has(activePhysicalInstanceId)) {
+      setActivePhysicalInstanceId(physicalOrder.instances[0]?.id ?? null);
     }
-  }, [selectedPhysicalInstanceId, physicalOrder]);
+  }, [activePhysicalInstanceId, physicalOrder]);
   const backValidation = useMemo(() => createBackValidationSummary(workingCards, projectDefaultBack, missingBackPolicy), [workingCards, projectDefaultBack, missingBackPolicy]);
   const activeFaceExists = Boolean(manualPhysicalBackPicker || artworkTargetCard?.faces.some((item) => item.side === effectivePickerSide));
   const activeIdentityId = artworkTargetCard?.identity?.id ?? null;
@@ -1072,7 +1078,8 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       setArtworkCatalogRevision((revision) => revision + 1);
       setArtworkCatalogState(null);
       setArtworkProblem(null);
-      setSelectedPhysicalInstanceId(null);
+      setActivePhysicalInstanceId(null);
+      setSelectedPhysicalInstanceIds(new Set());
       dispatchEditor({ type: "load-cards", cards: result.workingCards });
       setArtworkFilter("all"); setManualIdentities([]);
       setProviderHealth(result.providerHealth);
@@ -1209,7 +1216,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         const selectedId = updatedInstance?.workingCardId ?? result.selectedCardId;
         if (selectedId) {
           setPickerContext((current) => current ? { ...current, cardId: selectedId } : current);
-          setSelectedPhysicalInstanceId(pickerContext.physicalInstanceId);
+          setActivePhysicalInstanceId(pickerContext.physicalInstanceId);
           dispatchEditor({ type: "select-card", cardId: selectedId });
         }
       } else if (result.selectedCardId) {
@@ -1440,7 +1447,8 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     clearRequestCache(artworkCatalogRequests.current);
     clearRequestCache(identityDetailsRequests.current);
     dispatchEditor({ type: "load-project", cards, physicalOrder: project.snapshot.physicalOrder });
-    setSelectedPhysicalInstanceId(null);
+    setActivePhysicalInstanceId(null);
+    setSelectedPhysicalInstanceIds(new Set());
     setBleedMm(String(settings.bleedMm));
     setRoundedCorners(settings.roundedCorners);
     setTrimGuideEnabled(settings.cutGuides.trim.enabled);
@@ -2013,20 +2021,20 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       const target = workingCards.find(({ id }) => id === cardId);
       const previousIndex = physicalOrder.instances.findIndex(({ id }) => id === instanceId);
       const remaining = physicalOrder.instances.filter((reference) => reference.id !== instanceId && (target?.quantity !== 1 || reference.workingCardId !== cardId));
-      setSelectedPhysicalInstanceId(remaining[Math.min(previousIndex, remaining.length - 1)]?.id ?? null);
+      setActivePhysicalInstanceId(remaining[Math.min(previousIndex, remaining.length - 1)]?.id ?? null);
       dispatchEditor({ type: "remove-physical-instance", instanceId });
       return;
     }
     if (action === "duplicate-copy") {
       const nextInstanceId = "instance-" + physicalOrder.nextInstanceId;
       dispatchEditor({ type: "duplicate-physical-instance", instanceId, newCardId: globalThis.crypto.randomUUID() });
-      setSelectedPhysicalInstanceId(nextInstanceId);
+      setActivePhysicalInstanceId(nextInstanceId);
       return;
     }
     if (action === "delete-entry") {
       const previousIndex = physicalOrder.instances.findIndex(({ id }) => id === instanceId);
       const remaining = physicalOrder.instances.filter(({ workingCardId }) => workingCardId !== cardId);
-      setSelectedPhysicalInstanceId(remaining[Math.min(previousIndex, remaining.length - 1)]?.id ?? null);
+      setActivePhysicalInstanceId(remaining[Math.min(previousIndex, remaining.length - 1)]?.id ?? null);
       dispatchEditor({ type: "delete-card", cardId });
       return;
     }
@@ -2043,19 +2051,28 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         cardCount={physicalCardCount}
         cards={workingCards}
         physicalOrder={physicalOrder}
-        selectedPhysicalInstanceId={selectedPhysicalInstanceId}
+        activePhysicalInstanceId={activePhysicalInstanceId}
+        selectedPhysicalInstanceIds={selectedPhysicalInstanceIds}
         face={compositorSide}
         interactionBusy={interactionBusy}
         cutPreview={cutGeometryPreview}
         selectedPageNumber={cutPageNumber}
         onSelectPage={setCutPageNumber}
-        onSelectPhysicalInstance={(instanceId, cardId, side) => {
-          setSelectedPhysicalInstanceId(instanceId);
+        onActivatePhysicalInstance={(instanceId, cardId, side) => {
+          setActivePhysicalInstanceId(instanceId);
           setCompositorSide(side);
           if (selectedCardId !== cardId) dispatchEditor({ type: "select-card", cardId });
           const target = workingCards.find((item) => item.id === cardId);
           if (target?.faces.some((item) => item.side === side) && face !== side) dispatchEditor({ type: "set-face", side });
         }}
+        onTogglePhysicalInstanceSelection={(instanceId) => setSelectedPhysicalInstanceIds((current) => {
+          const next = new Set(current);
+          if (next.has(instanceId)) next.delete(instanceId);
+          else next.add(instanceId);
+          return next;
+        })}
+        onSelectAllPhysicalInstances={(instanceIds) => setSelectedPhysicalInstanceIds(new Set(instanceIds))}
+        onClearPhysicalInstanceSelection={() => setSelectedPhysicalInstanceIds(new Set())}
         onFaceChange={(side) => {
           setCompositorSide(side);
           if (activeCard?.faces.some((item) => item.side === side) && face !== side) dispatchEditor({ type: "set-face", side });
