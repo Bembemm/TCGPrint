@@ -1326,6 +1326,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       </svg>
     </div>
     {selectedPhysicalInstanceIds.size > 0 && onSelectAllPhysicalInstances && onClearPhysicalInstanceSelection && <div className="compositor-selection-bar" role="group" aria-label="Ações de seleção">
+      <span className="compositor-selection-count" aria-live="polite">{selectedPhysicalInstanceIds.size} {selectedPhysicalInstanceIds.size === 1 ? "selecionada" : "selecionadas"}</span>
       <button type="button" className="button secondary" onClick={() => onSelectAllPhysicalInstances(physicalOrder.instances.map(({ id }) => id))}>Selecionar tudo</button>
       <button type="button" className="button secondary" onClick={onClearPhysicalInstanceSelection}>Desmarcar</button>
     </div>}
@@ -1348,7 +1349,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     >
       <div className="compositor-context-menu-heading">
         <strong>{contextMenuInstance.card.identity?.name ?? contextMenuInstance.card.identityHints.name ?? "Carta custom"}</strong>
-        <span>Cópia {contextMenuInstance.copyNumber}/{contextMenuInstance.totalCopies} · Carta física {contextMenuInstance.physicalCardIndex + 1}</span>
+        <span>Cópia {contextMenuInstance.copyNumber} de {contextMenuInstance.totalCopies}</span>
       </div>
       {(() => {
         const displayedSide = localFaceOverrideByInstanceId[contextMenuInstance.id] ?? previewSide;
