@@ -230,7 +230,7 @@ describe("M6 Artwork Picker face context", () => {
       return picker;
     };
 
-    let dialog = await openBackPicker();
+    const dialog = await openBackPicker();
     expect(within(dialog).queryByRole("group", { name: "Filtrar provider" })).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Sem verso" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Project Default Back · Blue cardback/ })).toHaveAttribute("aria-current", "true");
@@ -240,10 +240,8 @@ describe("M6 Artwork Picker face context", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "Sem verso" }));
     await waitFor(() => expect(requests.filter((request) => request.action === "apply-generic-back-scope").at(-1)).toMatchObject({ choiceMode: "none", scope: "entry" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Island/ })).not.toBeInTheDocument());
-
-    dialog = await openBackPicker();
-    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Sem verso");
+    expect(screen.getByRole("dialog", { name: /Island/ })).toBe(dialog);
+    await waitFor(() => expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Sem verso"));
     expect(within(dialog).getByRole("button", { name: /Sem verso · Atual/ })).toHaveAttribute("aria-current", "true");
 
     const scopeSelect = within(dialog).getByRole("combobox", { name: "Aplicar verso em" });
@@ -251,19 +249,18 @@ describe("M6 Artwork Picker face context", () => {
     await user.click(within(dialog).getByRole("button", { name: /Project Default Back · Blue cardback/ }));
     await waitFor(() => expect(requests.filter((request) => request.action === "apply-generic-back-scope").at(-1)).toMatchObject({ choiceMode: "project-default", scope: "all-simple-project" }));
     await waitFor(() => expect(screen.getByText(/Verso aplicado a 2 carta\(s\) simples; 1 cartas dupla-face preservadas\./)).toBeInTheDocument());
+    await waitFor(() => expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Project Default Back"));
 
-    dialog = await openBackPicker();
-    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Project Default Back");
+    await user.selectOptions(scopeSelect, "entry");
     await user.click(dialog.querySelector(".picker-back-asset")!);
     await waitFor(() => expect(requests.filter((request) => request.action === "apply-generic-back-scope").at(-1)).toMatchObject({
       choiceMode: "library",
       scope: "entry",
       asset: { assetId: backAsset.assetId, sha256: hash, format: "png" },
     }));
-
-    dialog = await openBackPicker();
-    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Back Library · Blue cardback");
+    await waitFor(() => expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Back Library · Blue cardback"));
     expect(dialog.querySelector(".picker-back-asset")).toHaveAttribute("aria-current", "true");
+
     const mpcCard = within(dialog).getByText("MPC cardbacks").closest<HTMLElement>(".artwork-candidate")!;
     await user.click(within(mpcCard).getByRole("button", { name: "Selecionar arte" }));
     await waitFor(() => expect(requests.filter((request) => request.action === "apply-generic-back-scope").at(-1)).toMatchObject({
@@ -271,9 +268,7 @@ describe("M6 Artwork Picker face context", () => {
       scope: "entry",
       candidateId: simpleBackCandidate.id,
     }));
-
-    dialog = await openBackPicker();
-    expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent(`MPC Autofill · ${simpleBackCandidate.id}`);
+    await waitFor(() => expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent(`MPC Autofill · ${simpleBackCandidate.id}`));
     expect(within(dialog).getByRole("button", { name: "Selecionada" })).toBeInTheDocument();
   }, 15_000);
 });
