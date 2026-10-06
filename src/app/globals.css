@@ -1829,9 +1829,6 @@ body { min-width: 0; min-height: 0; }
   .workspace-shell[data-drawer-open="true"] .workspace-backdrop {
     display: block;
   }
-  .workspace-shell[data-drawer-open="true"] .workspace-mobile-nav {
-    pointer-events: none;
-  }
   .workspace-tab-panel {
     padding: 9px;
   }
