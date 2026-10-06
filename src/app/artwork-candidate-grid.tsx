@@ -207,7 +207,15 @@ export function ArtworkCandidateGrid({
             onClick={() => onSelect(candidate)}
           >
             {candidate.previewUri
-              ? <Image src={candidate.previewUri} alt={`${cardName} · ${candidate.setCode ?? sourceLabel(candidate.source)} ${candidate.collectorNumber ?? ""}`} width={300} height={420} unoptimized loading="lazy" />
+              ? <Image
+                src={candidate.previewUri}
+                alt={`${cardName} · ${candidate.setCode ?? sourceLabel(candidate.source)} ${candidate.collectorNumber ?? ""}`}
+                width={300}
+                height={420}
+                unoptimized
+                loading={visibleIndex < 8 ? "eager" : "lazy"}
+                fetchPriority={visibleIndex < 4 ? "high" : "auto"}
+              />
               : <span className="artwork-reference-thumb">{candidate.source === "mpc" ? "MPC reference" : "Preview indisponível"}</span>}
             <span className="artwork-quality-badge">{qualityBadge(candidate, checking)}</span>
             {isSelected && <span className="artwork-selected-badge">Selecionada</span>}
