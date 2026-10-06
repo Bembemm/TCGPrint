@@ -1055,6 +1055,25 @@ describe("card APIs", () => {
     expect(await unsafe.json()).toMatchObject({ code: "INVALID_MPC_FILTERS" });
   });
 
+  it("passes progressive cold-start search only to Scryfall", async () => {
+    const listArtworkCatalog = vi.fn(async () => ({ candidates: [candidate], catalogTotal: 1, catalogTotalComplete: true }));
+    const workbench = testWorkbench({ listArtworkCatalog });
+
+    const response = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", {
+      faceId: "front", source: "scryfall", progressive: true,
+    }), identity.id, workbench);
+
+    expect(response.status).toBe(200);
+    expect(listArtworkCatalog).toHaveBeenCalledWith(identity.id, "front", "scryfall", expect.objectContaining({ progressive: true }));
+    expect(await response.json()).toMatchObject({ catalogTotalComplete: false });
+
+    const invalid = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", {
+      faceId: "front", source: "mpc", progressive: true,
+    }), identity.id, workbench);
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ code: "INVALID_REQUEST" });
+  });
+
   it("accepts bounded MPC gallery pages and rejects paging other providers", async () => {
     const listArtworkCatalog = vi.fn(async () => ({ candidates: [candidate], catalogTotal: 1200, catalogTotalComplete: true }));
     const workbench = testWorkbench({ listArtworkCatalog });
