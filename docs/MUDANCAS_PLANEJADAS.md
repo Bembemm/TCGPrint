@@ -2295,6 +2295,8 @@ Antes de alterar comportamento:
 **Gate:** baseline verde ou problemas pré-existentes documentados.
 
 ### Slice 1 — Estrutura do workspace
+**Status: IMPLEMENTADO E APROVADO.**
+
 Implementar primeiro:
 - navegação única `Cartas / Configurações / Exportar`;
 - remover tabs redundantes;
@@ -2334,6 +2336,14 @@ Implementar o Slice 1 em duas subetapas revisáveis:
 
 **Gate 1B:** save-as nasce salvo com o Working Set atual; new-project não herda cards; recovery/conflito continuam funcionais; autosave permanece único e consistente.
 
+**Evidência de implementação aprovada:**
+- Slice 1A: `7aeb673` — `feat: consolidate workspace primary navigation`;
+- correção de review 1A: `717c46f` — `fix: make advanced diagnostics reachable from workspace header`;
+- Slice 1B: `a152143` — `feat: move project lifecycle into workspace header`;
+- suíte final reportada no gate 1B: 1.326 testes passando, 1 ignorado, typecheck e build verdes;
+- revisão do orquestrador confirmou sessão/autosave únicos, Save As pelo snapshot atual, New com documento limpo e recovery/conflito preservados.
+
+
 Achados vinculantes do Slice 0:
 - `ProjectsPanel` executa autosave e cut preview mesmo oculto: não desmontar esse lifecycle;
 - `TemplateLibraryPanel` publica `registrationStatus` consumido como gate de export: preservar o efeito;
@@ -2355,6 +2365,51 @@ Implementar:
 - sem outline roxo.
 
 **Gate:** interaction tests + nenhuma regressão de geometria/export.
+
+#### Subdivisão obrigatória do Slice 2
+
+O compositor concentra seleção física, inspeção de face, abertura do Artwork Picker e ações por instância. Para evitar regressões ao trocar vários significados de clique simultaneamente, implementar em subetapas revisáveis.
+
+**Slice 2A — Estado ativo + multi-selection canônico de UI**
+- separar explicitamente `activePhysicalInstanceId` do conjunto de multi-selection;
+- multi-selection deve ser keyed por `physicalInstanceId` estável;
+- checkbox passa a ser o único toggle de entrada/saída do selection set;
+- clique no corpo não deve alternar multi-selection;
+- remover completamente o outline roxo de seleção;
+- mostrar checkbox top-left com affordance discreta e estado selecionado claro;
+- adicionar barra flutuante somente quando houver seleção, contendo apenas `Selecionar tudo` e `Desmarcar`;
+- `Selecionar tudo` cobre todo o Working Set físico, inclusive páginas não visíveis;
+- `Desmarcar` limpa apenas o selection set;
+- seleção/active continuam efêmeros e não entram no Project/autosave;
+- preservar por enquanto os caminhos funcionais existentes de Artwork Picker, face flip, contextual HUD e reorder; não antecipar Slice 2B/3;
+- não alterar geometria, composição, export, `physicalOrder` ou APIs.
+
+**Gate 2A:** seleção por checkbox funciona através de páginas e reorder existente, active e selected são independentes, barra não causa layout shift, Project não fica dirty por seleção e testes do compositor/export continuam verdes.
+
+**Slice 2B — Interação direta da carta + menu contextual**
+- clique no corpo da carta abre imediatamente o Artwork Picker da instância física correspondente;
+- o clique pode atualizar `activePhysicalInstanceId`, mas nunca o selection set;
+- checkbox continua exclusivo para multi-selection;
+- flip continua inspeção local efêmera e não altera back/face canônico;
+- substituir o HUD grande por menu contextual flutuante, aberto por botão direito ou kebab;
+- menu deve ser ancorado ao ponteiro/carta, usar portal/floating sem alterar layout e fechar em scroll, resize, page change, target deletion ou abertura do picker;
+- ações normais do menu limitadas à baseline aprovada: Trocar artwork; Configurar verso/face; Aumentar quantidade; Remover uma cópia; Duplicar como entrada independente; Configurações completas se ainda fizer sentido; Remover carta inteira;
+- não incluir Girar 90°, Set as Cover, Edit Tags, mover antes/depois ou ação genérica Mover;
+- keyboard/focus e touch devem permanecer operáveis;
+- não implementar drag-and-drop neste sub-slice.
+
+**Gate 2B:** body/checkbox/flip/context menu possuem semânticas independentes, picker recebe a instância física correta, right-click/kebab não abre picker e nenhuma ação muda geometria/export indevidamente.
+
+**Slice 2C — Limpeza final da superfície do compositor**
+- remover controles visíveis de zoom manual, Fit Page/Fit Width/100%/-/+ e Layers;
+- preservar auto-fit/auto-resize internamente;
+- remover textos técnicos permanentes, linhas de metadata, selected-card line, legenda técnica, explicações de calibração e textos inferiores redundantes;
+- remover o HUD legado depois que o menu contextual do 2B estiver estável;
+- manter toolbar persistente somente com Front/Back e paginação;
+- overlays técnicos permanecem internos ou aparecem somente quando semanticamente configurados;
+- preservar exatamente grid, mm, paper ratio, margins, bleed, trim, registration, duplex pairing, calibration e ordem física.
+
+**Gate 2C:** superfície principal limpa conforme baseline, sem perda de capacidade funcional e sem mudança nos bytes/semântica dos exports.
 
 ### Slice 3 — Drag-and-drop canônico
 Implementar/revisar drag:
