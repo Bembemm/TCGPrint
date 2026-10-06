@@ -1070,7 +1070,7 @@ body { min-width: 0; min-height: 0; }
   .compositor-card-control-button { opacity: 0.58; }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 840px) {
   .workspace-preview {
     padding: 8px;
   }
@@ -1312,7 +1312,7 @@ body { min-width: 0; min-height: 0; }
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 840px) {
   .artwork-picker-layout {
     display: block;
   }
@@ -1661,7 +1661,7 @@ body { min-width: 0; min-height: 0; }
   display: none;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 840px) {
   .workspace-shell {
     grid-template-rows: 46px minmax(0, 1fr) 58px;
   }
