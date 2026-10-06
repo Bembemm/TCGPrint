@@ -107,6 +107,15 @@ function qualityLine(candidate: ArtworkCandidateView, checking: boolean): string
   return "DPI efetivo · desconhecido";
 }
 
+function qualityBadge(candidate: ArtworkCandidateView, checking: boolean): string {
+  if (checking || candidate.qualityStatus === "checking") return "Verificando";
+  if (candidate.effectiveDpi !== undefined && candidate.effectiveDpi > 0) return `${candidate.effectiveDpi} DPI`;
+  if (candidate.source === "mpc" && typeof candidate.metadata?.dpi === "number") return `${candidate.metadata.dpi} DPI*`;
+  if (!candidate.originalAvailable || candidate.qualityStatus === "unavailable") return "Sem original";
+  return "DPI ?";
+}
+
+
 export interface ArtworkCandidateGridProps {
   readonly candidates: readonly ArtworkCandidateView[];
   readonly windowLimit: number;
@@ -185,31 +194,53 @@ export function ArtworkCandidateGrid({
         const checking = qualityCheckingIds.has(candidate.id);
 
         const resultNumber = (paginated ? pageIndex * pageSize : 0) + visibleIndex + 1;
+        const title = candidate.faceName ?? candidate.metadata?.name as string ?? candidate.metadata?.originalFilename as string ?? sourceLabel(candidate.source);
+        const compactIdentity = candidate.setCode
+          ? `${candidate.setCode.toUpperCase()} #${candidate.collectorNumber ?? "?"}${candidate.language ? ` · ${candidate.language.toUpperCase()}` : ""}`
+          : sourceLabel(candidate.source);
         return <article className={`artwork-candidate ${isSelected ? "is-selected" : ""}`} key={candidate.id} data-candidate-rank={resultNumber}>
-          {candidate.previewUri
-            ? <Image src={candidate.previewUri} alt={`${cardName} · ${candidate.setCode ?? sourceLabel(candidate.source)} ${candidate.collectorNumber ?? ""}`} width={300} height={420} unoptimized loading="lazy" />
-            : <div className="artwork-reference-thumb">{candidate.source === "mpc" ? "MPC reference" : "Preview indisponível"}</div>}
-          <div className="candidate-meta">
-            {paginated && <span className="candidate-result-number">Resultado #{resultNumber}</span>}
-            <strong>{candidate.faceName ?? candidate.metadata?.name as string ?? candidate.metadata?.originalFilename as string ?? sourceLabel(candidate.source)}</strong>
-            <span>Provider: {sourceLabel(candidate.source)} · Face: {candidate.faceId === "back" ? "Back" : "Front"}</span>
-            <span>{candidate.setCode ? `${candidate.setCode.toUpperCase()} #${candidate.collectorNumber ?? "?"}` : "Set/collector não informados"} · {candidate.language ? candidate.language.toUpperCase() : "idioma não informado"}</span>
-            {candidate.source === "mpc" && <span>Source: {mpcSourceName ?? "não informada"} · Formato: {format ?? "não informado"} · Tamanho: {size === undefined ? "não informado" : `${Math.ceil(size / 1024)} KB`}</span>}
-            {candidate.source !== "mpc" && <span>Formato: {format ?? "não informado"}{size === undefined ? "" : ` · ${Math.ceil(size / 1024)} KB`}</span>}
-            <span>{candidate.widthPx && candidate.heightPx ? `${candidate.widthPx} × ${candidate.heightPx} px` : "Dimensões não validadas"} · {qualityLine(candidate, checking)}</span>
-            {candidate.releasedAt && <span>Release: {candidate.releasedAt}</span>}
-            {typeof candidate.metadata?.fullArt === "boolean" && <span>Full-art: {candidate.metadata.fullArt ? "sim" : "não"}</span>}
-            <span>{candidate.originalAvailable ? "Original disponível" : "Original indisponível"} · {candidate.originalCached ? "cache local validado" : "sem cache local"}</span>
-            {tags.length > 0 && <span>Tags: {tags.join(", ")}</span>}
-            {candidate.source === "mpc" && typeof candidate.metadata?.remoteMetadataStatus === "string" && <span className="reference-status">Validação da metadata MPC: {candidate.metadata.remoteMetadataStatus === "current" ? "atual" : candidate.metadata.remoteMetadataStatus === "removed" ? "removida no provider" : candidate.metadata.remoteMetadataStatus === "stale" ? "desatualizada" : candidate.metadata.remoteMetadataStatus}</span>}
-            {typeof candidate.metadata?.imageStatus === "string" && <span className="reference-status">Validação da imagem no provider: {candidate.metadata.imageStatus}</span>}
-            {candidate.source === "mpc" && typeof candidate.metadata?.metadataFreshness === "string" && <span className="reference-status">Atualidade da metadata: {candidate.metadata.metadataFreshness === "fresh" ? "atual" : candidate.metadata.metadataFreshness === "stale" ? "cache desatualizado" : candidate.metadata.metadataFreshness === "revalidated" ? "revalidada" : candidate.metadata.metadataFreshness}</span>}
-            {candidate.source === "mpc" && candidate.metadata?.localAvailabilityHint === true && !candidate.originalCached && <span className="reference-status">XML informa disponibilidade local; bytes ainda não verificados no cache</span>}
-          </div>
-          {candidate.source === "mpc" && onRevalidate && <button className="button secondary" type="button" disabled={disabled} onClick={() => onRevalidate(candidate)}>Revalidar metadata</button>}
-          <button className={`button ${isSelected ? "primary" : "secondary"}`} type="button" disabled={disabled} onClick={() => onSelect(candidate)}>
-            {isSelected && candidate.originalAvailable && !candidate.effectiveDpi ? "Validar original e calcular DPI" : isSelected ? "Selecionada" : candidate.originalAvailable ? "Selecionar arte" : "Selecionar referência"}
+          <button
+            className="artwork-candidate-preview"
+            type="button"
+            disabled={disabled}
+            aria-label={`Escolher visualmente ${title}`}
+            onClick={() => onSelect(candidate)}
+          >
+            {candidate.previewUri
+              ? <Image src={candidate.previewUri} alt={`${cardName} · ${candidate.setCode ?? sourceLabel(candidate.source)} ${candidate.collectorNumber ?? ""}`} width={300} height={420} unoptimized loading="lazy" />
+              : <span className="artwork-reference-thumb">{candidate.source === "mpc" ? "MPC reference" : "Preview indisponível"}</span>}
+            <span className="artwork-quality-badge">{qualityBadge(candidate, checking)}</span>
+            {isSelected && <span className="artwork-selected-badge">Selecionada</span>}
           </button>
+          <div className="candidate-primary">
+            <strong>{title}</strong>
+            <span>{compactIdentity}</span>
+          </div>
+          <details className="candidate-technical">
+            <summary>Detalhes</summary>
+            <div className="candidate-meta">
+              {paginated && <span className="candidate-result-number">Resultado #{resultNumber}</span>}
+              <span>Provider: {sourceLabel(candidate.source)} · Face: {candidate.faceId === "back" ? "Back" : "Front"}</span>
+              <span>{candidate.setCode ? `${candidate.setCode.toUpperCase()} #${candidate.collectorNumber ?? "?"}` : "Set/collector não informados"} · {candidate.language ? candidate.language.toUpperCase() : "idioma não informado"}</span>
+              {candidate.source === "mpc" && <span>Source: {mpcSourceName ?? "não informada"} · Formato: {format ?? "não informado"} · Tamanho: {size === undefined ? "não informado" : `${Math.ceil(size / 1024)} KB`}</span>}
+              {candidate.source !== "mpc" && <span>Formato: {format ?? "não informado"}{size === undefined ? "" : ` · ${Math.ceil(size / 1024)} KB`}</span>}
+              <span>{candidate.widthPx && candidate.heightPx ? `${candidate.widthPx} × ${candidate.heightPx} px` : "Dimensões não validadas"} · {qualityLine(candidate, checking)}</span>
+              {candidate.releasedAt && <span>Release: {candidate.releasedAt}</span>}
+              {typeof candidate.metadata?.fullArt === "boolean" && <span>Full-art: {candidate.metadata.fullArt ? "sim" : "não"}</span>}
+              <span>{candidate.originalAvailable ? "Original disponível" : "Original indisponível"} · {candidate.originalCached ? "cache local validado" : "sem cache local"}</span>
+              {tags.length > 0 && <span>Tags: {tags.join(", ")}</span>}
+              {candidate.source === "mpc" && typeof candidate.metadata?.remoteMetadataStatus === "string" && <span className="reference-status">Validação da metadata MPC: {candidate.metadata.remoteMetadataStatus === "current" ? "atual" : candidate.metadata.remoteMetadataStatus === "removed" ? "removida no provider" : candidate.metadata.remoteMetadataStatus === "stale" ? "desatualizada" : candidate.metadata.remoteMetadataStatus}</span>}
+              {typeof candidate.metadata?.imageStatus === "string" && <span className="reference-status">Validação da imagem no provider: {candidate.metadata.imageStatus}</span>}
+              {candidate.source === "mpc" && typeof candidate.metadata?.metadataFreshness === "string" && <span className="reference-status">Atualidade da metadata: {candidate.metadata.metadataFreshness === "fresh" ? "atual" : candidate.metadata.metadataFreshness === "stale" ? "cache desatualizado" : candidate.metadata.metadataFreshness === "revalidated" ? "revalidada" : candidate.metadata.metadataFreshness}</span>}
+              {candidate.source === "mpc" && candidate.metadata?.localAvailabilityHint === true && !candidate.originalCached && <span className="reference-status">XML informa disponibilidade local; bytes ainda não verificados no cache</span>}
+            </div>
+          </details>
+          <div className="candidate-actions">
+            {candidate.source === "mpc" && onRevalidate && <button className="button secondary" type="button" disabled={disabled} onClick={() => onRevalidate(candidate)}>Revalidar metadata</button>}
+            <button className={`button ${isSelected ? "primary" : "secondary"}`} type="button" disabled={disabled} onClick={() => onSelect(candidate)}>
+              {isSelected && candidate.originalAvailable && !candidate.effectiveDpi ? "Validar original e calcular DPI" : isSelected ? "Selecionada" : candidate.originalAvailable ? "Selecionar arte" : "Selecionar referência"}
+            </button>
+          </div>
         </article>;
       })}
     </div>
