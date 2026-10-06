@@ -90,7 +90,7 @@ describe("workspace settings sections", () => {
     render(settingsWorkspace());
 
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
-    await user.click(screen.getByText("Grade, slots e margens avançados"));
+    await user.click(screen.getByText("Posicionamento, slots e margens"));
     expect(screen.getByRole("spinbutton", { name: "Linhas da grade (opcional)" })).toBeInTheDocument();
     const orientation = screen.getByRole("combobox", { name: "Orientação da página" });
     await user.selectOptions(orientation, "landscape");
@@ -98,7 +98,6 @@ describe("workspace settings sections", () => {
     const mode = screen.getByRole("combobox", { name: "Modo de exportação" });
     await user.selectOptions(mode, "duplex");
     expect(mode).toHaveValue("duplex");
-    await user.click(screen.getByText("Bleed, cantos e guias"));
     const bleed = screen.getByRole("spinbutton", { name: "Bleed externo (mm)" });
     await user.clear(bleed);
     await user.type(bleed, "1.25");
@@ -117,6 +116,7 @@ describe("workspace settings sections", () => {
     const user = userEvent.setup();
     render(settingsWorkspace());
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
+    await user.click(screen.getByText("Marcas de registro"));
     await user.selectOptions(screen.getByRole("combobox", { name: "Registration type" }), "custom");
     await user.click(screen.getByText("Registration e geometria custom"));
     const geometry = screen.getByRole("textbox", { name: /Custom geometry JSON/ });
