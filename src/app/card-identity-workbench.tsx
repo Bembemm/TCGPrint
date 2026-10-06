@@ -1976,7 +1976,15 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         <div className="artwork-picker-current-frame">
           {currentArtworkPreviewUrl
             ? <>
-              <Image className="artwork-picker-current-thumbnail" src={currentArtworkPreviewUrl} alt={`Artwork atual de ${displayCard(pickerCard)}`} width={360} height={504} unoptimized priority />
+              <Image
+                className="artwork-picker-current-thumbnail"
+                src={currentArtworkPreviewUrl}
+                alt={`Artwork atual de ${displayCard(pickerCard)}`}
+                width={360}
+                height={504}
+                unoptimized
+                priority
+              />
               {currentArtworkDisplayUrl && <Image
                 key={currentArtworkDisplayUrl}
                 className="artwork-picker-current-display"
@@ -1986,7 +1994,8 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
                 width={1024}
                 height={1434}
                 unoptimized
-                priority
+                loading="lazy"
+                fetchPriority="low"
                 onError={(event) => { event.currentTarget.style.display = "none"; }}
               />}
             </>
