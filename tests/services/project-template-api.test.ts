@@ -14,7 +14,7 @@ import {
   handleProjectSave,
   handleProjectStageRecovery,
 } from "../../services/project-api";
-import { createNewProjectDocument } from "../../src/app/project-session";
+import { projectSnapshotDocument } from "../../src/app/project-session";
 import type { TemplateSelection } from "../../templates/types";
 
 describe("Project template API persistence", () => {
@@ -91,7 +91,7 @@ describe("Project template API persistence", () => {
     };
     database!.prepare("UPDATE template_versions SET template_geometry_json = ? WHERE template_id = ? AND version = ?")
       .run(JSON.stringify(templateGeometry), v5.templateId, v5.version);
-    const initialDocument = createNewProjectDocument({
+    const initialDocument = projectSnapshotDocument([], {
       ...DEFAULT_PROJECT_SETTINGS,
       layout: { skippedSlotIndices: [], templateGeometry },
     }, v5);

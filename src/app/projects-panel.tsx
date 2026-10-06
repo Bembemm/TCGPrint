@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { WorkingCard } from "../../core/cards/types";
 import type { ProjectSettingsV1 } from "../../persistence/projects/serializer";
 import type { ProjectDto, ProjectOpenDto, ProjectSaveState } from "../../services/project-api";
@@ -16,6 +17,8 @@ import TemplateLibraryPanel from "./template-library-panel";
 import type { TemplateRegistrationDefaults } from "./template-library-panel";
 import type { TemplateRegistrationStatus } from "./template-registration-compat";
 import { resolveProjectRecoveryChoice, type ProjectRecoveryChoice } from "./project-recovery-decision";
+import ProjectHeader from "./project-header";
+import { useWorkspaceProjectHeaderHost } from "./workspace-project-header-context";
 import {
   createProjectOpenInteractionLock,
   keepCurrentProjectWorkingSet,
@@ -112,6 +115,7 @@ export default function ProjectsPanel({
   const operationDisabled = disabled || operation !== null || session.saving !== null;
   const recoveryActionDisabled = operationDisabled;
   const projectActionsDisabled = operationDisabled || recoveryDecision !== null;
+  const projectHeaderHost = useWorkspaceProjectHeaderHost();
 
   useEffect(() => {
     dispatchSession({ type: "content-changed", snapshotKey: currentSnapshot.key });
@@ -270,9 +274,30 @@ export default function ProjectsPanel({
     setOperation("creating");
     try {
       await flushActiveProject();
-      const initialDocument = createNewProjectDocument(settings, templateSelection);
+      const initialDocument = createNewProjectDocument();
       const project = await api.create(initialDocument.snapshot, initialDocument.templateSelection);
-      activateProject(project, currentSnapshotKeyRef.current);
+      onProjectOpen(project);
+      activateProject(project, projectSnapshotValue(project.snapshot, project.templateSelection));
+      void refreshProjects();
+    } catch (error) {
+      dispatchSession({ type: "request-failed", message: errorMessage(error) });
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function saveAsProject() {
+    if (projectActionsDisabled || projectOpenLock.isLocked()) return;
+    const snapshotKey = currentSnapshotKeyRef.current;
+    const document = currentSnapshotDocumentRef.current;
+    if (snapshotKey === null || document === null) {
+      dispatchSession({ type: "request-failed", message: currentSnapshotErrorRef.current ?? "O Working Set atual não forma um snapshot válido." });
+      return;
+    }
+    setOperation("creating");
+    try {
+      const project = await api.create(document.snapshot, document.templateSelection);
+      activateProject(project, snapshotKey);
       void refreshProjects();
     } catch (error) {
       dispatchSession({ type: "request-failed", message: errorMessage(error) });
@@ -480,59 +505,38 @@ export default function ProjectsPanel({
   }
 
   const selectedCutPage = cutPreview?.pages.find(({ pageNumber }) => pageNumber === selectedCutPageNumber) ?? cutPreview?.pages[0];
-  const showProject = view === "all" || view === "project" || view === "settings";
-  const showProjectState = showProject || Boolean(recoveryDecision) || session.status === "Conflito" || session.status === "Erro";
   const showTemplates = view === "all" || view === "templates" || view === "settings";
   const showCutPreview = view === "all" || view === "cut" || view === "settings";
   const showCutExport = view === "all" || view === "cut" || view === "export";
 
+  const projectHeader = <ProjectHeader
+    activeProject={session.activeProject}
+    projects={session.projects}
+    status={session.status}
+    error={session.error}
+    recoveryDecision={recoveryDecision}
+    actionsDisabled={projectActionsDisabled || projectOpenLock.isLocked()}
+    recoveryActionsDisabled={recoveryActionDisabled}
+    onNewProject={() => void createProject()}
+    onSaveAsProject={() => void saveAsProject()}
+    onOpenProject={(projectId) => void openProject(projectId)}
+    onSaveNow={() => void saveProject()}
+    onDuplicateProject={(projectId) => void duplicateProject(projectId)}
+    onDeleteProject={(projectId) => void deleteProject(projectId)}
+    onSaveLocalCopy={() => void saveLocalCopy()}
+    onOpenCanonicalAfterConflict={() => void openCanonicalAfterConflict()}
+    onChooseRecovery={(choice) => void chooseRecovery(choice)}
+    onKeepCurrentWorkingSet={keepCurrentWorkingSet}
+  />;
+
   return (
+    <>
+    {projectHeaderHost ? createPortal(projectHeader, projectHeaderHost) : <div className="workspace-project-header-fallback">{projectHeader}</div>}
     <section
       className="panel projects-panel"
       aria-label={view === "settings" ? "Configurações" : view === "export" ? "Exportar" : view === "templates" ? "Templates" : view === "cut" ? "Corte" : "Projects"}
       hidden={view === "hidden"}
     >
-      <div className="projects-panel-project-view" hidden={!showProject}>
-      <div className="panel-heading">
-        <div>
-          <h2>Projects</h2>
-          <p>Autosave do Working Set aberto · recuperação antes de substituir um Project.</p>
-        </div>
-        <div className="project-save-controls">
-          <span className="status" aria-label="Estado do salvamento" aria-live="polite">{session.status}</span>
-          <button className="button primary" type="button" onClick={() => void createProject()} disabled={projectActionsDisabled}>
-            Criar Project vazio
-          </button>
-          <button
-            className="button secondary"
-            type="button"
-            onClick={() => void saveProject()}
-            disabled={projectActionsDisabled || !session.activeProject || session.status === "Salvo" || session.status === "Conflito"}
-          >
-            {session.status === "Erro" ? "Tentar novamente" : "Salvar agora"}
-          </button>
-        </div>
-      </div>
-
-      {session.activeProject
-        ? <p className="project-active-label">Aberto: {session.activeProject.name} · revisão {session.activeProject.revision}</p>
-        : <p className="project-active-label">Nenhum Project aberto</p>}
-
-      {session.projects.length > 0 ? <ul className="project-list">
-        {session.projects.map((project) => <li className="project-list-row" key={project.id}>
-          <div>
-            <strong>{project.name}</strong>
-            <span>revisão {project.revision} · atualizado em {project.updatedAt}</span>
-          </div>
-          <div className="project-row-actions">
-            <button className="button secondary" type="button" aria-label={`Abrir ${project.name} ${project.id}`} disabled={projectActionsDisabled} onClick={() => void openProject(project.id)}>Abrir</button>
-            <button className="button secondary" type="button" aria-label={`Duplicar ${project.name} ${project.id}`} disabled={projectActionsDisabled} onClick={() => void duplicateProject(project.id)}>Duplicar</button>
-            <button className="button secondary" type="button" aria-label={`Excluir ${project.name} ${project.id}`} disabled={projectActionsDisabled} onClick={() => void deleteProject(project.id)}>Excluir</button>
-          </div>
-        </li>)}
-      </ul> : <p className="muted">Nenhum Project salvo.</p>}
-      </div>
-
       <TemplateLibraryPanel view={view === "all" || view === "settings" ? "all" : showTemplates ? "library" : showCutPreview ? "cut" : "hidden"} selection={templateSelection} cutSourceSelection={settings.cutSourceSelection} onCutSourceSelect={onCutSourceSelectionChange} onRegistrationStatusChange={onTemplateRegistrationStatusChange} onSelect={(selection, defaults) => {
         const sameTemplateSelection = templateSelection?.templateId === selection?.templateId
           && templateSelection?.version === selection?.version
@@ -596,39 +600,7 @@ export default function ProjectsPanel({
       </section>
       </div>
 
-      <div className="projects-panel-project-state" hidden={!showProjectState}>
-      {(session.status === "Conflito" || session.status === "Erro") && session.activeProject && <section className="project-conflict" aria-label={session.status === "Conflito" ? "Conflito de revisão" : "Falha no autosave"}>
-        <p role="alert">{session.status === "Conflito"
-          ? "A revisão salva mudou em outro lugar. O Working Set local continua aberto e não foi sobrescrito."
-          : "O autosave não concluiu. O Working Set local continua aberto."}</p>
-        <div className="project-row-actions">
-          <button className="button primary" type="button" disabled={projectActionsDisabled} onClick={() => void saveLocalCopy()}>Salvar cópia local como novo Project</button>
-          {session.status === "Conflito" && <button className="button secondary" type="button" disabled={projectActionsDisabled} onClick={() => void openCanonicalAfterConflict()}>Descartar alterações locais e abrir a versão atual</button>}
-        </div>
-      </section>}
-
-      {recoveryDecision && <section className="project-recovery-choice" role="dialog" aria-modal="true" aria-labelledby="project-recovery-heading">
-        {recoveryDecision.recovery && recoveryDecision.recovery.baseRevision === recoveryDecision.revision ? <>
-          <h3 id="project-recovery-heading">Autosave recuperado</h3>
-          <p>Existe uma recuperação baseada na revisão atual de {recoveryDecision.name}. Escolha antes de carregar este Project.</p>
-          <div className="project-row-actions">
-            <button className="button primary" type="button" disabled={recoveryActionDisabled} onClick={() => void chooseRecovery("restore")}>Restaurar recuperação</button>
-            <button className="button secondary" type="button" disabled={recoveryActionDisabled} onClick={() => void chooseRecovery("discard")}>Descartar recuperação e abrir a versão salva</button>
-            <button className="button secondary" type="button" disabled={recoveryActionDisabled} onClick={keepCurrentWorkingSet}>Manter Working Set atual</button>
-          </div>
-        </> : <>
-          <h3 id="project-recovery-heading">Recovery de revisão antiga</h3>
-          <p>A recuperação de {recoveryDecision.name} parte da revisão {recoveryDecision.recovery?.baseRevision}; a versão canônica está na revisão {recoveryDecision.revision}. Escolha antes de carregar o Project.</p>
-          <div className="project-row-actions">
-            <button className="button primary" type="button" disabled={recoveryActionDisabled} onClick={() => void chooseRecovery("copy")}>Salvar recuperação como novo Project</button>
-            <button className="button secondary" type="button" disabled={recoveryActionDisabled} onClick={() => void chooseRecovery("discard")}>Descartar recovery e abrir a versão atual</button>
-            <button className="button secondary" type="button" disabled={recoveryActionDisabled} onClick={keepCurrentWorkingSet}>Manter Working Set atual</button>
-          </div>
-        </>}
-      </section>}
-
-      {session.error && <p className="error-message" role="alert">{session.error}</p>}
-      </div>
     </section>
+    </>
   );
 }

@@ -1,6 +1,6 @@
 import type { WorkingCard } from "../../core/cards/types";
 import type { ProjectDto, ProjectSaveState, ProjectSummaryDto } from "../../services/project-api";
-import { serializeProjectSnapshot, type ProjectSettingsV1, type ProjectSnapshotV1 } from "../../persistence/projects/serializer";
+import { DEFAULT_PROJECT_SETTINGS, serializeProjectSnapshot, type ProjectSettingsV1, type ProjectSnapshotV1 } from "../../persistence/projects/serializer";
 import type { TemplateSelection } from "../../templates/types";
 import { createPhysicalOrder, type PhysicalOrder } from "../../core/cards/physical-instance-order";
 
@@ -81,12 +81,9 @@ export function projectSnapshotDocument(
   return { snapshot: JSON.parse(snapshotJson) as ProjectSnapshotV1, templateSelection };
 }
 
-/** Creates an empty Project using the active Working Set's effective settings. */
-export function createNewProjectDocument(
-  settings: ProjectSettingsV1,
-  templateSelection: TemplateSelection | null,
-): ProjectSaveState {
-  return projectSnapshotDocument([], settings, templateSelection);
+/** Creates a new, empty Project from the product baseline without inheriting editorial state. */
+export function createNewProjectDocument(): ProjectSaveState {
+  return projectSnapshotDocument([], DEFAULT_PROJECT_SETTINGS, null);
 }
 
 export function projectSnapshotKey(

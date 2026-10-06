@@ -37,12 +37,12 @@ describe("Projects panel", () => {
     }));
 
     expect(markup).toContain('aria-label="Projects"');
-    expect(markup).toContain("Criar Project vazio");
+    expect(markup).toContain("Projeto não salvo");
+    expect(markup).toContain("Salvar como projeto");
     expect(markup).toContain("Silhouette Template Library");
     expect(markup).toContain(".studio3, .dxf, .svg, .json, .zip");
-    expect(markup).toContain("Salvar");
-    expect(markup).toContain("Dirty");
-    expect(markup).toContain("Nenhum Project aberto");
+    expect(markup).toContain("Abrir menu do Project");
+    expect(markup).not.toContain("Nenhum Project aberto");
   });
 
   it("promotes or discards recovery based on the current canonical revision", async () => {

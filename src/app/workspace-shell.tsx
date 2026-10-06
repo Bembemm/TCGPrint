@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import WorkspacePreview from "./workspace-preview";
 import WorkspaceSidebar, { WORKSPACE_SECTIONS, type WorkspaceSection } from "./workspace-sidebar";
+import { WorkspaceProjectHeaderContext } from "./workspace-project-header-context";
 
 export { WORKSPACE_SECTIONS } from "./workspace-sidebar";
 export type { WorkspaceSection } from "./workspace-sidebar";
@@ -41,6 +42,7 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [projectHeaderHost, setProjectHeaderHost] = useState<HTMLElement | null>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const drawerOpenerRef = useRef<HTMLElement | null>(null);
   const advancedTriggerRef = useRef<HTMLButtonElement>(null);
@@ -153,10 +155,11 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
     >{sections[id]}</section>)}
   </>;
 
-  return <div className="workspace-shell" data-active-section={activeSection} data-drawer-open={drawerOpen} data-sidebar-collapsed={sidebarCollapsed} inert={inert || undefined} aria-hidden={ariaHidden || undefined}>
+  return <WorkspaceProjectHeaderContext.Provider value={projectHeaderHost}><div className="workspace-shell" data-active-section={activeSection} data-drawer-open={drawerOpen} data-sidebar-collapsed={sidebarCollapsed} inert={inert || undefined} aria-hidden={ariaHidden || undefined}>
     <header className="workspace-topbar">
       <a className="workspace-brand" href="/" aria-label="TCGPrint início">TCGPrint</a>
-      <span className="workspace-topbar-status">Preview físico · Project local</span>
+      <div className="workspace-project-header-host" ref={setProjectHeaderHost} />
+      <span className="workspace-topbar-status">Preview físico</span>
       <div className="workspace-topbar-actions">
         {advancedContent && <details className="workspace-overflow-menu">
           <summary aria-label="Mais opções" title="Mais opções">···</summary>
@@ -221,5 +224,5 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, advance
       </WorkspaceSidebar>
       {sidebarCollapsed && <button type="button" className="workspace-reopen" aria-label="Abrir painel" aria-controls="workspace-sidebar" data-testid="workspace-reopen" onClick={() => setSidebarCollapsed(false)}>›</button>}
     </div>
-  </div>;
+  </div></WorkspaceProjectHeaderContext.Provider>;
 }

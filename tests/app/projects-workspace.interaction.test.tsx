@@ -68,6 +68,35 @@ const templateRecord = {
 };
 
 describe("shared Project, template, and cut session in the workspace", () => {
+  it("shows an unsaved Project in the persistent header and restores menu focus on Escape", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/projects"
+      ? Response.json({ projects: [] })
+      : Response.json({ templates: [] })));
+    const { view } = projectWorkspace();
+    render(view);
+
+    expect(await screen.findByText("Projeto não salvo")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Salvar como projeto" })).toBeInTheDocument();
+    const menu = screen.getByRole("button", { name: "Abrir menu do Project" });
+    await user.click(menu);
+    expect(menu).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Novo projeto" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Abrir projeto" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(menu).toHaveAttribute("aria-expanded", "false");
+    expect(menu).toHaveFocus();
+
+    await user.click(menu);
+    await user.click(screen.getByRole("button", { name: "Abrir projeto" }));
+    const projectDialog = await screen.findByRole("dialog", { name: "Abrir projeto" });
+    expect(projectDialog).toHaveAttribute("aria-modal", "true");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Abrir projeto" })).not.toBeInTheDocument();
+    expect(menu).toHaveFocus();
+  });
+
   it("keeps the Project save state, Template draft, and cut revision work attached across section changes", async () => {
     const user = userEvent.setup();
     const requests: { url: string; method: string }[] = [];
@@ -149,18 +178,18 @@ describe("shared Project, template, and cut session in the workspace", () => {
     const { view, onCutGeometryPreviewChange } = projectWorkspace();
     render(view);
 
+    await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
+    await user.click(screen.getByRole("button", { name: "Novo projeto" }));
+    await waitFor(() => expect(screen.getByText("Project M4")).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
-    await user.click(screen.getByRole("button", { name: "Criar Project vazio" }));
-    await waitFor(() => expect(screen.getByText("Aberto: Project M4 · revisão 1")).toBeInTheDocument());
 
     const templateName = screen.getByRole("textbox", { name: "Nome" });
     await user.clear(templateName);
     await user.type(templateName, "Rascunho de template");
     await user.click(screen.getByRole("button", { name: "Associar ao Project" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Associado" })).toHaveAttribute("aria-pressed", "true"));
-    await waitFor(() => expect(screen.getByText("Aberto: Project M4 · revisão 2")).toBeInTheDocument());
-    expect(screen.getByText("Aberto: Project M4 · revisão 2")).toBeInTheDocument();
-    expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Salvo");
+    expect(screen.getByText("Project M4")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Salvo"));
 
     await user.click(screen.getByRole("tab", { name: "Exportar" }));
     expect(screen.getByRole("heading", { name: "SVG/DXF Cut Export" })).toBeInTheDocument();
@@ -172,7 +201,7 @@ describe("shared Project, template, and cut session in the workspace", () => {
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
     expect(screen.getByRole("textbox", { name: "Nome" })).toHaveValue("Rascunho de template");
     expect(screen.getByRole("button", { name: "Associado" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("Aberto: Project M4 · revisão 2")).toBeInTheDocument();
+    expect(screen.getByText("Project M4")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Exportar" }));
     expect(screen.getByRole("button", { name: /Exportar SVG Cut/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Exportar DXF Cut/ })).toBeInTheDocument();
@@ -183,7 +212,7 @@ describe("shared Project, template, and cut session in the workspace", () => {
     expect(requests.filter(({ url }) => url === "/api/cut/preview").map(({ url }) => url)).toEqual(["/api/cut/preview", "/api/cut/preview"]);
   });
 
-  it("keeps Project open, manual save, autosave, duplicate, and delete available from Settings", async () => {
+  it("keeps Project open, manual save, autosave, duplicate, and delete available from the header", async () => {
     const user = userEvent.setup();
     const snapshot = () => ({
       projectSchemaVersion: 6,
@@ -202,6 +231,7 @@ describe("shared Project, template, and cut session in the workspace", () => {
       templateSelection: null as unknown,
     };
     let projects = [savedProject];
+    let duplicatedProject: typeof savedProject | null = null;
     let pendingRecovery: { snapshot: typeof savedProject.snapshot; templateSelection?: unknown } | null = null;
     const requests: Array<{ url: string; method: string; body?: unknown }> = [];
     const opened = vi.fn();
@@ -219,6 +249,10 @@ describe("shared Project, template, and cut session in the workspace", () => {
       }
       if (url === "/api/projects" && method === "POST") return Response.json(savedProject);
       if (url === "/api/projects/project-lifecycle" && method === "GET") return Response.json({ ...savedProject, recovery: null });
+      if (url === "/api/projects/project-copy" && method === "GET") {
+        const duplicate = projects.find(({ id }) => id === "project-copy");
+        return duplicate ? Response.json({ ...duplicate, recovery: null }) : Response.json({ message: "Not found" }, { status: 404 });
+      }
       if (url === "/api/projects/project-lifecycle/recovery" && method === "POST") {
         const save = body as { snapshot: typeof savedProject.snapshot; templateSelection?: unknown };
         pendingRecovery = save;
@@ -235,9 +269,9 @@ describe("shared Project, template, and cut session in the workspace", () => {
         return Response.json(savedProject);
       }
       if (url === "/api/projects/project-lifecycle/duplicate" && method === "POST") {
-        const duplicate = { ...savedProject, id: "project-copy", name: "Project lifecycle (cópia)", revision: 1 };
-        projects = [...projects, duplicate];
-        return Response.json(duplicate);
+        duplicatedProject = { ...savedProject, id: "project-copy", name: "Project lifecycle (cópia)", revision: 1 };
+        projects = [...projects, duplicatedProject];
+        return Response.json(duplicatedProject);
       }
       if (url === "/api/projects/project-copy" && method === "DELETE") {
         projects = projects.filter(({ id }) => id !== "project-copy");
@@ -307,39 +341,55 @@ describe("shared Project, template, and cut session in the workspace", () => {
 
     render(<LifecycleWorkspace />);
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
-    await user.click(screen.getByRole("button", { name: "Abrir Project lifecycle project-lifecycle" }));
-    await waitFor(() => expect(screen.getByText("Aberto: Project lifecycle · revisão 1")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
+    await user.click(screen.getByRole("button", { name: "Abrir projeto" }));
+    const openDialog = await screen.findByRole("dialog", { name: "Abrir projeto" });
+    await user.click(within(openDialog).getByRole("button", { name: "Abrir Project lifecycle" }));
+    await waitFor(() => expect(screen.getByText("Project lifecycle")).toBeInTheDocument());
     expect(opened).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "Alterar configuração do Project" }));
     const saveState = screen.getByLabelText("Estado do salvamento");
-    await waitFor(() => expect(saveState).toHaveTextContent("Dirty"));
+    await waitFor(() => expect(saveState).toHaveTextContent("Alterações pendentes"));
+    await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
     const saveNow = screen.getByRole("button", { name: "Salvar agora" });
     expect(saveNow).toBeEnabled();
     await user.click(saveNow);
-    await waitFor(() => expect(screen.getByText("Aberto: Project lifecycle · revisão 2")).toBeInTheDocument());
+    await waitFor(() => expect(savedProject.revision).toBe(2));
     await waitFor(() => expect(saveState).toHaveTextContent("Salvo"));
 
     await user.click(screen.getByRole("button", { name: "Alterar configuração do Project" }));
-    await waitFor(() => expect(saveState).toHaveTextContent("Dirty"));
-    await waitFor(() => expect(screen.getByText("Aberto: Project lifecycle · revisão 3")).toBeInTheDocument(), { timeout: 3_000 });
+    await waitFor(() => expect(saveState).toHaveTextContent("Alterações pendentes"));
+    await waitFor(() => expect(savedProject.revision).toBe(3), { timeout: 3_000 });
     await waitFor(() => expect(saveState).toHaveTextContent("Salvo"));
 
     await user.click(screen.getByRole("tab", { name: "Exportar" }));
     await within(screen.getByRole("tabpanel", { name: "Exportar" })).findByRole("region", { name: "SVG e DXF Cut" });
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
-    expect(screen.getByText("Aberto: Project lifecycle · revisão 3")).toBeInTheDocument();
+    expect(screen.getByText("Project lifecycle")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Duplicar Project lifecycle project-lifecycle" }));
-    await screen.findByRole("button", { name: "Excluir Project lifecycle (cópia) project-copy" });
-    await user.click(screen.getByRole("button", { name: "Excluir Project lifecycle (cópia) project-copy" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Abrir Project lifecycle (cópia) project-copy" })).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
+    await user.click(screen.getByRole("button", { name: "Duplicar" }));
+    expect(duplicatedProject).toMatchObject({
+      id: "project-copy",
+      revision: 1,
+      snapshot: { settings: { pageOrientation: "portrait" } },
+    });
+    await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
+    await user.click(screen.getByRole("button", { name: "Abrir projeto" }));
+    const duplicateDialog = await screen.findByRole("dialog", { name: "Abrir projeto" });
+    await user.click(within(duplicateDialog).getByRole("button", { name: "Abrir Project lifecycle (cópia)" }));
+    await waitFor(() => expect(screen.getByText("Project lifecycle (cópia)")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
+    await user.click(screen.getByRole("button", { name: "Excluir" }));
+    await waitFor(() => expect(screen.getByText("Projeto não salvo")).toBeInTheDocument());
+    expect(opened).toHaveBeenCalledTimes(2);
 
     expect(requests.filter(({ url, method }) => url === "/api/projects/project-lifecycle/recovery" && method === "POST")).toHaveLength(2);
     expect(requests.filter(({ url, method }) => url === "/api/projects/project-lifecycle/recovery/promote" && method === "POST")).toHaveLength(2);
     expect(requests.filter(({ url }) => url === "/api/projects/project-lifecycle/duplicate")).toHaveLength(1);
     expect(requests.filter(({ url, method }) => url === "/api/projects/project-copy" && method === "DELETE")).toHaveLength(1);
-    expect(requests.filter(({ url }) => url === "/api/cut/preview").map(({ body }) => (body as { expectedRevision: number }).expectedRevision)).toEqual([1, 2, 3]);
+    expect(requests.filter(({ url }) => url === "/api/cut/preview").map(({ body }) => (body as { expectedRevision: number }).expectedRevision)).toEqual([1, 2, 3, 1]);
     expect(requests.filter(({ url }) => url === "/api/templates")).toHaveLength(1);
   });
 
@@ -404,15 +454,21 @@ describe("shared Project, template, and cut session in the workspace", () => {
       }}
     />);
 
-    await user.click(screen.getByRole("tab", { name: "Configurações" }));
-    await user.click(screen.getByRole("button", { name: "Abrir Project com recovery project-recovery" }));
+    await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
+    await user.click(screen.getByRole("button", { name: "Abrir projeto" }));
+    const projectsDialog = await screen.findByRole("dialog", { name: "Abrir projeto" });
+    await user.click(within(projectsDialog).getByRole("button", { name: "Abrir Project com recovery" }));
     const recoveryDialog = await screen.findByRole("dialog", { name: "Autosave recuperado" });
-    expect(within(recoveryDialog).getByRole("button", { name: "Restaurar recuperação" })).toBeEnabled();
+    const restoreRecovery = within(recoveryDialog).getByRole("button", { name: "Restaurar recuperação" });
+    expect(restoreRecovery).toBeEnabled();
 
     await user.click(screen.getByRole("tab", { name: "Exportar" }));
     expect(screen.getByRole("dialog", { name: "Autosave recuperado" })).toBe(recoveryDialog);
     const keepCurrent = within(recoveryDialog).getByRole("button", { name: "Manter Working Set atual" });
     expect(keepCurrent).toBeEnabled();
+    keepCurrent.focus();
+    await user.tab();
+    expect(restoreRecovery).toHaveFocus();
     await user.click(keepCurrent);
     expect(screen.queryByRole("dialog", { name: "Autosave recuperado" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Cartas", "Configurações", "Exportar"]);
@@ -496,12 +552,16 @@ describe("shared Project, template, and cut session in the workspace", () => {
 
     render(<ConflictWorkspace />);
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
-    await user.click(screen.getByRole("button", { name: "Abrir Project com conflito project-conflict" }));
-    await waitFor(() => expect(screen.getByText("Aberto: Project com conflito · revisão 4")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
+    await user.click(screen.getByRole("button", { name: "Abrir projeto" }));
+    const projectsDialog = await screen.findByRole("dialog", { name: "Abrir projeto" });
+    await user.click(within(projectsDialog).getByRole("button", { name: "Abrir Project com conflito" }));
+    await waitFor(() => expect(screen.getByText("Project com conflito")).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: "Alterar configuração do Project" }));
     await waitFor(() => expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Conflito"));
 
     await user.click(screen.getByRole("tab", { name: "Exportar" }));
+    await user.click(screen.getByRole("button", { name: "Abrir menu do Project" }));
     const conflict = screen.getByRole("region", { name: "Conflito de revisão" });
     expect(within(conflict).getByRole("button", { name: "Salvar cópia local como novo Project" })).toBeEnabled();
     expect(within(conflict).getByRole("button", { name: "Descartar alterações locais e abrir a versão atual" })).toBeEnabled();

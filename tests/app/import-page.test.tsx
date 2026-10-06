@@ -28,12 +28,14 @@ describe("import workbench page", () => {
     expect(markup).toContain("Scryfall · verificando");
   });
 
-  it("renders the session workbench with automatic Project saves and manual retry controls", () => {
+  it("renders the Project session in the workspace header", () => {
     const markup = renderToStaticMarkup(createElement(CardIdentityWorkbench, { files: [], text: "", choices: {} }));
-    expect(markup).toContain("Projects");
-    expect(markup).toContain("Criar Project vazio");
-    expect(markup).toContain("Salvar agora");
-    expect(markup).toMatch(/autosave/i);
+    expect(markup).toContain('aria-label="Project ativo"');
+    expect(markup).toContain("Projeto não salvo");
+    expect(markup).toContain("Salvar como projeto");
+    expect(markup).toContain("Abrir menu do Project");
+    expect(markup).not.toContain("Criar Project vazio");
+    expect(markup).not.toContain("Dirty");
     expect(markup).toContain("Adicionar cartas");
     expect(markup).not.toContain("Resolver identidades");
   });
