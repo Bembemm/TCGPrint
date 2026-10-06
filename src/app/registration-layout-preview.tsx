@@ -1212,10 +1212,10 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
               const localName = cardName ?? "Carta";
               return <foreignObject
                 className="compositor-card-control-overlay"
-                x={slot.trim.xMm + slot.trim.widthMm - 12.4}
-                y={slot.trim.yMm + 0.7}
-                width="12"
-                height={canFlip ? "24" : "12"}
+                x={slot.trim.xMm + slot.trim.widthMm - 19.5}
+                y={slot.trim.yMm + 1}
+                width="18.5"
+                height="8.5"
                 pointerEvents="none"
                 data-compositor-controls-for={physicalInstance.id}
               >
