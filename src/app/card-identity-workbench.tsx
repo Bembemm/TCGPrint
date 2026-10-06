@@ -1824,16 +1824,19 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   </details>;
 
   const artworkPickerContent = pickerCard && pickerIsOpen ? <div className="artwork-picker-content">
-    {providerStatus()}
     <div className="artwork-picker-context">
       <strong>{pickerIsDfc ? "Carta dupla-face" : "Carta simples"}</strong>
-      <span>CardIdentity: {pickerCard.identity?.id ?? "não resolvida"}</span>
       <span>{effectivePickerSide === "front" ? "Front" : "Back"} · {pickerFaceName}</span>
       {pickerContext?.physicalCardIndex !== undefined
         ? <span>Carta física {pickerContext.physicalCardIndex + 1} · cópia original {pickerContext.physicalCopyNumber}/{pickerContext.physicalTotalCopies}</span>
         : <span>Entrada {pickerCard.order + 1} · {pickerCard.quantity} cópia(s)</span>}
       {pickerCard.manualBackArtwork?.source === "scryfall" && manualPhysicalBackPicker && <span role="status">Verso Scryfall legado preservado; essa fonte não pode ser escolhida novamente para cartas simples.</span>}
     </div>
+
+    <details className="artwork-picker-provider-status">
+      <summary>Estado dos provedores</summary>
+      {providerStatus()}
+    </details>
 
     <div className="artwork-picker-face-tabs" role="tablist" aria-label="Face da carta">
       {(["front", "back"] as const).map((side) => <button key={side} type="button" role="tab" aria-selected={effectivePickerSide === side} className={`button ${effectivePickerSide === side ? "primary" : "secondary"}`} disabled={interactionBusy || (pickerIsDfc && !pickerCard.faces.some((item) => item.side === side))} onClick={() => changeArtworkPickerSide(side)}>
