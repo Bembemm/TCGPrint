@@ -76,6 +76,45 @@ describe("artwork providers", () => {
     storage.database.close();
   }, 15_000);
 
+  it("serves expired Scryfall printings immediately and refreshes them in the background", async () => {
+    const storage = await setup();
+    const stale = { ...solRing, setCode: "old", collectorNumber: "1" };
+    const fresh = { ...solRing, id: "56565656-5656-4656-8656-565656565656", setCode: "new", collectorNumber: "2" };
+    const cacheKey = `scryfall:printings:${identity.oracleId}`;
+    storage.metadata.putMetadata(cacheKey, [stale], Date.now() - 1);
+
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    const listPrintings = vi.fn(async () => {
+      await refreshGate;
+      return [fresh];
+    });
+    const client = {
+      listPrintings,
+      lookupById: vi.fn(async () => fresh),
+      lookupByName: vi.fn(async () => fresh),
+      downloadAsset: vi.fn(),
+    } as unknown as ScryfallClient;
+    const provider = new ScryfallArtworkProvider(client, storage.originals, storage.thumbnails, storage.metadata, storage.repository);
+
+    const staleCandidates = await provider.searchArtwork(identity);
+    expect(staleCandidates).toHaveLength(1);
+    expect(staleCandidates[0]).toMatchObject({ setCode: "old", collectorNumber: "1" });
+    expect(listPrintings).toHaveBeenCalledTimes(1);
+    expect(provider.getHealth()).toMatchObject({ available: true, degraded: true });
+
+    releaseRefresh();
+    await vi.waitFor(() => {
+      expect(storage.metadata.getMetadataSnapshot<readonly ScryfallCard[]>(cacheKey)?.value[0]?.setCode).toBe("new");
+    });
+    const freshCandidates = await provider.searchArtwork(identity);
+    expect(freshCandidates).toHaveLength(1);
+    expect(freshCandidates[0]).toMatchObject({ setCode: "new", collectorNumber: "2" });
+    expect(listPrintings).toHaveBeenCalledTimes(1);
+    expect(provider.getHealth()).toMatchObject({ available: true, degraded: false });
+    storage.database.close();
+  });
+
   it("coalesces simultaneous Scryfall original requests and reuses the validated cache", async () => {
     const storage = await setup();
     const bytes = await png(900, 1260);
