@@ -2234,3 +2234,211 @@ body { min-width: 0; min-height: 0; }
     grid-column: 1 !important;
   }
 }
+
+
+/* Export pass — readiness first, diagnostics elsewhere. */
+.workspace-export-content {
+  display: grid;
+  gap: 9px;
+}
+.export-ready-card {
+  display: grid;
+  gap: 11px;
+  border: 1px solid #d9dde1;
+  border-radius: 11px;
+  padding: 11px;
+  background: #fff;
+}
+.export-ready-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.export-ready-heading h3 {
+  margin: 0 0 2px;
+  color: #17191c;
+  font-size: 15px;
+}
+.export-ready-heading p {
+  margin: 0;
+  color: #737a83;
+  font-size: 9px;
+}
+.export-readiness {
+  flex: none;
+  border-radius: 999px;
+  padding: 4px 7px;
+  font-size: 9px;
+  font-weight: 700;
+}
+.export-readiness.is-ready {
+  color: #1f5135;
+  background: #e8f4ed;
+}
+.export-readiness.is-blocked {
+  color: #765a1d;
+  background: #f7f0dc;
+}
+.export-physical-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+.export-physical-summary > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border-radius: 8px;
+  padding: 7px;
+  background: #f5f6f7;
+}
+.export-physical-summary span {
+  color: #858b93;
+  font-size: 8px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.export-physical-summary strong {
+  overflow: hidden;
+  color: #24272b;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.export-blockers {
+  display: grid;
+  gap: 6px;
+}
+.export-blockers:empty {
+  display: none;
+}
+.export-blockers .error-message,
+.export-blockers .warning-message,
+.export-blockers .muted {
+  margin: 0;
+  border-radius: 7px;
+  padding: 7px 8px;
+  font-size: 9px;
+}
+.export-back-summary {
+  overflow: hidden;
+  border: 1px solid #e1e3e6;
+  border-radius: 9px;
+  background: #fafafa;
+}
+.export-back-summary > summary {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 9px;
+  color: #3c4147;
+  cursor: pointer;
+  list-style: none;
+  font-size: 10px;
+  font-weight: 700;
+}
+.export-back-summary > summary::-webkit-details-marker {
+  display: none;
+}
+.export-back-summary > summary::after {
+  color: #868c94;
+  content: "›";
+  font-size: 16px;
+  transform: rotate(0deg);
+}
+.export-back-summary[open] > summary::after {
+  transform: rotate(90deg);
+}
+.export-back-summary-body {
+  border-top: 1px solid #e8eaec;
+  padding: 8px 9px;
+}
+.export-back-summary-body p {
+  margin: 0 0 6px;
+  color: #666d76;
+  font-size: 9px;
+}
+.export-back-summary-body ul {
+  display: grid;
+  gap: 4px;
+  margin: 5px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.export-back-summary-body .link-button {
+  color: #3d444c;
+  font-size: 9px;
+  text-decoration-color: #aeb3b9;
+}
+.export-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+.export-actions .button {
+  min-height: 38px;
+  border-radius: 8px;
+}
+.export-actions .button.primary {
+  border-color: #17191c;
+  color: #fff;
+  background: #17191c;
+}
+.export-actions .button.primary:hover:not(:disabled) {
+  background: #292d32;
+}
+.export-actions .button.secondary {
+  border-color: #d0d4d8;
+  color: #2f343a;
+  background: #f5f6f7;
+}
+.export-actions .button:disabled {
+  opacity: .42;
+}
+.export-download {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border: 1px solid #d4d8dc;
+  border-radius: 8px;
+  color: #24272b;
+  background: #fff;
+  text-decoration: none;
+}
+.export-status {
+  margin: 0;
+  color: #777e87;
+  font-size: 9px;
+}
+.export-empty-state {
+  display: grid;
+  gap: 4px;
+  border: 1px dashed #cfd3d7;
+  border-radius: 10px;
+  padding: 18px 12px;
+  color: #4d545c;
+  background: #fafafa;
+  text-align: center;
+}
+.export-empty-state strong {
+  color: #24272b;
+}
+.export-empty-state p {
+  margin: 0;
+  color: #7b818a;
+  font-size: 10px;
+}
+
+@media (max-width: 460px) {
+  .export-physical-summary {
+    grid-template-columns: 1fr;
+  }
+  .export-actions {
+    grid-template-columns: 1fr;
+  }
+}
