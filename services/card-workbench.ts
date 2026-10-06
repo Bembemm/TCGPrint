@@ -95,7 +95,7 @@ export interface CardWorkbench {
   confirmWorkingCardIdentity(card: WorkingCard, scryfallId: string, options?: { signal?: AbortSignal }): Promise<WorkingCard>;
   keepWorkingCardCustom(card: WorkingCard): WorkingCard;
   restoreDefaultArtwork(card: WorkingCard, faceId: CardFaceSide, options?: { signal?: AbortSignal }): Promise<WorkingCard | undefined>;
-  listArtworkCatalog?(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal }): Promise<ArtworkCatalogSearchResult>;
+  listArtworkCatalog?(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; offset?: number; limit?: number; signal?: AbortSignal }): Promise<ArtworkCatalogSearchResult>;
   listArtworkCandidates(identityId: string, faceId: CardFaceSide, source: ArtworkCatalogSource, options?: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
   listMpcCardbackCatalog?(options?: { mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal }): Promise<ArtworkCatalogSearchResult>;
   listMpcCardbackCandidates(options?: { mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal }): Promise<readonly ArtworkCandidate[]>;
@@ -381,7 +381,7 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     identityId: string,
     faceId: CardFaceSide,
     source: ArtworkCatalogSource,
-    callOptions: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; signal?: AbortSignal } = {},
+    callOptions: { mpcReferences?: readonly WorkingCardMpcReference[]; mpcFilters?: MpcArtworkFilterInput; forceMpcRefresh?: boolean; offset?: number; limit?: number; signal?: AbortSignal } = {},
   ): Promise<ArtworkCatalogSearchResult> => {
     const cachedIdentity = getIdentity(metadata, identityId);
     const oracleId = /^scryfall:oracle:(.+)$/.exec(identityId)?.[1];
@@ -409,7 +409,7 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
         catalogTotalComplete: uploads.catalogTotalComplete !== false && references.catalogTotalComplete !== false,
       };
     }
-    return catalog.searchWithTotal(identity, { source, faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), ...(callOptions.forceMpcRefresh ? { forceMpcRefresh: true } : {}), signal: callOptions.signal });
+    return catalog.searchWithTotal(identity, { source, faceId, ...(callOptions.mpcReferences ? { mpcReferences: callOptions.mpcReferences } : {}), ...(callOptions.mpcFilters ? { mpcFilters: callOptions.mpcFilters } : {}), ...(callOptions.forceMpcRefresh ? { forceMpcRefresh: true } : {}), ...(callOptions.offset !== undefined ? { offset: callOptions.offset } : {}), ...(callOptions.limit !== undefined ? { limit: callOptions.limit } : {}), signal: callOptions.signal });
   };
 
   return {
