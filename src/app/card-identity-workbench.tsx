@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { ReactNode } from "react";
 import type { ImportKind } from "../../import-engine/types";
 import type { ArtworkCandidate, CardFaceSide, CardIdentity, WorkingCard, WorkingCardBackMode } from "../../core/cards/types";
-import type { MpcArtworkFilterInput, MpcFilterCatalogs } from "../../artwork/mpc-contract";
+import { normalizeMpcArtworkFilters, type MpcArtworkFilterInput, type MpcFilterCatalogs } from "../../artwork/mpc-contract";
+import { rankMpcCandidates } from "../../artwork/mpc-ranking";
 import type { MpcArtworkProviderDiagnostic } from "../../artwork/mpc-provider";
 import { isDoubleFacedIdentity, isEligibleGenericPhysicalBack, restoreAutomaticBackSelection, selectManualBackLibraryAsset, setWorkingCardBackMode } from "../../core/cards/back-selection";
 
@@ -1022,9 +1023,13 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     const mergeProgressiveResult = (existing: KeyedArtworkCatalogResult<CandidateDto>, page: ArtworkCatalogResponse) => {
       const candidates = new Map(existing.candidates.map((candidate) => [candidate.id, candidate]));
       for (const candidate of page.candidates) candidates.set(candidate.id, candidate);
+      const merged = [...candidates.values()];
+      const ranked = artworkTargetCard?.identity
+        ? rankMpcCandidates(merged, artworkTargetCard.identity, normalizeMpcArtworkFilters(mpcFilters)) as readonly CandidateDto[]
+        : merged;
       return {
         requestKey,
-        candidates: [...candidates.values()],
+        candidates: ranked,
         catalogTotal: Math.max(existing.catalogTotal, page.catalogTotal),
         catalogTotalComplete: existing.catalogTotalComplete !== false && page.catalogTotalComplete !== false,
       };
