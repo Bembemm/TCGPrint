@@ -118,6 +118,8 @@ interface SourceRecord { readonly pk: number; readonly sourceType: "Google Drive
 export interface MpcAdvancedArtworkSearchOptions extends ArtworkSearchOptions {
   readonly filters?: MpcArtworkFilterInput;
   readonly forceRefresh?: boolean;
+  readonly offset?: number;
+  readonly limit?: number;
 }
 
 export interface MpcCatalogCacheDiagnostic {
@@ -708,7 +710,28 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const candidates = await this.searchArtworkAdvanced(identity, options);
     const filters = normalizeMpcArtworkFilters(options.filters ?? {});
     const query = identity.id === "custom:artwork-picker" || identity.provider === "local" ? "" : faceQuery(identity, options.faceId);
-    if (!query || !hasCatalogNarrowingFilters(filters)) return { candidates, catalogTotal: candidates.length };
+    if (!query) return { candidates, catalogTotal: candidates.length };
+
+    if (options.limit !== undefined && !hasCatalogNarrowingFilters(filters)) {
+      try {
+        const sources = await this.sources(options.signal);
+        const verifiedSourceIds = sources.map(({ pk }) => pk);
+        const searchKey = buildMpcSearchCacheKey(query, options.faceId ?? "any", filters, verifiedSourceIds);
+        const ids = this.metadata.getMetadataSnapshot<readonly string[]>(`${searchKey}:ids-v1`);
+        const full = this.metadata.getMetadataSnapshot<readonly StoredCandidate[]>(searchKey);
+        const referenceIds = new Set((options.mpcReferences ?? [])
+          .filter((reference) => (reference.faceId === "front" || reference.faceId === "back") && (!options.faceId || reference.faceId === options.faceId))
+          .map((reference) => reference.providerAssetId ?? reference.importedAssetId));
+        const remoteTotal = ids?.value.length ?? full?.value.length ?? candidates.length;
+        return { candidates, catalogTotal: Math.max(remoteTotal + referenceIds.size, candidates.length) };
+      } catch (error) {
+        if (isCancellation(error, options.signal)) throw error;
+        this.degrade(error);
+        return { candidates, catalogTotal: candidates.length, catalogTotalComplete: false };
+      }
+    }
+
+    if (!hasCatalogNarrowingFilters(filters)) return { candidates, catalogTotal: candidates.length };
 
     try {
       const sources = await this.sources(options.signal);
@@ -1179,9 +1202,15 @@ export class MpcArtworkProvider implements ArtworkProvider {
           return { ...(current ?? candidate), identityId: identity.id };
         }));
         this.operationSucceeded("search");
-        return this.combineCandidates(importedCandidates, rankMpcCandidates(
+        const ranked = rankMpcCandidates(
           refreshed.filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate) && candidateMatchesFilters(candidate, filters)), identity, filters,
-        ));
+        );
+        if (options.limit !== undefined) {
+          const offset = Math.max(0, options.offset ?? 0);
+          const page = ranked.slice(offset, offset + options.limit);
+          return offset === 0 ? this.combineCandidates(importedCandidates, page) : page;
+        }
+        return this.combineCandidates(importedCandidates, ranked);
       }
       staleSearch = cached && cached.value.length > 0 ? cached.value : undefined;
       this.searchCacheMisses = increment(this.searchCacheMisses);
@@ -1197,12 +1226,21 @@ export class MpcArtworkProvider implements ArtworkProvider {
         searchTypeSettings: { fuzzySearch: false, filterCardbacks: false },
         sourceSettings: { sources: sources.map(({ pk }) => [pk, filters.sources.length === 0 || filters.sources.includes(pk)]) },
       };
-      const ids = await this.searchAssetIds(query, settings, options.signal);
+      const idsCacheKey = `${searchKey}:ids-v1`;
+      const cachedIds = this.metadata.getMetadataSnapshot<readonly string[]>(idsCacheKey);
+      const ids = cachedIds && cachedIds.expiresAt > Date.now() && !options.forceRefresh && cachedIds.value.every(validAssetId)
+        ? [...cachedIds.value]
+        : await this.searchAssetIds(query, settings, options.signal);
+      if (!cachedIds || cachedIds.expiresAt <= Date.now() || options.forceRefresh) {
+        this.metadata.putMetadata(idsCacheKey, ids, Date.now() + CACHE_TTL_MS);
+      }
+      const offset = options.limit !== undefined ? Math.max(0, options.offset ?? 0) : 0;
+      const pageIds = options.limit !== undefined ? ids.slice(offset, offset + options.limit) : ids;
       const side = options.faceId ?? "front";
-      const hydration = ids.length ? await this.hydrateCards(ids, options.signal) : { byId: new Map<string, Record<string, unknown>>(), omittedIds: [] as string[], failedAssets: new Map<string, string>(), failedErrors: new Map<string, unknown>() };
+      const hydration = pageIds.length ? await this.hydrateCards(pageIds, options.signal) : { byId: new Map<string, Record<string, unknown>>(), omittedIds: [] as string[], failedAssets: new Map<string, string>(), failedErrors: new Map<string, unknown>() };
       let rejectedCandidate = hydration.omittedIds.length > 0 || hydration.failedAssets.size > 0;
       const providerRanks = new Map(ids.map((assetId, rank) => [assetId, rank]));
-      const candidates = ids.flatMap((assetId): StoredCandidate[] => {
+      const candidates = pageIds.flatMap((assetId): StoredCandidate[] => {
         const item = hydration.byId.get(assetId);
         if (!item) return [];
         try {
@@ -1219,13 +1257,16 @@ export class MpcArtworkProvider implements ArtworkProvider {
       if (candidates.length === 0 && hydration.failedAssets.size > 0) throw hydration.failedErrors.values().next().value;
       for (const item of candidates) this.metadata.putMetadata(candidateKey(item.candidate.id), item, Date.now() + CANDIDATE_TTL_MS);
       if (!rejectedCandidate) {
-        this.metadata.putMetadata(searchKey, candidates, Date.now() + (candidates.length ? CACHE_TTL_MS : EMPTY_SEARCH_TTL_MS));
-        if (candidates.length === 0) this.metricState.negativeSearchCacheWrites = increment(this.metricState.negativeSearchCacheWrites);
+        if (options.limit === undefined) {
+          this.metadata.putMetadata(searchKey, candidates, Date.now() + (candidates.length ? CACHE_TTL_MS : EMPTY_SEARCH_TTL_MS));
+          if (candidates.length === 0) this.metricState.negativeSearchCacheWrites = increment(this.metricState.negativeSearchCacheWrites);
+        }
         this.operationSucceeded("search");
       }
-      return this.combineCandidates(importedCandidates, rankMpcCandidates(
+      const ranked = rankMpcCandidates(
         candidates.map(({ candidate }) => candidate).filter((candidate) => !candidateHasKnownUnsupportedFormat(candidate)), identity, filters,
-      ));
+      );
+      return offset === 0 ? this.combineCandidates(importedCandidates, ranked) : ranked;
     } catch (error) {
       if (isCancellation(error, options.signal)) throw error;
       if (error instanceof MpcArtworkFilterValidationError) throw error;
