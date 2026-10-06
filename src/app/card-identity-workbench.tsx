@@ -1162,23 +1162,27 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   function chooseArtwork(candidate: CandidateDto) {
     setPendingArtwork(candidate);
     setPendingBackChoice(null);
-    setPickerScope(pickerContext?.physicalCardIndex === undefined ? "entry" : "physical-copy");
+    void applyArtworkSelection(candidate, null, pickerScope);
   }
 
   function chooseSemanticBack(choice: { readonly mode: "none" | "project-default" } | { readonly mode: "library"; readonly asset: BackLibraryAssetReference }) {
     setPendingArtwork(null);
     setPendingBackChoice(choice);
-    setPickerScope(pickerContext?.physicalCardIndex === undefined ? "entry" : "physical-copy");
+    void applyArtworkSelection(null, choice, pickerScope);
   }
 
-  async function confirmArtworkSelection() {
-    if (!artworkTargetCard || !artworkRequest || (!pendingArtwork && !pendingBackChoice)) return;
+  async function applyArtworkSelection(
+    explicitCandidate: CandidateDto | null = pendingArtwork,
+    explicitBackChoice: { readonly mode: "none" | "project-default" } | { readonly mode: "library"; readonly asset: BackLibraryAssetReference } | null = pendingBackChoice,
+    requestedScope: PickerScope = pickerScope,
+  ) {
+    if (!artworkTargetCard || !artworkRequest || (!explicitCandidate && !explicitBackChoice)) return;
     const controller = beginAbortableOperation("artwork");
     const problemCardId = artworkTargetCard.id;
     const problemRequestKey = artworkRequest.cacheKey;
     setBusy(true); setArtworkProblem(null); clearProblem(problemCardId);
     try {
-      const candidate = pendingArtwork;
+      const candidate = explicitCandidate;
       if (candidate?.originalAvailable) {
         const prepareResponse = await fetch(`/api/cards/artworks/${encodeURIComponent(candidate.id)}/prepare`, { method: "POST", signal: controller.signal });
         const prepared = await jsonResponse<{ candidate: CandidateDto }>(prepareResponse);
@@ -1189,17 +1193,17 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         setArtworkCatalogState((current) => updateArtworkCatalogCandidate(current, currentArtworkRequestKey, prepared.candidate));
       }
       const scope = manualPhysicalBackPicker
-        ? pickerScope
-        : pickerScope === "all-simple-project" ? "same-identity" : pickerScope;
+        ? requestedScope
+        : requestedScope === "all-simple-project" ? "same-identity" : requestedScope;
       const response = await fetch("/api/cards/resolve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
-        body: JSON.stringify(pendingBackChoice
+        body: JSON.stringify(explicitBackChoice
           ? {
             action: "apply-generic-back-scope", cards: workingCards, physicalOrder, targetCardId: artworkTargetCard.id,
-            scope, choiceMode: pendingBackChoice.mode,
-            ...(pendingBackChoice.mode === "library" ? { asset: pendingBackChoice.asset } : {}),
+            scope, choiceMode: explicitBackChoice.mode,
+            ...(explicitBackChoice.mode === "library" ? { asset: explicitBackChoice.asset } : {}),
             ...(pickerContext?.physicalCardIndex === undefined ? {} : { physicalCardIndex: pickerContext.physicalCardIndex }),
             ...(pickerContext?.physicalInstanceId ? { physicalInstanceId: pickerContext.physicalInstanceId } : {}),
           }
@@ -1234,13 +1238,14 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       if (result.providerHealth) setProviderHealth((current) => ({ ...current, ...result.providerHealth }));
       if (result.impact) {
         setStatus(`Verso aplicado a ${result.impact.affectedPhysicalCards} carta(s) simples; ${result.impact.preservedDfcPhysicalCards} cartas dupla-face preservadas.`);
-      } else if (manualPhysicalBackPicker || pendingBackChoice) {
+      } else if (manualPhysicalBackPicker || explicitBackChoice) {
         setStatus(candidate?.originalAvailable ? "Verso aplicado; original validado e armazenado no cache." : "Verso aplicado pela referência MPC validada.");
       } else {
         setStatus(candidate?.originalAvailable ? "Artwork selecionado; original validado e armazenado no cache." : "Referência MPC selecionada; nenhum original local está disponível.");
       }
       setPendingArtwork(null);
       setPendingBackChoice(null);
+      closeArtworkPicker();
     } catch (error) {
       if (controller.signal.aborted) {
         setArtworkProblem(null);
