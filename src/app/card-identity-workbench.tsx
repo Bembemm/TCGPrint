@@ -811,7 +811,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     if (selectedCardId !== target.id) dispatchEditor({ type: "select-card", cardId: target.id });
     if (isDoubleFacedIdentity(target.identity) && target.faces.some((item) => item.side === side)) dispatchEditor({ type: "set-face", side });
     setPickerSide(side);
-    setArtworkFilter(side === "back" && !isDoubleFacedIdentity(target.identity) ? "mpc" : "all");
+    setArtworkFilter(side === "back" && !isDoubleFacedIdentity(target.identity) ? "mpc" : target.identity ? "scryfall" : "all");
     setArtworkPageIndex(0);
     setArtworkSearch("");
     setArtworkSort("recommended");
@@ -832,7 +832,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       dispatchEditor({ type: "set-face", side });
     }
     setPickerSide(side);
-    setArtworkFilter(side === "back" && !isDoubleFacedIdentity(artworkTargetCard.identity) ? "mpc" : "all");
+    setArtworkFilter(side === "back" && !isDoubleFacedIdentity(artworkTargetCard.identity) ? "mpc" : artworkTargetCard.identity ? "scryfall" : "all");
     setArtworkPageIndex(0);
     setPendingArtwork(null);
     setPendingBackChoice(null);
@@ -1769,14 +1769,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const sameIdentityCards = pickerCard?.identity
     ? workingCards.filter((card) => card.identity?.id === pickerCard.identity?.id && card.identity?.provider === pickerCard.identity?.provider)
     : [];
-  const sameIdentitySimpleCards = sameIdentityCards.filter((card) => !isDoubleFacedIdentity(card.identity));
-  const allSimpleCards = workingCards.filter((card) => !isDoubleFacedIdentity(card.identity));
-  const preservedDfcCards = workingCards.filter((card) => isDoubleFacedIdentity(card.identity));
-  const plannedBackPhysicalCount = pickerScope === "physical-copy" ? 1
-    : pickerScope === "same-identity" ? sameIdentitySimpleCards.reduce((sum, card) => sum + card.quantity, 0)
-      : pickerScope === "all-simple-project" ? allSimpleCards.reduce((sum, card) => sum + card.quantity, 0)
-        : pickerCard?.quantity ?? 0;
-  const plannedBackDfcCount = pickerScope === "all-simple-project" ? preservedDfcCards.reduce((sum, card) => sum + card.quantity, 0) : 0;
+  const defaultPickerScope: PickerScope = pickerContext?.physicalCardIndex === undefined ? "entry" : "physical-copy";
   const selectedBackAssetId = pickerCard?.manualBackAsset?.assetId;
   const currentSimpleBack = manualPhysicalBackPicker && pickerCard
     ? pickerCard.backMode === "none"
@@ -1793,10 +1786,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             ? { mode: "artwork" as const, candidateId: pickerCard.manualBackArtwork.candidateId, label: `${labelSource(pickerCard.manualBackArtwork.source)} · ${pickerCard.manualBackArtwork.candidateId}` }
             : { mode: "auto" as const, label: "Verso automático" }
     : null;
-  const pendingBackChoiceLabel = pendingBackChoice?.mode === "none" ? "Sem verso"
-    : pendingBackChoice?.mode === "project-default" ? "Project Default Back"
-      : pendingBackChoice?.mode === "library" ? `Back Library · ${backLibraryAssets.find((asset) => asset.assetId === pendingBackChoice.asset.assetId)?.name ?? pendingBackChoice.asset.assetId}`
-        : "";
   const pickerBackLibraryAssets = backLibraryAssets.filter((asset) =>
     (asset.selectable !== false && !asset.retired) || asset.assetId === selectedBackAssetId,
   );
@@ -1852,8 +1841,30 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     {pickerIsDfc && <p className="multiface-label">Carta dupla-face · {pickerCard.faces.map((item) => `${item.side === "front" ? "Front" : "Back"} · ${item.name ?? "face sem nome"}`).join(" · ")}</p>}
 
     {!manualPhysicalBackPicker && <div className="artwork-filter-row picker-provider-tabs" role="group" aria-label="Filtrar provider">
-      {([ ["all", "Todas"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"], ["upload", "Meus uploads"] ] as const).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} aria-pressed={artworkFilter === value} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => { setArtworkFilter(value); setArtworkPageIndex(0); setPendingArtwork(null); }}>{label}</button>)}
+      {(pickerCard.identity
+        ? ([["scryfall", "Scryfall"], ["mpc", "MPC Autofill"]] as const)
+        : ([["all", "Todas"], ["upload", "Meus uploads"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"]] as const)
+      ).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} aria-pressed={artworkFilter === value} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => { setArtworkFilter(value); setArtworkPageIndex(0); setPendingArtwork(null); }}>{label}</button>)}
     </div>}
+
+    {!manualPhysicalBackPicker && pickerCard.identity && <label className="artwork-picker-bulk-toggle">
+      <input
+        type="checkbox"
+        checked={pickerScope === "same-identity"}
+        disabled={interactionBusy}
+        onChange={(event) => setPickerScope(event.currentTarget.checked ? "same-identity" : defaultPickerScope)}
+      />
+      <span>Aplicar também às cópias iguais</span>
+    </label>}
+
+    {manualPhysicalBackPicker && <label className="artwork-picker-scope-select">
+      <span>Aplicar verso em</span>
+      <select value={pickerScope} disabled={interactionBusy} onChange={(event) => setPickerScope(event.currentTarget.value as PickerScope)}>
+        <option value={defaultPickerScope}>{defaultPickerScope === "physical-copy" ? "Esta cópia" : "Esta entrada"}</option>
+        {pickerCard.identity && <option value="same-identity">Cartas iguais</option>}
+        <option value="all-simple-project">Todas as cartas simples</option>
+      </select>
+    </label>}
 
     {manualPhysicalBackPicker && <section className="simple-back-options" aria-label="Opções de verso para carta simples">
       <h3>Verso da carta simples</h3>
@@ -1923,20 +1934,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       onLoadMore={() => undefined}
     />
 
-    {(pendingArtwork || pendingBackChoice) && <section className="artwork-apply-scope" aria-label="Confirmar escopo da seleção">
-      <p className="artwork-pending-selection" role="status">Nova escolha: {pendingArtwork
-        ? `${pendingArtwork.faceName ?? displayCard(pickerCard)} · ${labelSource(pendingArtwork.source)}`
-        : pendingBackChoiceLabel}</p>
-      <h3>Aplicar para</h3>
-      <div className="artwork-scope-options">
-        <label><input type="radio" name="artwork-scope" checked={pickerScope === (pickerContext?.physicalCardIndex === undefined ? "entry" : "physical-copy")} onChange={() => setPickerScope(pickerContext?.physicalCardIndex === undefined ? "entry" : "physical-copy")} />{pickerContext?.physicalCardIndex === undefined ? "Somente esta entrada/cópias" : "Somente esta cópia física"}</label>
-        <label><input type="radio" name="artwork-scope" checked={pickerScope === "same-identity"} disabled={!pickerCard.identity} onChange={() => setPickerScope("same-identity")} />Todas iguais · mesma CardIdentity + {manualPhysicalBackPicker ? "verso simples" : effectivePickerSide}</label>
-        {manualPhysicalBackPicker && <label><input type="radio" name="artwork-scope" checked={pickerScope === "all-simple-project"} onChange={() => setPickerScope("all-simple-project")} />Todas as cartas simples do Project</label>}
-      </div>
-      {manualPhysicalBackPicker && <p className="artwork-bulk-impact" role="status">Aplicar verso a {plannedBackPhysicalCount} carta(s) simples · {plannedBackDfcCount} carta(s) dupla-face serão preservadas.</p>}
-      {!manualPhysicalBackPicker && pickerScope === "same-identity" && <p className="muted" role="status">A seleção afeta {sameIdentityCards.filter((card) => card.faces.some((item) => item.side === effectivePickerSide)).reduce((sum, card) => sum + card.quantity, 0)} cópia(s) com a mesma CardIdentity e face.</p>}
-      <div className="artwork-scope-actions"><button className="button primary" type="button" disabled={interactionBusy || (pickerScope === "same-identity" && !pickerCard.identity)} onClick={() => void confirmArtworkSelection()}>Aplicar seleção</button><button className="button secondary" type="button" disabled={interactionBusy} onClick={() => { setPendingArtwork(null); setPendingBackChoice(null); }}>Cancelar seleção</button></div>
-    </section>}
     {abortableOperation === "artwork" && <button className="button secondary" type="button" aria-label="Cancelar download e seleção da arte" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar download/seleção</button>}
   </div> : null;
 
