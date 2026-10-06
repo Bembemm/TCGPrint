@@ -1108,3 +1108,50 @@ body { min-width: 0; min-height: 0; }
     padding-inline: 2px;
   }
 }
+
+
+/* Native SVG card actions: stable sizing at every compositor zoom. */
+.compositor-card-control {
+  cursor: pointer;
+  opacity: 0.16;
+  transition: opacity 120ms ease;
+}
+.registration-preview-slot:hover .compositor-card-control,
+.compositor-card-control:focus-visible,
+.compositor-card-control[aria-expanded="true"],
+.compositor-card-control[aria-pressed="true"] {
+  opacity: 1;
+}
+.compositor-card-control-surface {
+  fill: #111317;
+  fill-opacity: 0.72;
+  stroke: #fff;
+  stroke-opacity: 0.18;
+  stroke-width: 0.28;
+  vector-effect: non-scaling-stroke;
+}
+.compositor-card-control:hover .compositor-card-control-surface,
+.compositor-card-control:focus-visible .compositor-card-control-surface,
+.compositor-card-control[aria-expanded="true"] .compositor-card-control-surface,
+.compositor-card-control[aria-pressed="true"] .compositor-card-control-surface {
+  fill-opacity: 0.92;
+  stroke-opacity: 0.72;
+}
+.compositor-card-control:focus-visible {
+  outline: none;
+}
+.compositor-card-control:focus-visible .compositor-card-control-surface {
+  stroke-width: 0.5;
+}
+.compositor-card-control-flip-icon {
+  fill: #fff;
+  font-size: 3.35px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-weight: 650;
+}
+.compositor-card-control-dot {
+  fill: #fff;
+}
+@media (hover: none) {
+  .compositor-card-control { opacity: 0.62; }
+}
