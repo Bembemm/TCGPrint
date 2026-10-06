@@ -80,6 +80,39 @@ export class ScryfallArtworkProvider implements ArtworkProvider {
       return usableSnapshot.value.flatMap((card) => this.candidatesFromPrinting(identity, card, options.faceId));
     }
 
+    if (!options.progressive) {
+      const inFlightRefresh = this.printingRefreshes.get(cacheKey);
+      if (inFlightRefresh) {
+        await inFlightRefresh;
+        const refreshed = this.metadata.getMetadataSnapshot<readonly ScryfallCard[]>(cacheKey);
+        if (refreshed && Array.isArray(refreshed.value) && refreshed.value.length > 0) {
+          return refreshed.value.flatMap((card) => this.candidatesFromPrinting(identity, card, options.faceId));
+        }
+      }
+    }
+
+    if (options.progressive && identity.oracleId) {
+      const pagedClient = this.client as ScryfallClient & {
+        listPrintingsPage?: (oracleId: string, nextPage?: string, options?: { signal?: AbortSignal }) => Promise<ScryfallPrintingPage>;
+      };
+      if (typeof pagedClient.listPrintingsPage === "function") {
+        try {
+          const firstPage = await pagedClient.listPrintingsPage(identity.oracleId, undefined, { signal: options.signal });
+          if (firstPage.cards.length > 0) {
+            if (firstPage.hasMore && firstPage.nextPage) {
+              this.schedulePrintingPageCompletion(cacheKey, identity.oracleId, firstPage.cards, firstPage.nextPage);
+            } else {
+              this.metadata.putMetadata(cacheKey, firstPage.cards, Date.now() + METADATA_TTL_MS);
+            }
+            this.health = { available: true, degraded: false };
+            return firstPage.cards.flatMap((card) => this.candidatesFromPrinting(identity, card, options.faceId));
+          }
+        } catch (error) {
+          if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError") || (error && typeof error === "object" && (error as { kind?: unknown }).kind === "aborted")) throw error;
+        }
+      }
+    }
+
     try {
       const cards = await this.fetchPrintings(identity, options.signal);
       this.metadata.putMetadata(cacheKey, cards, Date.now() + METADATA_TTL_MS);
@@ -104,6 +137,37 @@ export class ScryfallArtworkProvider implements ArtworkProvider {
       ? await this.client.lookupById(identity.scryfallId, { signal })
       : await this.client.lookupByName(identity.name, "exact", { signal });
     return requested.oracleId ? this.client.listPrintings(requested.oracleId, { signal }) : [requested];
+  }
+
+  private schedulePrintingPageCompletion(cacheKey: string, oracleId: string, firstCards: readonly ScryfallCard[], nextPage: string): void {
+    if (this.printingRefreshes.has(cacheKey)) return;
+    const pagedClient = this.client as ScryfallClient & {
+      listPrintingsPage?: (oracleId: string, nextPage?: string, options?: { signal?: AbortSignal }) => Promise<ScryfallPrintingPage>;
+    };
+    if (typeof pagedClient.listPrintingsPage !== "function") return;
+
+    let refresh!: Promise<void>;
+    refresh = (async () => {
+      const cards = [...firstCards];
+      let pageUrl: string | undefined = nextPage;
+      const seenPages = new Set<string>();
+      while (pageUrl) {
+        if (seenPages.has(pageUrl)) throw new Error("Scryfall returned a cyclic printing pagination link.");
+        seenPages.add(pageUrl);
+        const page = await pagedClient.listPrintingsPage!(oracleId, pageUrl);
+        cards.push(...page.cards);
+        pageUrl = page.hasMore ? page.nextPage : undefined;
+      }
+      if (cards.length > 0) this.metadata.putMetadata(cacheKey, cards, Date.now() + METADATA_TTL_MS);
+      this.health = { available: true, degraded: false };
+    })()
+      .catch((error: unknown) => {
+        this.health = { available: true, degraded: true, message: error instanceof Error ? error.message.slice(0, 300) : "Scryfall pagination refresh failed." };
+      })
+      .finally(() => {
+        if (this.printingRefreshes.get(cacheKey) === refresh) this.printingRefreshes.delete(cacheKey);
+      });
+    this.printingRefreshes.set(cacheKey, refresh);
   }
 
   private schedulePrintingRefresh(cacheKey: string, identity: CardIdentity): void {
