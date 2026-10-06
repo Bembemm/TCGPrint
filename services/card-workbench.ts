@@ -105,7 +105,7 @@ export interface CardWorkbench {
   refreshMpcArtworkCandidate(candidateId: string, signal?: AbortSignal): Promise<ArtworkCandidate | undefined>;
   revalidateMpcArtworkCandidates(candidateIds: readonly string[], signal?: AbortSignal): Promise<readonly MpcCandidateRevalidationResult[]>;
   getArtworkPreview(candidateId: string, signal?: AbortSignal): Promise<ArtworkPreview | undefined>;
-  getArtworkDisplay(candidateId: string, bucket: ArtworkDisplayWidthBucket, signal?: AbortSignal): Promise<(ArtworkDisplayAsset & { readonly source: "original" | "preview" }) | undefined>;
+  getArtworkDisplay(candidateId: string, bucket: ArtworkDisplayWidthBucket, signal?: AbortSignal): Promise<(ArtworkDisplayAsset & { readonly source: "original" }) | undefined>;
   getArtworkOriginal(candidateId: string, signal?: AbortSignal): ReturnType<ArtworkCatalog["getOriginal"]>;
   selectArtwork(card: WorkingCard, faceId: CardFaceSide, candidate: ArtworkCandidate): WorkingCard;
   selectManualBackArtwork(card: WorkingCard, candidate: ArtworkCandidate): WorkingCard;
@@ -614,19 +614,14 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
     async getArtworkDisplay(candidateId, bucket, signal) {
       if (!isArtworkDisplayWidthBucket(bucket)) throw new TypeError("Display width must be one of the supported buckets.");
       const candidate = await catalog.getCandidate(candidateId);
-      if (candidate?.originalAvailable) {
-        try {
-          const original = await catalog.getOriginal(candidateId, signal);
-          return { ...await displayStore.getOrCreate(candidateId, original.contentHash, original.bytes, bucket, signal), source: "original" as const };
-        } catch (error) {
-          if (isAbortFailure(error, signal)) throw error;
-          // Display quality degrades to the existing catalog preview; selection and export remain untouched.
-        }
+      if (!candidate?.originalAvailable) return undefined;
+      try {
+        const original = await catalog.getOriginal(candidateId, signal);
+        return { ...await displayStore.getOrCreate(candidateId, original.contentHash, original.bytes, bucket, signal), source: "original" as const };
+      } catch (error) {
+        if (isAbortFailure(error, signal)) throw error;
+        return undefined;
       }
-      const preview = await catalog.getPreview(candidateId, signal);
-      if (!preview) return undefined;
-      const sourceHash = sha256(preview.bytes);
-      return { ...await displayStore.getOrCreate(candidateId, sourceHash, preview.bytes, bucket, signal), source: "preview" as const };
     },
     getArtworkOriginal(candidateId, signal) { return catalog.getOriginal(candidateId, signal); },
     getMpcArtworkFilterCatalogs(signal) { return catalog.getMpcFilterCatalogs(signal); },

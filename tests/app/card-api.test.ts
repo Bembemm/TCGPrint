@@ -1204,6 +1204,19 @@ describe("card APIs", () => {
     expect(getArtworkDisplay).not.toHaveBeenCalled();
   });
 
+  it("returns DISPLAY_UNAVAILABLE when no original display derivative can be produced", async () => {
+    const getArtworkDisplay = vi.fn(async () => undefined);
+    const getArtworkPreview = vi.fn();
+    const workbench = testWorkbench({ getArtworkDisplay, getArtworkPreview });
+
+    const response = await handleArtworkDisplay(new Request(`http://localhost/api/cards/artworks/${candidateId}/display?width=512`), candidateId, workbench);
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ code: "DISPLAY_UNAVAILABLE" });
+    expect(getArtworkDisplay).toHaveBeenCalledWith(candidateId, 512, expect.anything());
+    expect(getArtworkPreview).not.toHaveBeenCalled();
+  });
+
   it("revalidates cached display responses with an ETag", async () => {
     const displayBytes = new Uint8Array(await sharp({ create: { width: 500, height: 700, channels: 3, background: "#246" } }).png().toBuffer());
     const workbench = testWorkbench({ getArtworkDisplay: vi.fn(async () => ({

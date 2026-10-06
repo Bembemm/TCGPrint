@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -343,12 +343,24 @@ describe("Cartas workspace navigation", () => {
     const displayImages = [...composer.querySelectorAll<SVGImageElement>("image[data-compositor-display-url]")];
     expect(displayImages.length).toBeGreaterThanOrEqual(2);
     fireEvent.load(displayImages[0]!);
+    vi.useFakeTimers();
     fireEvent.error(displayImages[1]!);
-    window.dispatchEvent(new Event("resize"));
-    expect(displayImages[0]).toHaveAttribute("data-compositor-source", "display-high-fidelity");
-    expect(displayImages[1]).toHaveAttribute("data-compositor-source", "display-high-fidelity-pending");
-    expect(displayImages[1]!.closest("[data-physical-instance-id]")?.querySelector("image[data-compositor-artwork]")).toHaveAttribute("data-compositor-source", "preview-thumbnail");
-    expect(exportRequests[0]?.body).toBeDefined();
+    try {
+      window.dispatchEvent(new Event("resize"));
+      expect(displayImages[0]).toHaveAttribute("data-compositor-source", "display-high-fidelity");
+      expect(displayImages[1]).toHaveAttribute("data-compositor-source", "display-high-fidelity-pending");
+      expect(displayImages[1]!.closest("[data-physical-instance-id]")?.querySelector("image[data-compositor-artwork]")).toHaveAttribute("data-compositor-source", "preview-thumbnail");
+      await act(() => vi.advanceTimersByTime(500));
+      const retriedDisplay = [...composer.querySelectorAll<SVGImageElement>("image[data-compositor-display-url]")]
+        .find((image) => new URL(image.getAttribute("data-compositor-display-url")!, "http://localhost").searchParams.get("retry") === "1");
+      expect(retriedDisplay).toBeDefined();
+      fireEvent.load(retriedDisplay!);
+      expect(retriedDisplay).toHaveAttribute("data-compositor-source", "display-high-fidelity");
+      expect(retriedDisplay!.closest("[data-physical-instance-id]")?.querySelector("image[data-compositor-artwork]")).toHaveAttribute("opacity", "0");
+      expect(exportRequests[0]?.body).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
 
     await user.click(screen.getByRole("button", { name: "Gerar PDF final" }));
     await screen.findByRole("link", { name: "Baixar tcgprint-m4.pdf" });

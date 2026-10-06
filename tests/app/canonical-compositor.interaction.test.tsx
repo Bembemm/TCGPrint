@@ -352,6 +352,116 @@ describe("canonical live compositor interactions", () => {
     expect(screen.getByTestId("project-revision")).toHaveTextContent("1");
   });
 
+  it("retries a failed display request and promotes the later high-fidelity load", () => {
+    vi.useFakeTimers();
+    try {
+      render(compositorWorkspace([{ ...card(), quantity: 1 }]));
+      const initialDisplay = displayArtworkForPhysicalIndex(0);
+      const initialUrl = initialDisplay.getAttribute("data-compositor-display-url")!;
+
+      fireEvent.error(initialDisplay);
+      expect(artworkForPhysicalIndex(0)).toHaveAttribute("data-compositor-source", "preview-thumbnail");
+      expect(artworkForPhysicalIndex(0)).toHaveAttribute("opacity", "1");
+      expect(initialDisplay).toHaveAttribute("data-compositor-source", "display-high-fidelity-pending");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(500));
+      const retry = displayArtworkForPhysicalIndex(0);
+      const retryUrl = new URL(retry.getAttribute("data-compositor-display-url")!, "http://localhost");
+      expect(retryUrl.searchParams.get("retry")).toBe("1");
+      expect(retryUrl.searchParams.get("width")).toBe(new URL(initialUrl, "http://localhost").searchParams.get("width"));
+
+      fireEvent.load(retry);
+      expect(retry).toHaveAttribute("data-compositor-source", "display-high-fidelity");
+      expect(retry).toHaveAttribute("opacity", "1");
+      expect(artworkForPhysicalIndex(0)).toHaveAttribute("opacity", "0");
+      expect(screen.getByTestId("project-revision")).toHaveTextContent("1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps retry URLs shared between repeated copies of the same artwork", () => {
+    vi.useFakeTimers();
+    try {
+      render(compositorWorkspace([{ ...card(), quantity: 2 }]));
+      const first = displayArtworkForPhysicalIndex(0);
+      const second = displayArtworkForPhysicalIndex(1);
+      const initialUrl = new URL(first.getAttribute("data-compositor-display-url")!, "http://localhost");
+      expect(first.getAttribute("data-compositor-display-url")).toBe(second.getAttribute("data-compositor-display-url"));
+
+      fireEvent.error(first);
+      fireEvent.error(second);
+      act(() => vi.advanceTimersByTime(500));
+
+      const firstRetryUrl = new URL(displayArtworkForPhysicalIndex(0).getAttribute("data-compositor-display-url")!, "http://localhost");
+      const secondRetryUrl = new URL(displayArtworkForPhysicalIndex(1).getAttribute("data-compositor-display-url")!, "http://localhost");
+      expect(firstRetryUrl.href).toBe(secondRetryUrl.href);
+      expect(firstRetryUrl.searchParams.get("retry")).toBe("1");
+      expect(firstRetryUrl.searchParams.get("width")).toBe(initialUrl.searchParams.get("width"));
+      expect(firstRetryUrl.searchParams.has("physicalInstanceId")).toBe(false);
+
+      fireEvent.load(displayArtworkForPhysicalIndex(0));
+      expect(displayArtworkForPhysicalIndex(0)).toHaveAttribute("data-compositor-source", "display-high-fidelity");
+      expect(displayArtworkForPhysicalIndex(1)).toHaveAttribute("data-compositor-source", "display-high-fidelity-pending");
+      expect(artworkForPhysicalIndex(1)).toHaveAttribute("data-compositor-source", "preview-thumbnail");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds display retries and clears pending retries when artwork, face, or page changes", () => {
+    vi.useFakeTimers();
+    try {
+      render(compositorWorkspace([{ ...card(), quantity: 10 }]));
+      const initialDisplay = displayArtworkForPhysicalIndex(0);
+      fireEvent.error(initialDisplay);
+      act(() => vi.advanceTimersByTime(500));
+
+      let display = displayArtworkForPhysicalIndex(0);
+      expect(new URL(display.getAttribute("data-compositor-display-url")!, "http://localhost").searchParams.get("retry")).toBe("1");
+      fireEvent.error(display);
+      act(() => vi.advanceTimersByTime(500));
+
+      display = displayArtworkForPhysicalIndex(0);
+      expect(new URL(display.getAttribute("data-compositor-display-url")!, "http://localhost").searchParams.get("retry")).toBe("2");
+      fireEvent.error(display);
+      act(() => vi.advanceTimersByTime(5_000));
+      expect(displayArtworkForPhysicalIndex(0)).toHaveAttribute("data-compositor-display-url", expect.stringContaining("retry=2"));
+      expect(artworkForPhysicalIndex(0)).toHaveAttribute("data-compositor-source", "preview-thumbnail");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByTestId("project-revision")).toHaveTextContent("1");
+
+      fireEvent.error(displayArtworkForPhysicalIndex(0));
+      fireEvent.click(screen.getByRole("tab", { name: "Configurações" }));
+      fireEvent.click(screen.getByRole("button", { name: "Selecionar artwork alternativa" }));
+      expect(artworkForPhysicalIndex(0)).toHaveAttribute("data-compositor-artwork", artworkFrontNext.candidateId);
+      act(() => vi.advanceTimersByTime(500));
+      display = displayArtworkForPhysicalIndex(0);
+      expect(display).toHaveAttribute("data-compositor-source", "display-high-fidelity-pending");
+      expect(display.getAttribute("data-compositor-display-url")).not.toContain("retry=");
+
+      fireEvent.error(display);
+      fireEvent.click(screen.getByRole("button", { name: "Verso" }));
+      expect(artworkForPhysicalIndex(0)).toHaveAttribute("data-compositor-artwork", artworkBack.candidateId);
+      act(() => vi.advanceTimersByTime(500));
+      display = displayArtworkForPhysicalIndex(0);
+      expect(display).toHaveAttribute("data-compositor-source", "display-high-fidelity-pending");
+      expect(display.getAttribute("data-compositor-display-url")).not.toContain("retry=");
+
+      fireEvent.error(display);
+      fireEvent.click(screen.getByRole("button", { name: "Próxima página" }));
+      expect(sheet()).toHaveAttribute("data-compositor-page", "2");
+      act(() => vi.advanceTimersByTime(500));
+      const pageTwoDisplay = displayArtworkForPhysicalIndex(9);
+      expect(pageTwoDisplay).toHaveAttribute("data-compositor-source", "display-high-fidelity-pending");
+      expect(pageTwoDisplay.getAttribute("data-compositor-display-url")).not.toContain("retry=");
+      expect(screen.getByTestId("project-revision")).toHaveTextContent("1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("changes the display URL only when auto-fit resize crosses a bucket boundary", () => {
     let viewportWidth = 540;
     vi.stubGlobal("ResizeObserver", undefined);

@@ -153,6 +153,14 @@ function calibrationSvgMatrix(matrix: { readonly a: number; readonly b: number; 
   return `matrix(${matrix.a} ${matrix.b} ${matrix.c} ${matrix.d} ${matrix.e} ${matrix.f})`;
 }
 
+const MAX_COMPOSITOR_DISPLAY_RETRIES = 2;
+const COMPOSITOR_DISPLAY_RETRY_COOLDOWN_MS = 500;
+
+function compositorDisplayRetryUrl(displayUrl: string, retry: number): string {
+  if (retry === 0) return displayUrl;
+  return `${displayUrl}${displayUrl.includes("?") ? "&" : "?"}retry=${retry}`;
+}
+
 interface CompositorArtworkImageProps {
   readonly previewUrl: string;
   readonly displayUrl: string;
@@ -170,11 +178,21 @@ interface CompositorArtworkImageProps {
 
 function CompositorArtworkImage({ previewUrl, displayUrl, assetKey, x, y, width, height, clipPath, transform, label, candidateId, face }: CompositorArtworkImageProps) {
   const [loadedDisplay, setLoadedDisplay] = useState<{ readonly url: string; readonly assetKey: string } | null>(null);
-  const currentDisplayRef = useRef({ url: displayUrl, assetKey });
-  currentDisplayRef.current = { url: displayUrl, assetKey };
-  const currentLoaded = loadedDisplay?.url === displayUrl && loadedDisplay.assetKey === assetKey;
+  const retryIdentity = `${assetKey}\0${face}`;
+  const [retryState, setRetryState] = useState({ identity: retryIdentity, retries: 0 });
+  const retryStateRef = useRef(retryState);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCount = retryState.identity === retryIdentity ? retryState.retries : 0;
+  const requestedDisplayUrl = compositorDisplayRetryUrl(displayUrl, retryCount);
+  const currentDisplayRef = useRef({ url: requestedDisplayUrl, identity: retryIdentity });
+  currentDisplayRef.current = { url: requestedDisplayUrl, identity: retryIdentity };
+  const currentLoaded = loadedDisplay?.url === requestedDisplayUrl && loadedDisplay.assetKey === assetKey;
   const previousLoaded = !currentLoaded && loadedDisplay?.assetKey === assetKey ? loadedDisplay : null;
   const visibleLayer = currentLoaded ? "display" : previousLoaded ? "previous" : "preview";
+  useEffect(() => () => {
+    if (retryTimerRef.current !== null) clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = null;
+  }, [retryIdentity, displayUrl]);
   const common = {
     x,
     y,
@@ -189,10 +207,27 @@ function CompositorArtworkImage({ previewUrl, displayUrl, assetKey, x, y, width,
     "data-compositor-face": face,
   };
   const markLoaded = (event: SyntheticEvent<SVGImageElement>) => {
-    if (currentDisplayRef.current.url !== displayUrl
-      || currentDisplayRef.current.assetKey !== assetKey
-      || event.currentTarget.getAttribute("href") !== displayUrl) return;
-    setLoadedDisplay({ url: displayUrl, assetKey });
+    if (currentDisplayRef.current.url !== requestedDisplayUrl
+      || currentDisplayRef.current.identity !== retryIdentity
+      || event.currentTarget.getAttribute("href") !== requestedDisplayUrl) return;
+    setLoadedDisplay({ url: requestedDisplayUrl, assetKey });
+  };
+  const retryAfterFailure = (event: SyntheticEvent<SVGImageElement>) => {
+    if (currentDisplayRef.current.url !== requestedDisplayUrl
+      || currentDisplayRef.current.identity !== retryIdentity
+      || event.currentTarget.getAttribute("href") !== requestedDisplayUrl
+      || retryTimerRef.current !== null) return;
+    const current = retryStateRef.current;
+    if (current.identity !== retryIdentity || current.retries >= MAX_COMPOSITOR_DISPLAY_RETRIES) return;
+    const nextRetry = current.retries + 1;
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      if (currentDisplayRef.current.url !== requestedDisplayUrl
+        || currentDisplayRef.current.identity !== retryIdentity) return;
+      const next = { identity: retryIdentity, retries: nextRetry };
+      retryStateRef.current = next;
+      setRetryState(next);
+    }, COMPOSITOR_DISPLAY_RETRY_COOLDOWN_MS);
   };
   return <>
     <image
@@ -213,13 +248,14 @@ function CompositorArtworkImage({ previewUrl, displayUrl, assetKey, x, y, width,
     />}
     <image
       {...common}
-      key={displayUrl}
-      href={displayUrl}
+      key={requestedDisplayUrl}
+      href={requestedDisplayUrl}
       opacity={currentLoaded ? 1 : 0}
       aria-hidden={!currentLoaded}
       data-compositor-source={currentLoaded ? "display-high-fidelity" : "display-high-fidelity-pending"}
-      data-compositor-display-url={displayUrl}
+      data-compositor-display-url={requestedDisplayUrl}
       onLoad={markLoaded}
+      onError={retryAfterFailure}
     />
   </>;
 }
@@ -1102,6 +1138,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
                   <text x={centerX} y={slot.trim.yMm + slot.trim.heightMm * 0.42} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize * 0.82} fill="#1e3a8a">{name.slice(0, 20)}{dfcLabel}</text>
                   {!artwork.available && <text x={centerX} y={slot.trim.yMm + slot.trim.heightMm * 0.58} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize * 0.62} fill="#475569">{artwork.label}</text>}
                 </g> : artwork.url && artwork.displayUrl && artwork.referenceId && <CompositorArtworkImage
+                  key={`${activePageIndex}-${displayedSide}-${artwork.assetKey}`}
                   previewUrl={artwork.url}
                   displayUrl={artwork.displayUrl}
                   assetKey={artwork.assetKey}

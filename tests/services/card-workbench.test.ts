@@ -176,21 +176,31 @@ describe("card workbench services", () => {
     expect(fake.downloadAsset.mock.calls[1]?.[0]).toContain(".png");
   });
 
-  it("falls back to the catalog preview when the canonical provider original is unavailable", async () => {
+  it("keeps display unavailable after a transient original failure and retries the original on the next request", async () => {
     const source = resolvedCard("Sol Ring", "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "cmm", "396");
     const fake = fakeScryfallClient([source]);
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 1500, height: 2100, channels: 3, background: "#579" } }).png().toBuffer());
     const smallBytes = new Uint8Array(await sharp({ create: { width: 640, height: 896, channels: 3, background: "#357" } }).png().toBuffer());
+    let originalAvailable = false;
     fake.downloadAsset.mockImplementation(async (sourceUrl, options) => {
-      if (options.kind === "original") throw new ScryfallError("network", "original unavailable");
+      if (options.kind === "original") {
+        if (!originalAvailable) throw new ScryfallError("network", "original unavailable");
+        return { bytes: originalBytes, contentType: "image/png", sourceUrl, kind: options.kind };
+      }
       return { bytes: smallBytes, contentType: "image/png", sourceUrl, kind: options.kind };
     });
     const { workbench } = await setup(undefined, fake.client);
     const candidate = (await workbench.listArtworkCandidates(`scryfall:oracle:${source.oracleId}`, "front", "scryfall"))[0]!;
 
-    const display = await workbench.getArtworkDisplay(candidate.id, 1024);
+    const failedDisplay = await workbench.getArtworkDisplay(candidate.id, 1024);
+    const preview = await workbench.getArtworkPreview(candidate.id);
+    originalAvailable = true;
+    const retriedDisplay = await workbench.getArtworkDisplay(candidate.id, 1024);
 
-    expect(display).toMatchObject({ widthPx: 300, heightPx: 420, source: "preview" });
-    expect(fake.downloadAsset.mock.calls.map(([, options]) => options.kind)).toEqual(["original", "thumbnail"]);
+    expect(failedDisplay).toBeUndefined();
+    expect(preview).toMatchObject({ widthPx: 300, heightPx: 420 });
+    expect(retriedDisplay).toMatchObject({ widthPx: 1024, heightPx: 1434, source: "original" });
+    expect(fake.downloadAsset.mock.calls.map(([, options]) => options.kind)).toEqual(["original", "thumbnail", "original"]);
   });
 
   it("keeps a Scryfall printing at index 800 selectable and sends it through validated original storage", async () => {
