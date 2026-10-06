@@ -1050,12 +1050,22 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
               if (!existing || existing.requestKey !== requestKey) return existing;
               return mergeProgressiveResult(existing, page);
             });
-            updateResolvedRequestCache(artworkCatalogRequests.current, artworkRequest.cacheKey, (cached) => mergeProgressiveResult({
-              requestKey,
-              candidates: cached.candidates,
-              catalogTotal: cached.catalogTotal,
-              catalogTotalComplete: cached.catalogTotalComplete,
-            }, page));
+            updateResolvedRequestCache(artworkCatalogRequests.current, artworkRequest.cacheKey, (cached) => {
+              const merged = mergeProgressiveResult({
+                requestKey,
+                candidates: cached.candidates,
+                catalogTotal: cached.catalogTotal,
+                catalogTotalComplete: cached.catalogTotalComplete,
+              }, page);
+              return {
+                ...cached,
+                candidates: merged.candidates,
+                catalogTotal: merged.catalogTotal,
+                catalogTotalComplete: merged.catalogTotalComplete,
+                providerHealth: { ...cached.providerHealth, ...page.providerHealth },
+                mpcDiagnostic: page.mpcDiagnostic ?? cached.mpcDiagnostic,
+              };
+            });
             setProviderHealth((current) => ({ ...current, ...page.providerHealth }));
             setMpcDiagnostic(page.mpcDiagnostic ?? null);
             if (page.candidates.length === 0 && offset + MPC_BACKGROUND_GALLERY_BATCH >= page.catalogTotal) return;
