@@ -63,6 +63,8 @@ export class ArtworkCatalog {
           source: options.source,
           ...(options.faceId ? { faceId: options.faceId } : {}),
           ...(options.mpcReferences ? { mpcReferences: options.mpcReferences } : {}),
+          ...(options.offset !== undefined ? { offset: options.offset } : {}),
+          ...(options.limit !== undefined ? { limit: options.limit } : {}),
           ...(options.signal ? { signal: options.signal } : {}),
         };
         const extension = mpcExtension(provider);
@@ -99,6 +101,8 @@ export class ArtworkCatalog {
           source: options.source,
           ...(options.faceId ? { faceId: options.faceId } : {}),
           ...(options.mpcReferences ? { mpcReferences: options.mpcReferences } : {}),
+          ...(options.offset !== undefined ? { offset: options.offset } : {}),
+          ...(options.limit !== undefined ? { limit: options.limit } : {}),
           ...(options.signal ? { signal: options.signal } : {}),
         };
         const extension = mpcExtension(provider);
