@@ -241,13 +241,18 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       if (target instanceof Node && contextMenuElementRef.current?.contains(target)) return;
       setContextMenu(null);
     };
+    const closeOnScroll = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && contextMenuElementRef.current?.contains(target)) return;
+      setContextMenu(null);
+    };
     const close = () => setContextMenu(null);
     document.addEventListener("pointerdown", closeOnOutsidePointer, true);
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("scroll", closeOnScroll, true);
     window.addEventListener("resize", close);
     return () => {
       document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", closeOnScroll, true);
       window.removeEventListener("resize", close);
     };
   }, [contextMenu?.token]);

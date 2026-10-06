@@ -711,6 +711,20 @@ describe("canonical live compositor interactions", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("keeps the context menu open during its own scroll and closes it on sheet scroll", async () => {
+    const user = userEvent.setup();
+    render(compositorWorkspace([{ ...card(), quantity: 11 }], { ...DEFAULT_PROJECT_SETTINGS, layout: { rows: 1, columns: 3, skippedSlotIndices: [] } }, false, undefined, false, undefined, vi.fn()));
+
+    await user.click(screen.getByRole("button", { name: "Mais ações para Island, cópia 1 de 11" }));
+    const menu = screen.getByRole("menu");
+
+    fireEvent.scroll(menu);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.scroll(sheet());
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
   it("clamps the right-click menu inside the viewport after measuring it", async () => {
     const innerWidthDescriptor = Object.getOwnPropertyDescriptor(window, "innerWidth");
     const innerHeightDescriptor = Object.getOwnPropertyDescriptor(window, "innerHeight");
