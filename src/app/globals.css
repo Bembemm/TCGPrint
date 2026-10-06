@@ -2763,3 +2763,51 @@ body { min-width: 0; min-height: 0; }
     width: 100%;
   }
 }
+
+
+/* Progressive picker status + advanced MPC controls. */
+.artwork-progressive-status {
+  margin: -4px 0 0;
+  color: #8e949d;
+  font-size: 9px;
+}
+.mpc-advanced-filters {
+  overflow: hidden;
+  border: 1px solid #30343a;
+  border-radius: 8px;
+  background: #17191d;
+}
+.mpc-advanced-filters > summary {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  color: #9fa5ad;
+  cursor: pointer;
+  list-style: none;
+  font-size: 9px;
+  font-weight: 650;
+}
+.mpc-advanced-filters > summary::-webkit-details-marker {
+  display: none;
+}
+.mpc-advanced-filters > summary::after {
+  content: "›";
+  font-size: 15px;
+}
+.mpc-advanced-filters[open] > summary::after {
+  transform: rotate(90deg);
+}
+.mpc-advanced-filters[open] {
+  padding-bottom: 8px;
+}
+.mpc-advanced-filters[open] > :not(summary) {
+  margin-inline: 8px;
+}
+.mpc-refresh-action {
+  width: fit-content;
+  min-height: 28px !important;
+  margin-top: 2px !important;
+  font-size: 9px !important;
+}
