@@ -180,7 +180,7 @@ export default function ProjectHeader({
       aria-expanded={menuOpen}
       aria-controls="workspace-project-menu"
       onClick={() => setMenuOpen((open) => !open)}
-    >Project ▾</button>
+    ><span aria-hidden="true">⌄</span></button>
 
     {menuOpen && <div id="workspace-project-menu" className="workspace-project-menu" role="group" aria-label="Ações do Project">
       <button type="button" disabled={actionsDisabled} onClick={() => runMenuAction(onNewProject)}>Novo projeto</button>
