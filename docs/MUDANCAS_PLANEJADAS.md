@@ -2410,6 +2410,19 @@ O compositor concentra seleção física, inspeção de face, abertura do Artwor
 
 **Gate 2B:** body/checkbox/flip/context menu possuem semânticas independentes, picker recebe a instância física correta, right-click/kebab não abre picker e nenhuma ação muda geometria/export indevidamente.
 
+**Status 2B: IMPLEMENTADO E APROVADO.**
+- commit principal: `ee3b64304f4dc3e94158e28d272bc47e0e80d81b` — `feat: add direct compositor artwork and context actions`;
+- corretivo aprovado: `963a20c6b5e381f16705fec9b65c8075823542ff` — `fix: keep compositor menu open during internal scroll`;
+- body click/Enter/Space abre o Artwork Picker no scope da cópia física correta e não altera multi-selection;
+- opener do picker aceita HTML/SVG de forma tipada, com restore focus seguro e fallback;
+- HUD in-flow foi substituído por menu contextual em portal/fixed, com right-click e kebab, keyboard/focus e clamp na viewport;
+- menu contém somente as ações aprovadas e não inclui mover/rotacionar/ações inventadas;
+- flip local é efêmero, keyed por `physicalInstanceId`, não altera Project/face/export e é podado/resetado corretamente;
+- drag HTML5 legado foi preservado com supressão do click residual; novo drag permanece para Slice 3;
+- revisão confirmou scroll interno do menu preservado e scroll externo ainda fecha o menu;
+- suíte reportada no gate final: 1.341 testes passando, 1 ignorado, typecheck/build/diff-check verdes.
+
+
 **Slice 2C — Limpeza final da superfície do compositor**
 - remover controles visíveis de zoom manual, Fit Page/Fit Width/100%/-/+ e Layers;
 - preservar auto-fit/auto-resize internamente;
