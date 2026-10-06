@@ -2052,3 +2052,185 @@ body { min-width: 0; min-height: 0; }
     max-width: 98px;
   }
 }
+
+
+/* Settings pass — compact accordion controls. */
+.registration-layout-controls {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+.settings-subsection {
+  min-width: 0;
+}
+.settings-accordion,
+.workspace-advanced-settings {
+  overflow: hidden;
+  border: 1px solid #d9dde1;
+  border-radius: 9px;
+  background: #fff;
+}
+.settings-accordion > summary,
+.workspace-advanced-settings > summary {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  color: #24272b;
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  font-weight: 700;
+}
+.settings-accordion > summary::-webkit-details-marker,
+.workspace-advanced-settings > summary::-webkit-details-marker {
+  display: none;
+}
+.settings-accordion > summary::after,
+.workspace-advanced-settings > summary::after {
+  color: #7f858d;
+  content: "›";
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1;
+  transform: rotate(90deg);
+  transition: transform 120ms ease;
+}
+.settings-accordion:not([open]) > summary::after,
+.workspace-advanced-settings:not([open]) > summary::after {
+  transform: rotate(0deg);
+}
+.settings-accordion > summary:hover,
+.workspace-advanced-settings > summary:hover {
+  background: #f3f4f5;
+}
+.settings-accordion > summary:focus-visible,
+.workspace-advanced-settings > summary:focus-visible {
+  outline: 2px solid #111315;
+  outline-offset: -2px;
+}
+.settings-accordion-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  border-top: 1px solid #eceef0;
+  padding: 9px;
+  background: #fafafa;
+}
+.settings-accordion-body > .muted,
+.settings-accordion-body > p,
+.settings-accordion-body > .workspace-advanced-settings,
+.settings-accordion-body > .cut-guide-controls,
+.settings-accordion-body > fieldset {
+  grid-column: 1 / -1;
+}
+.registration-layout-controls label,
+.settings-accordion-body label,
+.workspace-advanced-settings label {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 4px;
+  color: #555c65;
+  font-size: 9px;
+  font-weight: 600;
+}
+.registration-layout-controls input,
+.registration-layout-controls select,
+.registration-layout-controls textarea,
+.settings-accordion-body input,
+.settings-accordion-body select,
+.settings-accordion-body textarea,
+.workspace-advanced-settings input,
+.workspace-advanced-settings select,
+.workspace-advanced-settings textarea {
+  min-width: 0;
+  min-height: 32px;
+  border: 1px solid #d0d4d8;
+  border-radius: 7px;
+  padding: 5px 7px;
+  color: #1e2125;
+  background: #fff;
+  box-shadow: none;
+  font: inherit;
+}
+.registration-layout-controls input:focus-visible,
+.registration-layout-controls select:focus-visible,
+.registration-layout-controls textarea:focus-visible,
+.settings-accordion-body input:focus-visible,
+.settings-accordion-body select:focus-visible,
+.settings-accordion-body textarea:focus-visible {
+  outline: 2px solid #202328;
+  outline-offset: 1px;
+  border-color: #aeb3b9;
+}
+.settings-accordion-body .checkbox-field {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+  color: #3b4046;
+}
+.settings-accordion-body .checkbox-field input {
+  width: 15px;
+  min-width: 15px;
+  height: 15px;
+  min-height: 15px;
+  padding: 0;
+  accent-color: #202328;
+}
+.layout-settings-advanced,
+.pdf-settings-advanced {
+  margin-top: 7px;
+}
+.layout-settings-advanced .workspace-advanced-settings {
+  border-color: #dde0e3;
+}
+.layout-settings-advanced .workspace-advanced-settings > summary {
+  min-height: 36px;
+  color: #555c65;
+  font-size: 10px;
+  font-weight: 650;
+}
+.layout-settings-advanced .workspace-advanced-settings > label,
+.layout-settings-advanced .workspace-advanced-settings > p,
+.layout-settings-advanced .workspace-advanced-settings > button,
+.cut-settings .workspace-advanced-settings > label,
+.cut-settings .workspace-advanced-settings > p,
+.cut-settings .workspace-advanced-settings > textarea {
+  margin: 7px 9px;
+}
+.layout-settings-advanced .workspace-advanced-settings > p,
+.cut-settings .workspace-advanced-settings > p {
+  color: #727982;
+  font-size: 9px;
+}
+.bleed-settings {
+  margin-top: 0;
+}
+.bleed-settings .cut-guide-controls {
+  border-top: 1px solid #eceef0;
+  padding-top: 8px;
+}
+.template-geometry-status {
+  margin: 5px 2px 0;
+  color: #727982;
+  font-size: 9px;
+}
+
+@media (max-width: 840px) {
+  .settings-accordion-body {
+    grid-template-columns: 1fr;
+  }
+  .settings-accordion-body > * {
+    grid-column: 1 !important;
+  }
+}
