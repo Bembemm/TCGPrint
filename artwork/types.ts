@@ -35,6 +35,8 @@ export interface ArtworkProvider {
 
 export interface ArtworkCatalogSearchOptions extends ArtworkSearchOptions {
   readonly source: ArtworkCatalogSource;
+  readonly offset?: number;
+  readonly limit?: number;
 }
 
 export interface ArtworkCatalogSearchResult {
