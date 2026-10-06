@@ -348,12 +348,13 @@ describe("workspace shell interactions", () => {
     expect(close).toHaveFocus();
   });
 
-  it("defines desktop, tablet, and mobile drawer layouts without horizontal page overflow", () => {
+  it("defines a dominant desktop compositor and mobile bottom-sheet editor without horizontal overflow", () => {
     const css = readFileSync("src/app/globals.css", "utf8");
-    expect(css).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+380px/);
-    expect(css).toContain("@media (min-width: 701px) and (max-width: 1024px)");
-    expect(css).toContain("@media (max-width: 700px)");
-    expect(css).toMatch(/\.workspace-sidebar \{[^}]*position:\s*fixed;[^}]*right:\s*0;[^}]*width:\s*min\(420px,\s*100vw\)/s);
+    expect(css).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+334px/);
+    expect(css).toContain("@media (max-width: 840px)");
+    expect(css).toMatch(/\.workspace-mobile-nav \{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+    expect(css).toMatch(/\.workspace-sidebar \{[^}]*position:\s*fixed;[^}]*bottom:\s*58px;[^}]*left:\s*0;[^}]*width:\s*100%/s);
+    expect(css).toMatch(/transform:\s*translateY\(calc\(100% \+ 18px\)\)/);
     expect(css).toContain(".workspace-shell[data-drawer-open=\"true\"] .workspace-backdrop");
     expect(css).toContain("html, body { width: 100%; height: 100%; overflow: hidden; }");
     expect(css).toMatch(/\.workspace-preview-content \{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*align-items:\s*stretch/s);
