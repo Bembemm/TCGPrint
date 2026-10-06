@@ -450,7 +450,7 @@ describe("Cartas workspace navigation", () => {
     expect(liveCompositor?.contains(document.activeElement)).toBe(false);
 
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
-    await user.click(screen.getByText("Grade, slots e margens avançados"));
+    await user.click(screen.getByText("Posicionamento, slots e margens"));
     const margin = screen.getByRole("spinbutton", { name: "Margem esquerda (mm)" });
     await user.clear(margin);
     await user.type(margin, "5");
@@ -480,7 +480,7 @@ describe("Cartas workspace navigation", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Associado" })).toHaveAttribute("aria-pressed", "true"));
     await screen.findByText(/Registration custom desta versão legada/);
     await user.click(screen.getByRole("tab", { name: "Exportar" }));
-    expect(screen.getAllByText(/Template: legacy-custom-unconfigured/)).toHaveLength(2);
+    expect(screen.getByText("O template precisa de uma escolha explícita para as marcas de registro.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Gerar PDF final" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Conferir PDF final" })).toBeDisabled();
   }, 15_000);
