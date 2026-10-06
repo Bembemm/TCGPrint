@@ -1055,6 +1055,25 @@ describe("card APIs", () => {
     expect(await unsafe.json()).toMatchObject({ code: "INVALID_MPC_FILTERS" });
   });
 
+  it("accepts bounded MPC gallery pages and rejects paging other providers", async () => {
+    const listArtworkCatalog = vi.fn(async () => ({ candidates: [candidate], catalogTotal: 1200, catalogTotalComplete: true }));
+    const workbench = testWorkbench({ listArtworkCatalog });
+
+    const response = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", {
+      faceId: "front", source: "mpc", offset: 0, limit: 20,
+    }), identity.id, workbench);
+
+    expect(response.status).toBe(200);
+    expect(listArtworkCatalog).toHaveBeenCalledWith(identity.id, "front", "mpc", expect.objectContaining({ offset: 0, limit: 20 }));
+    expect(await response.json()).toMatchObject({ candidates: [expect.objectContaining({ id: candidate.id })], catalogTotal: 1200, offset: 0, limit: 20 });
+
+    const invalid = await handleArtworkList(jsonRequest("http://localhost/api/cards/id/artworks", {
+      faceId: "front", source: "scryfall", offset: 0, limit: 20,
+    }), identity.id, workbench);
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ code: "INVALID_REQUEST" });
+  });
+
   it("passes an explicit MPC search refresh through the API without changing artwork selection", async () => {
     const listArtworkCandidates = vi.fn(async () => [candidate]);
     const workbench = testWorkbench({ listArtworkCandidates });
