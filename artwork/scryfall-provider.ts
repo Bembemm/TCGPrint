@@ -108,7 +108,8 @@ export class ScryfallArtworkProvider implements ArtworkProvider {
 
   private schedulePrintingRefresh(cacheKey: string, identity: CardIdentity): void {
     if (this.printingRefreshes.has(cacheKey)) return;
-    const refresh = this.fetchPrintings(identity)
+    let refresh!: Promise<void>;
+    refresh = this.fetchPrintings(identity)
       .then((cards) => {
         if (cards.length > 0) this.metadata.putMetadata(cacheKey, cards, Date.now() + METADATA_TTL_MS);
         this.health = { available: true, degraded: false };
