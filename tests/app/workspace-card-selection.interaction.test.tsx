@@ -340,6 +340,20 @@ describe("Cartas workspace navigation", () => {
     pendingFirstExport.resolve(new Response("%PDF-1.7 cancelled", { headers: { "Content-Type": "application/pdf" } }));
     await waitFor(() => expect(screen.getAllByText("Exportação cancelada.").length).toBeGreaterThan(0));
 
+    const displayImages = [...composer.querySelectorAll<SVGImageElement>("image[data-compositor-display-url]")];
+    expect(displayImages.length).toBeGreaterThanOrEqual(2);
+    fireEvent.load(displayImages[0]!);
+    fireEvent.error(displayImages[1]!);
+    window.dispatchEvent(new Event("resize"));
+    expect(displayImages[0]).toHaveAttribute("data-compositor-source", "display-high-fidelity");
+    expect(displayImages[1]).toHaveAttribute("data-compositor-source", "display-high-fidelity-pending");
+    expect(displayImages[1]!.closest("[data-physical-instance-id]")?.querySelector("image[data-compositor-artwork]")).toHaveAttribute("data-compositor-source", "preview-thumbnail");
+    expect(exportRequests[0]?.body).toBeDefined();
+
+    await user.click(screen.getByRole("button", { name: "Gerar PDF final" }));
+    await screen.findByRole("link", { name: "Baixar tcgprint-m4.pdf" });
+    expect(exportRequests[1]?.body).toBe(exportRequests[0]?.body);
+
     const compositorShell = document.querySelector(".workspace-shell");
     const secondPhysicalCard = composer.querySelector('g[data-physical-card-index="1"]');
     if (!secondPhysicalCard) throw new Error("The second physical card is not rendered in the live compositor.");
@@ -367,7 +381,7 @@ describe("Cartas workspace navigation", () => {
     await user.click(within(menuPicker).getByRole("button", { name: "Fechar seletor de arte" }));
     expect(document.activeElement).toBe(contextTrigger);
 
-    const exportRequestBeforePointerReorder = exportRequests[0]?.body;
+    const exportRequestBeforePointerReorder = exportRequests[1]?.body;
     const mountainDragBody = composer.querySelector<SVGRectElement>('[data-physical-instance-id="instance-2"] [data-compositor-card-body="true"]');
     const islandDropBody = composer.querySelector<SVGRectElement>('[data-physical-instance-id="instance-1"] [data-compositor-card-body="true"]');
     if (!mountainDragBody || !islandDropBody) throw new Error("The two physical cards are not rendered in the live compositor.");
@@ -384,9 +398,9 @@ describe("Cartas workspace navigation", () => {
 
     await user.click(screen.getByRole("button", { name: "Gerar PDF final" }));
     expect(await screen.findByRole("link", { name: "Baixar tcgprint-m4.pdf" })).toHaveAttribute("download", "tcgprint-m4.pdf");
-    expect(createObjectUrl).toHaveBeenCalledTimes(1);
-    expect(exportCount).toBe(2);
-    const generatedPdfRequestBody = exportRequests[1]?.body;
+    expect(createObjectUrl).toHaveBeenCalledTimes(2);
+    expect(exportCount).toBe(3);
+    const generatedPdfRequestBody = exportRequests[2]?.body;
     expect(generatedPdfRequestBody).not.toBe(exportRequestBeforePointerReorder);
     const parsedExportRequest = JSON.parse(String(generatedPdfRequestBody)) as {
       options: { physicalOrder: { instances: readonly { id: string }[] } };
@@ -398,8 +412,8 @@ describe("Cartas workspace navigation", () => {
     await user.click(screen.getByRole("button", { name: "Conferir PDF final" }));
     const firstProof = await screen.findByRole("dialog", { name: "Conferir PDF final" });
     expect(within(firstProof).getByTitle("PDF final · front-only")).toBeInTheDocument();
-    expect(exportRequests[2]?.url).toBe("/api/cards/export?proof=final");
-    expect(exportRequests[2]?.body).toBe(generatedPdfRequestBody);
+    expect(exportRequests[3]?.url).toBe("/api/cards/export?proof=final");
+    expect(exportRequests[3]?.body).toBe(generatedPdfRequestBody);
     const liveCompositor = composer.closest(".workspace-live-compositor");
     expect(liveCompositor).toHaveAttribute("inert");
     expect(liveCompositor).toHaveAttribute("aria-hidden", "true");
@@ -413,7 +427,7 @@ describe("Cartas workspace navigation", () => {
     expect(document.activeElement).toBe(proofTrigger);
     await user.click(proofTrigger);
     const proof = await screen.findByRole("dialog", { name: "Conferir PDF final" });
-    expect(exportRequests[3]?.body).toBe(generatedPdfRequestBody);
+    expect(exportRequests[4]?.body).toBe(generatedPdfRequestBody);
     expect(document.activeElement).toBe(within(proof).getByRole("button", { name: "Fechar conferência do PDF final" }));
     await user.tab();
     expect(liveCompositor?.contains(document.activeElement)).toBe(false);
@@ -431,8 +445,8 @@ describe("Cartas workspace navigation", () => {
     expect(document.querySelector(".workspace-live-compositor")).toBe(liveCompositor);
     expect(liveCompositor).not.toHaveAttribute("inert");
     expect(document.activeElement).toBe(liveCompositor);
-    expect(exportCount).toBe(4);
-    expect(createObjectUrl).toHaveBeenCalledTimes(3);
+    expect(exportCount).toBe(5);
+    expect(createObjectUrl).toHaveBeenCalledTimes(4);
 
     cardsReturnedByImport = [card("swamp-card", "Swamp", 0), card("forest-card", "Forest", 1)];
     await user.click(screen.getByRole("tab", { name: "Cartas" }));

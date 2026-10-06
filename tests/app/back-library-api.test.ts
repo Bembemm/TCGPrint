@@ -5,12 +5,13 @@ import Database from "better-sqlite3";
 import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
 import { ArtworkOriginalStore } from "../../artwork/storage/original-store";
+import { ArtworkDisplayStore } from "../../artwork/storage/display-store";
 import { appDataPaths } from "../../artwork/storage/paths";
 import { ArtworkRepository } from "../../artwork/storage/repository";
 import { ArtworkThumbnailStore } from "../../artwork/storage/thumbnail-store";
 import { BackLibraryRepository } from "../../persistence/back-library/repository";
 import { BackLibraryService } from "../../services/back-library";
-import { handleBackLibraryList, handleBackLibraryPreview, handleBackLibraryRetire, handleBackLibraryUpload } from "../../services/back-library-api";
+import { handleBackLibraryDisplay, handleBackLibraryList, handleBackLibraryPreview, handleBackLibraryRetire, handleBackLibraryUpload } from "../../services/back-library-api";
 
 describe("Back Library API", () => {
   let directory: string | undefined;
@@ -34,6 +35,7 @@ describe("Back Library API", () => {
       new ArtworkOriginalStore(paths.originalsDirectory, artworkRepository),
       {},
       thumbnailStore,
+      new ArtworkDisplayStore(paths.displayDirectory),
     );
     return service;
   }
@@ -92,6 +94,37 @@ describe("Back Library API", () => {
     expect(extended.width).toBeGreaterThan(metadata.width!);
     expect(extended.height).toBeGreaterThan(metadata.height!);
     await expect(handleBackLibraryPreview(new Request("http://localhost"), "back:invalid", service).then((result) => result.status)).resolves.toBe(404);
+  });
+
+  it("serves a bucketed Back Library display from the original and keeps preview isolated", async () => {
+    const service = await setup();
+    const bytes = new Uint8Array(await sharp({ create: { width: 1500, height: 2250, channels: 3, background: "#aa7330" } }).png().toBuffer());
+    const asset = await service.add({ bytes, filename: "High fidelity back.png" });
+    const url = `http://localhost/api/back-library/${asset.assetId}/display`;
+
+    const response = await handleBackLibraryDisplay(new Request(`${url}?width=1024`), asset.assetId, service);
+    const displayBytes = new Uint8Array(await response.arrayBuffer());
+    const display = await sharp(displayBytes).metadata();
+    const previewResponse = await handleBackLibraryPreview(new Request(`http://localhost/api/back-library/${asset.assetId}/preview`), asset.assetId, service);
+    const preview = await sharp(new Uint8Array(await previewResponse.arrayBuffer())).metadata();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-tcgprint-artwork-role")).toBe("compositor-display");
+    expect(response.headers.get("x-tcgprint-display-bucket")).toBe("1024");
+    expect(response.headers.get("x-tcgprint-display-width")).toBe("1024");
+    expect(response.headers.get("x-tcgprint-display-height")).toBe("1536");
+    expect(display).toMatchObject({ width: 1024, height: 1536 });
+    expect(preview.width).toBeLessThanOrEqual(640);
+    expect(preview.height).toBeLessThanOrEqual(896);
+
+    const extendedResponse = await handleBackLibraryDisplay(new Request(`${url}?width=1024&bleedMm=1&trimWidthMm=63.5&trimHeightMm=88.9&roundedCorners=false`), asset.assetId, service);
+    const extended = await sharp(new Uint8Array(await extendedResponse.arrayBuffer())).metadata();
+    expect(extendedResponse.status).toBe(200);
+    expect(extended.width).toBeGreaterThan(display.width!);
+    expect(extended.height).toBeGreaterThan(display.height!);
+
+    const invalid = await handleBackLibraryDisplay(new Request(`${url}?width=513`), asset.assetId, service);
+    expect(invalid.status).toBe(400);
   });
 
   it("rejects malformed metadata and unsupported filename payloads with structured errors", async () => {

@@ -1,9 +1,11 @@
 import { BackLibraryError, MAX_BACK_LIBRARY_UPLOAD_BYTES, type BackLibraryService } from "./back-library";
 import { extendPreviewBleed } from "./preview-bleed";
+import { compositorDisplayResponse, DisplayRequestError, parseDisplayWidth } from "./compositor-display-response";
 
 const MAX_MULTIPART_OVERHEAD_BYTES = 1_048_576;
 
 function responseError(error: unknown): Response {
+  if (error instanceof DisplayRequestError) return Response.json({ code: "INVALID_DISPLAY_REQUEST", message: error.message }, { status: 400 });
   if (error instanceof BackLibraryError) {
     const status = error.code === "BACK_ASSET_NOT_FOUND" ? 404
       : error.code === "BACK_TOO_LARGE" ? 413
@@ -90,6 +92,17 @@ export async function handleBackLibraryPreview(request: Request, assetId: string
         "X-TCGPrint-Artwork-Role": "preview",
       },
     });
+  } catch (error) { return responseError(error); }
+}
+
+export async function handleBackLibraryDisplay(request: Request, assetId: string, service: BackLibraryService): Promise<Response> {
+  try {
+    if (!/^back:[a-f0-9]{64}$/.test(assetId)) throw new BackLibraryError("BACK_ASSET_NOT_FOUND", "Back Library asset ID is invalid.");
+    const record = service.listAll().find((asset) => asset.assetId === assetId);
+    if (!record) throw new BackLibraryError("BACK_ASSET_NOT_FOUND", "Back Library asset does not exist.");
+    const bucket = parseDisplayWidth(new URL(request.url));
+    const display = await service.resolveDisplay({ assetId: record.assetId, sha256: record.sha256, format: record.format }, bucket, request.signal);
+    return await compositorDisplayResponse(request, display, bucket);
   } catch (error) { return responseError(error); }
 }
 

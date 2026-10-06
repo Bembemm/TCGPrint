@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useEffect, useState } from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,10 @@ import { DEFAULT_PROJECT_SETTINGS, type ProjectSettingsV2 } from "../../persiste
 import RegistrationLayoutPreview from "../../src/app/registration-layout-preview";
 import WorkspaceShell from "../../src/app/workspace-shell";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const artworkFront = { candidateId: `upload:${"a".repeat(64)}`, source: "upload" as const, identityId: null, faceId: "front" };
 const artworkFrontNext = { candidateId: `upload:${"c".repeat(64)}`, source: "upload" as const, identityId: null, faceId: "front" };
@@ -253,6 +256,12 @@ function artworkForPhysicalIndex(index: number) {
   return artwork;
 }
 
+function displayArtworkForPhysicalIndex(index: number) {
+  const artwork = slotForPhysicalIndex(index).querySelector("image[data-compositor-display-url]");
+  if (!artwork) throw new Error("Physical card " + index + " has no compositor display request.");
+  return artwork;
+}
+
 function setClientRect(element: Element, bounds: { readonly left: number; readonly top: number; readonly width: number; readonly height: number }) {
   vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
     ...bounds,
@@ -299,6 +308,97 @@ function sheet() {
 }
 
 describe("canonical live compositor interactions", () => {
+  it("keeps thumbnails visible until the bucketed display image loads and reuses URLs for repeated copies", () => {
+    const originalDpr = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 2 });
+    render(compositorWorkspace([{ ...card(), quantity: 2 }]));
+
+    const firstDisplay = displayArtworkForPhysicalIndex(0);
+    const secondDisplay = displayArtworkForPhysicalIndex(1);
+    const fallbackImages = sheet().querySelectorAll("image[data-compositor-source='preview-thumbnail']");
+    const displayUrl = firstDisplay.getAttribute("data-compositor-display-url")!;
+
+    expect(fallbackImages).toHaveLength(2);
+    expect(firstDisplay.getAttribute("href")).toContain("/api/cards/artworks/");
+    expect(displayUrl).toContain("/display?");
+    expect(new URL(displayUrl, "http://localhost").searchParams.get("width")).toBe("768");
+    expect(secondDisplay.getAttribute("data-compositor-display-url")).toBe(displayUrl);
+    expect(firstDisplay).toHaveAttribute("data-compositor-source", "display-high-fidelity-pending");
+
+    fireEvent.load(firstDisplay);
+    expect(firstDisplay).toHaveAttribute("data-compositor-source", "display-high-fidelity");
+    expect(firstDisplay).toHaveAttribute("opacity", "1");
+    expect(sheet().querySelectorAll("image[data-compositor-source='preview-thumbnail']")).toHaveLength(2);
+    expect(screen.getByTestId("project-revision")).toHaveTextContent("1");
+    if (originalDpr) Object.defineProperty(window, "devicePixelRatio", originalDpr);
+    else Reflect.deleteProperty(window, "devicePixelRatio");
+  });
+
+  it("leaves the thumbnail visible after display failure and carries bleed geometry on the HQ URL", () => {
+    render(compositorWorkspace([{ ...card(), quantity: 1 }], { ...DEFAULT_PROJECT_SETTINGS, bleedMm: 1.25, roundedCorners: true, layout: { skippedSlotIndices: [] } }));
+    const display = displayArtworkForPhysicalIndex(0);
+    const url = new URL(display.getAttribute("data-compositor-display-url")!, "http://localhost");
+
+    expect(url.pathname).toContain("/display");
+    expect(url.searchParams.get("bleedMm")).toBe("1.25");
+    expect(url.searchParams.get("trimWidthMm")).toBe(String(DEFAULT_PROJECT_SETTINGS.cardFormat.widthMm));
+    expect(url.searchParams.get("roundedCorners")).toBe("true");
+    expect(url.searchParams.get("cornerRadiusMm")).toBe(String(DEFAULT_PROJECT_SETTINGS.cardFormat.cornerRadiusMm ?? 3.175));
+
+    fireEvent.error(display);
+    expect(artworkForPhysicalIndex(0)).toHaveAttribute("data-compositor-source", "preview-thumbnail");
+    expect(display).toHaveAttribute("data-compositor-source", "display-high-fidelity-pending");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByTestId("project-revision")).toHaveTextContent("1");
+  });
+
+  it("changes the display URL only when auto-fit resize crosses a bucket boundary", () => {
+    let viewportWidth = 540;
+    vi.stubGlobal("ResizeObserver", undefined);
+    const originalDpr = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 1 });
+    const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+    const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get() { return this.classList.contains("compositor-sheet-scroll") ? viewportWidth : 0; },
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() { return this.classList.contains("compositor-sheet-scroll") ? 900 : 0; },
+    });
+    const settings = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      paperFormat: { name: "Test square", widthMm: 100, heightMm: 100 },
+      cardFormat: { ...DEFAULT_PROJECT_SETTINGS.cardFormat, widthMm: 50, heightMm: 70 },
+      bleedMm: 0,
+      layout: { rows: 1, columns: 1, skippedSlotIndices: [] },
+    };
+    try {
+      render(compositorWorkspace([{ ...card(), quantity: 1 }], settings));
+      const displayUrl = () => displayArtworkForPhysicalIndex(0).getAttribute("data-compositor-display-url")!;
+      const initialUrl = displayUrl();
+      expect(new URL(initialUrl, "http://localhost").searchParams.get("width")).toBe("512");
+
+      viewportWidth = 541;
+      act(() => window.dispatchEvent(new Event("resize")));
+      expect(displayUrl()).toBe(initialUrl);
+
+      viewportWidth = 560;
+      act(() => window.dispatchEvent(new Event("resize")));
+      expect(displayUrl()).not.toBe(initialUrl);
+      expect(new URL(displayUrl(), "http://localhost").searchParams.get("width")).toBe("768");
+      expect(screen.getByTestId("project-revision")).toHaveTextContent("1");
+    } finally {
+      if (originalWidth) Object.defineProperty(HTMLElement.prototype, "clientWidth", originalWidth);
+      else Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+      if (originalHeight) Object.defineProperty(HTMLElement.prototype, "clientHeight", originalHeight);
+      else Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+      if (originalDpr) Object.defineProperty(window, "devicePixelRatio", originalDpr);
+      else Reflect.deleteProperty(window, "devicePixelRatio");
+    }
+  });
+
   it("renders permanently and updates margin, bleed, artwork, face, page, and calibration without an update action", async () => {
     const user = userEvent.setup();
     render(compositorWorkspace());
@@ -329,6 +429,7 @@ describe("canonical live compositor interactions", () => {
     expect(main.querySelector("image[data-compositor-artwork]")).toHaveAttribute("data-compositor-artwork", artworkFrontNext.candidateId);
     await user.click(screen.getByRole("button", { name: "Verso" }));
     expect(main.querySelector("image[data-compositor-artwork]")).toHaveAttribute("data-compositor-artwork", artworkBack.candidateId);
+    expect(main.querySelector("image[data-compositor-display-url]")).toHaveAttribute("data-compositor-display-url", expect.stringContaining("/api/cards/artworks/"));
 
     expect(sheet()).toHaveAttribute("data-compositor-page", "1");
     await user.click(screen.getByRole("button", { name: "Próxima página" }));
@@ -620,6 +721,8 @@ describe("canonical live compositor interactions", () => {
     const order = screen.getByTestId("physical-order-ids").textContent;
 
     const flip = flipButtonForPhysicalIndex(0);
+    const originalDisplay = displayArtworkForPhysicalIndex(0);
+    const originalDisplayUrl = originalDisplay.getAttribute("data-compositor-display-url");
     expect(flip).toHaveAccessibleName("Ver verso de Island, cópia 1");
     expect(flip).toHaveAttribute("aria-pressed", "false");
     fireEvent.pointerDown(flip, { pointerId: 25, pointerType: "mouse", isPrimary: true, button: 0, clientX: 20, clientY: 20 });
@@ -631,6 +734,12 @@ describe("canonical live compositor interactions", () => {
 
     expect(flipButtonForPhysicalIndex(0)).toHaveAttribute("aria-pressed", "true");
     expect(artworkForPhysicalIndex(0)).toHaveAttribute("data-compositor-artwork", artworkBack.candidateId);
+    const flippedDisplay = displayArtworkForPhysicalIndex(0);
+    expect(flippedDisplay).toHaveAttribute("data-compositor-face", "back");
+    expect(flippedDisplay.getAttribute("data-compositor-display-url")).not.toBe(originalDisplayUrl);
+    expect(flippedDisplay.getAttribute("data-compositor-display-url")).toContain(encodeURIComponent(artworkBack.candidateId));
+    fireEvent.load(originalDisplay);
+    expect(displayArtworkForPhysicalIndex(0)).toHaveAttribute("data-compositor-source", "display-high-fidelity-pending");
     expect(artworkForPhysicalIndex(1)).toHaveAttribute("data-compositor-artwork", artworkFront.candidateId);
     expect(sheet()).toHaveAttribute("aria-label", expect.stringContaining("frente"));
     expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "false");

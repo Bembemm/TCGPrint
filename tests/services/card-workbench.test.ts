@@ -134,6 +134,65 @@ describe("card workbench services", () => {
     expect(artworkQualityFromCandidate({ id: "validated", source: "scryfall", identityId: "scryfall:oracle:sol-ring", faceId: "front", originalAvailable: true, widthPx: 3000, heightPx: 4200, effectiveDpi: 798 })).toBe("excellent");
   });
 
+  it("derives upload display assets from the validated original without replacing the catalog thumbnail", async () => {
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 1500, height: 2100, channels: 3, background: "#579" } }).png().toBuffer());
+    const { workbench } = await setup();
+    const imported = await workbench.importForWorkingSet({ files: [{ filename: "high-resolution.png", bytes: originalBytes }] });
+    const candidateId = imported.workingCards[0]!.localArtworkIds[0]!;
+
+    const firstPreview = await workbench.getArtworkPreview(candidateId);
+    const display = await workbench.getArtworkDisplay(candidateId, 1024);
+    const secondPreview = await workbench.getArtworkPreview(candidateId);
+
+    expect(firstPreview).toMatchObject({ widthPx: 300, heightPx: 420 });
+    expect(display).toMatchObject({ widthPx: 1024, heightPx: 1434, source: "original" });
+    expect(display!.widthPx).toBeGreaterThan(firstPreview!.widthPx);
+    expect(secondPreview).toMatchObject({ widthPx: 300, heightPx: 420 });
+    expect(secondPreview!.bytes).toEqual(firstPreview!.bytes);
+  });
+
+  it("uses the canonical Scryfall original URI for compositor display while keeping its small catalog preview", async () => {
+    const source = resolvedCard("Sol Ring", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "cmm", "396");
+    const fake = fakeScryfallClient([source]);
+    const originalBytes = new Uint8Array(await sharp({ create: { width: 1500, height: 2100, channels: 3, background: "#579" } }).png().toBuffer());
+    const smallBytes = new Uint8Array(await sharp({ create: { width: 640, height: 896, channels: 3, background: "#357" } }).png().toBuffer());
+    fake.downloadAsset.mockImplementation(async (sourceUrl, options) => ({
+      bytes: options.kind === "original" ? originalBytes : smallBytes,
+      contentType: "image/png",
+      sourceUrl,
+      kind: options.kind,
+    }));
+    const { workbench } = await setup(undefined, fake.client);
+    const candidates = await workbench.listArtworkCandidates(`scryfall:oracle:${source.oracleId}`, "front", "scryfall");
+    const candidate = candidates[0]!;
+
+    const preview = await workbench.getArtworkPreview(candidate.id);
+    const display = await workbench.getArtworkDisplay(candidate.id, 1024);
+
+    expect(candidate.previewUri).toContain("-small.jpg");
+    expect(preview).toMatchObject({ widthPx: 300, heightPx: 420 });
+    expect(display).toMatchObject({ widthPx: 1024, heightPx: 1434, source: "original" });
+    expect(fake.downloadAsset.mock.calls.map(([, options]) => options.kind)).toEqual(["thumbnail", "original"]);
+    expect(fake.downloadAsset.mock.calls[1]?.[0]).toContain(".png");
+  });
+
+  it("falls back to the catalog preview when the canonical provider original is unavailable", async () => {
+    const source = resolvedCard("Sol Ring", "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "cmm", "396");
+    const fake = fakeScryfallClient([source]);
+    const smallBytes = new Uint8Array(await sharp({ create: { width: 640, height: 896, channels: 3, background: "#357" } }).png().toBuffer());
+    fake.downloadAsset.mockImplementation(async (sourceUrl, options) => {
+      if (options.kind === "original") throw new ScryfallError("network", "original unavailable");
+      return { bytes: smallBytes, contentType: "image/png", sourceUrl, kind: options.kind };
+    });
+    const { workbench } = await setup(undefined, fake.client);
+    const candidate = (await workbench.listArtworkCandidates(`scryfall:oracle:${source.oracleId}`, "front", "scryfall"))[0]!;
+
+    const display = await workbench.getArtworkDisplay(candidate.id, 1024);
+
+    expect(display).toMatchObject({ widthPx: 300, heightPx: 420, source: "preview" });
+    expect(fake.downloadAsset.mock.calls.map(([, options]) => options.kind)).toEqual(["original", "thumbnail"]);
+  });
+
   it("keeps a Scryfall printing at index 800 selectable and sends it through validated original storage", async () => {
     const source = resolvedCard("Sol Ring", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "cmm", "396");
     const fake = fakeScryfallClient([source], 1200);

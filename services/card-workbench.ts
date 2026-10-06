@@ -13,6 +13,8 @@ import type { MpcArtworkFilterInput, MpcFilterCatalogs } from "../artwork/mpc-co
 import { ScryfallArtworkProvider } from "../artwork/scryfall-provider";
 import { ArtworkMetadataCache } from "../artwork/storage/metadata-cache";
 import { ArtworkOriginalStore } from "../artwork/storage/original-store";
+import { ArtworkDisplayStore, type ArtworkDisplayAsset } from "../artwork/storage/display-store";
+import { isArtworkDisplayWidthBucket, type ArtworkDisplayWidthBucket } from "../artwork/display-buckets";
 import { appDataPaths } from "../artwork/storage/paths";
 import { ArtworkRepository } from "../artwork/storage/repository";
 import { ArtworkThumbnailStore } from "../artwork/storage/thumbnail-store";
@@ -103,6 +105,7 @@ export interface CardWorkbench {
   refreshMpcArtworkCandidate(candidateId: string, signal?: AbortSignal): Promise<ArtworkCandidate | undefined>;
   revalidateMpcArtworkCandidates(candidateIds: readonly string[], signal?: AbortSignal): Promise<readonly MpcCandidateRevalidationResult[]>;
   getArtworkPreview(candidateId: string, signal?: AbortSignal): Promise<ArtworkPreview | undefined>;
+  getArtworkDisplay(candidateId: string, bucket: ArtworkDisplayWidthBucket, signal?: AbortSignal): Promise<(ArtworkDisplayAsset & { readonly source: "original" | "preview" }) | undefined>;
   getArtworkOriginal(candidateId: string, signal?: AbortSignal): ReturnType<ArtworkCatalog["getOriginal"]>;
   selectArtwork(card: WorkingCard, faceId: CardFaceSide, candidate: ArtworkCandidate): WorkingCard;
   selectManualBackArtwork(card: WorkingCard, candidate: ArtworkCandidate): WorkingCard;
@@ -284,6 +287,15 @@ function identityFromResolutionCandidate(candidate: IdentityResolutionCandidate)
   return candidate.identity;
 }
 
+function isAbortFailure(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) return true;
+  return Boolean(error && typeof error === "object" && "kind" in error && (error as { kind?: unknown }).kind === "aborted");
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 export async function createCardWorkbench(options: CardWorkbenchOptions = {}): Promise<CardWorkbench> {
   const dataDirectory = options.dataDirectory ?? process.env.TCGPRINT_DATA_DIR ?? process.cwd();
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
@@ -291,10 +303,12 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
   mkdirSync(paths.rootDirectory, { recursive: true, mode: 0o700 });
   mkdirSync(paths.originalsDirectory, { recursive: true, mode: 0o700 });
   mkdirSync(paths.thumbnailsDirectory, { recursive: true, mode: 0o700 });
+  mkdirSync(paths.displayDirectory, { recursive: true, mode: 0o700 });
   const database = openArtworkDatabase(paths.databaseFile);
   const repository = new ArtworkRepository(database);
   const originals = new ArtworkOriginalStore(paths.originalsDirectory, repository, { maximumBytes: options.maxUploadBytes ?? MAX_UPLOAD_BYTES });
   const thumbnails = new ArtworkThumbnailStore(paths.thumbnailsDirectory, repository);
+  const displayStore = new ArtworkDisplayStore(paths.displayDirectory);
   const metadata = new ArtworkMetadataCache(repository);
   const client = options.scryfallClient ?? new ScryfallClient({
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
@@ -597,6 +611,23 @@ export async function createCardWorkbench(options: CardWorkbenchOptions = {}): P
       return mpc.getCandidateForReferences(candidateId, callOptions.mpcReferences, syntheticIdentity, callOptions.signal);
     },
     getArtworkPreview(candidateId, signal) { return catalog.getPreview(candidateId, signal); },
+    async getArtworkDisplay(candidateId, bucket, signal) {
+      if (!isArtworkDisplayWidthBucket(bucket)) throw new TypeError("Display width must be one of the supported buckets.");
+      const candidate = await catalog.getCandidate(candidateId);
+      if (candidate?.originalAvailable) {
+        try {
+          const original = await catalog.getOriginal(candidateId, signal);
+          return { ...await displayStore.getOrCreate(candidateId, original.contentHash, original.bytes, bucket, signal), source: "original" as const };
+        } catch (error) {
+          if (isAbortFailure(error, signal)) throw error;
+          // Display quality degrades to the existing catalog preview; selection and export remain untouched.
+        }
+      }
+      const preview = await catalog.getPreview(candidateId, signal);
+      if (!preview) return undefined;
+      const sourceHash = sha256(preview.bytes);
+      return { ...await displayStore.getOrCreate(candidateId, sourceHash, preview.bytes, bucket, signal), source: "preview" as const };
+    },
     getArtworkOriginal(candidateId, signal) { return catalog.getOriginal(candidateId, signal); },
     getMpcArtworkFilterCatalogs(signal) { return catalog.getMpcFilterCatalogs(signal); },
     getMpcArtworkProviderDiagnostic() { return catalog.getMpcDiagnostic(); },

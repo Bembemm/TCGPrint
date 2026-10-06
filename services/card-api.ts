@@ -31,6 +31,7 @@ import { verifyPrinterProfileSnapshot } from "../persistence/printer-profiles/ha
 import { MPC_MAX_REVALIDATION_CANDIDATES, type MpcCandidateRevalidationResult } from "../artwork/mpc-provider";
 import { createMpcDiagnosticReport } from "../artwork/mpc-diagnostic-report";
 import { extendPreviewBleed } from "./preview-bleed";
+import { compositorDisplayResponse, DisplayRequestError, parseDisplayWidth } from "./compositor-display-response";
 
 const FORBIDDEN_PROPERTIES = new Set(["originalBytes", "bytes", "sourcePath", "localOriginalPath", "originalUri", "previewUri", "filePaths", "absolutePath", "filesystemPath"]);
 const SOURCES = new Set(["scryfall", "upload", "mpc", "url", "custom"]);
@@ -374,6 +375,7 @@ function noStore(response: Response): Response {
 
 function respondError(error: unknown): Response {
   if (error instanceof ApiRequestError) return Response.json({ code: error.code, message: error.message }, { status: error.status });
+  if (error instanceof DisplayRequestError) return Response.json({ code: "INVALID_DISPLAY_REQUEST", message: error.message }, { status: 400 });
   if (error instanceof BackSelectionPolicyError) return Response.json({ code: "INVALID_PHYSICAL_BACK_SELECTION", message: error.message }, { status: 400 });
   if (error instanceof ArtworkSelectionScopeError) return Response.json({ code: error.code, message: error.message }, { status: 400 });
   if (error instanceof MpcArtworkFilterValidationError) return Response.json({ code: "INVALID_MPC_FILTERS", message: error.message }, { status: 400 });
@@ -957,6 +959,16 @@ export async function handleArtworkPreview(request: Request, candidateId: string
     return new Response(previewBytes, {
       headers: { "Content-Type": contentType, "Cache-Control": "private, max-age=3600", "X-TCGPrint-Artwork-Role": "preview" },
     });
+  } catch (error) { return respondError(error); }
+}
+
+export async function handleArtworkDisplay(request: Request, candidateId: string, workbench: CardWorkbench): Promise<Response> {
+  try {
+    if (!/^(upload:[a-f0-9]{64}|scryfall:[a-f0-9-]{36}:(front|back)|mpc:[a-f0-9]{64})$/.test(candidateId)) throw new ApiRequestError(400, "INVALID_ID", "Artwork ID is invalid.");
+    const bucket = parseDisplayWidth(new URL(request.url));
+    const display = await workbench.getArtworkDisplay(candidateId, bucket, request.signal);
+    if (!display) throw new ApiRequestError(404, "DISPLAY_UNAVAILABLE", "No display image is available for this reference.");
+    return await compositorDisplayResponse(request, display, bucket);
   } catch (error) { return respondError(error); }
 }
 

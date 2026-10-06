@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ArtworkOriginalStore } from "../../artwork/storage/original-store";
+import { ArtworkDisplayStore } from "../../artwork/storage/display-store";
 import { appDataPaths } from "../../artwork/storage/paths";
 import { ArtworkRepository } from "../../artwork/storage/repository";
 import { ArtworkThumbnailStore } from "../../artwork/storage/thumbnail-store";
@@ -30,7 +31,7 @@ async function makeService(options: { maximumBytes?: number; maximumDimensionPix
   databases.push(database);
   const artworkRepository = new ArtworkRepository(database);
   const originals = new ArtworkOriginalStore(paths.originalsDirectory, artworkRepository, { maximumBytes: options.maximumBytes ?? 20 * 1024 * 1024 });
-  return { service: new BackLibraryService(new BackLibraryRepository(database), originals, options, new ArtworkThumbnailStore(paths.thumbnailsDirectory, artworkRepository)), database, paths, originals, artworkRepository };
+  return { service: new BackLibraryService(new BackLibraryRepository(database), originals, options, new ArtworkThumbnailStore(paths.thumbnailsDirectory, artworkRepository), new ArtworkDisplayStore(paths.displayDirectory)), database, paths, originals, artworkRepository };
 }
 
 async function png(width = 64, height = 96) {
@@ -93,6 +94,31 @@ describe("Back Library", () => {
     expect(metadata.height).toBeLessThanOrEqual(896);
     expect(preview.bytes).not.toEqual(bytes);
     await expect(service.resolvePreview({ ...reference, sha256: "0".repeat(64) })).rejects.toMatchObject({ code: "BACK_REFERENCE_MISMATCH" });
+  });
+
+  it("resolves bucketed display assets from the immutable Back Library original", async () => {
+    const { service } = await makeService();
+    const bytes = await png(1500, 2250);
+    const record = await service.add({ bytes, filename: "Display back.png" });
+    const reference = { assetId: record.assetId, sha256: record.sha256, format: record.format } as const;
+
+    const preview = await service.resolvePreview(reference);
+    const display = await service.resolveDisplay(reference, 1024);
+    const nextPreview = await service.resolvePreview(reference);
+
+    expect(preview.widthPx).toBeLessThanOrEqual(640);
+    expect(preview.heightPx).toBeLessThanOrEqual(896);
+    expect(display).toMatchObject({ widthPx: 1024, heightPx: 1536, contentType: "image/png" });
+    expect(nextPreview.bytes).toEqual(preview.bytes);
+    expect(await service.resolveDisplay(reference, 1024)).toMatchObject({ widthPx: 1024, heightPx: 1536 });
+  });
+
+  it("does not upscale small Back Library originals for a larger display bucket", async () => {
+    const { service } = await makeService();
+    const bytes = await png(500, 700);
+    const record = await service.add({ bytes, filename: "Small back.png" });
+    const display = await service.resolveDisplay({ assetId: record.assetId, sha256: record.sha256, format: record.format }, 1024);
+    expect(display).toMatchObject({ widthPx: 500, heightPx: 700 });
   });
 
   it("deduplicates by byte hash and preserves the first asset identity and metadata", async () => {

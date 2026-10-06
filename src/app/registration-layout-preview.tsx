@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 import { CutGuideEngine } from "../../core/geometry";
 import type { CardSlotMm } from "../../core/geometry/placement";
@@ -17,6 +17,8 @@ import { transformRegistrationGeometry, type RegistrationPrimitive } from "../..
 import { calculateCompositorScale, COMPOSITOR_CSS_PX_PER_MM, type CompositorViewportSize } from "./compositor-zoom";
 import { deriveCompositorInsertionAxis, resolveCompositorInsertionPlacement, type CompositorInsertionAxis } from "./compositor-pointer-drag";
 import type { FocusableElement } from "./artwork-picker-dialog";
+import { selectCompositorDisplayBucket } from "./compositor-display-bucket";
+import type { ArtworkDisplayWidthBucket } from "../../artwork/display-buckets";
 
 interface RegistrationLayoutPreviewProps {
   readonly settings: ProjectSettingsV2;
@@ -139,8 +141,87 @@ function backPreviewUrl(assetId: string, trimWidthMm: number, trimHeightMm: numb
   return `/api/back-library/${encodeURIComponent(assetId)}/preview${previewGeometryQuery(trimWidthMm, trimHeightMm, bleedMm, roundedCorners, cornerRadiusMm)}`;
 }
 
+function artworkDisplayUrl(candidateId: string, bucket: ArtworkDisplayWidthBucket, trimWidthMm: number, trimHeightMm: number, bleedMm: number, roundedCorners: boolean, cornerRadiusMm: number): string {
+  return `/api/cards/artworks/${encodeURIComponent(candidateId)}/display?width=${bucket}&${previewGeometryQuery(trimWidthMm, trimHeightMm, bleedMm, roundedCorners, cornerRadiusMm).slice(1)}`;
+}
+
+function backDisplayUrl(assetId: string, bucket: ArtworkDisplayWidthBucket, trimWidthMm: number, trimHeightMm: number, bleedMm: number, roundedCorners: boolean, cornerRadiusMm: number): string {
+  return `/api/back-library/${encodeURIComponent(assetId)}/display?width=${bucket}&${previewGeometryQuery(trimWidthMm, trimHeightMm, bleedMm, roundedCorners, cornerRadiusMm).slice(1)}`;
+}
+
 function calibrationSvgMatrix(matrix: { readonly a: number; readonly b: number; readonly c: number; readonly d: number; readonly e: number; readonly f: number }): string {
   return `matrix(${matrix.a} ${matrix.b} ${matrix.c} ${matrix.d} ${matrix.e} ${matrix.f})`;
+}
+
+interface CompositorArtworkImageProps {
+  readonly previewUrl: string;
+  readonly displayUrl: string;
+  readonly assetKey: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly clipPath: string;
+  readonly transform?: string;
+  readonly label: string;
+  readonly candidateId: string;
+  readonly face: "front" | "back";
+}
+
+function CompositorArtworkImage({ previewUrl, displayUrl, assetKey, x, y, width, height, clipPath, transform, label, candidateId, face }: CompositorArtworkImageProps) {
+  const [loadedDisplay, setLoadedDisplay] = useState<{ readonly url: string; readonly assetKey: string } | null>(null);
+  const currentDisplayRef = useRef({ url: displayUrl, assetKey });
+  currentDisplayRef.current = { url: displayUrl, assetKey };
+  const currentLoaded = loadedDisplay?.url === displayUrl && loadedDisplay.assetKey === assetKey;
+  const previousLoaded = !currentLoaded && loadedDisplay?.assetKey === assetKey ? loadedDisplay : null;
+  const visibleLayer = currentLoaded ? "display" : previousLoaded ? "previous" : "preview";
+  const common = {
+    x,
+    y,
+    width,
+    height,
+    preserveAspectRatio: "none" as const,
+    clipPath,
+    ...(transform ? { transform } : {}),
+    role: "img" as const,
+    "aria-label": label,
+    "data-compositor-artwork": candidateId,
+    "data-compositor-face": face,
+  };
+  const markLoaded = (event: SyntheticEvent<SVGImageElement>) => {
+    if (currentDisplayRef.current.url !== displayUrl
+      || currentDisplayRef.current.assetKey !== assetKey
+      || event.currentTarget.getAttribute("href") !== displayUrl) return;
+    setLoadedDisplay({ url: displayUrl, assetKey });
+  };
+  return <>
+    <image
+      {...common}
+      href={previewUrl}
+      opacity={visibleLayer === "preview" ? 1 : 0}
+      aria-hidden={visibleLayer !== "preview"}
+      data-compositor-source="preview-thumbnail"
+    />
+    {previousLoaded && <image
+      {...common}
+      key={`previous-${previousLoaded.url}`}
+      href={previousLoaded.url}
+      opacity={visibleLayer === "previous" ? 1 : 0}
+      aria-hidden={visibleLayer !== "previous"}
+      data-compositor-source="display-high-fidelity"
+      data-compositor-display-url={previousLoaded.url}
+    />}
+    <image
+      {...common}
+      key={displayUrl}
+      href={displayUrl}
+      opacity={currentLoaded ? 1 : 0}
+      aria-hidden={!currentLoaded}
+      data-compositor-source={currentLoaded ? "display-high-fidelity" : "display-high-fidelity-pending"}
+      data-compositor-display-url={displayUrl}
+      onLoad={markLoaded}
+    />
+  </>;
 }
 
 export default function RegistrationLayoutPreview({ settings, cardCount, cards, physicalOrder: suppliedPhysicalOrder, activePhysicalInstanceId = null, onActiveOccupiedSlotChange, selectedPhysicalInstanceIds = EMPTY_PHYSICAL_INSTANCE_IDS, face, interactionBusy = false, documentRevision = 0, cutPreview = null, selectedPageNumber, onSelectPage, onToggleSkippedSlot, onActivatePhysicalInstance, onTogglePhysicalInstanceSelection, onSelectAllPhysicalInstances, onClearPhysicalInstanceSelection, onFaceChange, onSelectArtwork, onPhysicalAction, onReorderPhysicalInstance }: RegistrationLayoutPreviewProps) {
@@ -448,6 +529,8 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   const silhouetteGeometry = cutPreviewPage?.geometry ?? cutPreview?.geometry;
   const page = placement.pageSizeMm;
   const zoomScale = calculateCompositorScale(viewportSize, page);
+  const displayCssWidth = (card.widthMm + 2 * settings.bleedMm) * COMPOSITOR_CSS_PX_PER_MM * zoomScale;
+  const displayBucket = selectCompositorDisplayBucket(displayCssWidth, typeof window === "undefined" ? 1 : window.devicePixelRatio);
   const fontSize = Math.min(7, page.widthMm / 35);
   const skipped = new Set(placement.gridSlots.filter(({ skippedByUser }) => skippedByUser).map(({ index }) => index));
   const assigned = new Set(placement.slots.map(({ index }) => index));
@@ -469,23 +552,42 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
     const cornerRadiusMm = settings.cardFormat.cornerRadiusMm ?? 3.175;
     const sourceTrimWidthMm = settings.cardFormat.widthMm;
     const sourceTrimHeightMm = settings.cardFormat.heightMm;
-    if (!cardEntry) return { url: undefined, label: "Carta sem arte selecionada", available: false, referenceId: undefined };
+    if (!cardEntry) return { url: undefined, displayUrl: undefined, assetKey: "", label: "Carta sem arte selecionada", available: false, referenceId: undefined };
     if (side === "front") {
       const artwork = cardEntry.selectedArtworkByFace.front;
       return artwork
-        ? { url: artworkPreviewUrl(artwork.candidateId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm), label: `${cardEntry.identity?.name ?? cardEntry.identityHints.name ?? "Carta"} · frente`, available: true, referenceId: artwork.candidateId }
-        : { url: undefined, label: "Frente sem artwork selecionada", available: false, referenceId: undefined };
+        ? {
+          url: artworkPreviewUrl(artwork.candidateId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm),
+          displayUrl: artworkDisplayUrl(artwork.candidateId, displayBucket, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm),
+          assetKey: [artwork.candidateId, side, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm].join("\0"),
+          label: `${cardEntry.identity?.name ?? cardEntry.identityHints.name ?? "Carta"} · frente`,
+          available: true,
+          referenceId: artwork.candidateId,
+        }
+        : { url: undefined, displayUrl: undefined, assetKey: "", label: "Frente sem artwork selecionada", available: false, referenceId: undefined };
     }
     const back = resolveBackForMissingPolicy(cardEntry, settings.projectDefaultBack, settings.missingBackPolicy);
     if (back.status !== "available") return { url: undefined, label: back.status === "intentional-none" ? "Verso intencionalmente em branco" : "Verso sem artwork disponível", available: false, referenceId: undefined };
-    if (back.artwork) return { url: artworkPreviewUrl(back.artwork.candidateId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm), label: `${cardEntry.identity?.name ?? cardEntry.identityHints.name ?? "Carta"} · verso`, available: true, referenceId: back.artwork.candidateId };
-    if (back.asset) return {
-      url: backPreviewUrl(back.asset.assetId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm),
-      label: back.mode === "project-default" ? "Verso padrão do Project" : "Verso da Back Library",
+    if (back.artwork) return {
+      url: artworkPreviewUrl(back.artwork.candidateId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm),
+      displayUrl: artworkDisplayUrl(back.artwork.candidateId, displayBucket, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm),
+      assetKey: [back.artwork.candidateId, side, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm].join("\0"),
+      label: `${cardEntry.identity?.name ?? cardEntry.identityHints.name ?? "Carta"} · verso`,
       available: true,
-      referenceId: backPreviewUrl(back.asset.assetId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm),
+      referenceId: back.artwork.candidateId,
     };
-    return { url: undefined, label: "Verso sem artwork disponível", available: false, referenceId: undefined };
+    if (back.asset) {
+      const previewUrl = backPreviewUrl(back.asset.assetId, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm);
+      return {
+        url: previewUrl,
+        displayUrl: backDisplayUrl(back.asset.assetId, displayBucket, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm),
+        assetKey: [back.asset.assetId, side, sourceTrimWidthMm, sourceTrimHeightMm, bleedMm, roundedCorners, cornerRadiusMm].join("\0"),
+        label: back.mode === "project-default" ? "Verso padrão do Project" : "Verso da Back Library",
+        available: true,
+        referenceId: previewUrl,
+      };
+    }
+    return { url: undefined, displayUrl: undefined, assetKey: "", label: "Verso sem artwork disponível", available: false, referenceId: undefined };
   }
 
   const lastAssignedGridSlot = placement.gridSlots.reduce((last, slot) => assigned.has(slot.index) ? Math.max(last, slot.index) : last, -1);
@@ -999,20 +1101,19 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
                 {!artwork.available ? <g>
                   <text x={centerX} y={slot.trim.yMm + slot.trim.heightMm * 0.42} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize * 0.82} fill="#1e3a8a">{name.slice(0, 20)}{dfcLabel}</text>
                   {!artwork.available && <text x={centerX} y={slot.trim.yMm + slot.trim.heightMm * 0.58} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize * 0.62} fill="#475569">{artwork.label}</text>}
-                </g> : artwork.url && <image
-                  href={artwork.url}
+                </g> : artwork.url && artwork.displayUrl && artwork.referenceId && <CompositorArtworkImage
+                  previewUrl={artwork.url}
+                  displayUrl={artwork.displayUrl}
+                  assetKey={artwork.assetKey}
                   x={artworkRotationDegrees ? centerX - sourceWidth / 2 : settings.bleedMm > 0 ? slot.slotXmm : slot.trim.xMm}
                   y={artworkRotationDegrees ? centerY - sourceHeight / 2 : settings.bleedMm > 0 ? slot.slotYmm : slot.trim.yMm}
                   width={artworkRotationDegrees ? sourceWidth : settings.bleedMm > 0 ? slot.slotWidthMm : slot.trim.widthMm}
                   height={artworkRotationDegrees ? sourceHeight : settings.bleedMm > 0 ? slot.slotHeightMm : slot.trim.heightMm}
-                  preserveAspectRatio="none"
                   clipPath={`url(#${clipId})`}
                   transform={rotateArtwork}
-                  role="img"
-                  aria-label={artwork.label}
-                  data-compositor-artwork={artwork.referenceId}
-                  data-compositor-face={displayedSide}
-                  data-compositor-source="preview-thumbnail"
+                  label={artwork.label}
+                  candidateId={artwork.referenceId}
+                  face={displayedSide}
                 />}
                 {!artwork.available && displayedSide === "back" && <text x={centerX} y={slot.trim.yMm + slot.trim.heightMm * 0.76} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize * 0.62} fill="#475569">VERSO INDISPONÍVEL</text>}
                 {localInspection && <g className="compositor-local-inspection-indicator" pointerEvents="none" aria-hidden="true">

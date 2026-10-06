@@ -4,6 +4,7 @@ import sharp from "sharp";
 import type { CardWorkbench } from "../../services/card-workbench";
 import {
   handleArtworkDownload,
+  handleArtworkDisplay,
   handleArtworkList,
   handleArtworkPreview,
   handleArtworkPrepare,
@@ -1167,6 +1168,74 @@ describe("card APIs", () => {
     expect(new Uint8Array(await download.arrayBuffer())).toEqual(originalBytes);
     expect(workbench.getArtworkPreview).toHaveBeenCalledTimes(1);
     expect(workbench.getArtworkOriginal).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([512, 768, 1024, 1280])("serves compositor display bucket %i with actual image dimensions", async (width) => {
+    const displayBytes = new Uint8Array(await sharp({ create: { width: 500, height: 700, channels: 3, background: "#246" } }).png().toBuffer());
+    const getArtworkDisplay = vi.fn(async (_id: string, _bucket: number, _signal?: AbortSignal) => ({
+      bytes: displayBytes,
+      contentType: "image/png" as const,
+      widthPx: 500,
+      heightPx: 700,
+      sourceHash: "a".repeat(64),
+      bucket: width as 512 | 768 | 1024 | 1280,
+      source: "original" as const,
+    }));
+    const workbench = testWorkbench({ getArtworkDisplay });
+
+    const response = await handleArtworkDisplay(new Request(`http://localhost/api/cards/artworks/${candidateId}/display?width=${width}`), candidateId, workbench);
+    const metadata = await sharp(new Uint8Array(await response.arrayBuffer())).metadata();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-tcgprint-artwork-role")).toBe("compositor-display");
+    expect(response.headers.get("x-tcgprint-display-bucket")).toBe(String(width));
+    expect(response.headers.get("x-tcgprint-display-width")).toBe("500");
+    expect(response.headers.get("x-tcgprint-display-height")).toBe("700");
+    expect(metadata).toMatchObject({ width: 500, height: 700 });
+    expect(getArtworkDisplay).toHaveBeenCalledWith(candidateId, width, expect.anything());
+  });
+
+  it.each([undefined, "513", "512&width=768", "1e3", "0512"]) ("rejects invalid compositor display widths (%s)", async (width) => {
+    const getArtworkDisplay = vi.fn();
+    const workbench = testWorkbench({ getArtworkDisplay });
+    const query = width === undefined ? "" : `?width=${width}`;
+    const response = await handleArtworkDisplay(new Request(`http://localhost/api/cards/artworks/${candidateId}/display${query}`), candidateId, workbench);
+    expect(response.status).toBe(400);
+    expect(getArtworkDisplay).not.toHaveBeenCalled();
+  });
+
+  it("revalidates cached display responses with an ETag", async () => {
+    const displayBytes = new Uint8Array(await sharp({ create: { width: 500, height: 700, channels: 3, background: "#246" } }).png().toBuffer());
+    const workbench = testWorkbench({ getArtworkDisplay: vi.fn(async () => ({
+      bytes: displayBytes, contentType: "image/png" as const, widthPx: 500, heightPx: 700,
+      sourceHash: "a".repeat(64), bucket: 512 as const, source: "original" as const,
+    })) });
+    const first = await handleArtworkDisplay(new Request(`http://localhost/api/cards/artworks/${candidateId}/display?width=512`), candidateId, workbench);
+    const etag = first.headers.get("etag");
+    const second = await handleArtworkDisplay(new Request(`http://localhost/api/cards/artworks/${candidateId}/display?width=512`, { headers: { "If-None-Match": etag! } }), candidateId, workbench);
+
+    expect(etag).toMatch(/^"sha256-[a-f0-9]{64}"$/);
+    expect(first.headers.get("cache-control")).toBe("private, max-age=0, must-revalidate");
+    expect(second.status).toBe(304);
+    expect((await second.arrayBuffer()).byteLength).toBe(0);
+  });
+
+  it("preserves canonical bleed geometry for compositor display without changing its base source", async () => {
+    const sourceBytes = new Uint8Array(await sharp({ create: { width: 127, height: 178, channels: 4, background: { r: 35, g: 115, b: 205, alpha: 1 } } }).png().toBuffer());
+    const getArtworkDisplay = vi.fn(async () => ({ bytes: sourceBytes, contentType: "image/png" as const, widthPx: 127, heightPx: 178, sourceHash: "a".repeat(64), bucket: 512 as const, source: "original" as const }));
+    const workbench = testWorkbench({ getArtworkDisplay });
+    const response = await handleArtworkDisplay(new Request(`http://localhost/api/cards/artworks/${candidateId}/display?width=512&trimWidthMm=63.5&trimHeightMm=88.9&bleedMm=1&roundedCorners=true&cornerRadiusMm=3.175`), candidateId, workbench);
+    const outputBytes = new Uint8Array(await response.arrayBuffer());
+    const metadata = await sharp(outputBytes).metadata();
+    const bleedX = Math.ceil(127 / 63.5);
+    const bleedY = Math.ceil(178 / 88.9);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(metadata.width).toBe(127 + bleedX * 2);
+    expect(metadata.height).toBe(178 + bleedY * 2);
+    expect(workbench.getArtworkOriginal).not.toHaveBeenCalled();
+    expect(workbench.getArtworkPreview).not.toHaveBeenCalled();
   });
 
   it("serves live bleed as a cached-thumbnail derivative without requesting the print original", async () => {

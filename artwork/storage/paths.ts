@@ -8,6 +8,7 @@ export interface ArtworkAppDataPaths {
   readonly databaseFile: string;
   readonly originalsDirectory: string;
   readonly thumbnailsDirectory: string;
+  readonly displayDirectory: string;
 }
 
 export function appDataPaths(baseDirectory: string): ArtworkAppDataPaths {
@@ -17,6 +18,7 @@ export function appDataPaths(baseDirectory: string): ArtworkAppDataPaths {
     databaseFile: join(rootDirectory, "artwork-cache.sqlite"),
     originalsDirectory: join(rootDirectory, "originals"),
     thumbnailsDirectory: join(rootDirectory, "thumbnails"),
+    displayDirectory: join(rootDirectory, "compositor-display"),
   };
 }
 

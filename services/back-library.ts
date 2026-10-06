@@ -4,6 +4,8 @@ import type { ArtworkOriginal } from "../artwork/storage/types";
 import { ArtworkStorageError } from "../artwork/storage/types";
 import { validateImageBytes } from "../artwork/storage/image-validation";
 import type { ArtworkOriginalStore } from "../artwork/storage/original-store";
+import type { ArtworkDisplayAsset, ArtworkDisplayStore } from "../artwork/storage/display-store";
+import { isArtworkDisplayWidthBucket, type ArtworkDisplayWidthBucket } from "../artwork/display-buckets";
 import type { ArtworkThumbnailStore } from "../artwork/storage/thumbnail-store";
 import type { BackLibraryAssetReference } from "../core/cards/types";
 import { BackLibraryRepository, type BackLibraryAssetRecord } from "../persistence/back-library/repository";
@@ -82,6 +84,7 @@ export class BackLibraryService {
   private readonly maximumDimensionPixels: number;
   private readonly maximumPixels: number;
   private readonly thumbnails: ArtworkThumbnailStore | undefined;
+  private readonly displayStore: ArtworkDisplayStore | undefined;
   private readonly previewCache = new Map<string, { readonly bytes: Uint8Array; readonly contentType: string; readonly widthPx: number; readonly heightPx: number }>();
 
   constructor(
@@ -89,10 +92,12 @@ export class BackLibraryService {
     originals: ArtworkOriginalStore,
     options: { maximumBytes?: number; maximumDimensionPixels?: number; maximumPixels?: number } = {},
     thumbnails?: ArtworkThumbnailStore,
+    displayStore?: ArtworkDisplayStore,
   ) {
     this.repository = repository;
     this.originals = originals;
     this.thumbnails = thumbnails;
+    this.displayStore = displayStore;
     this.maximumBytes = options.maximumBytes ?? MAX_BACK_LIBRARY_UPLOAD_BYTES;
     this.maximumDimensionPixels = options.maximumDimensionPixels ?? MAX_BACK_DIMENSION_PIXELS;
     this.maximumPixels = options.maximumPixels ?? MAX_BACK_PIXELS;
@@ -215,5 +220,25 @@ export class BackLibraryService {
     this.previewCache.set(reference.sha256, preview);
     while (this.previewCache.size > 24) this.previewCache.delete(this.previewCache.keys().next().value!);
     return { ...preview, bytes: new Uint8Array(preview.bytes) };
+  }
+
+  async resolveDisplay(
+    reference: BackLibraryAssetReference,
+    bucket: ArtworkDisplayWidthBucket,
+    signal?: AbortSignal,
+  ): Promise<ArtworkDisplayAsset> {
+    if (!isArtworkDisplayWidthBucket(bucket)) throw new BackLibraryError("BACK_INVALID_METADATA", "Display width must be one of the supported buckets.");
+    if (signal?.aborted) throw Object.assign(new Error("The display image request was cancelled."), { name: "AbortError" });
+    if (!this.displayStore) throw new BackLibraryError("BACK_ORIGINAL_UNAVAILABLE", "Back Library display storage is unavailable.");
+    const original = await this.resolveOriginal(reference);
+    if (signal?.aborted) throw Object.assign(new Error("The display image request was cancelled."), { name: "AbortError" });
+    try {
+      return await this.displayStore.getOrCreate(reference.assetId, original.contentHash, original.bytes, bucket, signal);
+    } catch (error) {
+      if (error instanceof BackLibraryError) throw error;
+      if (error instanceof TypeError) throw new BackLibraryError("BACK_INVALID_METADATA", error.message, error);
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      throw new BackLibraryError("BACK_ORIGINAL_UNAVAILABLE", "Back Library display image could not be derived.", error);
+    }
   }
 }
