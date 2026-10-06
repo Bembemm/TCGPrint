@@ -954,6 +954,40 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   }, [manualQuery, autocompleteEnabled]);
 
   useEffect(() => {
+    if (!pickerIsOpen || manualPhysicalBackPicker || artworkFilter === "mpc" || !artworkTargetCard?.identity) return;
+    if (typeof window.requestIdleCallback !== "function") return;
+
+    const identityId = artworkTargetCard.identity.id;
+    const faceId = effectivePickerSide;
+    const references = artworkTargetCard.mpcReferences;
+    const cacheKey = JSON.stringify([identityId, faceId, false, "mpc", references, mpcFilters, artworkCatalogRevision]);
+    const controller = new AbortController();
+    const idleId = window.requestIdleCallback(() => {
+      void getOrCreateCachedRequest(artworkCatalogRequests.current, cacheKey, async () => {
+        const response = await fetch(`/api/cards/${encodeURIComponent(identityId)}/artworks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            faceId,
+            source: "mpc",
+            mpcReferences: references,
+            mpcFilters,
+            offset: 0,
+            limit: MPC_INITIAL_GALLERY_BATCH,
+          }),
+        });
+        return jsonResponse<ArtworkCatalogResponse>(response);
+      }).catch(() => undefined);
+    }, { timeout: 1200 });
+
+    return () => {
+      window.cancelIdleCallback(idleId);
+      controller.abort();
+    };
+  }, [pickerIsOpen, manualPhysicalBackPicker, artworkFilter, artworkTargetCard?.id, effectivePickerSide, mpcFilters, artworkCatalogRevision]);
+
+  useEffect(() => {
     if (!pickerIsOpen || artworkFilter !== "mpc" || mpcCatalogs) return;
     const controller = new AbortController();
     void fetch("/api/cards/artworks/mpc-catalogs", { signal: controller.signal, cache: "no-store" })
