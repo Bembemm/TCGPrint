@@ -76,6 +76,42 @@ describe("artwork providers", () => {
     storage.database.close();
   }, 15_000);
 
+  it("returns the first cold Scryfall page immediately and completes the catalog in the background", async () => {
+    const storage = await setup();
+    const firstCard = { ...solRing, id: "11111111-1111-4111-8111-111111111111", setCode: "one", collectorNumber: "1" };
+    const secondCard = { ...solRing, id: "22222222-2222-4222-8222-222222222222", setCode: "two", collectorNumber: "2" };
+    const secondPageUrl = "https://api.scryfall.com/cards/search?q=oracleid%3Atest&page=2";
+    let releaseSecondPage!: () => void;
+    const secondPageGate = new Promise<void>((resolve) => { releaseSecondPage = resolve; });
+    const listPrintingsPage = vi.fn(async (_oracleId: string, nextPage?: string) => {
+      if (!nextPage) return { cards: [firstCard], hasMore: true, nextPage: secondPageUrl };
+      await secondPageGate;
+      return { cards: [secondCard], hasMore: false };
+    });
+    const client = {
+      listPrintingsPage,
+      listPrintings: vi.fn(async () => [firstCard, secondCard]),
+      lookupById: vi.fn(async () => firstCard),
+      lookupByName: vi.fn(async () => firstCard),
+      downloadAsset: vi.fn(),
+    } as unknown as ScryfallClient;
+    const provider = new ScryfallArtworkProvider(client, storage.originals, storage.thumbnails, storage.metadata, storage.repository);
+
+    const partial = await provider.searchArtwork(identity, { progressive: true });
+    expect(partial).toHaveLength(1);
+    expect(partial[0]).toMatchObject({ setCode: "one", collectorNumber: "1" });
+    expect(listPrintingsPage).toHaveBeenCalledTimes(2);
+
+    releaseSecondPage();
+    const complete = await provider.searchArtwork(identity);
+    expect(complete).toHaveLength(2);
+    expect(complete.map(({ setCode }) => setCode)).toEqual(["one", "two"]);
+    expect(listPrintingsPage).toHaveBeenCalledTimes(2);
+    expect((client.listPrintings as unknown as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+
+    storage.database.close();
+  });
+
   it("serves expired Scryfall printings immediately and refreshes them in the background", async () => {
     const storage = await setup();
     const stale = { ...solRing, setCode: "old", collectorNumber: "1" };
