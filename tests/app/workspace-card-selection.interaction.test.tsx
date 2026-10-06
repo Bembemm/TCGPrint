@@ -308,17 +308,20 @@ describe("Cartas workspace navigation", () => {
     };
     let picker = await openPicker();
     await user.click(within(await picker).getByRole("button", { name: "Selecionar arte" }));
-    await user.click(within(await picker).getByRole("button", { name: "Aplicar seleção" }));
-    await waitFor(() => expect(within(screen.getByRole("dialog", { name: /Mountain/ })).getByText(/Estado atual:.*scryfall:mountain-front/)).toBeInTheDocument());
-    await user.click(within(screen.getByRole("dialog", { name: /Mountain/ })).getByRole("button", { name: "Fechar seletor de arte" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Mountain/ })).not.toBeInTheDocument());
+    picker = await openPicker();
+    expect(within(await picker).getByText(/Estado atual:.*scryfall:mountain-front/)).toBeInTheDocument();
+    expect(within(await picker).getByRole("img", { name: /Artwork atual de Mountain/ })).toBeInTheDocument();
+    await user.click(within(await picker).getByRole("button", { name: "Fechar seletor de arte" }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     await user.click(screen.getByRole("button", { name: /1\/2 · Island/ }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     picker = await openPicker();
     await user.click(within(await picker).getByRole("button", { name: "Selecionar arte" }));
-    await user.click(within(await picker).getByRole("button", { name: "Aplicar seleção" }));
-    await waitFor(() => expect(within(screen.getByRole("dialog", { name: /Island/ })).getByText(/Estado atual:.*scryfall:island-front/)).toBeInTheDocument());
-    await user.click(within(screen.getByRole("dialog", { name: /Island/ })).getByRole("button", { name: "Fechar seletor de arte" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Island/ })).not.toBeInTheDocument());
+    picker = await openPicker();
+    expect(within(await picker).getByText(/Estado atual:.*scryfall:island-front/)).toBeInTheDocument();
+    await user.click(within(await picker).getByRole("button", { name: "Fechar seletor de arte" }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     await user.click(screen.getByRole("button", { name: /2\/2 · Mountain/ }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
@@ -388,8 +391,8 @@ describe("Cartas workspace navigation", () => {
     await user.click(within(contextMenu).getByRole("menuitem", { name: "Trocar artwork" }));
     const menuPicker = await screen.findByRole("dialog", { name: /Mountain · cópia 1\/1/ });
     expect(within(menuPicker).getByText("Carta física 2 · cópia original 1/1")).toBeInTheDocument();
-    await user.click(within(menuPicker).getByRole("button", { name: "Selecionada" }));
-    expect(within(menuPicker).getByRole("radio", { name: "Somente esta cópia física" })).toBeChecked();
+    const bulkToggle = within(menuPicker).getByRole("checkbox", { name: "Aplicar também às cópias iguais" });
+    expect(bulkToggle).not.toBeChecked();
     await user.click(within(menuPicker).getByRole("button", { name: "Fechar seletor de arte" }));
     expect(document.activeElement).toBe(contextTrigger);
 
