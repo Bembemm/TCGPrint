@@ -2940,3 +2940,129 @@ body { min-width: 0; min-height: 0; }
     font-size: 9px;
   }
 }
+
+
+/* Import pass — keep the main Cards surface focused on adding cards. */
+.input-panel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d9dde1;
+  border-radius: 10px;
+  padding: 9px;
+  background: #fff;
+}
+.input-panel .panel-heading {
+  align-items: center;
+  margin: 0;
+}
+.input-panel .panel-heading h2 {
+  margin: 0 0 2px;
+  color: #1c1f23;
+  font-size: 13px;
+}
+.input-panel .panel-heading p {
+  margin: 0;
+  color: #7b8189;
+  font-size: 9px;
+}
+.input-panel .panel-heading > .button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 7px;
+  color: #747b84;
+  background: transparent;
+  font-size: 9px;
+}
+.input-panel > .field-label {
+  color: #555c65;
+  font-size: 9px;
+  font-weight: 650;
+}
+.input-panel > textarea {
+  min-height: 88px;
+  resize: vertical;
+  border: 1px solid #d5d9dd;
+  border-radius: 8px;
+  padding: 8px;
+  color: #24272b;
+  background: #fafafa;
+  font: inherit;
+  font-size: 10px;
+}
+.input-panel > textarea:focus-visible {
+  outline: 2px solid #202328;
+  outline-offset: 1px;
+}
+.drop-zone {
+  gap: 8px;
+  border: 1px dashed #c9cdd2;
+  border-radius: 9px;
+  padding: 9px;
+  background: #f7f8f9;
+}
+.drop-zone strong {
+  color: #34393f;
+  font-size: 10px;
+}
+.drop-zone span {
+  color: #858b93;
+  font-size: 8px;
+}
+.file-actions {
+  gap: 5px;
+}
+.file-actions .button {
+  min-height: 29px;
+  border-color: #d4d8dc;
+  border-radius: 7px;
+  color: #454b52;
+  background: #fff;
+  font-size: 9px;
+}
+.selected-files {
+  border: 1px solid #e0e3e6;
+  border-radius: 8px;
+  padding: 7px;
+  background: #fafafa;
+  font-size: 9px;
+}
+.selected-files > ul {
+  max-height: 116px;
+  overflow: auto;
+}
+.import-advanced {
+  overflow: hidden;
+  border: 1px solid #e1e4e7;
+  border-radius: 8px;
+  background: #fafafa;
+}
+.import-advanced > summary {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  color: #626972;
+  cursor: pointer;
+  list-style: none;
+  font-size: 9px;
+  font-weight: 650;
+}
+.import-advanced > summary::-webkit-details-marker { display: none; }
+.import-advanced > summary::after {
+  content: "›";
+  color: #8b9199;
+  font-size: 15px;
+}
+.import-advanced[open] > summary::after { transform: rotate(90deg); }
+.import-advanced-body {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid #e5e7ea;
+  padding: 8px;
+}
+.import-advanced-body > .muted {
+  margin: 0;
+  color: #7b8189;
+  font-size: 8px;
+}
