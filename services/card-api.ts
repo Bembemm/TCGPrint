@@ -846,11 +846,13 @@ export async function handleArtworkList(request: Request, identityId: string, wo
     if (typeof sourceValue !== "string" || !["all", ...SOURCES].includes(sourceValue)) throw new ApiRequestError(400, "INVALID_SOURCE", "Artwork source filter is invalid.");
     if (body.physicalBackArtwork !== undefined && typeof body.physicalBackArtwork !== "boolean") throw new ApiRequestError(400, "INVALID_REQUEST", "physicalBackArtwork must be a boolean.");
     if (body.forceMpcRefresh !== undefined && typeof body.forceMpcRefresh !== "boolean") throw new ApiRequestError(400, "INVALID_REQUEST", "forceMpcRefresh must be a boolean.");
+    if (body.progressive !== undefined && typeof body.progressive !== "boolean") throw new ApiRequestError(400, "INVALID_REQUEST", "progressive must be a boolean.");
     const offset = body.offset === undefined ? undefined : Number(body.offset);
     const limit = body.limit === undefined ? undefined : Number(body.limit);
     if (offset !== undefined && (!Number.isSafeInteger(offset) || offset < 0 || offset > 10_000)) throw new ApiRequestError(400, "INVALID_REQUEST", "offset must be an integer between 0 and 10000.");
     if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 60)) throw new ApiRequestError(400, "INVALID_REQUEST", "limit must be an integer between 1 and 60.");
     if ((offset !== undefined || limit !== undefined) && sourceValue !== "mpc") throw new ApiRequestError(400, "INVALID_REQUEST", "Progressive catalog paging is available only for MPC Autofill.");
+    if (body.progressive === true && sourceValue !== "scryfall") throw new ApiRequestError(400, "INVALID_REQUEST", "Progressive cold-start search is available only for Scryfall.");
     const mpcFilters = body.mpcFilters === undefined ? undefined : normalizeMpcArtworkFilters(body.mpcFilters);
     const references: WorkingCardMpcReference[] = Array.isArray(body.mpcReferences) ? body.mpcReferences.slice(0, 100).flatMap((value): WorkingCardMpcReference[] => {
       const ref = record(value);
@@ -869,13 +871,13 @@ export async function handleArtworkList(request: Request, identityId: string, wo
       const verified = candidates.filter((candidate) => candidate.source === "mpc" && candidate.faceId === "back" && candidate.metadata?.cardType === "CARDBACK");
       return Response.json({ candidates: verified.map(candidateDto), catalogTotal: catalog.catalogTotal, catalogTotalComplete: catalog.catalogTotalComplete !== false, providerHealth: safeProviderHealth(workbench.getProviderHealth()), mpcDiagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
     }
-    const catalogOptions = { mpcReferences: references, ...(mpcFilters ? { mpcFilters } : {}), ...(body.forceMpcRefresh === true ? { forceMpcRefresh: true } : {}), ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}), signal: request.signal };
+    const catalogOptions = { mpcReferences: references, ...(mpcFilters ? { mpcFilters } : {}), ...(body.forceMpcRefresh === true ? { forceMpcRefresh: true } : {}), ...(body.progressive === true ? { progressive: true } : {}), ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}), signal: request.signal };
     const catalog = workbench.listArtworkCatalog
       ? await workbench.listArtworkCatalog(identityId, faceId, sourceValue as ArtworkCatalogSource, catalogOptions)
       : await workbench.listArtworkCandidates(identityId, faceId, sourceValue as ArtworkCatalogSource, catalogOptions).then((candidates) => ({ candidates, catalogTotal: candidates.length, catalogTotalComplete: true }));
     const candidates = catalog.candidates;
     const uniqueCandidates = [...new Map(candidates.map((candidate) => [candidate.id, candidate])).values()];
-    return Response.json({ candidates: uniqueCandidates.map(candidateDto), catalogTotal: catalog.catalogTotal, catalogTotalComplete: catalog.catalogTotalComplete !== false, ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}), providerHealth: safeProviderHealth(workbench.getProviderHealth()), mpcDiagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
+    return Response.json({ candidates: uniqueCandidates.map(candidateDto), catalogTotal: catalog.catalogTotal, catalogTotalComplete: body.progressive === true && sourceValue === "scryfall" ? false : catalog.catalogTotalComplete !== false, ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}), providerHealth: safeProviderHealth(workbench.getProviderHealth()), mpcDiagnostic: workbench.getMpcArtworkProviderDiagnostic?.() });
   } catch (error) { return respondError(error); }
 }
 
