@@ -157,8 +157,8 @@ export default function HomePage() {
       <section className="panel input-panel" aria-labelledby="inputs-heading">
         <div className="panel-heading">
           <div>
-            <h2 id="inputs-heading">Entradas</h2>
-            <p>Imagens, listas, arquivos estruturados, ZIPs, texto colado, URLs de sites suportados e arquivos diretos.</p>
+            <h2 id="inputs-heading">Adicionar cartas</h2>
+            <p>Cole uma lista, uma URL ou importe arquivos.</p>
           </div>
           <button className="button secondary" type="button" onClick={() => {
             setFiles([]);
@@ -191,7 +191,7 @@ export default function HomePage() {
         >
           <div>
             <strong>Arraste arquivos aqui</strong>
-            <span>PNG, JPEG, WebP, TIFF, SVG, TXT, CSV, TSV, JSON, XML e ZIP</span>
+            <span>Imagens, decklists e arquivos de projeto suportados</span>
           </div>
           <div className="file-actions">
             <label className="button secondary">
@@ -229,12 +229,18 @@ export default function HomePage() {
             ))}</ul>
           </div>
         )}
-        <div className="action-row">
-          <button className="button secondary" type="button" onClick={runPreview} disabled={busy}>
-            {busy ? "Analisando…" : "Analisar importação"}
-          </button>
-          <span className="status" aria-live="polite">{status}</span>
-        </div>
+        <details className="import-advanced">
+          <summary>Opções de importação</summary>
+          <div className="import-advanced-body">
+            <p className="muted">Imagens, listas, arquivos estruturados, ZIPs, texto colado, URLs de sites suportados e arquivos diretos. Formatos: PNG, JPEG, WebP, TIFF, SVG, TXT, CSV, TSV, JSON, XML e ZIP.</p>
+            <div className="action-row">
+              <button className="button secondary" type="button" onClick={runPreview} disabled={busy}>
+                {busy ? "Analisando…" : "Analisar importação"}
+              </button>
+              <span className="status" aria-live="polite">{status}</span>
+            </div>
+          </div>
+        </details>
         {preview?.detections.some((detection) => detection.status === "ambiguous") && <fieldset className="ambiguous-import-choices">
           <legend>Escolha o importer para as entradas ambíguas</legend>
           {preview.detections.filter((detection) => detection.status === "ambiguous").map((detection) => {
