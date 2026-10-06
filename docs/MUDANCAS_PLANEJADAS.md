@@ -2386,6 +2386,16 @@ O compositor concentra seleção física, inspeção de face, abertura do Artwor
 
 **Gate 2A:** seleção por checkbox funciona através de páginas e reorder existente, active e selected são independentes, barra não causa layout shift, Project não fica dirty por seleção e testes do compositor/export continuam verdes.
 
+**Status 2A: IMPLEMENTADO E APROVADO.**
+- commit: `7791c7bbeff258b8079fb5a7cfae0b1c7f3ff2be` — `feat: separate compositor active state and multi-selection`;
+- revisão confirmou `activePhysicalInstanceId` separado de `selectedPhysicalInstanceIds`;
+- checkbox é o único toggle do selection set; body/right-click não alteram multi-selection;
+- Select All usa todos os IDs de `physicalOrder.instances`, inclusive outras páginas;
+- seleção permanece keyed por ID após reorder e poda IDs removidos;
+- Project/autosave permanecem intactos; teste de integração verificou zero PUT/recovery após seleção;
+- suíte reportada no gate: 1.334 testes passando, 1 ignorado, typecheck/build/diff-check verdes.
+
+
 **Slice 2B — Interação direta da carta + menu contextual**
 - clique no corpo da carta abre imediatamente o Artwork Picker da instância física correspondente;
 - o clique pode atualizar `activePhysicalInstanceId`, mas nunca o selection set;
