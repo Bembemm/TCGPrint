@@ -145,22 +145,29 @@ export class ScryfallClient {
     return mapScryfallCardList(payload);
   }
 
-  async listPrintings(oracleId: string, options: ScryfallRequestOptions = {}): Promise<readonly ScryfallCard[]> {
-    const url = this.apiUrl("/cards/search");
-    url.searchParams.set("q", `oracleid:${oracleId}`);
-    url.searchParams.set("unique", "prints");
-    url.searchParams.set("order", "released");
-    const cards: ScryfallCard[] = [];
-    let pageUrl: URL | undefined = url;
-    const seenPages = new Set<string>();
-    while (pageUrl) {
-      if (seenPages.has(pageUrl.href)) throw new ScryfallError("invalid-payload", "Scryfall returned a cyclic printing pagination link.");
-      seenPages.add(pageUrl.href);
-      const page = await this.getPrintingPage(pageUrl, options.signal);
-      cards.push(...page.cards);
-      if (page.hasMore && !page.nextPage) throw new ScryfallError("invalid-payload", "Scryfall omitted next_page while has_more is true.");
-      pageUrl = page.hasMore && page.nextPage ? this.validateApiUrl(page.nextPage) : undefined;
+  async listPrintingsPage(oracleId: string, nextPage?: string, options: ScryfallRequestOptions = {}): Promise<ScryfallPrintingPage> {
+    const url = nextPage ? this.validateApiUrl(nextPage) : this.apiUrl("/cards/search");
+    if (!nextPage) {
+      url.searchParams.set("q", `oracleid:${oracleId}`);
+      url.searchParams.set("unique", "prints");
+      url.searchParams.set("order", "released");
     }
+    const page = await this.getPrintingPage(url, options.signal);
+    if (page.hasMore && !page.nextPage) throw new ScryfallError("invalid-payload", "Scryfall omitted next_page while has_more is true.");
+    return page;
+  }
+
+  async listPrintings(oracleId: string, options: ScryfallRequestOptions = {}): Promise<readonly ScryfallCard[]> {
+    const cards: ScryfallCard[] = [];
+    let nextPage: string | undefined;
+    const seenPages = new Set<string>();
+    do {
+      if (nextPage && seenPages.has(nextPage)) throw new ScryfallError("invalid-payload", "Scryfall returned a cyclic printing pagination link.");
+      if (nextPage) seenPages.add(nextPage);
+      const page = await this.listPrintingsPage(oracleId, nextPage, options);
+      cards.push(...page.cards);
+      nextPage = page.hasMore ? page.nextPage : undefined;
+    } while (nextPage);
     return cards;
   }
 
