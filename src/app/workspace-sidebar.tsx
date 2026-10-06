@@ -48,10 +48,10 @@ export default function WorkspaceSidebar({
     inert={isUnavailable ? true : undefined}
   >
     <div className="workspace-sidebar-heading">
-      <div><span className="eyebrow">Painel de trabalho</span><h2>{WORKSPACE_SECTIONS.find(({ id }) => id === activeSection)?.label}</h2></div>
+      <h2>{WORKSPACE_SECTIONS.find(({ id }) => id === activeSection)?.label}</h2>
       <div className="workspace-sidebar-actions">
-        <button type="button" className="button secondary workspace-sidebar-close" aria-label="Fechar painel" onClick={onClose}>Fechar</button>
-        <button type="button" className="button secondary workspace-sidebar-collapse" aria-label="Recolher painel" aria-expanded={!collapsed} aria-controls="workspace-sidebar" onClick={onCollapse}>Recolher</button>
+        <button type="button" className="workspace-sidebar-close" aria-label="Fechar painel" onClick={onClose}>×</button>
+        <button type="button" className="workspace-sidebar-collapse" aria-label="Recolher painel" aria-expanded={!collapsed} aria-controls="workspace-sidebar" onClick={onCollapse}>‹</button>
       </div>
     </div>
 
