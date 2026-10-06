@@ -8,6 +8,7 @@ import type { WorkingCard } from "../../core/cards/types";
 import { createPhysicalOrder, movePhysicalInstance, type PhysicalOrder } from "../../core/cards/physical-instance-order";
 import { selectManualBackArtwork } from "../../core/cards/back-selection";
 import { createIdentitySideCalibration, type PrinterProfileSnapshot } from "../../core/calibration";
+import { createDefaultRegistrationConfig } from "../../core/registration";
 import { DEFAULT_PROJECT_SETTINGS, type ProjectSettingsV2 } from "../../persistence/projects/serializer";
 import RegistrationLayoutPreview from "../../src/app/registration-layout-preview";
 import WorkspaceShell from "../../src/app/workspace-shell";
@@ -74,6 +75,7 @@ function compositorWorkspace(
     const [projectRevision, setProjectRevision] = useState(1);
     const [pageNumber, setPageNumber] = useState(1);
     const [activePhysicalInstanceId, setActivePhysicalInstanceId] = useState<string | null>(null);
+    const [activeOccupiedSlotIndex, setActiveOccupiedSlotIndex] = useState<number | null>(null);
     const [selectedPhysicalInstanceIds, setSelectedPhysicalInstanceIds] = useState<Set<string>>(() => new Set());
     useEffect(() => {
       const existingIds = new Set(physicalOrder.instances.map(({ id }) => id));
@@ -86,6 +88,15 @@ function compositorWorkspace(
       setSettings(update);
       setProjectRevision((revision) => revision + 1);
     };
+    const toggleSkippedSlot = (index: number) => changeSettings((current) => ({
+      ...current,
+      layout: {
+        ...current.layout,
+        skippedSlotIndices: current.layout.skippedSlotIndices.includes(index)
+          ? current.layout.skippedSlotIndices.filter((slotIndex) => slotIndex !== index)
+          : [...current.layout.skippedSlotIndices, index],
+      },
+    }));
     const sections = {
       cards: <p>cards</p>,
       settings: <>
@@ -93,6 +104,7 @@ function compositorWorkspace(
         <label>Bleed do Project<input aria-label="Bleed do Project" type="number" step="0.125" value={settings.bleedMm} onChange={(event) => { const value = Number(event.currentTarget.value); changeSettings((current) => ({ ...current, bleedMm: value })); }} /></label>
         <button type="button" onClick={() => setCards((current) => current.map((entry) => ({ ...entry, selectedArtworkByFace: { ...entry.selectedArtworkByFace, front: artworkFrontNext } })))}>Selecionar artwork alternativa</button>
         <label>Offset de calibração<input aria-label="Offset de calibração" type="number" value={settings.printerProfileSelection?.front.offsetXUm ?? 0} onChange={(event) => { const value = Number(event.currentTarget.value); changeSettings((current) => ({ ...current, printerProfileSelection: { ...calibrationProfile, front: { ...calibrationProfile.front, offsetXUm: value } } })); }} /></label>
+        {activeOccupiedSlotIndex !== null && <button type="button" onClick={() => toggleSkippedSlot(activeOccupiedSlotIndex)}>Desativar slot da carta ativa</button>}
       </>,
       export: <p>export</p>,
     };
@@ -100,6 +112,7 @@ function compositorWorkspace(
       <output data-testid="project-revision">{projectRevision}</output>
       <output data-testid="active-physical-instance-id">{activePhysicalInstanceId ?? "none"}</output>
       <output data-testid="physical-order-ids">{physicalOrder.instances.map(({ id }) => id).join(",")}</output>
+      <output data-testid="skipped-slot-indices">{settings.layout.skippedSlotIndices.join(",")}</output>
       {simulateRemoveCopy && <button type="button" onClick={() => { setCards([...initialCards]); setPhysicalOrder(initialPhysicalOrder ?? createPhysicalOrder(initialCards)); }}>Undo test removal</button>}
       <WorkspaceShell
         hasCards
@@ -115,6 +128,7 @@ function compositorWorkspace(
           selectedPageNumber={pageNumber}
           onSelectPage={setPageNumber}
           onActivatePhysicalInstance={(instanceId) => setActivePhysicalInstanceId(instanceId)}
+          onActiveOccupiedSlotChange={setActiveOccupiedSlotIndex}
           onTogglePhysicalInstanceSelection={(instanceId) => setSelectedPhysicalInstanceIds((current) => {
             const next = new Set(current);
             if (next.has(instanceId)) next.delete(instanceId);
@@ -151,15 +165,7 @@ function compositorWorkspace(
           onReorderPhysicalInstance={enableReorder ? (instanceId, targetInstanceId, placement) => setPhysicalOrder((current) => movePhysicalInstance(current, instanceId, targetInstanceId, placement)) : undefined}
           onToggleSkippedSlot={(index) => {
             if (!enableSkippedSlotChanges) return;
-            changeSettings((current) => ({
-              ...current,
-              layout: {
-                ...current.layout,
-                skippedSlotIndices: current.layout.skippedSlotIndices.includes(index)
-                  ? current.layout.skippedSlotIndices.filter((slotIndex) => slotIndex !== index)
-                  : [...current.layout.skippedSlotIndices, index],
-              },
-            }));
+            toggleSkippedSlot(index);
           }}
         />}
       />
@@ -272,7 +278,7 @@ describe("canonical live compositor interactions", () => {
     await user.clear(screen.getByRole("spinbutton", { name: "Offset de calibração" }));
     await user.type(screen.getByRole("spinbutton", { name: "Offset de calibração" }), "500");
     expect(sheet()).not.toHaveAttribute("data-compositor-calibration-matrix", "identity");
-    expect(sheet().querySelector("[data-compositor-layer='reserved']"))
+    expect(sheet().querySelector("[data-calibrated-print-content]"))
       .toHaveAttribute("transform", sheet().getAttribute("data-compositor-calibration-matrix"));
   });
 
@@ -290,8 +296,8 @@ describe("canonical live compositor interactions", () => {
     expect(slotForPhysicalIndex(1)).toHaveAttribute("data-working-card-id", "compositor-card");
     expect(slotForPhysicalIndex(1)).toHaveAttribute("data-copy-number", "2");
     expect(secondCopy).toHaveAttribute("aria-current", "true");
-    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
-    expect(screen.getByTestId("active-physical-card")).toHaveTextContent("Carta física 2 · Island · cópia 2/3");
+    expect(sheet()).toHaveAttribute("data-active-physical-card-index", "1");
+    expect(screen.queryByText(/Carta física 2 · Island · cópia 2\/3/)).not.toBeInTheDocument();
     expect(slotForPhysicalIndex(1).querySelector("image[data-compositor-artwork]"))
       .toHaveAttribute("aria-label", "Island · frente");
     expect(slotForPhysicalIndex(1).querySelector("image[data-compositor-artwork]"))
@@ -304,7 +310,7 @@ describe("canonical live compositor interactions", () => {
     expect(pairedBackCopy).toHaveAttribute("data-working-card-id", "compositor-card");
     expect(pairedBackCopy).toHaveAttribute("data-copy-number", "2");
     expect(pairedBackCopy).toHaveAttribute("data-copy-count", "3");
-    expect(screen.getByTestId("active-physical-card")).toHaveTextContent("Carta física 2 · Island · cópia 2/3");
+    expect(sheet()).toHaveAttribute("data-active-physical-card-index", "1");
     expect(pairedBackCopy.querySelector("image[data-compositor-artwork]"))
       .toHaveAttribute("aria-label", "Island · verso");
     expect(pairedBackCopy.querySelector("image[data-compositor-artwork]"))
@@ -817,8 +823,7 @@ describe("canonical live compositor interactions", () => {
     const firstSlot = slotForPhysicalIndex(0);
     const secondSlot = slotForPhysicalIndex(1);
     const originalViewBox = sheet().getAttribute("viewBox");
-    const originalTrim = firstSlot.querySelector('[data-compositor-layer="trim"]');
-    const originalTrimGeometry = ["x", "y", "width", "height"].map((attribute) => originalTrim?.getAttribute(attribute));
+    const originalSlotPosition = [firstSlot.getAttribute("data-slot-x-mm"), firstSlot.getAttribute("data-slot-y-mm")];
     const originalSelectedArtwork = secondSlot.querySelector("image[data-compositor-artwork]")?.outerHTML;
 
     expect(sheet().querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(0);
@@ -831,8 +836,8 @@ describe("canonical live compositor interactions", () => {
     expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("group", { name: "Ações de seleção" })).toBeInTheDocument();
     expect(sheet().querySelectorAll("[data-compositor-selection-outline]")).toHaveLength(0);
-    expect(["x", "y", "width", "height"].map((attribute) => firstSlot.querySelector('[data-compositor-layer="trim"]')?.getAttribute(attribute)))
-      .toEqual(originalTrimGeometry);
+    expect([firstSlot.getAttribute("data-slot-x-mm"), firstSlot.getAttribute("data-slot-y-mm")])
+      .toEqual(originalSlotPosition);
     expect(secondSlot.querySelector("image[data-compositor-artwork]")?.outerHTML).toBe(originalSelectedArtwork);
     expect(sheet()).toHaveAttribute("viewBox", originalViewBox);
     expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
@@ -929,14 +934,14 @@ describe("canonical live compositor interactions", () => {
     render(compositorWorkspace([card()]));
 
     await user.click(screen.getByRole("button", { name: /carta física 2.*cópia 2 de 10/i }));
-    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
     await user.click(screen.getByRole("button", { name: "Próxima página" }));
     expect(screen.getByRole("group", { name: /Compositor live frente.*página 2 de 2/ })).toHaveAttribute("data-active-physical-card-index", "none");
-    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
     expect(screen.queryByRole("button", { name: /carta física 2.*cópia 2 de 10/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Página anterior" }));
-    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
     expect(bodyButtonForPhysicalIndex(1)).toHaveAttribute("aria-current", "true");
   });
 
@@ -956,8 +961,8 @@ describe("canonical live compositor interactions", () => {
     expect(sheet()).toHaveAttribute("data-compositor-page", "2");
     expect(slotForPhysicalIndex(9)).toHaveAttribute("data-physical-instance-id", "instance-2");
     expect(bodyButtonForPhysicalIndex(9)).toHaveAttribute("aria-current", "true");
-    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-instance-id", "instance-2");
-    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "9");
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
+    expect(sheet()).toHaveAttribute("data-active-physical-card-index", "9");
     expect(checkboxForPhysicalIndex(9)).toHaveAttribute("aria-checked", "true");
   });
 
@@ -972,7 +977,7 @@ describe("canonical live compositor interactions", () => {
 
     expect(sheet().querySelector('g[data-physical-card-index="0"]')).toHaveAttribute("data-physical-instance-id", "instance-2");
     expect(sheet().querySelector('g[data-physical-card-index="1"]')).toHaveAttribute("data-physical-instance-id", "instance-1");
-    expect(screen.getByTestId("active-physical-card")).toHaveAttribute("data-active-physical-card-index", "1");
+    expect(sheet()).toHaveAttribute("data-active-physical-card-index", "1");
   });
 
   it("keeps explicit skipped-slot editing available without using selection clicks as Project edits", async () => {
@@ -986,52 +991,96 @@ describe("canonical live compositor interactions", () => {
     await user.click(screen.getByRole("button", { name: /carta física 1.*cópia 1 de 3/i }));
     expect(Number(screen.getByTestId("project-revision").textContent)).toBe(revision);
     const startingX = Number(slotForPhysicalIndex(0).getAttribute("data-slot-x-mm"));
-
-    await user.click(screen.getByRole("button", { name: "Desativar slot da carta ativa" }));
+    expect(screen.queryByTestId("active-physical-card")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
+    await user.click(await screen.findByRole("button", { name: "Desativar slot da carta ativa" }));
 
     expect(Number(screen.getByTestId("project-revision").textContent)).toBe(revision + 1);
+    expect(screen.getByTestId("skipped-slot-indices")).toHaveTextContent("0");
     expect(Number(slotForPhysicalIndex(0).getAttribute("data-slot-x-mm"))).not.toBe(startingX);
   });
 
-  it("keeps Layers and zoom in viewer UI state instead of Project state", async () => {
+  it("keeps only face and page navigation in the persistent toolbar", async () => {
     const user = userEvent.setup();
     render(compositorWorkspace());
     const revision = screen.getByTestId("project-revision").textContent;
-    await user.click(screen.getByText("Layers"));
-    await user.click(screen.getByRole("checkbox", { name: "Artwork" }));
-    await user.click(screen.getByRole("checkbox", { name: "Bleed" }));
-    await user.click(screen.getByRole("checkbox", { name: "Trim" }));
-    await user.click(screen.getByRole("checkbox", { name: "Cut guides" }));
-    await user.click(screen.getByRole("checkbox", { name: "Silhouette / SVG-DXF" }));
-    await user.click(screen.getByRole("checkbox", { name: "Registration" }));
-    await user.click(screen.getByRole("checkbox", { name: "Reserved zones" }));
-    await user.click(screen.getByRole("checkbox", { name: "Margins" }));
-    await user.click(screen.getByRole("checkbox", { name: "Calibration" }));
-    expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
-    const compositor = screen.getByRole("group", { name: /Compositor live/ });
-    const physicalPlanSignature = Array.from(compositor.querySelectorAll("[data-slot-x-mm]"))
-      .map((slot) => [slot.getAttribute("data-slot-x-mm"), slot.getAttribute("data-slot-y-mm")]);
-    const physicalViewBox = compositor.getAttribute("viewBox");
-    expect(compositor.querySelector("image[data-compositor-artwork]")).not.toBeInTheDocument();
-    expect(compositor.querySelector("[data-compositor-layer='bleed']")).not.toBeInTheDocument();
-    expect(compositor.querySelector("[data-compositor-layer='cut']")).not.toBeInTheDocument();
-    expect(compositor.querySelector("[data-compositor-layer='silhouette']")).not.toBeInTheDocument();
-    expect(compositor.querySelector("[data-compositor-layer='margins']")).not.toBeInTheDocument();
-    expect(compositor.querySelector("[data-compositor-layer='registration']")).not.toBeInTheDocument();
-    expect(compositor.querySelector("[data-calibrated-print-content]")).toHaveAttribute("data-calibrated-print-content", "false");
+    const toolbar = screen.getByRole("toolbar", { name: "Controles do compositor" });
+    const faceControls = within(toolbar).getByRole("group", { name: "Face do compositor" });
+    const pageControls = within(toolbar).getByRole("group", { name: "Navegação de páginas" });
+    expect(toolbar.children).toHaveLength(2);
+    expect(within(faceControls).getAllByRole("button")).toHaveLength(2);
+    expect(within(faceControls).getByRole("button", { name: "Frente" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(faceControls).getByRole("button", { name: "Verso" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(pageControls).getByRole("button", { name: "Página anterior" })).toBeInTheDocument();
+    expect(within(pageControls).getByRole("button", { name: "Próxima página" })).toBeInTheDocument();
+    expect(within(pageControls).getByLabelText("Página do compositor")).toBeInTheDocument();
+    expect(within(pageControls).getByText("Página 1 de 2")).toBeInTheDocument();
+    expect(within(toolbar).queryByRole("button", { name: /Fit Page|Fit Width|100%|Reduzir zoom|Aumentar zoom/i })).not.toBeInTheDocument();
+    expect(within(toolbar).queryByText("Layers")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Aumentar zoom" }));
+    const compositorRegion = screen.getByRole("region", { name: "Compositor live" });
+    expect(compositorRegion).toBeInTheDocument();
+    expect(within(compositorRegion).queryByRole("heading", { name: "Compositor live" })).not.toBeInTheDocument();
+    expect(within(compositorRegion).queryByText(/capacidade|atualiza automaticamente|cartas físicas ·/i)).not.toBeInTheDocument();
+    expect(within(compositorRegion).queryByText(/Frente física|Verso físico|registration/i)).not.toBeInTheDocument();
+    expect(within(compositorRegion).queryByText(/Perfil .*ΔX|Sem perfil de calibração selecionado|ΔY|skew/i)).not.toBeInTheDocument();
+    expect(within(compositorRegion).queryByText(/Bleed|Trim\/card|Cut path|Skipped slot\/path|Reserved zone|Registration mark/)).not.toBeInTheDocument();
+    expect(within(compositorRegion).queryByText(/Defina linhas e colunas antes de desativar slots/)).not.toBeInTheDocument();
+
+    await user.click(within(faceControls).getByRole("button", { name: "Verso" }));
+    expect(within(compositorRegion).queryByText(/O verso mantém a mesma página física/)).not.toBeInTheDocument();
+    expect(within(compositorRegion).queryByText(/Verso físico|grade duplex pareada/)).not.toBeInTheDocument();
     expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
-    expect(Array.from(compositor.querySelectorAll("[data-slot-x-mm]"))
-      .map((slot) => [slot.getAttribute("data-slot-x-mm"), slot.getAttribute("data-slot-y-mm")])).toEqual(physicalPlanSignature);
-    expect(compositor).toHaveAttribute("viewBox", physicalViewBox);
-    await user.click(screen.getByRole("button", { name: "100%" }));
-    expect(compositor).toHaveAttribute("data-compositor-zoom-scale", "1");
-    expect(screen.getByTestId("project-revision")).toHaveTextContent(revision ?? "");
-    expect(Array.from(compositor.querySelectorAll("[data-slot-x-mm]"))
-      .map((slot) => [slot.getAttribute("data-slot-x-mm"), slot.getAttribute("data-slot-y-mm")])).toEqual(physicalPlanSignature);
-    expect(screen.getByRole("button", { name: "Fit Page" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryAllByTitle(/PDF/)).toHaveLength(0);
     expect(screen.queryByRole("dialog", { name: "Conferir PDF final" })).not.toBeInTheDocument();
+  });
+
+  it("derives bleed, calibration, cut guides, and registration overlays from Project settings", () => {
+    const unconfiguredSettings: ProjectSettingsV2 = {
+      ...DEFAULT_PROJECT_SETTINGS,
+      bleedMm: 0,
+      marginsMm: { top: 0, right: 0, bottom: 0, left: 0 },
+      registration: createDefaultRegistrationConfig("none", "portrait"),
+      printerProfileSelection: null,
+      cutSourceSelection: null,
+      cutGuides: {
+        trim: { ...DEFAULT_PROJECT_SETTINGS.cutGuides.trim, enabled: false },
+        external: { ...DEFAULT_PROJECT_SETTINGS.cutGuides.external, enabled: false },
+      },
+      layout: { rows: 1, columns: 1, skippedSlotIndices: [] },
+    };
+    const view = render(compositorWorkspace([{ ...card(), quantity: 1 }], unconfiguredSettings));
+    const unconfiguredSheet = sheet();
+    expect(unconfiguredSheet.querySelector("image[data-compositor-artwork]")).toBeInTheDocument();
+    for (const layer of ["bleed", "trim", "cut", "silhouette", "registration", "reserved", "margins"]) {
+      expect(unconfiguredSheet.querySelector(`[data-compositor-layer='${layer}']`)).not.toBeInTheDocument();
+    }
+    expect(unconfiguredSheet.getAttribute("data-compositor-calibration-matrix")).toBe("identity");
+
+    view.unmount();
+    const configuredSettings: ProjectSettingsV2 = {
+      ...unconfiguredSettings,
+      bleedMm: 1.25,
+      printerProfileSelection: {
+        ...calibrationProfile,
+        front: { ...calibrationProfile.front, offsetXUm: 500 },
+      },
+      registration: createDefaultRegistrationConfig("three-point", "portrait"),
+      cutGuides: {
+        trim: { ...unconfiguredSettings.cutGuides.trim, enabled: true },
+        external: { ...unconfiguredSettings.cutGuides.external, enabled: true },
+      },
+    };
+    render(compositorWorkspace([{ ...card(), quantity: 1 }], configuredSettings));
+
+    const configuredSheet = sheet();
+    expect(configuredSheet.querySelector("image[data-compositor-artwork]")?.getAttribute("href")).toContain("bleedMm=1.25");
+    expect(configuredSheet.querySelector("[data-compositor-layer='bleed']")).toBeInTheDocument();
+    expect(configuredSheet.querySelector("[data-compositor-layer='cut']")).toBeInTheDocument();
+    expect(configuredSheet.querySelector("[data-compositor-layer='registration']")?.childElementCount).toBeGreaterThan(0);
+    expect(configuredSheet.querySelector("[data-compositor-layer='reserved']")?.childElementCount).toBeGreaterThan(0);
+    const calibrationMatrix = configuredSheet.getAttribute("data-compositor-calibration-matrix");
+    expect(calibrationMatrix).not.toBe("identity");
+    expect(configuredSheet.querySelector("[data-calibrated-print-content]")).toHaveAttribute("transform", calibrationMatrix);
   });
 });

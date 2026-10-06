@@ -317,8 +317,8 @@ describe("Cartas workspace navigation", () => {
     expect(exportCount).toBe(2);
     const generatedPdfRequestBody = exportRequests[1]?.body;
     expect(generatedPdfRequestBody).toBe(exportRequestBeforePhysicalSelection);
-    await user.click(screen.getByRole("button", { name: "Aumentar zoom" }));
-    expect(composer).toHaveAttribute("data-compositor-zoom-mode", "manual");
+    expect(composer).toHaveAttribute("data-compositor-zoom-mode", "fit-page");
+    expect(screen.queryByRole("button", { name: "Aumentar zoom" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Conferir PDF final" }));
     const firstProof = await screen.findByRole("dialog", { name: "Conferir PDF final" });

@@ -348,38 +348,20 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .registration-preview-slot.is-drag-source { opacity: 0.58; }
 .registration-preview-slot.is-drop-target { filter: drop-shadow(0 0 1.8px #ea580c); }
 .registration-preview-slot.is-invalid-drop { filter: drop-shadow(0 0 1.8px #dc2626); }
-.registration-preview-slot.is-drop-target [data-compositor-layer="trim"] { stroke: #ea580c; stroke-width: 1.1; stroke-dasharray: 1.5 0.8; }
-.registration-preview-slot.is-invalid-drop [data-compositor-layer="trim"] { stroke: #dc2626; stroke-width: 1.1; stroke-dasharray: 1.5 0.8; }
-.registration-preview-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; color: #4a5865; font-size: 10px; }
-.registration-preview-legend span { display: inline-flex; align-items: center; gap: 4px; }
-.registration-preview-legend i { display: inline-block; width: 12px; height: 8px; border: 1px solid; }
-.legend-bleed { border-color: #f97316 !important; background: #fff7ed; }
-.legend-trim { border-color: #1d4ed8 !important; background: #eff6ff; }
-.legend-cut-source { border-color: #dc2626 !important; background: #fee2e2; }
-.legend-reserved { border-color: #dc2626 !important; background: #fecaca; }
-.legend-skipped { border-color: #7e22ce !important; background: #f3e8ff; }
-.legend-mark { border-color: #111827 !important; background: #111827; }
+.registration-preview-slot.is-drop-target .compositor-card-body { stroke: #ea580c; stroke-width: 1.1; stroke-dasharray: 1.5 0.8; }
+.registration-preview-slot.is-invalid-drop .compositor-card-body { stroke: #dc2626; stroke-width: 1.1; stroke-dasharray: 1.5 0.8; }
 .canonical-compositor { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 8px; overflow: hidden; }
+.canonical-compositor .compositor-sheet { max-height: none; }
 .workspace-preview-stack { position: relative; display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; justify-content: center; }
 .workspace-live-compositor { display: flex; width: min(100%, 1000px); height: 100%; min-width: 0; min-height: 0; }
 .workspace-preview-stack > .canonical-compositor, .workspace-live-compositor > .canonical-compositor { width: 100%; height: 100%; }
-.canonical-compositor .compositor-heading { flex: none; align-items: center; margin: 0; }
-.canonical-compositor .compositor-heading h2 { margin: 0 0 3px; color: #263544; font-size: 16px; }
-.canonical-compositor .compositor-heading p { color: #526171; line-height: 1.4; }
-.canonical-compositor .compositor-heading > span { color: #47647d; font-weight: 650; text-align: right; }
 .compositor-toolbar { display: flex; min-width: 0; flex: none; flex-wrap: wrap; align-items: center; gap: 6px 12px; border: 1px solid #cbd3db; border-radius: 5px; padding: 6px; background: #fff; }
 .compositor-toolbar .duplex-preview-controls { margin: 0; }
 .compositor-toolbar .button { min-height: 29px; padding: 4px 8px; font-size: 10px; }
-.compositor-page-controls, .compositor-zoom-controls { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 4px; color: #44515e; font-size: 10px; }
+.compositor-page-controls { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 4px; color: #44515e; font-size: 10px; }
 .compositor-page-controls > span { min-width: 82px; text-align: center; }
 .compositor-page-controls .registration-page-picker { display: flex; align-items: center; gap: 4px; }
 .compositor-page-controls select { max-width: 175px; min-width: 0; border: 1px solid #b8c3cd; border-radius: 3px; padding: 5px; background: #fff; color: #263544; font: inherit; }
-.compositor-layers { position: relative; margin-left: auto; color: #263544; font-size: 10px; }
-.compositor-layers summary { cursor: pointer; border: 1px solid #cbd3db; border-radius: 4px; padding: 7px 9px; background: #f8fafc; font-weight: 700; }
-.compositor-layers > div { position: absolute; z-index: 8; top: 100%; right: 0; display: grid; min-width: 165px; gap: 6px; margin-top: 3px; border: 1px solid #bbc6d0; border-radius: 4px; padding: 9px; background: #fff; box-shadow: 0 4px 16px #17212a24; }
-.compositor-layers label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.compositor-side-context { flex: none; margin: 0; color: #536171; font-size: 10px; }
-.compositor-active-card { display: flex; flex: none; align-items: center; gap: 8px; margin: 0; color: #263544; font-size: 10px; font-weight: 650; }
 .compositor-card-control-overlay { overflow: visible; pointer-events: none; }
 .compositor-card-controls { display: flex; width: 100%; height: 100%; flex-direction: column; align-items: flex-end; gap: 2px; pointer-events: none; }
 .compositor-card-control-button { display: inline-flex; width: 30px; min-width: 30px; height: 30px; min-height: 30px; align-items: center; justify-content: center; border: 1px solid #4b5563; border-radius: 4px; padding: 0; color: #242a30; background: rgb(255 255 255 / 96%); box-shadow: 0 1px 3px rgb(17 24 39 / 22%); font: 700 18px/1 Arial, sans-serif; cursor: pointer; opacity: 0.46; pointer-events: auto; transition: opacity 120ms ease, background-color 120ms ease; }
@@ -405,8 +387,7 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .compositor-selection-bar { position: absolute; z-index: 6; inset-block-end: max(8px, env(safe-area-inset-bottom)); left: 50%; display: flex; max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: center; gap: 4px; transform: translateX(-50%); border: 1px solid #aeb7bf; border-radius: 4px; padding: 4px; background: #fff; box-shadow: 0 1px 4px #11182724; }
 .compositor-selection-bar button { min-height: 34px; border: 1px solid #5b636b; border-radius: 3px; padding: 5px 9px; color: #fff; background: #343a40; font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
 .compositor-selection-bar button:focus-visible { outline: 2px solid #111827; outline-offset: 2px; }
-.canonical-compositor .registration-preview-legend { flex: none; margin-top: 0; }
-.compositor-toolbar button:focus-visible, .compositor-layers summary:focus-visible, .compositor-page-controls select:focus-visible { outline: 2px solid #145c92; outline-offset: 2px; }
+.compositor-toolbar button:focus-visible, .compositor-page-controls select:focus-visible { outline: 2px solid #145c92; outline-offset: 2px; }
 @media (hover: none) { .compositor-selection-checkbox { opacity: 0.86; } .compositor-card-control-button { opacity: 0.9; } }
 @media (max-width: 420px) { .compositor-selection-bar { gap: 3px; padding: 3px; } .compositor-selection-bar button { min-height: 38px; padding-inline: 8px; } }
 .compositor-proof-overlay { position: absolute; z-index: 20; inset: 0; display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 8px; border: 1px solid #b5c2cd; border-radius: 6px; padding: 12px; background: #f8fafc; box-shadow: 0 10px 36px #13202c3b; }
@@ -630,17 +611,13 @@ body { min-width: 0; min-height: 0; }
   .workspace-layout { display: block; overflow: hidden; }
   .workspace-preview { position: absolute; inset: 0; width: 100%; height: 100%; padding: 8px; }
   .workspace-preview-content .registration-sheet-preview { max-height: calc(100dvh - 76px); }
-  .workspace-preview-content .compositor-sheet { max-height: calc(100dvh - 300px); }
+  .workspace-preview-content .canonical-compositor .compositor-sheet { max-height: none; }
   .compositor-proof-overlay { inset: 0; padding: 7px; }
   .compositor-proof-heading { align-items: flex-start; }
   .compositor-proof-heading .button { flex: none; max-width: 130px; padding: 5px 7px; font-size: 9px; }
   .canonical-compositor { gap: 5px; padding: 7px; }
-  .canonical-compositor .compositor-heading { align-items: flex-start; flex-direction: column; }
-  .canonical-compositor .compositor-heading > span { text-align: left; }
   .compositor-toolbar { gap: 5px; padding: 5px; }
   .compositor-page-controls { order: 1; }
-  .compositor-zoom-controls { order: 2; }
-  .compositor-layers { order: 3; margin-left: auto; }
   .workspace-sidebar { position: fixed; z-index: 100; top: 50px; right: 0; bottom: 0; width: min(420px, 100vw); height: auto; max-height: none; transform: translateX(100%); transition: transform 180ms ease, visibility 180ms ease; visibility: hidden; border-left: 1px solid #aeb9c4; box-shadow: -10px 0 30px #17212a22; }
   .workspace-sidebar[data-drawer-open="true"] { transform: translateX(0); visibility: visible; }
   .workspace-sidebar-heading { position: sticky; z-index: 6; top: 0; flex: none; background: #fff; }

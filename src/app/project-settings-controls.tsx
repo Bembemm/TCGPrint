@@ -29,6 +29,7 @@ export interface ProjectSettingsControlsProps {
   readonly layoutColumns: string;
   readonly templateGeometryActive: boolean;
   readonly skippedSlotIndices: readonly number[];
+  readonly activeOccupiedSlotIndex?: number | null;
   readonly exportContentMode: ExportContentMode;
   readonly missingBackPolicy: MissingBackPolicy;
   readonly duplexFlipMode: DuplexFlipMode;
@@ -49,6 +50,7 @@ export interface ProjectSettingsControlsProps {
   readonly onRegistrationChange: (value: RegistrationConfig) => void;
   readonly onLayoutRowsChange: (value: string) => void;
   readonly onLayoutColumnsChange: (value: string) => void;
+  readonly onDeactivateActiveSlot?: () => void;
   readonly onExportContentModeChange: (value: ExportContentMode) => void;
   readonly onMissingBackPolicyChange: (value: MissingBackPolicy) => void;
   readonly onDuplexFlipModeChange: (value: DuplexFlipMode) => void;
@@ -76,6 +78,7 @@ export default function ProjectSettingsControls({
   layoutColumns,
   templateGeometryActive,
   skippedSlotIndices,
+  activeOccupiedSlotIndex = null,
   exportContentMode,
   missingBackPolicy,
   duplexFlipMode,
@@ -96,6 +99,7 @@ export default function ProjectSettingsControls({
   onRegistrationChange,
   onLayoutRowsChange,
   onLayoutColumnsChange,
+  onDeactivateActiveSlot,
   onExportContentModeChange,
   onMissingBackPolicyChange,
   onDuplexFlipModeChange,
@@ -210,8 +214,9 @@ export default function ProjectSettingsControls({
       <p>{templateGeometryActive
         ? `Grade bloqueada pela geometria do template. Slots desativados: ${skippedSlotIndices.length ? skippedSlotIndices.map((index) => index + 1).join(", ") : "nenhum"}.`
         : layoutRows.trim() && layoutColumns.trim()
-          ? `Slots desativados: ${skippedSlotIndices.length ? skippedSlotIndices.map((index) => index + 1).join(", ") : "nenhum"}. Clique em uma posição no preview para alternar.`
+          ? `Slots desativados: ${skippedSlotIndices.length ? skippedSlotIndices.map((index) => index + 1).join(", ") : "nenhum"}. Clique em um slot vazio no compositor para alternar.`
           : "Defina linhas e colunas antes de desativar slots."}</p>
+      {activeOccupiedSlotIndex !== null && onDeactivateActiveSlot && <button type="button" className="button secondary" disabled={disabled} onClick={onDeactivateActiveSlot}>Desativar slot da carta ativa</button>}
       </details>
       {templateGeometryActive && <p className="template-geometry-status" role="status">Geometria física do template ativa; a grade manual permanece bloqueada.</p>}
       </section>

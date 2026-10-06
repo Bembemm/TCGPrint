@@ -575,6 +575,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const physicalOrder = editorState.physicalOrder;
   const selectedCardId = editorState.selectedCardId;
   const [activePhysicalInstanceId, setActivePhysicalInstanceId] = useState<string | null>(null);
+  const [activeOccupiedSlotIndex, setActiveOccupiedSlotIndex] = useState<number | null>(null);
   const [selectedPhysicalInstanceIds, setSelectedPhysicalInstanceIds] = useState<Set<string>>(() => new Set());
   const [compositorDocumentRevision, setCompositorDocumentRevision] = useState(0);
   const [compositorSide, setCompositorSide] = useState<CardFaceSide>(editorState.face);
@@ -1611,6 +1612,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             layoutColumns={layoutColumns}
             templateGeometryActive={Boolean(templateGeometry)}
             skippedSlotIndices={skippedSlotIndices}
+            activeOccupiedSlotIndex={activeOccupiedSlotIndex}
             exportContentMode={exportContentMode}
             missingBackPolicy={missingBackPolicy}
             duplexFlipMode={duplexFlipMode}
@@ -1635,6 +1637,12 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             })}
             onLayoutRowsChange={(value) => updateProjectSetting(() => setLayoutRows(value))}
             onLayoutColumnsChange={(value) => updateProjectSetting(() => setLayoutColumns(value))}
+            onDeactivateActiveSlot={() => {
+              if (activeOccupiedSlotIndex === null) return;
+              updateProjectSetting(() => setSkippedSlotIndices((current) => current.includes(activeOccupiedSlotIndex)
+                ? current.filter((slot) => slot !== activeOccupiedSlotIndex)
+                : [...current, activeOccupiedSlotIndex].sort((left, right) => left - right)));
+            }}
             onExportContentModeChange={(value) => updateProjectSetting(() => setExportContentMode(value))}
             onMissingBackPolicyChange={(value) => updateProjectSetting(() => setMissingBackPolicy(value))}
             onDuplexFlipModeChange={(value) => updateProjectSetting(() => setDuplexFlipMode(value))}
@@ -2060,6 +2068,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         cards={workingCards}
         physicalOrder={physicalOrder}
         activePhysicalInstanceId={activePhysicalInstanceId}
+        onActiveOccupiedSlotChange={setActiveOccupiedSlotIndex}
         selectedPhysicalInstanceIds={selectedPhysicalInstanceIds}
         face={compositorSide}
         interactionBusy={interactionBusy}

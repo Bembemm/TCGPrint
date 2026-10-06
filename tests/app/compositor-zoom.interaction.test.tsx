@@ -2,7 +2,6 @@
 import { Profiler } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PROJECT_SETTINGS } from "../../persistence/projects/serializer";
 import RegistrationLayoutPreview from "../../src/app/registration-layout-preview";
@@ -13,8 +12,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("compositor zoom interactions", () => {
-  it("keeps fit scales stable for duplicate and subpixel observer callbacks while the sidebar changes width", async () => {
+describe("compositor automatic fit interactions", () => {
+  it("keeps fit-page stable for duplicate observer callbacks and recalculates after viewport changes", async () => {
     let layoutWidthPx = 820;
     let layoutHeightPx = 500;
     const notifications: Array<(width: number, height: number) => void> = [];
@@ -43,16 +42,17 @@ describe("compositor zoom interactions", () => {
       return this.classList.contains("compositor-sheet-scroll") ? layoutHeightPx : 0;
     });
 
+    const onSelectPage = vi.fn();
+    const onToggleSkippedSlot = vi.fn();
     const commits: number[] = [];
-    const user = userEvent.setup();
     render(<Profiler id="compositor" onRender={(_id, _phase, _actual, _base, _start, commitTime) => commits.push(commitTime)}>
       <RegistrationLayoutPreview
         settings={{ ...DEFAULT_PROJECT_SETTINGS, pageOrientation: "portrait", layout: { skippedSlotIndices: [] } }}
         cardCount={0}
         cards={[]}
         selectedPageNumber={1}
-        onSelectPage={vi.fn()}
-        onToggleSkippedSlot={vi.fn()}
+        onSelectPage={onSelectPage}
+        onToggleSkippedSlot={onToggleSkippedSlot}
       />
     </Profiler>);
 
@@ -60,8 +60,7 @@ describe("compositor zoom interactions", () => {
     const scale = () => Number(sheet.getAttribute("data-compositor-zoom-scale"));
     const baseWidthPx = 210 * 96 / 25.4;
     const baseHeightPx = 297 * 96 / 25.4;
-    const fitWidth = (width: number) => (width - 32) / baseWidthPx;
-    const fitPage = (width: number, height: number) => Math.min(fitWidth(width), (height - 32) / baseHeightPx);
+    const fitPage = (width: number, height: number) => Math.min((width - 32) / baseWidthPx, (height - 32) / baseHeightPx);
 
     await waitFor(() => expect(scale()).toBeCloseTo(fitPage(820, 500), 8));
     const notify = notifications[0];
@@ -74,37 +73,19 @@ describe("compositor zoom interactions", () => {
       expect(commits).toHaveLength(stableCommits);
     }
 
-    await user.click(screen.getByRole("button", { name: "Fit Width" }));
-    expect(scale()).toBeCloseTo(fitWidth(820), 8);
     act(() => notify(610, 500));
-    expect(scale()).toBeCloseTo(fitWidth(610), 8);
-    act(() => notify(820, 500));
-    expect(scale()).toBeCloseTo(fitWidth(820), 8);
-
-    await user.click(screen.getByRole("button", { name: "Fit Page" }));
+    expect(scale()).toBeCloseTo(fitPage(610, 500), 8);
     act(() => notify(820, 900));
     expect(scale()).toBeCloseTo(fitPage(820, 900), 8);
-    act(() => notify(610, 900));
-    expect(scale()).toBeCloseTo(fitPage(610, 900), 8);
-    act(() => notify(820, 900));
-    expect(scale()).toBeCloseTo(fitPage(820, 900), 8);
-
-    const settledScales: number[] = [];
-    act(() => notify(820, 900));
-    settledScales.push(scale());
-    act(() => notify(820, 900));
-    settledScales.push(scale());
-    const settledCommits = commits.length;
-    for (const [width, height] of [[820.1, 900], [820, 900], [820, 900]]) {
-      act(() => notify(width, height));
-      settledScales.push(scale());
-    }
-    expect(new Set(settledScales)).toEqual(new Set([fitPage(820, 900)]));
-    expect(commits).toHaveLength(settledCommits);
+    act(() => notify(390, 520));
+    expect(scale()).toBeCloseTo(fitPage(390, 520), 8);
+    expect(sheet).toHaveAttribute("data-compositor-zoom-mode", "fit-page");
+    expect(screen.queryAllByRole("button", { name: /Fit Page|Fit Width|100%|Reduzir zoom|Aumentar zoom/i })).toHaveLength(0);
+    expect(onSelectPage).not.toHaveBeenCalled();
+    expect(onToggleSkippedSlot).not.toHaveBeenCalled();
   });
 
-  it("fits its measured viewport, follows resize in fit modes, and keeps manual scale", async () => {
-    const user = userEvent.setup();
+  it("keeps page proportions while fitting every measured viewport automatically", async () => {
     let widthPx = 820;
     let heightPx = 500;
     const observers: Array<{ target: Element; notify: () => void }> = [];
@@ -138,45 +119,40 @@ describe("compositor zoom interactions", () => {
       return { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, x: 0, y: 0, toJSON() {} } as DOMRect;
     });
 
+    const onSelectPage = vi.fn();
+    const onToggleSkippedSlot = vi.fn();
     render(<RegistrationLayoutPreview
       settings={{ ...DEFAULT_PROJECT_SETTINGS, pageOrientation: "portrait", layout: { skippedSlotIndices: [] } }}
       cardCount={0}
       cards={[]}
       selectedPageNumber={1}
-      onSelectPage={vi.fn()}
-      onToggleSkippedSlot={vi.fn()}
+      onSelectPage={onSelectPage}
+      onToggleSkippedSlot={onToggleSkippedSlot}
     />);
     const sheet = screen.getByRole("group", { name: /Compositor live/ });
     const scale = () => Number(sheet.getAttribute("data-compositor-zoom-scale"));
-    const fitWidthScale = (width: number) => (width - 32) / (210 * 96 / 25.4);
+    const fitPageScale = (width: number, height: number) => Math.min(
+      (width - 32) / (210 * 96 / 25.4),
+      (height - 32) / (297 * 96 / 25.4),
+    );
 
-    await waitFor(() => expect(scale()).toBeGreaterThan(0));
-    const fitPageSize = { width: 210 * 96 / 25.4 * scale(), height: 297 * 96 / 25.4 * scale() };
-    expect(fitPageSize.width).toBeLessThanOrEqual(widthPx - 32);
-    expect(fitPageSize.height).toBeLessThanOrEqual(heightPx - 32);
-
-    await user.click(screen.getByRole("button", { name: "Fit Width" }));
-    expect(scale()).toBeCloseTo(fitWidthScale(widthPx), 8);
+    await waitFor(() => expect(scale()).toBeCloseTo(fitPageScale(widthPx, heightPx), 8));
+    expect(sheet).toHaveAttribute("data-compositor-zoom-mode", "fit-page");
     widthPx = 420;
     heightPx = 850;
     act(() => observers.forEach(({ notify }) => notify()));
-    await waitFor(() => expect(scale()).toBeCloseTo(fitWidthScale(widthPx), 8));
-
-    await user.click(screen.getByRole("button", { name: "Fit Page" }));
+    await waitFor(() => expect(scale()).toBeCloseTo(fitPageScale(widthPx, heightPx), 8));
     widthPx = 390;
     heightPx = 520;
     act(() => observers.forEach(({ notify }) => notify()));
-    const fitPageScale = Math.min((widthPx - 32) / (210 * 96 / 25.4), (heightPx - 32) / (297 * 96 / 25.4));
-    await waitFor(() => expect(scale()).toBeCloseTo(fitPageScale, 8));
+    await waitFor(() => expect(scale()).toBeCloseTo(fitPageScale(widthPx, heightPx), 8));
 
-    await user.click(screen.getByRole("button", { name: "100%" }));
-    expect(scale()).toBe(1);
-    await user.click(screen.getByRole("button", { name: "Aumentar zoom" }));
-    expect(scale()).toBe(1.1);
-    widthPx = 340;
-    heightPx = 600;
-    act(() => observers.forEach(({ notify }) => notify()));
-    expect(scale()).toBe(1.1);
+    const width = Number.parseFloat(sheet.getAttribute("style")?.match(/width:\s*([0-9.]+)px/)?.[1] ?? "0");
+    const height = Number.parseFloat(sheet.getAttribute("style")?.match(/height:\s*([0-9.]+)px/)?.[1] ?? "0");
+    expect(width / height).toBeCloseTo(210 / 297, 8);
     expect(sheet.getAttribute("viewBox")).toBe("0 0 210 297");
+    expect(screen.queryAllByRole("button", { name: /Fit Page|Fit Width|100%|Reduzir zoom|Aumentar zoom/i })).toHaveLength(0);
+    expect(onSelectPage).not.toHaveBeenCalled();
+    expect(onToggleSkippedSlot).not.toHaveBeenCalled();
   });
 });

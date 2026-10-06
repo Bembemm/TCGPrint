@@ -209,11 +209,16 @@ describe("workspace shell interactions", () => {
   it("keeps skipped-slot editing attached to the active copy while navigating", async () => {
     const user = userEvent.setup();
     const cards = [previewCard("Island", 0), previewCard("Mountain", 1)];
-    const sections = Object.fromEntries(WORKSPACE_SECTIONS.map(({ id }) => [id, <p key={id}>{id}</p>])) as Record<WorkspaceSection, ReactNode>;
     function PreviewHarness() {
       const [skippedSlotIndices, setSkippedSlotIndices] = useState<readonly number[]>([]);
       const [activePhysicalInstanceId, setActivePhysicalInstanceId] = useState<string | null>(null);
+      const [activeOccupiedSlotIndex, setActiveOccupiedSlotIndex] = useState<number | null>(null);
       const [selectedPhysicalInstanceIds, setSelectedPhysicalInstanceIds] = useState<ReadonlySet<string>>(() => new Set());
+      const sections = Object.fromEntries(WORKSPACE_SECTIONS.map(({ id }) => [id,
+        id === "settings"
+          ? <div key={id}>{activeOccupiedSlotIndex !== null && <button type="button" onClick={() => setSkippedSlotIndices((current) => current.includes(activeOccupiedSlotIndex) ? current.filter((item) => item !== activeOccupiedSlotIndex) : [...current, activeOccupiedSlotIndex])}>Desativar slot da carta ativa</button>}</div>
+          : <p key={id}>{id}</p>,
+      ])) as Record<WorkspaceSection, ReactNode>;
       return <WorkspaceShell
         sections={sections}
         hasCards
@@ -227,6 +232,7 @@ describe("workspace shell interactions", () => {
           onSelectPage={() => undefined}
           onToggleSkippedSlot={(index) => setSkippedSlotIndices((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index])}
           onActivatePhysicalInstance={(instanceId) => setActivePhysicalInstanceId(instanceId)}
+          onActiveOccupiedSlotChange={setActiveOccupiedSlotIndex}
           onTogglePhysicalInstanceSelection={(instanceId) => setSelectedPhysicalInstanceIds((current) => {
             const next = new Set(current);
             if (next.has(instanceId)) next.delete(instanceId);
@@ -244,9 +250,9 @@ describe("workspace shell interactions", () => {
     const firstBody = screen.getByRole("button", { name: /Slot 1 · carta física 1/ });
     await user.click(firstBody);
     expect(firstBody).toHaveAttribute("aria-current", "true");
-    await user.click(screen.getByRole("button", { name: "Desativar slot da carta ativa" }));
-    expect(screen.queryByText("SKIP 1")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
+    const settingsPanel = screen.getByRole("complementary", { name: "Painel lateral" });
+    await user.click(await within(settingsPanel).findByRole("button", { name: "Desativar slot da carta ativa" }));
     expect(screen.getByRole("button", { name: "Slot 1 desativado" })).toHaveAttribute("aria-pressed", "true");
   });
 

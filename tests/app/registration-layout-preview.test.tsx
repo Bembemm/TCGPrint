@@ -43,13 +43,14 @@ describe("registration layout preview", () => {
       onToggleSkippedSlot: vi.fn(),
     }));
 
-    expect(markup).toContain("A4 landscape · Magic Standard");
-    expect(markup).toContain("registration three-point/landscape");
+    expect(markup).toContain('aria-label="Compositor live frente A4 landscape, página 1 de 1"');
     expect(markup).toContain("stroke=\"#111827\"");
     expect(markup).toContain("fill=\"#fecaca\"");
-    expect(markup).toContain("legend-reserved");
+    expect(markup).toContain("data-compositor-layer=\"registration\"");
+    expect(markup).toContain("data-compositor-layer=\"reserved\"");
+    expect(markup).not.toContain("registration-preview-legend");
     expect(markup).toContain('aria-label="Face do compositor"');
-    expect(markup).toContain('data-duplex-cut-overlay="front" transform="matrix(1 0 0 1 0 0)"');
+    expect(markup).not.toContain('data-compositor-layer="cut"');
   });
 
   it("shows semantic DFC labeling and the upright back preview control", () => {
@@ -114,7 +115,7 @@ describe("registration layout preview", () => {
     expect(markup).not.toMatch(/<text[^>]*>\s*2\s*<\/text>/);
     expect(markup).toContain('aria-label="Slot 3 vazio"');
     expect(markup).toContain("x1=\"40\" y1=\"35\"");
-    expect(markup).toContain("capacidade 2");
+    expect(markup).not.toContain("capacidade 2");
     expect(markup).not.toContain("stroke=\"#111827\"");
   });
 
@@ -128,7 +129,8 @@ describe("registration layout preview", () => {
       onToggleSkippedSlot: vi.fn(),
     }));
 
-    expect(markup).toContain("Defina linhas e colunas antes de desativar slots");
+    expect(markup).not.toContain("Defina linhas e colunas antes de desativar slots");
+    expect(markup).toContain('aria-label="Compositor live"');
     expect(markup).toContain('role="button"');
     expect(markup).toContain('data-physical-card-index="0"');
     expect(markup).toContain('data-copy-number="1"');

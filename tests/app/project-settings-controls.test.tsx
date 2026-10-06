@@ -91,6 +91,7 @@ describe("ProjectSettingsControls", () => {
       layoutColumns: "3",
       templateGeometryActive: true,
       skippedSlotIndices: [],
+      activeOccupiedSlotIndex: 1,
       exportContentMode: "front-only",
       missingBackPolicy: "use-project-default",
       duplexFlipMode: "long-edge",
@@ -111,12 +112,14 @@ describe("ProjectSettingsControls", () => {
       onRegistrationChange: inert,
       onLayoutRowsChange: inert,
       onLayoutColumnsChange: inert,
+      onDeactivateActiveSlot: inert,
       onExportContentModeChange: inert,
       onMissingBackPolicyChange: inert,
       onDuplexFlipModeChange: inert,
     }));
 
     expect(markup).toContain("Grade bloqueada pela geometria do template");
+    expect(markup).toContain("Desativar slot da carta ativa");
     expect(markup).toMatch(/<label>Linhas da grade \(opcional\)<input type="number"[^>]*disabled=""[^>]*value="2"/);
     expect(markup).toMatch(/<label>Colunas da grade \(opcional\)<input type="number"[^>]*disabled=""[^>]*value="3"/);
   });
