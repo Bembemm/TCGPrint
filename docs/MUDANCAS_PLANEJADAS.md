@@ -2434,6 +2434,18 @@ O compositor concentra seleção física, inspeção de face, abertura do Artwor
 
 **Gate 2C:** superfície principal limpa conforme baseline, sem perda de capacidade funcional e sem mudança nos bytes/semântica dos exports.
 
+**Status 2C: IMPLEMENTADO E APROVADO.**
+- commit: `3f65f9acfc0872371cb0fd3ac608e20cafcfe90f` — `feat: simplify compositor surface`;
+- toolbar persistente reduzida a Frente/Verso e navegação de páginas;
+- zoom manual, Layers, cabeçalho técnico, linha de carta ativa, prosa de calibração, legenda e explicações redundantes removidos;
+- auto-fit permanece via viewport measurement + ResizeObserver, com fit-page permanente;
+- overlays visuais agora derivam da configuração real do Project, sem novo toggle de debug;
+- capacidade de editar `skippedSlotIndices` foi preservada em Settings para slot ocupado;
+- seleção 2A, picker/menu/flip 2B e drag HTML5 legado permaneceram intactos;
+- nenhum arquivo de core/persistence/services/export foi alterado;
+- suíte reportada: 1.339 testes passando, 1 ignorado, além de typecheck/build/diff-check verdes; a redução líquida de 2 testes corresponde à remoção dos modos de zoom que deixaram de existir.
+
+
 ### Slice 3 — Drag-and-drop canônico
 Implementar/revisar drag:
 - threshold clique vs drag;
