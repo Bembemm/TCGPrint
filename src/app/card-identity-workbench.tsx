@@ -1795,6 +1795,15 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         : currentSimpleBack?.mode === "project-default" && projectDefaultBack
           ? `/api/back-library/${encodeURIComponent(projectDefaultBack.assetId)}/preview`
           : undefined;
+  const currentArtworkDisplayUrl = selected?.candidateId
+    ? `/api/cards/artworks/${encodeURIComponent(selected.candidateId)}/display?width=1024`
+    : currentSimpleBack?.mode === "artwork"
+      ? `/api/cards/artworks/${encodeURIComponent(currentSimpleBack.candidateId)}/display?width=1024`
+      : currentSimpleBack?.mode === "library"
+        ? `/api/back-library/${encodeURIComponent(currentSimpleBack.assetId)}/display?width=1024`
+        : currentSimpleBack?.mode === "project-default" && projectDefaultBack
+          ? `/api/back-library/${encodeURIComponent(projectDefaultBack.assetId)}/display?width=1024`
+          : undefined;
 
   const mpcAdvancedFilters = <details className="mpc-advanced-filters">
     <summary>Filtros avançados MPC</summary>
@@ -1837,7 +1846,21 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       <aside className="artwork-picker-current" aria-label="Artwork atual">
         <div className="artwork-picker-current-frame">
           {currentArtworkPreviewUrl
-            ? <Image src={currentArtworkPreviewUrl} alt={`Artwork atual de ${displayCard(pickerCard)}`} width={360} height={504} unoptimized priority />
+            ? <>
+              <Image className="artwork-picker-current-thumbnail" src={currentArtworkPreviewUrl} alt={`Artwork atual de ${displayCard(pickerCard)}`} width={360} height={504} unoptimized priority />
+              {currentArtworkDisplayUrl && <Image
+                key={currentArtworkDisplayUrl}
+                className="artwork-picker-current-display"
+                src={currentArtworkDisplayUrl}
+                alt=""
+                aria-hidden="true"
+                width={1024}
+                height={1434}
+                unoptimized
+                priority
+                onError={(event) => { event.currentTarget.style.display = "none"; }}
+              />}
+            </>
             : <div className="artwork-picker-current-placeholder">{currentSimpleBack?.mode === "none" ? "Sem verso" : "Nenhuma artwork aplicada"}</div>}
         </div>
         <div className="artwork-picker-current-copy">
