@@ -454,7 +454,7 @@ describe("Cartas workspace navigation", () => {
     const margin = screen.getByRole("spinbutton", { name: "Margem esquerda (mm)" });
     await user.clear(margin);
     await user.type(margin, "5");
-    expect(within(proof).getByRole("status")).toHaveTextContent("PDF conferido anteriormente está desatualizado");
+    expect(within(proof).getByRole("status")).toHaveTextContent("Esta prévia ficou desatualizada");
     expect(composer.querySelector("g[data-slot-x-mm]")?.getAttribute("data-slot-x-mm")).not.toBe(initialSlotX);
     expect(screen.getByRole("dialog", { name: "Conferir PDF final" })).toBe(proof);
     await user.keyboard("{Escape}");
