@@ -68,6 +68,7 @@ describe("ambiguous importer choice in the Cards workspace", () => {
 
     render(<HomePage />);
     await user.type(screen.getByRole("textbox", { name: "Cole uma decklist ou URL" }), "1 Island");
+    await user.click(screen.getByText("Opções de importação"));
     await user.click(screen.getByRole("button", { name: "Analisar importação" }));
 
     const cardsPanel = screen.getByRole("tabpanel", { name: "Cartas" });
