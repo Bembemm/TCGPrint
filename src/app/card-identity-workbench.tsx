@@ -1701,6 +1701,9 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
 
   const sharedProjectSections: readonly WorkspaceSection[] = ["settings", "export"];
   const sharedProjectPanel = (activeSection: WorkspaceSection) => <div className="workspace-project-settings-content">
+    <details className="workspace-settings-tool-group" open>
+      <summary>{activeSection === "export" ? "Corte SVG / DXF" : "Templates e Project"}</summary>
+      <div className="workspace-settings-tool-body">
       <ProjectsPanel
         view={activeSection === "export" ? "export" : "settings"}
         cards={workingCards}
@@ -1757,6 +1760,8 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         onProjectInteractionLockChange={setProjectInteractionLocked}
         disabled={busy}
       />
+      </div>
+    </details>
     <div className="workspace-settings-view" hidden={activeSection !== "settings"}>
           <ProjectSettingsControls
             paperFormat={paperFormat}
@@ -1817,6 +1822,9 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           />
     </div>
     <div className="workspace-back-library-view" hidden={activeSection !== "settings"}>
+      <details className="workspace-settings-tool-group" open>
+        <summary>Versos e Back Library</summary>
+        <div className="workspace-settings-tool-body">
       <BackLibraryControls
             assets={backLibraryAssets}
             selectedDefault={projectDefaultBack}
@@ -1827,8 +1835,13 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             onCardModeChange={(mode) => { if (activeCard) updateCardBackMode(activeCard, mode); }}
             onManualBackChange={(asset) => { if (activeCard) dispatchEditor({ type: "replace-card", cardId: activeCard.id, card: selectManualBackLibraryAsset(activeCard, asset) }); }}
       />
+        </div>
+      </details>
     </div>
     <div className="workspace-settings-view" hidden={activeSection !== "settings"}>
+      <details className="workspace-settings-tool-group" open>
+        <summary>Calibração da impressora</summary>
+        <div className="workspace-settings-tool-body">
       <PrinterCalibrationPanel
         paperFormat={paperFormat}
         pageOrientation={pageOrientation}
@@ -1842,6 +1855,8 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           setPrinterDuplexMode(mode);
         })}
       />
+        </div>
+      </details>
     </div>
     <div className="workspace-export-view" hidden={activeSection !== "export"}>{exportSection}</div>
   </div>;
