@@ -1953,11 +1953,11 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       </select></label>
     </div>
 
-    {selected && <p className="selected-artwork-line">Estado atual: {labelSource(selected.source)} · {selected.candidateId} · {artworkPolicyLabel(selected)}</p>}
+    {selected && <p className="selected-artwork-line">Atual · {labelSource(selected.source)}</p>}
     {!manualPhysicalBackPicker && !pickerCard.identity && <p className="muted">Sem CardIdentity resolvida: “todas iguais” fica indisponível até a identidade ser confirmada.</p>}
-    {!manualPhysicalBackPicker && <button className="button secondary restore-artwork-default" type="button" disabled={interactionBusy || !pickerCard.identity || !activeFaceExists} title={!pickerCard.identity ? "Não há identidade resolvida para determinar uma artwork padrão." : undefined} onClick={() => void restoreArtworkDefault(pickerCard, effectivePickerSide)}>Restaurar artwork padrão desta face</button>}
+    {!manualPhysicalBackPicker && <button className="button secondary restore-artwork-default" type="button" disabled={interactionBusy || !pickerCard.identity || !activeFaceExists} title={!pickerCard.identity ? "Não há identidade resolvida para determinar uma artwork padrão." : undefined} onClick={() => void restoreArtworkDefault(pickerCard, effectivePickerSide)}>Usar padrão</button>}
     {visibleArtworkProblem && <p className="error-message" role="alert">{visibleArtworkProblem}</p>}
-    {artworkCatalogState?.requestKey !== currentArtworkRequestKey && !visibleArtworkProblem && <p className="muted" role="status">Carregando o catálogo completo…</p>}
+    {artworkCatalogState?.requestKey !== currentArtworkRequestKey && !visibleArtworkProblem && <p className="muted" role="status">Carregando artworks…</p>}
     {artworkCatalogState?.requestKey === currentArtworkRequestKey && filteredArtworkCandidates.length === 0 && !visibleArtworkProblem && <p className="muted" role="status">Nenhum resultado corresponde a esta busca. Se um provider falhou, os demais resultados continuam disponíveis.</p>}
 
     <ArtworkCandidateGrid
