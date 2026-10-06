@@ -54,6 +54,7 @@ export class ScryfallArtworkProvider implements ArtworkProvider {
   private readonly metadata: ArtworkMetadataCache;
   private readonly repository: ArtworkRepository;
   private readonly originalRequests = createCoalescedRequestRegistry<ArtworkOriginal>();
+  private readonly printingRefreshes = new Map<string, Promise<void>>();
   private health: ProviderHealth = { available: true, degraded: false };
 
   constructor(client: ScryfallClient, originals: ArtworkOriginalStore, thumbnails: ArtworkThumbnailStore, metadata: ArtworkMetadataCache, repository: ArtworkRepository) {
@@ -66,32 +67,59 @@ export class ScryfallArtworkProvider implements ArtworkProvider {
 
   async searchArtwork(identity: CardIdentity, options: ArtworkSearchOptions = {}): Promise<readonly ArtworkCandidate[]> {
     const cacheKey = `scryfall:printings:${identity.oracleId ?? identity.scryfallId ?? identity.name.toLowerCase()}`;
-    let cards = this.metadata.getMetadata<readonly ScryfallCard[]>(cacheKey);
-    if (!cards) {
-      try {
-        if (identity.oracleId) {
-          cards = await this.client.listPrintings(identity.oracleId, { signal: options.signal });
-        } else {
-          const requested = identity.scryfallId
-            ? await this.client.lookupById(identity.scryfallId, { signal: options.signal })
-            : await this.client.lookupByName(identity.name, "exact", { signal: options.signal });
-          cards = requested.oracleId ? await this.client.listPrintings(requested.oracleId, { signal: options.signal }) : [requested];
-        }
-        this.metadata.putMetadata(cacheKey, cards, Date.now() + METADATA_TTL_MS);
-        this.health = { available: true, degraded: false };
-      } catch (error) {
-        if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError") || (error && typeof error === "object" && (error as { kind?: unknown }).kind === "aborted")) throw error;
-        const cached = identity.oracleId ? this.repository.listOriginalsByOracleId(identity.oracleId) : identity.scryfallId ? [this.repository.findOriginalByScryfallId(identity.scryfallId)].filter((item): item is ArtworkOriginalRecord => Boolean(item)) : [];
-        const candidates = cached.flatMap((record) => {
-          const candidate = this.candidateFromStoredOriginal(record, identity);
-          return candidate ? [candidate] : [];
-        });
-        if (!candidates.length) throw error;
-        this.health = { available: true, degraded: true, message: error instanceof Error ? error.message.slice(0, 300) : "Scryfall is unavailable; using cached originals." };
-        return candidates.filter((candidate) => !options.faceId || candidate.faceId === options.faceId);
-      }
+    const snapshot = this.metadata.getMetadataSnapshot<readonly ScryfallCard[]>(cacheKey);
+    const usableSnapshot = snapshot && Array.isArray(snapshot.value) && snapshot.value.length > 0 ? snapshot : undefined;
+
+    if (usableSnapshot && usableSnapshot.expiresAt > Date.now()) {
+      return usableSnapshot.value.flatMap((card) => this.candidatesFromPrinting(identity, card, options.faceId));
     }
-    return cards.flatMap((card) => this.candidatesFromPrinting(identity, card, options.faceId));
+
+    if (usableSnapshot) {
+      this.schedulePrintingRefresh(cacheKey, identity);
+      this.health = { available: true, degraded: true, message: "Scryfall artwork catalog is refreshing in the background." };
+      return usableSnapshot.value.flatMap((card) => this.candidatesFromPrinting(identity, card, options.faceId));
+    }
+
+    try {
+      const cards = await this.fetchPrintings(identity, options.signal);
+      this.metadata.putMetadata(cacheKey, cards, Date.now() + METADATA_TTL_MS);
+      this.health = { available: true, degraded: false };
+      return cards.flatMap((card) => this.candidatesFromPrinting(identity, card, options.faceId));
+    } catch (error) {
+      if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError") || (error && typeof error === "object" && (error as { kind?: unknown }).kind === "aborted")) throw error;
+      const cached = identity.oracleId ? this.repository.listOriginalsByOracleId(identity.oracleId) : identity.scryfallId ? [this.repository.findOriginalByScryfallId(identity.scryfallId)].filter((item): item is ArtworkOriginalRecord => Boolean(item)) : [];
+      const candidates = cached.flatMap((record) => {
+        const candidate = this.candidateFromStoredOriginal(record, identity);
+        return candidate ? [candidate] : [];
+      });
+      if (!candidates.length) throw error;
+      this.health = { available: true, degraded: true, message: error instanceof Error ? error.message.slice(0, 300) : "Scryfall is unavailable; using cached originals." };
+      return candidates.filter((candidate) => !options.faceId || candidate.faceId === options.faceId);
+    }
+  }
+
+  private async fetchPrintings(identity: CardIdentity, signal?: AbortSignal): Promise<readonly ScryfallCard[]> {
+    if (identity.oracleId) return this.client.listPrintings(identity.oracleId, { signal });
+    const requested = identity.scryfallId
+      ? await this.client.lookupById(identity.scryfallId, { signal })
+      : await this.client.lookupByName(identity.name, "exact", { signal });
+    return requested.oracleId ? this.client.listPrintings(requested.oracleId, { signal }) : [requested];
+  }
+
+  private schedulePrintingRefresh(cacheKey: string, identity: CardIdentity): void {
+    if (this.printingRefreshes.has(cacheKey)) return;
+    const refresh = this.fetchPrintings(identity)
+      .then((cards) => {
+        if (cards.length > 0) this.metadata.putMetadata(cacheKey, cards, Date.now() + METADATA_TTL_MS);
+        this.health = { available: true, degraded: false };
+      })
+      .catch((error: unknown) => {
+        this.health = { available: true, degraded: true, message: error instanceof Error ? error.message.slice(0, 300) : "Scryfall refresh failed; using cached artwork catalog." };
+      })
+      .finally(() => {
+        if (this.printingRefreshes.get(cacheKey) === refresh) this.printingRefreshes.delete(cacheKey);
+      });
+    this.printingRefreshes.set(cacheKey, refresh);
   }
 
   /** Builds lazy artwork metadata from one already-resolved printing; it performs no API or asset requests. */
