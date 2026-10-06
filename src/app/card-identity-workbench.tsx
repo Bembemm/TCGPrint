@@ -1245,7 +1245,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       }
       setPendingArtwork(null);
       setPendingBackChoice(null);
-      closeArtworkPicker();
     } catch (error) {
       if (controller.signal.aborted) {
         setArtworkProblem(null);
