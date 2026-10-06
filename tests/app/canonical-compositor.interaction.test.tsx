@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
 import { useState } from "react";
-import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
@@ -12,7 +11,7 @@ import { selectManualBackArtwork } from "../../core/cards/back-selection";
 import { createIdentitySideCalibration, type PrinterProfileSnapshot } from "../../core/calibration";
 import { DEFAULT_PROJECT_SETTINGS, type ProjectSettingsV2 } from "../../persistence/projects/serializer";
 import RegistrationLayoutPreview from "../../src/app/registration-layout-preview";
-import WorkspaceShell, { WORKSPACE_SECTIONS, type WorkspaceSection } from "../../src/app/workspace-shell";
+import WorkspaceShell from "../../src/app/workspace-shell";
 
 afterEach(cleanup);
 
@@ -77,15 +76,16 @@ function compositorWorkspace(
       setSettings(update);
       setProjectRevision((revision) => revision + 1);
     };
-    const sections = Object.fromEntries(WORKSPACE_SECTIONS.map(({ id }) => [id, id === "layout"
-      ? <label>Margem esquerda<input aria-label="Margem esquerda" type="number" value={settings.marginsMm.left} onChange={(event) => { const value = Number(event.currentTarget.value); changeSettings((current) => ({ ...current, marginsMm: { ...current.marginsMm, left: value } })); }} /></label>
-      : id === "pdf"
-        ? <label>Bleed do Project<input aria-label="Bleed do Project" type="number" step="0.125" value={settings.bleedMm} onChange={(event) => { const value = Number(event.currentTarget.value); changeSettings((current) => ({ ...current, bleedMm: value })); }} /></label>
-        : id === "artwork"
-          ? <button type="button" onClick={() => setCards((current) => current.map((entry) => ({ ...entry, selectedArtworkByFace: { ...entry.selectedArtworkByFace, front: artworkFrontNext } })))}>Selecionar artwork alternativa</button>
-          : id === "calibration"
-            ? <label>Offset de calibração<input aria-label="Offset de calibração" type="number" value={settings.printerProfileSelection?.front.offsetXUm ?? 0} onChange={(event) => { const value = Number(event.currentTarget.value); changeSettings((current) => ({ ...current, printerProfileSelection: { ...calibrationProfile, front: { ...calibrationProfile.front, offsetXUm: value } } })); }} /></label>
-            : <p key={id}>{id}</p>])) as Record<WorkspaceSection, ReactNode>;
+    const sections = {
+      cards: <p>cards</p>,
+      settings: <>
+        <label>Margem esquerda<input aria-label="Margem esquerda" type="number" value={settings.marginsMm.left} onChange={(event) => { const value = Number(event.currentTarget.value); changeSettings((current) => ({ ...current, marginsMm: { ...current.marginsMm, left: value } })); }} /></label>
+        <label>Bleed do Project<input aria-label="Bleed do Project" type="number" step="0.125" value={settings.bleedMm} onChange={(event) => { const value = Number(event.currentTarget.value); changeSettings((current) => ({ ...current, bleedMm: value })); }} /></label>
+        <button type="button" onClick={() => setCards((current) => current.map((entry) => ({ ...entry, selectedArtworkByFace: { ...entry.selectedArtworkByFace, front: artworkFrontNext } })))}>Selecionar artwork alternativa</button>
+        <label>Offset de calibração<input aria-label="Offset de calibração" type="number" value={settings.printerProfileSelection?.front.offsetXUm ?? 0} onChange={(event) => { const value = Number(event.currentTarget.value); changeSettings((current) => ({ ...current, printerProfileSelection: { ...calibrationProfile, front: { ...calibrationProfile.front, offsetXUm: value } } })); }} /></label>
+      </>,
+      export: <p>export</p>,
+    };
     return <>
       <output data-testid="project-revision">{projectRevision}</output>
       {simulateRemoveCopy && <button type="button" onClick={() => { setCards([...initialCards]); setPhysicalOrder(initialPhysicalOrder ?? createPhysicalOrder(initialCards)); }}>Undo test removal</button>}
@@ -190,19 +190,17 @@ describe("canonical live compositor interactions", () => {
     const slot = () => main.querySelector("g[data-slot-x-mm]");
     const startingX = Number(slot()?.getAttribute("data-slot-x-mm"));
     const revisionAfterInitialRender = screen.getByTestId("project-revision").textContent;
-    await user.click(screen.getByRole("tab", { name: "Layout" }));
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
     await user.clear(screen.getByRole("spinbutton", { name: "Margem esquerda" }));
     await user.type(screen.getByRole("spinbutton", { name: "Margem esquerda" }), "10");
     expect(Number(slot()?.getAttribute("data-slot-x-mm"))).not.toBe(startingX);
     expect(Number(screen.getByTestId("project-revision").textContent)).toBeGreaterThan(Number(revisionAfterInitialRender));
 
-    await user.click(screen.getByRole("tab", { name: "PDF" }));
     await user.clear(screen.getByRole("spinbutton", { name: "Bleed do Project" }));
     await user.type(screen.getByRole("spinbutton", { name: "Bleed do Project" }), "1.25");
     expect(sheet()).toHaveAttribute("data-compositor-bleed-mm", "1.25");
     expect(main.querySelector("image[data-compositor-artwork]")?.getAttribute("href")).toContain("bleedMm=1.25");
 
-    await user.click(screen.getByRole("tab", { name: "Artwork" }));
     await user.click(screen.getByRole("button", { name: "Selecionar artwork alternativa" }));
     expect(main.querySelector("image[data-compositor-artwork]")).toHaveAttribute("data-compositor-artwork", artworkFrontNext.candidateId);
     await user.click(screen.getByRole("button", { name: "Verso" }));
@@ -212,7 +210,6 @@ describe("canonical live compositor interactions", () => {
     await user.click(screen.getByRole("button", { name: "Próxima página" }));
     expect(sheet()).toHaveAttribute("data-compositor-page", "2");
 
-    await user.click(screen.getByRole("tab", { name: "Calibração" }));
     await user.click(screen.getByRole("button", { name: "Frente" }));
     await user.clear(screen.getByRole("spinbutton", { name: "Offset de calibração" }));
     await user.type(screen.getByRole("spinbutton", { name: "Offset de calibração" }), "500");

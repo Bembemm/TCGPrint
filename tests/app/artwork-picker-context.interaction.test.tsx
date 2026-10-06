@@ -121,7 +121,7 @@ describe("M6 Artwork Picker face context", () => {
     await user.type(screen.getByRole("textbox", { name: "Cole uma decklist ou URL" }), "1 Delver of Secrets");
     await user.click(screen.getByRole("button", { name: "Adicionar cartas" }));
     await screen.findByRole("button", { name: /1\/1 · Delver of Secrets/ });
-    await user.click(screen.getByRole("tab", { name: "Artwork" }));
+    await user.click(screen.getByRole("tab", { name: "Cartas" }));
     await user.click(await screen.findByRole("button", { name: "Selecionar arte" }));
     let dialog = await screen.findByRole("dialog", { name: /Delver of Secrets/ });
 
@@ -216,9 +216,9 @@ describe("M6 Artwork Picker face context", () => {
     await user.type(screen.getByRole("textbox", { name: "Cole uma decklist ou URL" }), "2 Island\n1 Delver of Secrets");
     await user.click(screen.getByRole("button", { name: "Adicionar cartas" }));
     await screen.findByRole("button", { name: /1\/2 · Island/ });
-    await user.click(screen.getByRole("tab", { name: "PDF" }));
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
     await user.selectOptions(await screen.findByRole("combobox", { name: "Verso padrão do Project" }), backAsset.assetId);
-    await user.click(screen.getByRole("tab", { name: "Artwork" }));
+    await user.click(screen.getByRole("tab", { name: "Cartas" }));
     await user.click(await screen.findByRole("button", { name: "Selecionar arte" }));
     let dialog = await screen.findByRole("dialog", { name: /Island/ });
     await user.click(within(dialog).getByRole("tab", { name: "Back" }));

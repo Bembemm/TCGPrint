@@ -1514,10 +1514,10 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     })}
   </div>;
 
-  const sharedProjectSections: readonly WorkspaceSection[] = ["project", "layout", "pdf", "cut", "templates"];
+  const sharedProjectSections: readonly WorkspaceSection[] = ["settings", "export"];
   const sharedProjectPanel = (activeSection: WorkspaceSection) => <div className="workspace-project-settings-content">
       <ProjectsPanel
-        view={activeSection === "project" ? "project" : activeSection === "templates" ? "templates" : activeSection === "cut" ? "cut" : "hidden"}
+        view={activeSection === "export" ? "export" : "settings"}
         cards={workingCards}
         physicalOrder={physicalOrder}
         settings={projectSettings}
@@ -1572,11 +1572,11 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         onProjectInteractionLockChange={setProjectInteractionLocked}
         disabled={busy}
       />
-    <div className="workspace-settings-view" hidden={activeSection !== "layout" && activeSection !== "pdf" && activeSection !== "cut"}>
+    <div className="workspace-settings-view" hidden={activeSection !== "settings"}>
           <ProjectSettingsControls
             paperFormat={paperFormat}
             cardFormat={cardFormat}
-            section={activeSection === "layout" || activeSection === "pdf" || activeSection === "cut" ? activeSection : "layout"}
+            section="all"
             bleedMm={bleedMm}
             roundedCorners={roundedCorners}
             trimGuideEnabled={trimGuideEnabled}
@@ -1624,7 +1624,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             onDuplexFlipModeChange={(value) => updateProjectSetting(() => setDuplexFlipMode(value))}
           />
     </div>
-    <div className="workspace-back-library-view" hidden={activeSection !== "pdf"}>
+    <div className="workspace-back-library-view" hidden={activeSection !== "settings"}>
       <BackLibraryControls
             assets={backLibraryAssets}
             selectedDefault={projectDefaultBack}
@@ -1636,6 +1636,22 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             onManualBackChange={(asset) => { if (activeCard) dispatchEditor({ type: "replace-card", cardId: activeCard.id, card: selectManualBackLibraryAsset(activeCard, asset) }); }}
       />
     </div>
+    <div className="workspace-settings-view" hidden={activeSection !== "settings"}>
+      <PrinterCalibrationPanel
+        paperFormat={paperFormat}
+        pageOrientation={pageOrientation}
+        printerProfileSelection={printerProfileSelection}
+        printerDuplexMode={printerDuplexMode}
+        exportContentMode={exportContentMode}
+        duplexFlipMode={duplexFlipMode}
+        disabled={interactionBusy}
+        onProjectSelectionChange={(selection, mode) => updateProjectSetting(() => {
+          setPrinterProfileSelection(selection);
+          setPrinterDuplexMode(mode);
+        })}
+      />
+    </div>
+    <div className="workspace-export-view" hidden={activeSection !== "export"}>{exportSection}</div>
   </div>;
 
   const cardsSection = <div className="workspace-section-content workspace-cards-content">
@@ -1678,6 +1694,9 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
 
           <WorkingCardDetailsSummary card={activeCard} identityLayout={identityDetails?.layout} artworkCandidates={artworkCandidates} />
           <div className="card-identity-actions">
+            {selectedFor(activeCard, face) && <span>Arte atual: {labelSource(selectedFor(activeCard, face)!.source)} · {selectedFor(activeCard, face)!.candidateId}</span>}
+            {activeCard.manualBackArtwork?.source === "scryfall" && <span>Verso Scryfall legado preservado.</span>}
+            <button className="button secondary" type="button" disabled={interactionBusy} onClick={(event) => openArtworkPicker(activeCard.id, face, event.currentTarget)}>Selecionar arte</button>
             <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => void reresolveCard(activeCard)}>Re-resolver esta carta</button>
           </div>
 
@@ -1710,20 +1729,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           {(identityDetails?.relatedCards.length || relatedCardNames(activeCard).length) > 0 && <div className="related-card-list"><strong>Related cards / tokens:</strong> {(identityDetails?.relatedCards ?? relatedCardNames(activeCard)).map((item) => `${item.name}${item.component === "token" ? " (token; não adicionado)" : ""}`).join(" · ")}</div>}
         </div>}
       </div>}
-  </div>;
-
-  const artworkSection = <div className="workspace-section-content workspace-artwork-content">
-    {activeCard ? <>
-      <p className="muted">A arte é aplicada ao estado canônico usado pelo compositor, pelo Project e pelo PDF.</p>
-      <div className="selected-artwork-summary">
-        <strong>{displayCard(activeCard)}</strong>
-        <span>{activeCard.quantity} cópia(s) · {isDoubleFacedIdentity(activeCard.identity) ? "Carta dupla-face" : "Carta simples"}</span>
-        {selected && <span>Arte atual: {labelSource(selected.source)} · {selected.candidateId}</span>}
-        {activeCard.manualBackArtwork?.source === "scryfall" && <span>Verso Scryfall legado preservado.</span>}
-        <button className="button primary" type="button" disabled={interactionBusy} onClick={(event) => openArtworkPicker(activeCard.id, face, event.currentTarget)}>Selecionar arte</button>
-      </div>
-      <p className="muted">Para editar uma cópia específica, selecione-a no compositor e use “Selecionar arte”.</p>
-    </> : <section className="panel"><h3>Nenhuma carta selecionada</h3><p>Adicione e selecione uma carta para escolher artwork.</p></section>}
   </div>;
 
   const pickerCard = artworkTargetCard;
@@ -2083,27 +2088,10 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       hasCards={workingCards.length > 0}
       inert={pickerIsOpen}
       ariaHidden={pickerIsOpen}
-      sharedPanel={{ id: "workspace-project-settings-panel", sections: sharedProjectSections, content: sharedProjectPanel }}
+      advancedContent={diagnosticsSection}
+      sharedPanel={{ id: "workspace-settings-export-panel", sections: sharedProjectSections, content: sharedProjectPanel }}
       sections={{
         cards: cardsSection,
-        artwork: artworkSection,
-        calibration: <div className="workspace-section-content">
-          <PrinterCalibrationPanel
-          paperFormat={paperFormat}
-          pageOrientation={pageOrientation}
-          printerProfileSelection={printerProfileSelection}
-          printerDuplexMode={printerDuplexMode}
-          exportContentMode={exportContentMode}
-          duplexFlipMode={duplexFlipMode}
-          disabled={interactionBusy}
-          onProjectSelectionChange={(selection, mode) => updateProjectSetting(() => {
-            setPrinterProfileSelection(selection);
-            setPrinterDuplexMode(mode);
-          })}
-          />
-        </div>,
-        export: exportSection,
-        diagnostics: diagnosticsSection,
       }}
     />
     {artworkPickerContent && <ArtworkPickerDialog title={pickerTitle} onClose={closeArtworkPicker} restoreFocusRef={pickerOpenerRef}>{artworkPickerContent}</ArtworkPickerDialog>}

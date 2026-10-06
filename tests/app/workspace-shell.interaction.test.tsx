@@ -44,13 +44,19 @@ function previewCard(id: string, order: number): WorkingCard {
 }
 
 describe("workspace shell interactions", () => {
-  it("orders all sidebar sections with Cartas first and exposes the selected tab", () => {
+  it("exposes only Cartas, Configurações, and Exportar as primary tabs with linked panels", () => {
     render(workspace());
 
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((tab) => tab.textContent)).toEqual(WORKSPACE_SECTIONS.map(({ label }) => label));
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Cartas", "Configurações", "Exportar"]);
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
     expect(tabs[0]).toHaveAttribute("tabindex", "0");
+    expect(screen.queryByRole("tab", { name: "Artwork" })).not.toBeInTheDocument();
+    for (const tab of tabs) {
+      const panel = document.getElementById(tab.getAttribute("aria-controls") ?? "");
+      expect(panel).not.toBeNull();
+      expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+    }
     expect(screen.getByRole("complementary", { name: "Painel lateral" })).toBeInTheDocument();
   });
 
@@ -61,21 +67,67 @@ describe("workspace shell interactions", () => {
     const cardsTab = screen.getByRole("tab", { name: "Cartas" });
     cardsTab.focus();
     await user.keyboard("{ArrowRight}");
-    const artworkTab = screen.getByRole("tab", { name: "Artwork" });
-    expect(artworkTab).toHaveAttribute("aria-selected", "true");
-    expect(artworkTab).toHaveFocus();
+    const settingsTab = screen.getByRole("tab", { name: "Configurações" });
+    expect(settingsTab).toHaveAttribute("aria-selected", "true");
+    expect(settingsTab).toHaveFocus();
 
-    const draft = screen.getByLabelText("artwork draft");
+    const draft = screen.getByLabelText("settings draft");
     await user.type(draft, "selected card draft");
-    await user.click(screen.getByRole("tab", { name: "Projeto" }));
-    await user.click(artworkTab);
+    await user.click(screen.getByRole("tab", { name: "Exportar" }));
+    await user.click(settingsTab);
 
-    expect(screen.getByLabelText("artwork draft")).toHaveValue("selected card draft");
+    expect(screen.getByLabelText("settings draft")).toHaveValue("selected card draft");
     expect(draft.isConnected).toBe(true);
     const previewDraft = screen.getByLabelText("preview draft");
     await user.type(previewDraft, "physical preview stays mounted");
-    await user.click(screen.getByRole("tab", { name: "Corte" }));
+    await user.click(screen.getByRole("tab", { name: "Exportar" }));
     expect(screen.getByLabelText("preview draft")).toHaveValue("physical preview stays mounted");
+    await user.keyboard("{End}");
+    expect(screen.getByRole("tab", { name: "Exportar" })).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(cardsTab).toHaveFocus();
+  });
+
+  it("keeps one shared settings and export controller mounted while changing tabs", async () => {
+    const user = userEvent.setup();
+    const sections = { cards: <p>cards</p>, settings: <p>settings</p>, export: <p>export</p> };
+    render(<WorkspaceShell
+      sections={sections}
+      preview={<div />}
+      hasCards
+      sharedPanel={{ id: "workspace-settings-export-panel", sections: ["settings", "export"], content: <DraftField label="shared controller draft" /> }}
+    />);
+
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
+    const draft = screen.getByLabelText("shared controller draft");
+    await user.type(draft, "preserved");
+    await user.click(screen.getByRole("tab", { name: "Exportar" }));
+    expect(screen.getByLabelText("shared controller draft")).toBe(draft);
+    expect(draft).toHaveValue("preserved");
+    expect(draft).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
+    expect(screen.getByLabelText("shared controller draft")).toBe(draft);
+  });
+
+  it("opens advanced diagnostics without adding a fourth primary tab", async () => {
+    const user = userEvent.setup();
+    render(<WorkspaceShell
+      sections={{ cards: <p>cards</p>, settings: <p>settings</p>, export: <p>export</p> }}
+      preview={<div />}
+      hasCards
+      advancedContent={<p>Provider health</p>}
+    />);
+
+    await user.click(screen.getByText("···"));
+    await user.click(screen.getByText("Developer"));
+    const trigger = screen.getByRole("button", { name: "Diagnóstico" });
+    await user.click(trigger);
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.getByRole("region", { name: "Developer · Diagnóstico" })).toHaveTextContent("Provider health");
+    const close = screen.getByRole("button", { name: "Fechar diagnóstico" });
+    expect(close).toHaveFocus();
+    await user.click(close);
+    expect(trigger).toHaveFocus();
   });
 
   it("keeps skipped-slot editing active through the selected-copy action while navigating", async () => {
@@ -105,20 +157,20 @@ describe("workspace shell interactions", () => {
     expect(firstSlot).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Desativar slot da carta selecionada" }));
     expect(screen.queryByText("SKIP 1")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Artwork" }));
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
     expect(screen.getByRole("button", { name: "Slot 1 desativado" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("collapses and reopens the desktop sidebar without changing its active section", async () => {
     const user = userEvent.setup();
     render(workspace());
-    await user.click(screen.getByRole("tab", { name: "PDF" }));
+    await user.click(screen.getByRole("tab", { name: "Exportar" }));
 
     await user.click(screen.getByRole("button", { name: "Recolher painel" }));
     expect(screen.getByRole("complementary", { name: "Painel lateral" })).toHaveAttribute("data-collapsed", "true");
     await user.click(screen.getByTestId("workspace-reopen"));
 
-    expect(screen.getByRole("tab", { name: "PDF" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Exportar" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("opens Cartas from the empty state and restores a collapsed sidebar", async () => {
@@ -126,7 +178,7 @@ describe("workspace shell interactions", () => {
     const sections = Object.fromEntries(WORKSPACE_SECTIONS.map(({ id }) => [id, <DraftField key={id} label={`${id} draft`} />])) as Record<WorkspaceSection, ReactNode>;
     render(<WorkspaceShell sections={sections} preview={<div />} hasCards={false} />);
 
-    await user.click(screen.getByRole("tab", { name: "PDF" }));
+    await user.click(screen.getByRole("tab", { name: "Exportar" }));
     await user.click(screen.getByRole("button", { name: "Recolher painel" }));
     await user.click(screen.getByRole("button", { name: "Abrir Cartas" }));
 
@@ -145,9 +197,9 @@ describe("workspace shell interactions", () => {
     expect(drawer).toHaveAttribute("aria-modal", "true");
     expect(screen.getByRole("tab", { name: "Cartas" })).toHaveFocus();
 
-    await user.click(within(drawer).getByRole("tab", { name: "Artwork" }));
+    await user.click(within(drawer).getByRole("tab", { name: "Configurações" }));
     expect(drawer).toHaveAttribute("data-drawer-open", "true");
-    expect(screen.getByRole("tab", { name: "Artwork" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Configurações" })).toHaveAttribute("aria-selected", "true");
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(drawer).toHaveAttribute("data-drawer-open", "false");

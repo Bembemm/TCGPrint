@@ -12,12 +12,15 @@ describe("import workbench page", () => {
     expect(markup).toContain("Selecionar arquivos");
     expect(markup).toContain("Selecionar pasta");
     expect(markup).toContain("Arraste arquivos aqui");
-    expect(markup).toContain("Diagnóstico da importação");
+    expect(markup).toContain("Analisar importação");
     expect(markup).not.toContain("Criar preview");
     expect(markup).toMatch(/type=\"file\" multiple=\"\"[^>]*>/);
     expect(markup).toContain("webkitdirectory=\"\"");
     expect(markup).toContain('aria-label="Seções de trabalho"');
     expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain('id="workspace-tab-settings"');
+    expect(markup).toContain('id="workspace-tab-export"');
+    expect(markup).not.toContain('id="workspace-tab-artwork"');
     expect(markup).toContain("Entradas");
     expect(markup).toContain("Adicionar cartas");
     expect(markup).not.toContain("Resolver identidades");

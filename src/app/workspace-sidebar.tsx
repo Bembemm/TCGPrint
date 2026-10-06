@@ -4,15 +4,8 @@ import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
 export const WORKSPACE_SECTIONS = [
   { id: "cards", label: "Cartas" },
-  { id: "artwork", label: "Artwork" },
-  { id: "project", label: "Projeto" },
-  { id: "layout", label: "Layout" },
-  { id: "pdf", label: "PDF" },
-  { id: "cut", label: "Corte" },
-  { id: "templates", label: "Templates" },
-  { id: "calibration", label: "Calibração" },
-  { id: "export", label: "Export" },
-  { id: "diagnostics", label: "Diagnóstico" },
+  { id: "settings", label: "Configurações" },
+  { id: "export", label: "Exportar" },
 ] as const;
 
 export type WorkspaceSection = typeof WORKSPACE_SECTIONS[number]["id"];

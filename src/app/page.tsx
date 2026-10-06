@@ -231,10 +231,31 @@ export default function HomePage() {
         )}
         <div className="action-row">
           <button className="button secondary" type="button" onClick={runPreview} disabled={busy}>
-            {busy ? "Analisando…" : "Diagnóstico da importação"}
+            {busy ? "Analisando…" : "Analisar importação"}
           </button>
           <span className="status" aria-live="polite">{status}</span>
         </div>
+        {preview?.detections.some((detection) => detection.status === "ambiguous") && <fieldset className="ambiguous-import-choices">
+          <legend>Escolha o importer para as entradas ambíguas</legend>
+          {preview.detections.filter((detection) => detection.status === "ambiguous").map((detection) => {
+            const source = preview.sources.find((item) => item.id === detection.sourceId);
+            const sourceId = detection.sourceId ?? "";
+            return <label className="ambiguous-import-choice" key={sourceId}>
+              <span>{source?.sourcePath || source?.filename || sourceId}</span>
+              <select
+                aria-label={`Importer para ${source?.filename ?? sourceId}`}
+                value={choices[sourceId] ?? detection.selected?.kind ?? ""}
+                onChange={(event) => {
+                  const kind = event.currentTarget.value as ImportKind;
+                  setChoices((current) => ({ ...current, [sourceId]: kind }));
+                }}
+              >
+                <option value="">Escolha</option>
+                {detection.candidates.map((candidate) => <option key={candidate.kind} value={candidate.kind}>{candidate.kind}</option>)}
+              </select>
+            </label>;
+          })}
+        </fieldset>}
         {problem && <p className="error-message" role="alert">{problem}</p>}
       </section>
   );
@@ -272,16 +293,7 @@ export default function HomePage() {
                       <div>{detection.candidates.map((candidate) => `${candidate.kind} ${(candidate.confidence * 100).toFixed(0)}%`).join(" · ")}</div>
                       {detection.reasons.length > 0 && <small className="detection-reasons">{detection.reasons.join(" ")}</small>}
                     </td>
-                    <td>{detection.status === "ambiguous" ? (
-                      <select
-                        aria-label={`Importer para ${source?.filename ?? detection.sourceId}`}
-                        value={manualValue}
-                        onChange={(event) => setChoices((current) => ({ ...current, [detection.sourceId ?? ""]: event.currentTarget.value as ImportKind }))}
-                      >
-                        <option value="">Escolha</option>
-                        {detection.candidates.map((candidate) => <option key={candidate.kind} value={candidate.kind}>{candidate.kind}</option>)}
-                      </select>
-                    ) : detection.selected?.kind ?? "aguardando escolha"}</td>
+                    <td>{manualValue || (detection.status === "ambiguous" ? "aguardando escolha" : detection.selected?.kind ?? "aguardando escolha")}</td>
                   </tr>
                 );
               })}</tbody>

@@ -48,7 +48,7 @@ export interface ProjectsPanelProps {
   readonly disabled?: boolean;
 }
 
-export type ProjectsPanelView = "all" | "project" | "templates" | "cut" | "hidden";
+export type ProjectsPanelView = "all" | "project" | "templates" | "cut" | "settings" | "export" | "hidden";
 
 function errorMessage(error: unknown): string {
   if (error instanceof ProjectApiClientError) return error.message;
@@ -480,14 +480,16 @@ export default function ProjectsPanel({
   }
 
   const selectedCutPage = cutPreview?.pages.find(({ pageNumber }) => pageNumber === selectedCutPageNumber) ?? cutPreview?.pages[0];
-  const showProject = view === "all" || view === "project";
-  const showTemplates = view === "all" || view === "templates";
-  const showCut = view === "all" || view === "cut";
+  const showProject = view === "all" || view === "project" || view === "settings";
+  const showProjectState = showProject || Boolean(recoveryDecision) || session.status === "Conflito" || session.status === "Erro";
+  const showTemplates = view === "all" || view === "templates" || view === "settings";
+  const showCutPreview = view === "all" || view === "cut" || view === "settings";
+  const showCutExport = view === "all" || view === "cut" || view === "export";
 
   return (
     <section
       className="panel projects-panel"
-      aria-label={view === "templates" ? "Templates" : view === "cut" ? "Corte" : "Projects"}
+      aria-label={view === "settings" ? "Configurações" : view === "export" ? "Exportar" : view === "templates" ? "Templates" : view === "cut" ? "Corte" : "Projects"}
       hidden={view === "hidden"}
     >
       <div className="projects-panel-project-view" hidden={!showProject}>
@@ -531,7 +533,7 @@ export default function ProjectsPanel({
       </ul> : <p className="muted">Nenhum Project salvo.</p>}
       </div>
 
-      <TemplateLibraryPanel view={view === "all" ? "all" : showTemplates ? "library" : showCut ? "cut" : "hidden"} selection={templateSelection} cutSourceSelection={settings.cutSourceSelection} onCutSourceSelect={onCutSourceSelectionChange} onRegistrationStatusChange={onTemplateRegistrationStatusChange} onSelect={(selection, defaults) => {
+      <TemplateLibraryPanel view={view === "all" || view === "settings" ? "all" : showTemplates ? "library" : showCutPreview ? "cut" : "hidden"} selection={templateSelection} cutSourceSelection={settings.cutSourceSelection} onCutSourceSelect={onCutSourceSelectionChange} onRegistrationStatusChange={onTemplateRegistrationStatusChange} onSelect={(selection, defaults) => {
         const sameTemplateSelection = templateSelection?.templateId === selection?.templateId
           && templateSelection?.version === selection?.version
           && templateSelection?.packageHash === selection?.packageHash;
@@ -541,15 +543,15 @@ export default function ProjectsPanel({
         else if (selection === null) onTemplateDefaults?.(null);
       }} disabled={projectActionsDisabled} />
 
-      <div className="projects-panel-cut-view" hidden={!showCut}>
-      <section className="cut-export-panel" aria-label="SVG e DXF Cut Export">
+      <div className="projects-panel-cut-view" hidden={!showCutPreview}>
+      <section className="cut-export-panel" aria-label="Preview e validação de corte">
         <div>
-          <h3>SVG/DXF Cut Export</h3>
+          <h3>Preview de corte</h3>
           <p>Preview e exports usam a mesma geometria em milímetros. Cada cut file corresponde à página PDF selecionada e contém somente caminhos dos slots com cartas atribuídas; slots pulados, reservados ou vazios ficam de fora.</p>
           {cutPreview?.geometry.source.kind === "project-layout" && <p className="muted">Sem SVG/DXF selecionado: os exports manuais geram somente retângulos de canto reto a partir dos trims ativos do layout PDF. Nenhum canto ou curva é inferido.</p>}
         </div>
         {session.activeProject === null
-          ? <p className="muted">Abra ou crie um Project para validar e exportar os paths de corte.</p>
+          ? <p className="muted">Abra ou crie um Project para validar os paths de corte.</p>
           : session.status !== "Salvo"
             ? <p className="muted" aria-live="polite">Aguardando autosave para validar a revisão atual do Project.</p>
             : cutPreviewLoading
@@ -557,18 +559,36 @@ export default function ProjectsPanel({
               : cutPreview
                 ? <>
                   <p>Project {cutPreview.projectId} · revisão {cutPreview.projectRevision} · parser {cutPreview.parserVersion} · folha {cutPreview.layout.pageSizeMm.widthMm} × {cutPreview.layout.pageSizeMm.heightMm} mm · {selectedCutPage?.slotPaths.filter(({ state }) => state === "active").length ?? 0} paths ativos</p>
-                  {cutPreview.pageCount > 1 && selectedCutPage && <label className="cut-page-picker">Página PDF
-                    <select aria-label="Página PDF correspondente ao cut file" value={selectedCutPage.pageNumber} onChange={(event) => onCutPageNumberChange(Number(event.currentTarget.value))}>
-                      {cutPreview.pages.map((page) => <option key={page.pageNumber} value={page.pageNumber}>Página {page.pageNumber} · cartas {page.firstCardNumber}–{page.lastCardNumber}</option>)}
-                    </select>
-                  </label>}
                   {cutPreview.alternateSources.map((source) => source.status === "divergent" || source.status === "unreadable"
                     ? <p key={source.fileId} className="error-message" role="alert">Fonte alternativa {source.fileName}: {source.status === "divergent" ? "geometria materialmente divergente" : "não pôde ser comparada"}{source.message ? ` · ${source.message}` : ""}. A seleção explícita do Project continua vinculada ao arquivo escolhido.</p>
                     : null)}
                   {cutPreview.alternateSources.filter(({ status }) => status === "equivalent" || status === "not-compared").map((source) => <p key={source.fileId} className="muted">Fonte alternativa {source.fileName}: {source.status === "equivalent" ? "geometria equivalente" : source.message}</p>)}
+                </>
+                : <p className="muted">Cut preview indisponível.</p>}
+        {cutPreviewError && <p className="error-message" role="alert">{cutPreviewError}</p>}
+      </section>
+      </div>
+
+      <div className="projects-panel-cut-export-view" hidden={!showCutExport}>
+      <section className="cut-export-panel" aria-label="SVG e DXF Cut">
+        <h3>SVG/DXF Cut Export</h3>
+        {session.activeProject === null
+          ? <p className="muted">Abra ou crie um Project em Configurações para validar e exportar os paths de corte.</p>
+          : session.status !== "Salvo"
+            ? <p className="muted" aria-live="polite">Aguardando autosave para validar a revisão atual do Project.</p>
+            : cutPreviewLoading
+              ? <p className="muted" aria-live="polite">Validando original, versão, hash e sincronização com o layout…</p>
+              : cutPreview && selectedCutPage
+                ? <>
+                  <p>Project {cutPreview.projectId} · revisão {cutPreview.projectRevision} · parser {cutPreview.parserVersion} · folha {cutPreview.layout.pageSizeMm.widthMm} × {cutPreview.layout.pageSizeMm.heightMm} mm · {selectedCutPage.slotPaths.filter(({ state }) => state === "active").length} paths ativos</p>
+                  {cutPreview.pageCount > 1 && <label className="cut-page-picker">Página PDF
+                    <select aria-label="Página PDF correspondente ao cut file" value={selectedCutPage.pageNumber} onChange={(event) => onCutPageNumberChange(Number(event.currentTarget.value))}>
+                      {cutPreview.pages.map((page) => <option key={page.pageNumber} value={page.pageNumber}>Página {page.pageNumber} · cartas {page.firstCardNumber}–{page.lastCardNumber}</option>)}
+                    </select>
+                  </label>}
                   <div className="cut-export-actions">
-                    <button className="button secondary" type="button" disabled={projectActionsDisabled || cutExportBusy || !selectedCutPage?.activeGeometry} onClick={() => void exportCut("svg", selectedCutPage?.pageNumber ?? 1)}>{cutExportBusy ? "Exportando…" : `Exportar SVG Cut · página ${selectedCutPage?.pageNumber ?? 1}`}</button>
-                    <button className="button secondary" type="button" disabled={projectActionsDisabled || cutExportBusy || !selectedCutPage?.activeGeometry} onClick={() => void exportCut("dxf", selectedCutPage?.pageNumber ?? 1)}>{cutExportBusy ? "Exportando…" : `Exportar DXF Cut · página ${selectedCutPage?.pageNumber ?? 1}`}</button>
+                    <button className="button secondary" type="button" disabled={projectActionsDisabled || cutExportBusy || !selectedCutPage.activeGeometry} onClick={() => void exportCut("svg", selectedCutPage.pageNumber)}>{cutExportBusy ? "Exportando…" : `Exportar SVG Cut · página ${selectedCutPage.pageNumber}`}</button>
+                    <button className="button secondary" type="button" disabled={projectActionsDisabled || cutExportBusy || !selectedCutPage.activeGeometry} onClick={() => void exportCut("dxf", selectedCutPage.pageNumber)}>{cutExportBusy ? "Exportando…" : `Exportar DXF Cut · página ${selectedCutPage.pageNumber}`}</button>
                   </div>
                 </>
                 : <p className="muted">Cut preview indisponível.</p>}
@@ -576,7 +596,7 @@ export default function ProjectsPanel({
       </section>
       </div>
 
-      <div className="projects-panel-project-state" hidden={!showProject}>
+      <div className="projects-panel-project-state" hidden={!showProjectState}>
       {(session.status === "Conflito" || session.status === "Erro") && session.activeProject && <section className="project-conflict" aria-label={session.status === "Conflito" ? "Conflito de revisão" : "Falha no autosave"}>
         <p role="alert">{session.status === "Conflito"
           ? "A revisão salva mudou em outro lugar. O Working Set local continua aberto e não foi sobrescrito."

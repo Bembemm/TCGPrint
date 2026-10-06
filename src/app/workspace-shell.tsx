@@ -18,6 +18,7 @@ export interface WorkspaceShellProps {
   readonly preview: ReactNode;
   readonly sections: Readonly<Partial<Record<WorkspaceSection, ReactNode>>>;
   readonly sharedPanel?: WorkspaceSharedPanel;
+  readonly advancedContent?: ReactNode;
   readonly hasCards: boolean;
   readonly inert?: boolean;
   readonly ariaHidden?: boolean;
@@ -35,12 +36,16 @@ function isFocusable(element: Element): element is HTMLElement {
   return style.display !== "none" && style.visibility !== "hidden";
 }
 
-export default function WorkspaceShell({ preview, sections, sharedPanel, hasCards, inert = false, ariaHidden = false }: WorkspaceShellProps) {
+export default function WorkspaceShell({ preview, sections, sharedPanel, advancedContent, hasCards, inert = false, ariaHidden = false }: WorkspaceShellProps) {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("cards");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
   const drawerOpenerRef = useRef<HTMLElement | null>(null);
+  const advancedTriggerRef = useRef<HTMLButtonElement>(null);
+  const advancedCloseRef = useRef<HTMLButtonElement>(null);
+  const wasAdvancedOpenRef = useRef(false);
   const sharedSectionSet = useMemo(() => new Set(sharedPanel?.sections ?? []), [sharedPanel?.sections]);
   const panelIdFor = useCallback((section: WorkspaceSection) => sharedSectionSet.has(section)
     ? sharedPanel?.id ?? "workspace-shared-panel"
@@ -60,6 +65,12 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, hasCard
     if (!drawerOpen) return;
     sidebarRef.current?.querySelector<HTMLElement>(`#workspace-tab-${activeSection}`)?.focus();
   }, [activeSection, drawerOpen]);
+
+  useEffect(() => {
+    if (advancedOpen) advancedCloseRef.current?.focus();
+    else if (wasAdvancedOpenRef.current) advancedTriggerRef.current?.focus();
+    wasAdvancedOpenRef.current = advancedOpen;
+  }, [advancedOpen]);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -128,15 +139,32 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, hasCard
     <header className="workspace-topbar">
       <a className="workspace-brand" href="/" aria-label="TCGPrint início">TCGPrint</a>
       <span className="workspace-topbar-status">Preview físico · Project local</span>
-      <button
-        type="button"
-        className="button secondary workspace-mobile-open"
-        aria-label="Abrir painel"
-        aria-expanded={drawerOpen}
-        aria-controls="workspace-sidebar"
-        data-testid="workspace-mobile-open"
-        onClick={(event) => openDrawer(event.currentTarget)}
-      >Painel</button>
+      <div className="workspace-topbar-actions">
+        {advancedContent && <details className="workspace-overflow-menu">
+          <summary aria-label="Mais opções" title="Mais opções">···</summary>
+          <div className="workspace-overflow-menu-content">
+            <details>
+              <summary>Developer</summary>
+              <button
+                ref={advancedTriggerRef}
+                type="button"
+                aria-expanded={advancedOpen}
+                aria-controls="workspace-advanced-panel"
+                onClick={() => setAdvancedOpen((open) => !open)}
+              >Diagnóstico</button>
+            </details>
+          </div>
+        </details>}
+        <button
+          type="button"
+          className="button secondary workspace-mobile-open"
+          aria-label="Abrir painel"
+          aria-expanded={drawerOpen}
+          aria-controls="workspace-sidebar"
+          data-testid="workspace-mobile-open"
+          onClick={(event) => openDrawer(event.currentTarget)}
+        >Painel</button>
+      </div>
     </header>
 
     <div className="workspace-layout">
@@ -155,12 +183,24 @@ export default function WorkspaceShell({ preview, sections, sharedPanel, hasCard
         drawerOpen={drawerOpen}
         panelIdFor={panelIdFor}
         sidebarRef={sidebarRef}
-        children={panels}
         onCollapse={() => setSidebarCollapsed(true)}
         onClose={closeDrawer}
         onSelectSection={setActiveSection}
         onTabKeyDown={handleTabKeyDown}
-      />
+      >{panels}
+        {advancedContent && <section
+          id="workspace-advanced-panel"
+          className="workspace-advanced-panel"
+          aria-label="Developer · Diagnóstico"
+          hidden={!advancedOpen}
+        >
+          <header className="workspace-advanced-heading">
+            <h2>Diagnóstico</h2>
+            <button ref={advancedCloseRef} type="button" className="button secondary" onClick={() => setAdvancedOpen(false)}>Fechar diagnóstico</button>
+          </header>
+          {advancedContent}
+        </section>}
+      </WorkspaceSidebar>
       {sidebarCollapsed && <button type="button" className="workspace-reopen" aria-label="Abrir painel" aria-controls="workspace-sidebar" data-testid="workspace-reopen" onClick={() => setSidebarCollapsed(false)}>›</button>}
     </div>
   </div>;

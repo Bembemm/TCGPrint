@@ -17,6 +17,28 @@ const providerHealth = {
   mpc: { available: true, degraded: false },
 };
 
+const legacyTemplateVersion = {
+  templateId: "legacy-custom-template",
+  name: "Legacy custom",
+  source: "Fixture",
+  version: "v9",
+  paper: "a4",
+  cardFormat: "standard",
+  orientation: "portrait",
+  registrationType: "custom",
+  packageHash: "9".repeat(64),
+  createdAt: "2026-01-01T00:00:00.000Z",
+  files: [],
+};
+const legacyTemplate = {
+  id: "legacy-custom-template",
+  name: "Legacy custom",
+  source: "Fixture",
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+  versions: [legacyTemplateVersion],
+};
+
 function card(id: string, name: string, order: number): WorkingCard {
   return {
     id,
@@ -43,8 +65,8 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-describe("Cards and Artwork navigation", () => {
-  it("keeps the selected Working Card when navigating from Cartas to Artwork and back", async () => {
+describe("Cartas workspace navigation", () => {
+  it("keeps the selected Working Card and Artwork Picker reachable in Cartas", async () => {
     const user = userEvent.setup();
     const imported = [card("island-card", "Island", 0), card("mountain-card", "Mountain", 1)];
     let cardsReturnedByImport = imported;
@@ -92,7 +114,11 @@ describe("Cards and Artwork navigation", () => {
       }
       if (url === "/api/back-library") return Response.json({ assets: [] });
       if (url === "/api/projects") return Response.json({ projects: [] });
-      if (url === "/api/templates") return Response.json({ templates: [] });
+      if (url === "/api/templates") return Response.json({ templates: [legacyTemplate] });
+      if (url.startsWith("/api/templates/legacy-custom-template/versions/v9/verify")) {
+        const selection = { templateId: "legacy-custom-template", version: "v9", packageHash: legacyTemplateVersion.packageHash };
+        return Response.json({ selection, status: "available", version: legacyTemplateVersion, files: [] });
+      }
       if (url === "/api/printer-profiles") return Response.json({ profiles: [] });
       if (url === "/api/cards/mountain-card") return Response.json({ identity: { id: "mountain", provider: "scryfall", name: "Mountain", resolutionMethod: "name", confidence: 1, relatedCards: [] } });
       if (url === "/api/cards/mountain-card/artworks") return Response.json({ candidates: [mountainArtwork], catalogTotal: 1, catalogTotalComplete: true, providerHealth });
@@ -115,7 +141,7 @@ describe("Cards and Artwork navigation", () => {
     await user.click(screen.getByRole("button", { name: /2\/2 · Mountain/ }));
     expect(screen.getByRole("button", { name: /2\/2 · Mountain/ })).toHaveAttribute("aria-pressed", "true");
 
-    await user.click(screen.getByRole("tab", { name: "Artwork" }));
+    await user.click(screen.getByRole("tab", { name: "Cartas" }));
     const openPicker = async () => {
       await user.click(await screen.findByRole("button", { name: "Selecionar arte" }));
       return screen.findByRole("dialog");
@@ -127,7 +153,7 @@ describe("Cards and Artwork navigation", () => {
     await user.click(within(screen.getByRole("dialog", { name: /Mountain/ })).getByRole("button", { name: "Fechar seletor de arte" }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     await user.click(screen.getByRole("button", { name: /1\/2 · Island/ }));
-    await user.click(screen.getByRole("tab", { name: "Artwork" }));
+    await user.click(screen.getByRole("tab", { name: "Cartas" }));
     picker = await openPicker();
     await user.click(within(await picker).getByRole("button", { name: "Selecionar arte" }));
     await user.click(within(await picker).getByRole("button", { name: "Aplicar seleção" }));
@@ -137,12 +163,12 @@ describe("Cards and Artwork navigation", () => {
     await user.click(screen.getByRole("button", { name: /2\/2 · Mountain/ }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     expect(screen.getByRole("button", { name: /2\/2 · Mountain/ })).toHaveAttribute("aria-pressed", "true");
-    await user.click(screen.getByRole("tab", { name: "Artwork" }));
+    await user.click(screen.getByRole("tab", { name: "Cartas" }));
     picker = await openPicker();
     expect(within(await picker).getByText(/Estado atual:.*scryfall:mountain-front/)).toBeInTheDocument();
     await user.click(within(await picker).getByRole("button", { name: "Fechar seletor de arte" }));
 
-    await user.click(screen.getByRole("tab", { name: "Export" }));
+    await user.click(screen.getByRole("tab", { name: "Exportar" }));
     const composer = screen.getByRole("group", { name: /Compositor live frente/ });
     const initialSlotX = composer.querySelector("g[data-slot-x-mm]")?.getAttribute("data-slot-x-mm");
     const generate = screen.getByRole("button", { name: "Gerar PDF final" });
@@ -206,7 +232,7 @@ describe("Cards and Artwork navigation", () => {
     await user.tab();
     expect(liveCompositor?.contains(document.activeElement)).toBe(false);
 
-    await user.click(screen.getByRole("tab", { name: "Layout" }));
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
     await user.click(screen.getByText("Grade, slots e margens avançados"));
     const margin = screen.getByRole("spinbutton", { name: "Margem esquerda (mm)" });
     await user.clear(margin);
@@ -231,5 +257,14 @@ describe("Cards and Artwork navigation", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /2\/2 · Forest/ })).toBeInTheDocument());
     expect(composer.querySelector('g[data-physical-card-index="1"]')).toHaveAttribute("data-physical-instance-id", "instance-2");
     expect(composer.querySelector('g[data-physical-card-index="1"]')).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
+    await user.click(await screen.findByRole("button", { name: "Associar ao Project" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Associado" })).toHaveAttribute("aria-pressed", "true"));
+    await screen.findByText(/Registration custom desta versão legada/);
+    await user.click(screen.getByRole("tab", { name: "Exportar" }));
+    expect(screen.getAllByText(/Template: legacy-custom-unconfigured/)).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Gerar PDF final" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Conferir PDF final" })).toBeDisabled();
   }, 15_000);
 });

@@ -12,15 +12,14 @@ import WorkspaceShell, { WORKSPACE_SECTIONS, type WorkspaceSection } from "../..
 
 afterEach(cleanup);
 
-function SettingsControls({ activeSection }: { readonly activeSection: WorkspaceSection }) {
+function SettingsControls() {
   const [pageOrientation, setPageOrientation] = useState<"portrait" | "landscape">("portrait");
   const [bleedMm, setBleedMm] = useState("0.625");
   const [roundedCorners, setRoundedCorners] = useState(false);
   const [exportContentMode, setExportContentMode] = useState(DEFAULT_PROJECT_SETTINGS.exportContentMode);
   const [registration, setRegistration] = useState<RegistrationConfig>(() => createDefaultRegistrationConfig("none", "portrait"));
-  const section = activeSection === "pdf" ? "pdf" : activeSection === "cut" ? "cut" : "layout";
   const props = {
-    section,
+    section: "all" as const,
     paperFormat: DEFAULT_PROJECT_SETTINGS.paperFormat,
     cardFormat: DEFAULT_PROJECT_SETTINGS.cardFormat,
     bleedMm,
@@ -75,27 +74,27 @@ function settingsWorkspace() {
     preview={<div />}
     hasCards
     sharedPanel={{
-      id: "workspace-project-settings-panel",
-      sections: ["project", "layout", "pdf", "cut", "templates"],
-      content: (activeSection: WorkspaceSection) => <SettingsControls activeSection={activeSection} />,
+      id: "workspace-settings-export-panel",
+      sections: ["settings", "export"],
+      content: (activeSection: WorkspaceSection) => <>
+        <div hidden={activeSection !== "settings"}><SettingsControls /></div>
+        <div hidden={activeSection !== "export"}><p>PDF e conferência final</p></div>
+      </>,
     }}
   />;
 }
 
 describe("workspace settings sections", () => {
-  it("changes Layout and PDF controls through their canonical callbacks", async () => {
+  it("keeps Layout, PDF, and cut settings together and preserves their drafts across Exportar", async () => {
     const user = userEvent.setup();
     render(settingsWorkspace());
 
-    await user.click(screen.getByRole("tab", { name: "Layout" }));
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
     await user.click(screen.getByText("Grade, slots e margens avançados"));
     expect(screen.getByRole("spinbutton", { name: "Linhas da grade (opcional)" })).toBeInTheDocument();
     const orientation = screen.getByRole("combobox", { name: "Orientação da página" });
     await user.selectOptions(orientation, "landscape");
     expect(orientation).toHaveValue("landscape");
-    expect(screen.queryByRole("combobox", { name: "Modo de exportação" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "PDF" }));
     const mode = screen.getByRole("combobox", { name: "Modo de exportação" });
     await user.selectOptions(mode, "duplex");
     expect(mode).toHaveValue("duplex");
@@ -105,17 +104,19 @@ describe("workspace settings sections", () => {
     await user.type(bleed, "1.25");
     await user.click(screen.getByRole("checkbox", { name: /Cantos arredondados/ }));
 
-    await user.click(screen.getByRole("tab", { name: "Layout" }));
+    await user.click(screen.getByRole("tab", { name: "Exportar" }));
+    expect(screen.getByText("PDF e conferência final")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
     expect(screen.getByRole("combobox", { name: "Orientação da página" })).toHaveValue("landscape");
-    await user.click(screen.getByRole("tab", { name: "PDF" }));
+    expect(screen.getByRole("combobox", { name: "Modo de exportação" })).toHaveValue("duplex");
     expect(screen.getByRole("spinbutton", { name: "Bleed externo (mm)" })).toHaveValue(1.25);
     expect(screen.getByRole("checkbox", { name: /Cantos arredondados/ })).toBeChecked();
   });
 
-  it("keeps custom registration geometry draft when navigating Corte, Templates, and Projeto", async () => {
+  it("keeps custom registration geometry draft when navigating Configurações, Exportar, and Cartas", async () => {
     const user = userEvent.setup();
     render(settingsWorkspace());
-    await user.click(screen.getByRole("tab", { name: "Corte" }));
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Registration type" }), "custom");
     await user.click(screen.getByText("Registration e geometria custom"));
     const geometry = screen.getByRole("textbox", { name: /Custom geometry JSON/ });
@@ -123,9 +124,9 @@ describe("workspace settings sections", () => {
     fireEvent.change(geometry, { target: { value: "{bad draft" } });
     expect(geometry).toHaveValue("{bad draft");
 
-    await user.click(screen.getByRole("tab", { name: "Templates" }));
-    await user.click(screen.getByRole("tab", { name: "Projeto" }));
-    await user.click(screen.getByRole("tab", { name: "Corte" }));
+    await user.click(screen.getByRole("tab", { name: "Exportar" }));
+    await user.click(screen.getByRole("tab", { name: "Cartas" }));
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
     expect(screen.getByRole("textbox", { name: /Custom geometry JSON/ })).toHaveValue("{bad draft");
   });
 });

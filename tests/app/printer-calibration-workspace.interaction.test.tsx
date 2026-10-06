@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { useState } from "react";
-import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import userEvent from "@testing-library/user-event";
@@ -32,8 +31,7 @@ const profile: PrinterProfileSnapshot = {
 };
 
 function calibrationWorkspace() {
-  const sections = Object.fromEntries(WORKSPACE_SECTIONS.map(({ id }) => [id, id === "calibration"
-    ? <PrinterCalibrationPanel
+  const calibrationPanel = <PrinterCalibrationPanel
         paperFormat={DEFAULT_PROJECT_SETTINGS.paperFormat}
         pageOrientation="portrait"
         printerProfileSelection={profile}
@@ -42,9 +40,20 @@ function calibrationWorkspace() {
         duplexFlipMode="long-edge"
         disabled={false}
         onProjectSelectionChange={vi.fn()}
-      />
-    : <p>{id}</p>])) as Record<(typeof WORKSPACE_SECTIONS)[number]["id"], ReactNode>;
-  return <WorkspaceShell sections={sections} preview={<div />} hasCards />;
+      />;
+  return <WorkspaceShell
+    sections={{ cards: <p>cards</p>, settings: <p>settings</p>, export: <p>export</p> }}
+    preview={<div />}
+    hasCards
+    sharedPanel={{
+      id: "workspace-settings-export-panel",
+      sections: ["settings", "export"],
+      content: (activeSection: (typeof WORKSPACE_SECTIONS)[number]["id"]) => <>
+        <div hidden={activeSection !== "settings"}>{calibrationPanel}</div>
+        <div hidden={activeSection !== "export"}><p>PDF export surface</p></div>
+      </>,
+    }}
+  />;
 }
 
 describe("calibration wizard stages", () => {
@@ -52,7 +61,7 @@ describe("calibration wizard stages", () => {
     const user = userEvent.setup();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ profiles: [profile] }), { status: 200 })));
     render(calibrationWorkspace());
-    await user.click(screen.getByRole("tab", { name: "Calibração" }));
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
 
     const profileStage = screen.getByRole("tab", { name: "Profile" });
     profileStage.focus();
@@ -115,7 +124,7 @@ describe("calibration wizard stages", () => {
     const user = userEvent.setup();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ profiles: [profile] }), { status: 200 })));
     render(calibrationWorkspace());
-    await user.click(screen.getByRole("tab", { name: "Calibração" }));
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
 
     expect(screen.getByRole("tab", { name: "Profile" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("combobox", { name: "Printer profile" })).toBeInTheDocument();
@@ -149,7 +158,7 @@ describe("calibration wizard stages", () => {
     const user = userEvent.setup();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ profiles: [profile] }), { status: 200 })));
     render(calibrationWorkspace());
-    await user.click(screen.getByRole("tab", { name: "Calibração" }));
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
     await user.click(screen.getByRole("tab", { name: "Ajuste" }));
     await user.click(screen.getByRole("button", { name: "Advanced · Scale/Skew" }));
     await user.click(screen.getByRole("button", { name: "Front" }));
@@ -171,8 +180,8 @@ describe("calibration wizard stages", () => {
     expect(screen.getByLabelText("X offset (mm)")).toHaveValue("1.234");
     expect(screen.getByLabelText(/Opacidade do verso/)).toHaveValue("65");
 
-    await user.click(screen.getByRole("tab", { name: "Artwork" }));
-    await user.click(screen.getByRole("tab", { name: "Calibração" }));
+    await user.click(screen.getByRole("tab", { name: "Exportar" }));
+    await user.click(screen.getByRole("tab", { name: "Configurações" }));
     await user.click(screen.getByRole("tab", { name: "Medições" }));
     expect((screen.getByLabelText("Fixture session ID") as HTMLInputElement).value).toBe(sessionId);
     expect(screen.getAllByLabelText("X (mm)")[0]).toHaveValue("0.125");
