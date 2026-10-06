@@ -58,6 +58,27 @@ describe("ScryfallClient", () => {
     expect(urls.some((url) => url.searchParams.get("q") === "oracleid:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" && url.searchParams.get("unique") === "prints")).toBe(true);
   });
 
+  it("fetches one Scryfall printing page without walking the remaining catalog", async () => {
+    const second = "https://api.scryfall.com/cards/search?q=oracleid%3Atest&page=2";
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.searchParams.get("page") === "2") return json(cardPage([{ ...normal, id: "printing-page-2", collector_number: "2" }]));
+      return json({ ...cardPage([{ ...normal, id: "printing-page-1", collector_number: "1" }], second), next_page: second });
+    });
+    const client = fakeClient(fetchImpl);
+
+    const first = await client.listPrintingsPage("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+
+    expect(first.cards).toHaveLength(1);
+    expect(first.cards[0]?.collectorNumber).toBe("1");
+    expect(first).toMatchObject({ hasMore: true, nextPage: second });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    const next = await client.listPrintingsPage("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", first.nextPage);
+    expect(next.cards[0]?.collectorNumber).toBe("2");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("follows every unique printing page beyond the former 100-page ceiling", async () => {
     const pageCount = 101;
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
