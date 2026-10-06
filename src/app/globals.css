@@ -3121,3 +3121,79 @@ body { min-width: 0; min-height: 0; }
   border-radius: 7px;
   box-shadow: none;
 }
+
+
+/* Cut export — user-facing summary first. */
+.cut-export-panel {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+.cut-export-panel h3 {
+  margin: 0;
+  color: #24272b;
+  font-size: 12px;
+}
+.cut-export-panel > div > p,
+.cut-export-panel > p {
+  margin: 0;
+  color: #727982;
+  font-size: 9px;
+}
+.cut-human-summary {
+  border-radius: 8px;
+  padding: 8px;
+  color: #30353b !important;
+  background: #f2f3f4;
+  font-weight: 650;
+}
+.cut-page-picker {
+  display: grid;
+  gap: 4px;
+  color: #666d75;
+  font-size: 9px;
+}
+.cut-page-picker select {
+  min-height: 32px;
+  border: 1px solid #d4d8dc;
+  border-radius: 7px;
+  padding: 5px 7px;
+  color: #24272b;
+  background: #fff;
+}
+.cut-export-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.cut-export-actions .button {
+  min-height: 34px;
+  border-radius: 7px;
+}
+.cut-technical-details {
+  overflow: hidden;
+  border: 1px solid #e1e4e7;
+  border-radius: 8px;
+  background: #fafafa;
+}
+.cut-technical-details > summary {
+  padding: 7px 8px;
+  color: #777e87;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 650;
+}
+.cut-technical-details > p {
+  margin: 0;
+  border-top: 1px solid #e7e9eb;
+  padding: 7px 8px;
+  color: #858b93;
+  font-size: 8px;
+}
+@media (max-width: 460px) {
+  .cut-export-actions {
+    grid-template-columns: 1fr;
+  }
+}
