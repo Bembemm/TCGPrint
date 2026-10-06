@@ -1242,15 +1242,12 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
                   onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
                 >
                   <rect className="compositor-card-control-surface" x={flipX} y={controlY} width={controlSize} height={controlSize} rx="1.45" />
-                  <text
+                  <path
                     className="compositor-card-control-flip-icon"
-                    x={flipX + controlSize / 2}
-                    y={controlY + controlSize / 2 + 0.1}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
+                    d={`M ${flipX + 1.35} ${controlY + 2.55} C ${flipX + 1.65} ${controlY + 1.35}, ${flipX + 3.55} ${controlY + 1.1}, ${flipX + 4.2} ${controlY + 2.05} M ${flipX + 3.55} ${controlY + 1.45} L ${flipX + 4.28} ${controlY + 2.03} L ${flipX + 3.42} ${controlY + 2.35} M ${flipX + 4.25} ${controlY + 3.05} C ${flipX + 3.9} ${controlY + 4.2}, ${flipX + 2.05} ${controlY + 4.45}, ${flipX + 1.4} ${controlY + 3.5} M ${flipX + 2.05} ${controlY + 4.08} L ${flipX + 1.32} ${controlY + 3.5} L ${flipX + 2.18} ${controlY + 3.18}`}
                     pointerEvents="none"
                     aria-hidden="true"
-                  >↻</text>
+                  />
                 </g>}
                 <g
                   className="compositor-card-control compositor-context-trigger"
