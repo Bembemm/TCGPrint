@@ -7,7 +7,7 @@ import type { CardSlotMm } from "../../core/geometry/placement";
 import { buildCanonicalPrintPlan, getDuplexPreviewOverlayMatrix } from "../../core/duplex";
 import { createPrintCalibrationTransform } from "../../core/calibration";
 import type { WorkingCard } from "../../core/cards/types";
-import { createPhysicalOrder, type PhysicalOrder } from "../../core/cards/physical-instance-order";
+import { createPhysicalOrder, movePhysicalInstance, type PhysicalOrder } from "../../core/cards/physical-instance-order";
 import { isDoubleFacedIdentity } from "../../core/cards/back-selection";
 import { resolveBackForMissingPolicy } from "./back-validation";
 import type { ProjectSettingsV2 } from "../../persistence/projects/serializer";
@@ -157,6 +157,12 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   const pointerDragRef = useRef<PointerDragState | null>(null);
   const pointerHandlersRef = useRef<PointerHandlers>({ move: () => undefined, up: () => undefined, cancel: () => undefined });
   const dragGhostRef = useRef<HTMLDivElement | null>(null);
+  const pendingKeyboardReorderFocusRef = useRef<{
+    readonly physicalInstanceId: string;
+    readonly documentRevision: number;
+    readonly expectedOrderSignature: string;
+  } | null>(null);
+  const [keyboardReorderFocusAttempt, setKeyboardReorderFocusAttempt] = useState(0);
   const pageNavigationHoverRef = useRef<string | null>(null);
   const suppressNextClickAfterDragRef = useRef(false);
   const clickSuppressionTimeoutRef = useRef<number | null>(null);
@@ -369,6 +375,22 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       pageLayoutSignature,
     };
   }, [activePhysicalInstanceId, activePhysicalCardIndex, physicalOrderSignature, pageLayoutSignature, result.pages, selectedPageNumber, onSelectPage]);
+  useEffect(() => {
+    const pending = pendingKeyboardReorderFocusRef.current;
+    if (!pending) return;
+    if (interactionBusy
+      || pending.documentRevision !== documentRevision
+      || !physicalCards.some(({ id }) => id === pending.physicalInstanceId)
+      || physicalOrderSignature !== pending.expectedOrderSignature) {
+      pendingKeyboardReorderFocusRef.current = null;
+      return;
+    }
+    const targetBody = Array.from(sheetViewportRef.current?.querySelectorAll<SVGRectElement>("[data-compositor-card-body='true']") ?? [])
+      .find((body) => body.dataset.physicalInstanceId === pending.physicalInstanceId);
+    if (!targetBody) return;
+    targetBody.focus();
+    if (document.activeElement === targetBody) pendingKeyboardReorderFocusRef.current = null;
+  }, [interactionBusy, documentRevision, physicalInstanceIdsSignature, physicalOrderSignature, activePageIndex, keyboardReorderFocusAttempt]);
 
   useEffect(() => {
     const viewport = sheetViewportRef.current;
@@ -740,6 +762,7 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
   }
 
   function beginBodyPointerDrag(event: ReactPointerEvent<SVGRectElement>, instance: PhysicalCardInstance) {
+    pendingKeyboardReorderFocusRef.current = null;
     if (event.button !== 0 || event.isPrimary === false || interactionBusy || !onReorderPhysicalInstance || pointerDragRef.current) return;
     clearClickSuppression();
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -784,6 +807,14 @@ export default function RegistrationLayoutPreview({ settings, cardCount, cards, 
       if (index < 0 || !target) return;
       const placement = event.key === "ArrowLeft" ? "before" : "after";
       if (physicalMoveIsNoop(instance.id, target.id, placement)) return;
+      const expectedOrderSignature = movePhysicalInstance(physicalOrder, instance.id, target.id, placement)
+        .instances.map(({ id }) => id).join("\u0000");
+      pendingKeyboardReorderFocusRef.current = {
+        physicalInstanceId: instance.id,
+        documentRevision,
+        expectedOrderSignature,
+      };
+      setKeyboardReorderFocusAttempt((attempt) => attempt + 1);
       activateInstance(instance);
       onReorderPhysicalInstance(instance.id, target.id, placement);
       setDropFeedback(`${instance.card.identity?.name ?? instance.card.identityHints.name ?? "Carta"} movida para a posição ${targetIndex + 1} da ordem física.`);

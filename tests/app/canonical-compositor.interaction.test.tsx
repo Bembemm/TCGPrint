@@ -228,6 +228,13 @@ function bodyButtonForPhysicalIndex(index: number) {
   return button;
 }
 
+function bodyButtonForPhysicalInstanceId(instanceId: string) {
+  const body = Array.from(sheet().querySelectorAll<SVGRectElement>('[data-compositor-card-body="true"]'))
+    .find((candidate) => candidate.dataset.physicalInstanceId === instanceId);
+  if (!body) throw new Error(`Physical instance ${instanceId} has no visible body activation control.`);
+  return body;
+}
+
 function checkboxForPhysicalIndex(index: number) {
   const checkbox = slotForPhysicalIndex(index).querySelector('[role="checkbox"]');
   if (!(checkbox instanceof SVGElement)) throw new Error(`Physical card ${index} has no selection checkbox.`);
@@ -816,6 +823,96 @@ describe("canonical live compositor interactions", () => {
     expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-4");
     expect(source).toHaveAttribute("aria-keyshortcuts", "Alt+ArrowLeft Alt+ArrowRight");
     expect(screen.getByText(/posição 3 da ordem física/i)).toBeInTheDocument();
+  });
+
+  it("keeps keyboard focus on the same physical instance through repeated right reorder", () => {
+    render(compositorWorkspace([{ ...card(), quantity: 4 }], undefined, false, undefined, true));
+    const source = bodyButtonForPhysicalIndex(1);
+    source.focus();
+
+    fireEvent.keyDown(source, { key: "ArrowRight", altKey: true });
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-3,instance-2,instance-4");
+    expect(document.activeElement).toBe(bodyButtonForPhysicalInstanceId("instance-2"));
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
+
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowRight", altKey: true });
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-3,instance-4,instance-2");
+    expect(document.activeElement).toBe(bodyButtonForPhysicalInstanceId("instance-2"));
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
+  });
+
+  it("keeps keyboard focus on the same physical instance through repeated left reorder", () => {
+    render(compositorWorkspace([{ ...card(), quantity: 4 }], undefined, false, undefined, true));
+    const source = bodyButtonForPhysicalIndex(3);
+    source.focus();
+
+    fireEvent.keyDown(source, { key: "ArrowLeft", altKey: true });
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-2,instance-4,instance-3");
+    expect(document.activeElement).toBe(bodyButtonForPhysicalInstanceId("instance-4"));
+
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowLeft", altKey: true });
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-4,instance-2,instance-3");
+    expect(document.activeElement).toBe(bodyButtonForPhysicalInstanceId("instance-4"));
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-4");
+  });
+
+  it("restores keyboard focus after a reorder moves the instance across pages", async () => {
+    const user = userEvent.setup();
+    render(compositorWorkspace([{ ...card(), quantity: 4 }], {
+      ...DEFAULT_PROJECT_SETTINGS,
+      layout: { rows: 1, columns: 2, skippedSlotIndices: [] },
+    }, false, undefined, true));
+    await user.click(screen.getByRole("button", { name: "Próxima página" }));
+    const source = bodyButtonForPhysicalIndex(2);
+    source.focus();
+
+    fireEvent.keyDown(source, { key: "ArrowLeft", altKey: true });
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-1,instance-3,instance-2,instance-4");
+    expect(sheet()).toHaveAttribute("data-compositor-page", "1");
+    expect(document.activeElement).toBe(bodyButtonForPhysicalInstanceId("instance-3"));
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-3");
+
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowLeft", altKey: true });
+
+    expect(screen.getByTestId("physical-order-ids")).toHaveTextContent("instance-3,instance-1,instance-2,instance-4");
+    expect(document.activeElement).toBe(bodyButtonForPhysicalInstanceId("instance-3"));
+    expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-3");
+  });
+
+  it("keeps focus and skips reorder callbacks at the physical order limits", () => {
+    const cards = [{ ...card(), quantity: 2 }];
+    const physicalOrder = createPhysicalOrder(cards);
+    const onReorderPhysicalInstance = vi.fn();
+    render(<RegistrationLayoutPreview
+      settings={{ ...DEFAULT_PROJECT_SETTINGS, layout: { skippedSlotIndices: [] } }}
+      cardCount={2}
+      cards={cards}
+      physicalOrder={physicalOrder}
+      activePhysicalInstanceId="instance-1"
+      selectedPageNumber={1}
+      onSelectPage={vi.fn()}
+      onToggleSkippedSlot={vi.fn()}
+      onReorderPhysicalInstance={onReorderPhysicalInstance}
+    />);
+    const first = bodyButtonForPhysicalIndex(0);
+    first.focus();
+
+    fireEvent.keyDown(first, { key: "ArrowLeft", altKey: true });
+
+    expect(document.activeElement).toBe(first);
+    expect(onReorderPhysicalInstance).not.toHaveBeenCalled();
+
+    const last = bodyButtonForPhysicalIndex(1);
+    last.focus();
+    fireEvent.keyDown(last, { key: "ArrowRight", altKey: true });
+
+    expect(document.activeElement).toBe(last);
+    expect(onReorderPhysicalInstance).not.toHaveBeenCalled();
   });
 
   it("does not offer local flip when no alternate artwork is available", () => {
