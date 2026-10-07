@@ -290,6 +290,15 @@ function hasCatalogNarrowingFilters(filters: MpcArtworkFilters): boolean {
     || filters.languages.length > 0;
 }
 
+function hasExplicitCatalogNarrowingFilters(filters: MpcArtworkFilterInput | undefined): boolean {
+  return filters?.minimumDpi !== undefined
+    || filters?.maximumDpi !== undefined
+    || Boolean(filters?.sources?.length)
+    || Boolean(filters?.includeTags?.length)
+    || Boolean(filters?.excludeTags?.length)
+    || Boolean(filters?.languages?.length);
+}
+
 function safeCanonicalCard(value: unknown): Readonly<Record<string, unknown>> | undefined {
   if (!record(value)) return undefined;
   const output: Record<string, string> = {};
@@ -712,7 +721,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
     const query = identity.id === "custom:artwork-picker" || identity.provider === "local" ? "" : faceQuery(identity, options.faceId);
     if (!query) return { candidates, catalogTotal: candidates.length };
 
-    if (options.limit !== undefined && !hasCatalogNarrowingFilters(filters)) {
+    if (options.limit !== undefined && !hasExplicitCatalogNarrowingFilters(options.filters)) {
       try {
         const sources = await this.sources(options.signal);
         const verifiedSourceIds = sources.map(({ pk }) => pk);
@@ -1232,7 +1241,7 @@ export class MpcArtworkProvider implements ArtworkProvider {
         ? [...cachedIds.value]
         : await this.searchAssetIds(query, settings, options.signal);
       if (!cachedIds || cachedIds.expiresAt <= Date.now() || options.forceRefresh) {
-        this.metadata.putMetadata(idsCacheKey, ids, Date.now() + CACHE_TTL_MS);
+        this.metadata.putMetadata(idsCacheKey, ids, Date.now() + (ids.length ? CACHE_TTL_MS : EMPTY_SEARCH_TTL_MS));
       }
       const offset = options.limit !== undefined ? Math.max(0, options.offset ?? 0) : 0;
       const pageIds = options.limit !== undefined ? ids.slice(offset, offset + options.limit) : ids;
