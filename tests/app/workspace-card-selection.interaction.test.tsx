@@ -334,6 +334,7 @@ describe("Cartas workspace navigation", () => {
     await user.click(within(picker).getByRole("button", { name: "Fechar seletor de arte" }));
 
     await user.click(screen.getByRole("tab", { name: "Exportar" }));
+    expect(screen.getByRole("combobox", { name: "Modo de exportação" })).toHaveValue("front-only");
     const composer = screen.getByRole("group", { name: /Compositor live frente/ });
     const initialSlotX = composer.querySelector("g[data-slot-x-mm]")?.getAttribute("data-slot-x-mm");
     const generate = screen.getByRole("button", { name: "Gerar PDF final" });
