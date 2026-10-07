@@ -209,8 +209,11 @@ describe("M6 Artwork Picker face context", () => {
       }
       if (url.includes("/prepare")) {
         prepareSignal = init?.signal ?? undefined;
-        return new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+        return new Promise<Response>((resolve) => {
+          init?.signal?.addEventListener("abort", () => resolve(Response.json(
+            { code: "MPC_ABORTED", message: "MPC artwork request was cancelled." },
+            { status: 499 },
+          )), { once: true });
         });
       }
       if (url === "/api/cards/resolve") {
