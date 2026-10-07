@@ -272,4 +272,80 @@ describe("M6 Artwork Picker face context", () => {
     await waitFor(() => expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent(`MPC Autofill · ${simpleBackCandidate.id}`));
     expect(within(dialog).getByRole("button", { name: "Selecionada" })).toBeInTheDocument();
   }, 15_000);
+
+  it("aborts obsolete progressive Scryfall completion when the picker changes face", async () => {
+    const user = userEvent.setup();
+    let frontCompletionStarted = false;
+    let frontCompletionAborted = false;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      if (url === "/api/cards/import") return Response.json({
+        workingCards: [dfc],
+        report: { summary: {}, sources: [], selectedImporters: [], warnings: [], errors: [], pairings: [] },
+        providerHealth,
+      });
+      if (url === "/api/cards/resolve") {
+        const body = JSON.parse(String(init?.body)) as { cards?: WorkingCard[] };
+        return Response.json({ workingCards: body.cards ?? [dfc], providerHealth });
+      }
+      if (url === "/api/back-library") return Response.json({ assets: [] });
+      if (url === "/api/projects") return Response.json({ projects: [] });
+      if (url === "/api/templates") return Response.json({ templates: [] });
+      if (url === "/api/printer-profiles") return Response.json({ profiles: [] });
+      if (url === "/api/cards/artworks/mpc-catalogs") return Response.json({ catalogs: { sources: [], dpi: [], layouts: [], languages: [] } });
+      if (url === `/api/cards/${encodeURIComponent(dfc.id)}`) return Response.json({ identity: dfcIdentity });
+      if (url.endsWith("/artworks")) {
+        const body = JSON.parse(String(init?.body)) as { faceId: "front" | "back"; source: string; progressive?: boolean };
+        if (body.faceId === "front" && body.source === "scryfall" && body.progressive === true) {
+          return Response.json({
+            candidates: [candidate("scryfall", "front")],
+            catalogTotal: 2,
+            catalogTotalComplete: false,
+            providerHealth,
+          });
+        }
+        if (body.faceId === "front" && body.source === "scryfall" && body.progressive !== true) {
+          frontCompletionStarted = true;
+          const signal = init?.signal;
+          return new Promise<Response>((_resolve, reject) => {
+            const abort = () => {
+              frontCompletionAborted = true;
+              reject(new DOMException("aborted", "AbortError"));
+            };
+            if (signal?.aborted) abort();
+            else signal?.addEventListener("abort", abort, { once: true });
+          });
+        }
+        if (body.faceId === "back" && body.source === "scryfall") {
+          return Response.json({
+            candidates: [candidate("scryfall", "back")],
+            catalogTotal: 1,
+            catalogTotalComplete: true,
+            providerHealth,
+          });
+        }
+      }
+      return Response.json({ message: `Rota não simulada: ${url}` }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<HomePage />);
+    await user.type(screen.getByRole("textbox", { name: "Cole uma decklist ou URL" }), "1 Delver of Secrets");
+    await user.click(screen.getByRole("button", { name: "Adicionar cartas" }));
+    await screen.findByRole("button", { name: /1\/1 · Delver of Secrets/ });
+    await user.click(screen.getByRole("tab", { name: "Cartas" }));
+    await user.click(await screen.findByRole("button", { name: "Trocar artwork" }));
+
+    const dialog = await screen.findByRole("dialog", { name: /Delver of Secrets/ });
+    await within(dialog).findByText("Delver of Secrets · scryfall");
+    await waitFor(() => expect(frontCompletionStarted).toBe(true));
+
+    await user.click(within(dialog).getByRole("tab", { name: "Verso · Insectile Aberration" }));
+
+    await waitFor(() => expect(frontCompletionAborted).toBe(true));
+    expect(await within(dialog).findByText("Insectile Aberration · scryfall")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("alert")).not.toHaveTextContent("O restante do catálogo Scryfall não pôde ser carregado.");
+  }, 15_000);
+
 });
