@@ -2535,3 +2535,78 @@ Não avançar automaticamente para todos os slices em um único lote. Cada slice
 ---
 
 > Este arquivo deve continuar sendo atualizado conforme novas mudanças forem definidas. Nenhum item marcado como “especificado” deve ser tratado como implementado sem evidência de código e testes.
+
+
+---
+
+## Retomada pós-migração nativa — checkpoint 2026-10-07
+
+Este checkpoint registra a retomada do TCGPrint web sem descartar o trabalho produzido imediatamente antes da decisão de migrar o foco para C++/Qt.
+
+### Fonte exata preservada
+
+A reescrita nativa registrou explicitamente como baseline comportamental:
+
+```text
+Bembemm/TCGPrint
+chatgpt/selection-picker-visual-rescue
+7f2308764d3f4691d662e29d3ad0cc9ee8535a1b
+```
+
+A branch histórica `chatgpt/selection-picker-visual-rescue` permanece exatamente nesse commit e não deve ser movida durante a retomada.
+
+A continuação ocorre em:
+
+```text
+chatgpt/resume-web-pre-native
+```
+
+criada diretamente de `7f2308764d3f4691d662e29d3ad0cc9ee8535a1b`.
+
+### Relação com a main
+
+A `main` permanece em `6dd9b22c823d83d1dedda456bf94b75483a9506a`.
+
+O snapshot pré-native contém 94 commits adicionais após essa base. Esses commits não podem ser descartados nem reconstruídos a partir da `main`.
+
+Entre os trabalhos preservados estão:
+
+- refinamento visual do Artwork Picker;
+- aplicação direta de artwork mantendo o picker aberto;
+- preview HQ no picker;
+- compositor/editor mobile e navegação por bottom sheet;
+- reorganização de Project/Configurações/Exportar;
+- Configurações compactas em accordions;
+- Exportar como etapa final compacta;
+- carregamento progressivo/paginado do catálogo MPC;
+- prioridade para thumbnails visíveis;
+- stale-while-revalidate de catálogo Scryfall;
+- carregamento progressivo de printings Scryfall;
+- simplificação do fluxo Adicionar cartas;
+- diferenciação entre compositor live e prova do PDF real;
+- refinamentos finais da seleção do compositor e export de corte.
+
+### Estado de retomada
+
+Não considerar esses 94 commits automaticamente aprovados apenas por existirem.
+
+Antes de integração em `main`, a branch de retomada deve passar por:
+
+1. revisão do delta completo `6dd9b22..7f230876`;
+2. testes direcionados das áreas alteradas;
+3. suíte completa;
+4. typecheck;
+5. build;
+6. smoke real desktop/mobile;
+7. smoke do Artwork Picker com Scryfall e MPC;
+8. prova de persistência/Project;
+9. prova de Front/Back, duplex, reorder e PDF;
+10. confirmação de que thumbnails/display derivatives continuam separados dos originals usados no export.
+
+Até esses gates serem verificados, o estado correto é:
+
+```text
+IMPLEMENTADO NO SNAPSHOT PRÉ-NATIVE
+PENDENTE DE GATE FINAL DE RETOMADA
+NÃO INTEGRADO À MAIN
+```
