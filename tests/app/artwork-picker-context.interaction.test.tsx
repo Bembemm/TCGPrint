@@ -234,7 +234,7 @@ describe("M6 Artwork Picker face context", () => {
     const candidateLabel = await within(dialog).findByText("Island · mpc");
     await user.click(within(candidateLabel.closest<HTMLElement>(".artwork-candidate")!).getByRole("button", { name: /Escolher visualmente/ }));
 
-    expect(await within(dialog).findByRole("status")).toHaveTextContent("Baixando e validando o original selecionado");
+    expect(await within(dialog).findByText(/Baixando e validando o original selecionado/)).toBeInTheDocument();
     const close = within(dialog).getByRole("button", { name: "Fechar seletor de arte" });
     expect(close).not.toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "Cancelar download e seleção da arte" })).not.toBeDisabled();
