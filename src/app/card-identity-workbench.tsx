@@ -2112,7 +2112,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       </div>
       <div className="picker-back-library">
         <h4>Back Library</h4>
-        {pickerBackLibraryAssets.length === 0 && <p className="muted">A Back Library ainda não tem imagens disponíveis. Adicione uma pela seção Exportar → Back Library.</p>}
+        {pickerBackLibraryAssets.length === 0 && <p className="muted">A Back Library ainda não tem imagens disponíveis. Adicione uma em Configurações → Versos e Back Library.</p>}
         <div className="picker-back-library-grid">
           {pickerBackLibraryAssets.map((asset) => {
             const currentAsset = currentSimpleBack?.mode === "library" && currentSimpleBack.assetId === asset.assetId;
