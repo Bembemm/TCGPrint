@@ -65,6 +65,7 @@ function json(route, body, status = 200) {
 function installRoutes(page) {
   let cards = [card("island-card", "Island", 0), card("mountain-card", "Mountain", 1)];
   const projects = [];
+  const projectRequests = [];
   let projectCounter = 0;
 
   page.route("**/api/**", async (route) => {
@@ -72,6 +73,7 @@ function installRoutes(page) {
     const url = new URL(request.url());
     const path = url.pathname;
     const method = request.method();
+    if (path.startsWith("/api/projects")) projectRequests.push({ method, path, body: request.postData() });
 
     if (path === "/api/cards/import" && method === "POST") {
       return json(route, { workingCards: cards, report: { summary: {}, sources: [], selectedImporters: [], warnings: [], errors: [], pairings: [] }, providerHealth });
@@ -217,6 +219,7 @@ function installRoutes(page) {
 
     return json(route, { message: `Browser smoke route not mocked: ${method} ${path}` }, 404);
   });
+  return { projectRequests };
 }
 
 async function addCards(page) {
@@ -238,7 +241,7 @@ async function chooseFrontArtworkForVisibleCard(page) {
 async function desktopSmoke(browser) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
-  installRoutes(page);
+  const apiState = installRoutes(page);
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(baseURL, { waitUntil: "networkidle" });
@@ -284,7 +287,14 @@ async function desktopSmoke(browser) {
   assert.notDeepEqual(afterOrder, beforeOrder, "pointer drag should change the canonical physical order");
 
   await page.getByRole("button", { name: "Salvar como projeto" }).click();
-  await page.getByLabel("Estado do salvamento").filter({ hasText: "Salvo" }).waitFor();
+  try {
+    await page.getByLabel("Estado do salvamento").filter({ hasText: "Salvo" }).waitFor({ timeout: 10_000 });
+  } catch (error) {
+    await page.screenshot({ path: `${artifactDir}/desktop-project-save-failure.png`, fullPage: true });
+    console.error("Project save status:", await page.getByLabel("Estado do salvamento").textContent().catch(() => "<missing>"));
+    console.error("Project API requests:", JSON.stringify(apiState.projectRequests, null, 2));
+    throw error;
+  }
   await page.getByRole("button", { name: "Abrir menu do Project" }).click();
   await page.getByRole("button", { name: "Abrir projeto" }).click();
   const openDialog = page.getByRole("dialog", { name: "Abrir projeto" });
