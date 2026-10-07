@@ -2603,10 +2603,36 @@ Antes de integração em `main`, a branch de retomada deve passar por:
 9. prova de Front/Back, duplex, reorder e PDF;
 10. confirmação de que thumbnails/display derivatives continuam separados dos originals usados no export.
 
-Até esses gates serem verificados, o estado correto é:
+### Gate automatizado de retomada — verificado em 2026-10-07
+
+O snapshot pré-native foi retomado na branch `chatgpt/resume-web-pre-native` e o delta foi corrigido sem portar implementação do C++ de volta para o web.
+
+Findings corrigidos durante a retomada:
+
+- paginação progressiva MPC não deve executar uma segunda busca remota redundante no primeiro lote;
+- cache de IDs MPC vazio deve respeitar o TTL curto de busca negativa, para não mascarar recuperação de uma falha de rede;
+- requests progressivos do Artwork Picker devem ser abortados ao trocar carta/face, e não apenas ter suas respostas ignoradas;
+- tipagens regressivas introduzidas no snapshot final foram corrigidas sem alterar semântica de produto;
+- testes antigos foram alinhados apenas onde a UX aprovada já havia mudado.
+
+Gate verificado no commit `f94d71f018e894868f12c69f3265da3d06434790`, GitHub Actions run `37640254242`:
+
+- 122 arquivos de teste passando;
+- 1 arquivo ignorado;
+- 1.402 testes passando;
+- 1 teste ignorado;
+- `npm run typecheck` verde;
+- `npm run build` verde;
+- Next.js 16.3.6 compilado com sucesso;
+- production server smoke verde com `next start` e resposta HTTP na porta 3101.
+
+Estado após o gate:
 
 ```text
-IMPLEMENTADO NO SNAPSHOT PRÉ-NATIVE
-PENDENTE DE GATE FINAL DE RETOMADA
+SNAPSHOT PRÉ-NATIVE RECUPERADO E VALIDADO
+SUÍTE / TYPECHECK / BUILD / PRODUCTION HTTP SMOKE VERDES
+BRANCH HISTÓRICA PRESERVADA
 NÃO INTEGRADO À MAIN
 ```
+
+Ainda permanece como validação não automatizada o smoke visual manual de desktop/mobile e dos fluxos finais de Front/Back/duplex/reorder/picker/Project reopen. A integração em `main` continua exigindo autorização explícita do usuário.
