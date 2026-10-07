@@ -147,7 +147,7 @@ describe("M6 Artwork Picker face context", () => {
     const backTab = within(dialog).getByRole("tab", { name: "Verso · Insectile Aberration" });
     await user.click(backTab);
     expect(backTab).toHaveAttribute("aria-selected", "true");
-    expect(within(dialog).getAllByText("Back · Insectile Aberration").length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText("Verso · Insectile Aberration").length).toBeGreaterThan(0);
     expect(within(dialog).queryByRole("heading", { name: "Verso da carta simples" })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Sem verso" })).not.toBeInTheDocument();
 
