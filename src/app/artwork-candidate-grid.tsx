@@ -132,7 +132,6 @@ export interface ArtworkCandidateGridProps {
   readonly disabled?: boolean;
   readonly qualityCheckingIds?: ReadonlySet<string>;
   readonly onSelect: (candidate: ArtworkCandidateView) => void;
-  readonly onRevalidate?: (candidate: ArtworkCandidateView) => void;
   readonly onLoadMore: () => void;
 }
 
@@ -152,7 +151,6 @@ export function ArtworkCandidateGrid({
   disabled = false,
   qualityCheckingIds = new Set<string>(),
   onSelect,
-  onRevalidate,
   onLoadMore,
 }: ArtworkCandidateGridProps) {
   const [jumpToResult, setJumpToResult] = useState("");
@@ -249,9 +247,8 @@ export function ArtworkCandidateGrid({
             </div>
           </details>
           <div className="candidate-actions">
-            {candidate.source === "mpc" && onRevalidate && <button className="button secondary" type="button" disabled={disabled} onClick={() => onRevalidate(candidate)}>Revalidar metadata</button>}
             <button className={`button ${isSelected ? "primary" : "secondary"}`} type="button" disabled={disabled} onClick={() => onSelect(candidate)}>
-              {isSelected && candidate.originalAvailable && !candidate.effectiveDpi ? "Validar original e calcular DPI" : isSelected ? "Selecionada" : candidate.originalAvailable ? "Selecionar arte" : "Selecionar referência"}
+              {isSelected ? "Selecionada" : candidate.originalAvailable ? "Selecionar arte" : "Selecionar referência"}
             </button>
           </div>
         </article>;
