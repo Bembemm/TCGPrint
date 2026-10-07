@@ -266,8 +266,8 @@ td select { min-width: 128px; padding: 5px 7px; font-size: 11px; }
 .candidate-meta span { color: #5f6b77; font-size: 9px; line-height: 1.3; }
 .candidate-meta .reference-status { color: #7c591a; }
 .artwork-candidate > .button { margin-top: auto; min-height: 29px; padding: 5px 7px; font-size: 10px; }
-.artwork-picker-backdrop { position: fixed; z-index: 100; inset: 0; background: rgb(21 32 43 / 18%); }
-.artwork-picker-dialog { position: fixed; z-index: 101; inset: 3vh 3vw; width: min(1440px, 94vw); max-width: none; max-height: 94dvh; margin: auto; overflow: hidden; border: 1px solid #cbd3db; border-radius: 8px; padding: 0; color: #263544; background: #fff; box-shadow: 0 16px 56px rgb(20 35 50 / 18%); }
+.artwork-picker-backdrop { position: fixed; z-index: 900; inset: 0; background: rgb(21 32 43 / 18%); }
+.artwork-picker-dialog { position: fixed; z-index: 901; inset: 3vh 3vw; width: min(1440px, 94vw); max-width: none; max-height: 94dvh; margin: auto; overflow: hidden; border: 1px solid #cbd3db; border-radius: 8px; padding: 0; color: #263544; background: #fff; box-shadow: 0 16px 56px rgb(20 35 50 / 18%); }
 .artwork-picker-dialog::backdrop { background: transparent; }
 .artwork-picker-heading { position: sticky; z-index: 3; top: 0; display: flex; min-height: 62px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #dce2e7; padding: 10px 16px; background: #fff; }
 .artwork-picker-heading h2 { min-width: 0; margin: 0; overflow-wrap: anywhere; color: #263544; font-size: 18px; }
