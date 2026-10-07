@@ -246,11 +246,6 @@ export function ArtworkCandidateGrid({
               {candidate.source === "mpc" && candidate.metadata?.localAvailabilityHint === true && !candidate.originalCached && <span className="reference-status">XML informa disponibilidade local; bytes ainda não verificados no cache</span>}
             </div>
           </details>
-          <div className="candidate-actions">
-            <button className={`button ${isSelected ? "primary" : "secondary"}`} type="button" disabled={disabled} onClick={() => onSelect(candidate)}>
-              {isSelected ? "Selecionada" : candidate.originalAvailable ? "Selecionar arte" : "Selecionar referência"}
-            </button>
-          </div>
         </article>;
       })}
     </div>
