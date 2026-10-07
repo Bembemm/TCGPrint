@@ -123,7 +123,7 @@ describe("M6 Artwork Picker face context", () => {
     await screen.findByRole("button", { name: /1\/1 · Delver of Secrets/ });
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     const openPicker = async () => {
-      await user.click(await screen.findByRole("button", { name: "Selecionar arte" }));
+      await user.click(await screen.findByRole("button", { name: "Trocar artwork" }));
       return screen.findByRole("dialog", { name: /Delver of Secrets/ });
     };
 
@@ -224,7 +224,7 @@ describe("M6 Artwork Picker face context", () => {
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
 
     const openBackPicker = async () => {
-      await user.click(await screen.findByRole("button", { name: "Selecionar arte" }));
+      await user.click(await screen.findByRole("button", { name: "Trocar artwork" }));
       const picker = await screen.findByRole("dialog", { name: /Island/ });
       await user.click(within(picker).getByRole("tab", { name: "Verso" }));
       return picker;
