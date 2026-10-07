@@ -694,6 +694,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const [bleedDiagnostics, setBleedDiagnostics] = useState<BleedDiagnosticsReport | null>(null);
   const [backLibraryAssets, setBackLibraryAssets] = useState<readonly BackLibraryAssetDto[]>([]);
   const interactionBusy = busy || projectOpenPending;
+  const artworkInteractionBusy = interactionBusy || abortableOperation === "artwork";
   function setProjectInteractionLocked(locked: boolean) {
     projectOpenPendingRef.current = locked;
     setProjectOpenPending(locked);
@@ -798,6 +799,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   }
 
   const closeArtworkPicker = useCallback(() => {
+    activeOperationAbortController.current?.abort();
     setPickerContext(null);
     setPendingArtwork(null);
     setPendingBackChoice(null);
@@ -1363,7 +1365,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     const controller = beginAbortableOperation("artwork");
     const problemCardId = artworkTargetCard.id;
     const problemRequestKey = artworkRequest.cacheKey;
-    setBusy(true); setArtworkProblem(null); clearProblem(problemCardId);
+    setArtworkProblem(null); clearProblem(problemCardId);
     try {
       const candidate = explicitCandidate;
       if (candidate?.originalAvailable) {
@@ -1440,7 +1442,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         });
       }
     }
-    finally { finishAbortableOperation(controller); setBusy(false); }
+    finally { finishAbortableOperation(controller); }
   }
 
   async function restoreArtworkDefault(card: WorkingCard, side: CardFaceSide) {
@@ -2079,7 +2081,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     </details>
 
     <div className="artwork-picker-face-tabs" role="tablist" aria-label="Face da carta">
-      {(["front", "back"] as const).map((side) => <button key={side} type="button" role="tab" aria-selected={effectivePickerSide === side} className={`button ${effectivePickerSide === side ? "primary" : "secondary"}`} disabled={interactionBusy || (pickerIsDfc && !pickerCard.faces.some((item) => item.side === side))} onClick={() => changeArtworkPickerSide(side)}>
+      {(["front", "back"] as const).map((side) => <button key={side} type="button" role="tab" aria-selected={effectivePickerSide === side} className={`button ${effectivePickerSide === side ? "primary" : "secondary"}`} disabled={artworkInteractionBusy || (pickerIsDfc && !pickerCard.faces.some((item) => item.side === side))} onClick={() => changeArtworkPickerSide(side)}>
         {side === "front" ? "Frente" : "Verso"}{pickerIsDfc && pickerCard.faces.find((item) => item.side === side)?.name ? ` · ${pickerCard.faces.find((item) => item.side === side)?.name}` : ""}
       </button>)}
     </div>
@@ -2088,7 +2090,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       {(pickerCard.identity
         ? ([["scryfall", "Scryfall"], ["mpc", "MPC Autofill"]] as const)
         : ([["all", "Todas"], ["upload", "Meus uploads"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"]] as const)
-      ).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} aria-pressed={artworkFilter === value} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => {
+      ).map(([value, label]) => <button key={value} type="button" disabled={artworkInteractionBusy} aria-pressed={artworkFilter === value} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => {
         if (pickerCard.identity && effectivePickerSide === "front" && (value === "scryfall" || value === "mpc")) lastFrontArtworkProviderRef.current = value;
         setArtworkFilter(value);
         setArtworkPageIndex(0);
@@ -2100,7 +2102,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       <input
         type="checkbox"
         checked={pickerScope === "same-identity"}
-        disabled={interactionBusy}
+        disabled={artworkInteractionBusy}
         onChange={(event) => setPickerScope(event.currentTarget.checked ? "same-identity" : defaultPickerScope)}
       />
       <span>Aplicar também às cópias iguais</span>
@@ -2108,7 +2110,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
 
     {manualPhysicalBackPicker && <label className="artwork-picker-scope-select">
       <span>Aplicar verso em</span>
-      <select value={pickerScope} disabled={interactionBusy} onChange={(event) => setPickerScope(event.currentTarget.value as PickerScope)}>
+      <select value={pickerScope} disabled={artworkInteractionBusy} onChange={(event) => setPickerScope(event.currentTarget.value as PickerScope)}>
         <option value={defaultPickerScope}>{defaultPickerScope === "physical-copy" ? "Esta cópia" : "Esta entrada"}</option>
         {pickerCard.identity && <option value="same-identity">Cartas iguais</option>}
         <option value="all-simple-project">Todas as cartas simples</option>
@@ -2119,8 +2121,8 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       <h3>Verso da carta simples</h3>
       {currentSimpleBack && <p className="simple-back-current" role="status" aria-label="Estado atual do verso">Estado atual do verso: {currentSimpleBack.label}</p>}
       <div className="simple-back-semantic-options">
-        <button type="button" aria-current={currentSimpleBack?.mode === "none" ? "true" : undefined} aria-pressed={pendingBackChoice?.mode === "none"} className={`button ${pendingBackChoice?.mode === "none" || currentSimpleBack?.mode === "none" ? "primary" : "secondary"}`} disabled={interactionBusy} onClick={() => chooseSemanticBack({ mode: "none" })}>Sem verso{currentSimpleBack?.mode === "none" ? " · Atual" : ""}</button>
-        {projectDefaultBack && <button type="button" aria-current={currentSimpleBack?.mode === "project-default" ? "true" : undefined} aria-pressed={pendingBackChoice?.mode === "project-default"} className={`button ${pendingBackChoice?.mode === "project-default" || currentSimpleBack?.mode === "project-default" ? "primary" : "secondary"}`} disabled={interactionBusy} onClick={() => chooseSemanticBack({ mode: "project-default" })}>Project Default Back · {backLibraryAssets.find((asset) => asset.assetId === projectDefaultBack.assetId)?.name ?? "configurado"}{currentSimpleBack?.mode === "project-default" ? " · Atual" : ""}</button>}
+        <button type="button" aria-current={currentSimpleBack?.mode === "none" ? "true" : undefined} aria-pressed={pendingBackChoice?.mode === "none"} className={`button ${pendingBackChoice?.mode === "none" || currentSimpleBack?.mode === "none" ? "primary" : "secondary"}`} disabled={artworkInteractionBusy} onClick={() => chooseSemanticBack({ mode: "none" })}>Sem verso{currentSimpleBack?.mode === "none" ? " · Atual" : ""}</button>
+        {projectDefaultBack && <button type="button" aria-current={currentSimpleBack?.mode === "project-default" ? "true" : undefined} aria-pressed={pendingBackChoice?.mode === "project-default"} className={`button ${pendingBackChoice?.mode === "project-default" || currentSimpleBack?.mode === "project-default" ? "primary" : "secondary"}`} disabled={artworkInteractionBusy} onClick={() => chooseSemanticBack({ mode: "project-default" })}>Project Default Back · {backLibraryAssets.find((asset) => asset.assetId === projectDefaultBack.assetId)?.name ?? "configurado"}{currentSimpleBack?.mode === "project-default" ? " · Atual" : ""}</button>}
       </div>
       <div className="picker-back-library">
         <h4>Back Library</h4>
@@ -2129,7 +2131,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           {pickerBackLibraryAssets.map((asset) => {
             const currentAsset = currentSimpleBack?.mode === "library" && currentSimpleBack.assetId === asset.assetId;
             const pendingAsset = pendingBackChoice?.mode === "library" && pendingBackChoice.asset.assetId === asset.assetId;
-            return <button key={asset.assetId} type="button" aria-current={currentAsset ? "true" : undefined} aria-pressed={pendingAsset} className={`picker-back-asset ${pendingAsset || currentAsset ? "is-selected" : ""} ${currentAsset ? "is-current" : ""}`} disabled={interactionBusy || asset.retired} onClick={() => chooseSemanticBack({ mode: "library", asset: { assetId: asset.assetId, sha256: asset.sha256, format: asset.format } })}>
+            return <button key={asset.assetId} type="button" aria-current={currentAsset ? "true" : undefined} aria-pressed={pendingAsset} className={`picker-back-asset ${pendingAsset || currentAsset ? "is-selected" : ""} ${currentAsset ? "is-current" : ""}`} disabled={artworkInteractionBusy || asset.retired} onClick={() => chooseSemanticBack({ mode: "library", asset: { assetId: asset.assetId, sha256: asset.sha256, format: asset.format } })}>
             <Image src={`/api/back-library/${encodeURIComponent(asset.assetId)}/preview`} alt={`Preview do verso ${asset.name}`} width={200} height={280} unoptimized loading="lazy" />
             <strong>{asset.name}{asset.retired ? " · arquivado" : ""}{currentAsset ? " · Atual" : ""}</strong>
             <span>{asset.widthPx} × {asset.heightPx}px · {asset.format.toUpperCase()} · SHA-256 {asset.sha256.slice(0, 12)}</span>
@@ -2155,7 +2157,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
 
     {selected && <p className="selected-artwork-line">Atual · {labelSource(selected.source)}</p>}
     {!manualPhysicalBackPicker && !pickerCard.identity && <p className="muted">Sem CardIdentity resolvida: “todas iguais” fica indisponível até a identidade ser confirmada.</p>}
-    {!manualPhysicalBackPicker && <button className="button secondary restore-artwork-default" type="button" disabled={interactionBusy || !pickerCard.identity || !activeFaceExists} title={!pickerCard.identity ? "Não há identidade resolvida para determinar uma artwork padrão." : undefined} onClick={() => void restoreArtworkDefault(pickerCard, effectivePickerSide)}>Usar padrão</button>}
+    {!manualPhysicalBackPicker && <button className="button secondary restore-artwork-default" type="button" disabled={artworkInteractionBusy || !pickerCard.identity || !activeFaceExists} title={!pickerCard.identity ? "Não há identidade resolvida para determinar uma artwork padrão." : undefined} onClick={() => void restoreArtworkDefault(pickerCard, effectivePickerSide)}>Usar padrão</button>}
     {visibleArtworkProblem && <p className="error-message" role="alert">{visibleArtworkProblem}</p>}
     {artworkCatalogState?.requestKey !== currentArtworkRequestKey && !visibleArtworkProblem && <>
       <p className="muted" role="status">Carregando artworks…</p>
@@ -2178,13 +2180,16 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       catalogLabel={manualPhysicalBackPicker ? "MPC cardbacks" : artworkRequest?.source && artworkRequest.source !== "all" ? labelSource(artworkRequest.source) : "Catálogo de arte"}
       cardName={displayCard(pickerCard)}
       selectedCandidateId={pendingArtwork?.id ?? selected?.candidateId}
-      disabled={interactionBusy}
+      disabled={artworkInteractionBusy}
       qualityCheckingIds={qualityCheckingIds}
       onSelect={chooseArtwork}
       onLoadMore={() => undefined}
     />
 
-    {abortableOperation === "artwork" && <button className="button secondary artwork-picker-cancel-operation" type="button" aria-label="Cancelar download e seleção da arte" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar</button>}
+    {abortableOperation === "artwork" && <div className="artwork-picker-selection-progress" role="status">
+      <p className="muted">Baixando e validando o original selecionado… O seletor continua responsivo; você pode cancelar ou fechar.</p>
+      <button className="button secondary artwork-picker-cancel-operation" type="button" aria-label="Cancelar download e seleção da arte" onClick={() => activeOperationAbortController.current?.abort()}>Cancelar</button>
+    </div>}
       </div>
     </div>
   </div> : null;
