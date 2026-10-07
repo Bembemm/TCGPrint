@@ -397,7 +397,7 @@ async function mobileSmoke(browser) {
   await context.close();
 }
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL ?? "chrome" });
 try {
   await desktopSmoke(browser);
   await mobileSmoke(browser);
