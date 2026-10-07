@@ -1431,23 +1431,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     finally { finishAbortableOperation(controller); setBusy(false); }
   }
 
-  async function refreshMpcMetadata(candidate: CandidateDto) {
-    if (candidate.source !== "mpc" || !artworkRequest || !artworkTargetCard) return;
-    const requestKey = artworkRequest.cacheKey;
-    setBusy(true); setArtworkProblem(null);
-    try {
-      const response = await fetch(`/api/cards/artworks/${encodeURIComponent(candidate.id)}/refresh`, { method: "POST" });
-      const result = await jsonResponse<{ candidate: CandidateDto }>(response);
-      setArtworkCatalogState((current) => updateArtworkCatalogCandidate(current, currentArtworkRequestKey, result.candidate));
-      updateResolvedRequestCache(artworkCatalogRequests.current, requestKey, (cached) => ({
-        ...cached,
-        candidates: cached.candidates.map((item) => item.id === candidate.id ? result.candidate : item),
-      }));
-    } catch (error) {
-      setArtworkProblem({ message: error instanceof Error ? error.message : "Não foi possível revalidar os metadados MPC.", cardId: artworkTargetCard.id, requestKey });
-    } finally { setBusy(false); }
-  }
-
   async function restoreArtworkDefault(card: WorkingCard, side: CardFaceSide) {
     if (!artworkRequest) return;
     const problemRequestKey = artworkRequest.cacheKey;
@@ -2186,7 +2169,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       disabled={interactionBusy}
       qualityCheckingIds={qualityCheckingIds}
       onSelect={chooseArtwork}
-      onRevalidate={(candidate) => void refreshMpcMetadata(candidate)}
       onLoadMore={() => undefined}
     />
 
