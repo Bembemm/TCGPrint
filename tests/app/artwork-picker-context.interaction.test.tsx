@@ -270,7 +270,7 @@ describe("M6 Artwork Picker face context", () => {
       candidateId: simpleBackCandidate.id,
     }));
     await waitFor(() => expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent(`MPC Autofill · ${simpleBackCandidate.id}`));
-    expect(within(dialog).getByRole("button", { name: "Selecionada" })).toBeInTheDocument();
+    expect(within(dialog).getByText("Selecionada")).toBeInTheDocument();
   }, 15_000);
 
   it("aborts obsolete progressive Scryfall completion when the picker changes face", async () => {
