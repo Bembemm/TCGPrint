@@ -371,7 +371,7 @@ async function mobileSmoke(browser) {
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(baseURL, { waitUntil: "networkidle" });
 
-  const mobileNav = page.getByRole("navigation", { name: "Navegação do workspace" });
+  const mobileNav = page.getByRole("navigation", { name: "Área de trabalho" });
   await mobileNav.waitFor();
   await mobileNav.getByRole("button", { name: "Cartas" }).waitFor();
   assert.equal(await page.getByTestId("workspace-mobile-open").isVisible(), false, "legacy mobile panel trigger must stay hidden in the bottom-nav layout");
