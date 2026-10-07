@@ -1008,6 +1008,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
 
   useEffect(() => {
     let current = true;
+    const controller = new AbortController();
     const requestKey = currentArtworkRequestKey;
     const progressiveMpc = artworkRequest?.source === "mpc" && !manualPhysicalBackPicker;
     const progressiveScryfall = artworkRequest?.source === "scryfall" && !manualPhysicalBackPicker;
@@ -1051,6 +1052,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
             body: JSON.stringify(requestBody(
               progressiveMpc ? 0 : undefined,
               progressiveMpc ? MPC_INITIAL_GALLERY_BATCH : undefined,
@@ -1085,6 +1087,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           void fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
             body: JSON.stringify(requestBody(undefined, undefined, false)),
           })
             .then((response) => jsonResponse<ArtworkCatalogResponse>(response))
@@ -1101,7 +1104,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
               setProviderHealth((current) => ({ ...current, ...complete.providerHealth }));
             })
             .catch((error: unknown) => {
-              if (!current || artworkRequestKeyRef.current !== requestKey || !artworkTargetCard) return;
+              if (controller.signal.aborted || !current || artworkRequestKeyRef.current !== requestKey || !artworkTargetCard) return;
               setArtworkProblem({
                 message: error instanceof Error ? error.message : "O restante do catálogo Scryfall não pôde ser carregado.",
                 cardId: artworkTargetCard.id,
@@ -1124,6 +1127,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
               body: JSON.stringify(requestBody(offset, MPC_BACKGROUND_GALLERY_BATCH, false)),
             });
             const page = await jsonResponse<ArtworkCatalogResponse>(response);
@@ -1154,7 +1158,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
             await new Promise<void>((resolve) => setTimeout(resolve, 40));
           }
         })().catch((error: unknown) => {
-          if (!current || artworkRequestKeyRef.current !== requestKey || !artworkTargetCard || !artworkRequest) return;
+          if (controller.signal.aborted || !current || artworkRequestKeyRef.current !== requestKey || !artworkTargetCard || !artworkRequest) return;
           setArtworkProblem({
             message: error instanceof Error ? error.message : "O restante do catálogo MPC não pôde ser carregado.",
             cardId: artworkTargetCard.id,
@@ -1165,7 +1169,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         });
       })
       .catch((error: unknown) => {
-        if (current && artworkRequestKeyRef.current === requestKey && artworkTargetCard && artworkRequest) {
+        if (!controller.signal.aborted && current && artworkRequestKeyRef.current === requestKey && artworkTargetCard && artworkRequest) {
           setArtworkProgressiveLoading(false);
           setArtworkCatalogState((existing) => existing?.requestKey === requestKey
             ? existing
@@ -1177,7 +1181,10 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           });
         }
       });
-    return () => { current = false; };
+    return () => {
+      current = false;
+      controller.abort();
+    };
   }, [artworkRequest?.cacheKey, artworkTargetCard?.id, projectRestoreVersion]);
 
   useEffect(() => {
