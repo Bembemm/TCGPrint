@@ -2208,6 +2208,15 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         </span>
       </header>
 
+      <label className="export-mode-control">Modo de saída
+        <select aria-label="Modo de exportação" value={exportContentMode} disabled={interactionBusy} onChange={(event) => updateProjectSetting(() => setExportContentMode(event.currentTarget.value as ExportContentMode))}>
+          <option value="front-only">Somente frente</option>
+          <option value="back-only">Somente verso</option>
+          <option value="front-back-separated">Frente e verso separados (2 PDFs)</option>
+          <option value="duplex">Duplex intercalado</option>
+        </select>
+      </label>
+
       <div className="export-physical-summary" aria-label="Resumo físico">
         <div><span>Cartas</span><strong>{physicalCardCount}</strong></div>
         <div><span>Formato</span><strong>{cardFormat.widthMm} × {cardFormat.heightMm} mm</strong></div>
