@@ -46,3 +46,28 @@ jobs:
           done
           cat /tmp/tcgprint-next.log
           exit 1
+      - name: Install browser smoke tooling
+        if: success()
+        run: |
+          npm install --no-save --package-lock=false @playwright/test@1.51.1
+          npx playwright install --with-deps chromium
+      - name: Browser smoke
+        if: success()
+        run: |
+          npm run start -- -p 3101 > /tmp/tcgprint-browser.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error --head http://127.0.0.1:3101/ >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          TCGPRINT_BASE_URL=http://127.0.0.1:3101 node scripts/resume-browser-smoke.mjs
+      - name: Upload browser smoke screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resume-browser-smoke
+          path: artifacts/resume-browser-smoke
+          if-no-files-found: warn
