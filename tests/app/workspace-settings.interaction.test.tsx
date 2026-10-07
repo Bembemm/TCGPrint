@@ -95,9 +95,9 @@ describe("workspace settings sections", () => {
     const orientation = screen.getByRole("combobox", { name: "Orientação da página" });
     await user.selectOptions(orientation, "landscape");
     expect(orientation).toHaveValue("landscape");
-    const mode = screen.getByRole("combobox", { name: "Modo de exportação" });
-    await user.selectOptions(mode, "duplex");
-    expect(mode).toHaveValue("duplex");
+    expect(screen.queryByRole("combobox", { name: "Modo de exportação" })).not.toBeInTheDocument();
+    expect(screen.getByText("Bleed & Cantos")).toBeInTheDocument();
+    expect(screen.getByText("Guias")).toBeInTheDocument();
     const bleed = screen.getByRole("spinbutton", { name: "Bleed externo (mm)" });
     await user.clear(bleed);
     await user.type(bleed, "1.25");
@@ -107,7 +107,6 @@ describe("workspace settings sections", () => {
     expect(screen.getByText("PDF e conferência final")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Configurações" }));
     expect(screen.getByRole("combobox", { name: "Orientação da página" })).toHaveValue("landscape");
-    expect(screen.getByRole("combobox", { name: "Modo de exportação" })).toHaveValue("duplex");
     expect(screen.getByRole("spinbutton", { name: "Bleed externo (mm)" })).toHaveValue(1.25);
     expect(screen.getByRole("checkbox", { name: /Cantos arredondados/ })).toBeChecked();
   });
