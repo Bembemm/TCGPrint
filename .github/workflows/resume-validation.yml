@@ -48,9 +48,7 @@ jobs:
           exit 1
       - name: Install browser smoke tooling
         if: success()
-        run: |
-          npm install --no-save --package-lock=false @playwright/test@1.51.1
-          npx playwright install --with-deps chromium
+        run: npm install --no-save --package-lock=false @playwright/test@1.51.1
       - name: Browser smoke
         if: success()
         run: |
