@@ -12,6 +12,18 @@ const providerHealth = {
   mpc: { available: true, degraded: false },
 };
 
+const defaultBackHash = "c".repeat(64);
+const defaultBackAsset = {
+  assetId: `back:${defaultBackHash}`,
+  sha256: defaultBackHash,
+  format: "png",
+  name: "Browser smoke back",
+  widthPx: 750,
+  heightPx: 1050,
+  retired: false,
+  selectable: true,
+};
+
 function card(id, name, order) {
   return {
     id,
@@ -72,6 +84,8 @@ function installRoutes(page) {
   let cards = [card("island-card", "Island", 0), card("mountain-card", "Mountain", 1)];
   const projects = [];
   const projectRequests = [];
+  const exportRequests = [];
+  const displayRequests = [];
   let projectCounter = 0;
 
   page.route("**/api/**", async (route) => {
@@ -80,6 +94,7 @@ function installRoutes(page) {
     const path = url.pathname;
     const method = request.method();
     if (path.startsWith("/api/projects")) projectRequests.push({ method, path, body: request.postData() });
+    if (/\/api\/(?:cards\/artworks|back-library)\/.+\/display$/.test(path)) displayRequests.push(request.url());
 
     if (path === "/api/cards/import" && method === "POST") {
       return json(route, { workingCards: cards, report: { summary: {}, sources: [], selectedImporters: [], warnings: [], errors: [], pairings: [] }, providerHealth });
@@ -108,7 +123,7 @@ function installRoutes(page) {
       return json(route, { workingCards: cards, providerHealth });
     }
 
-    if (path === "/api/back-library" && method === "GET") return json(route, { assets: [] });
+    if (path === "/api/back-library" && method === "GET") return json(route, { assets: [defaultBackAsset] });
     if (path === "/api/templates" && method === "GET") return json(route, { templates: [] });
     if (path === "/api/printer-profiles" && method === "GET") return json(route, { profiles: [] });
     if (path === "/api/cards/artworks/mpc-catalogs") return json(route, { catalogs: { sources: [], dpi: [], layouts: [], languages: [], tags: [] } });
@@ -153,6 +168,10 @@ function installRoutes(page) {
     }
 
     if (/^\/api\/cards\/artworks\/.+\/(?:preview|display)$/.test(path)) {
+      return route.fulfill({ status: 200, contentType: "image/png", body: png });
+    }
+
+    if (/^\/api\/back-library\/.+\/(?:preview|display)$/.test(path)) {
       return route.fulfill({ status: 200, contentType: "image/png", body: png });
     }
 
@@ -254,6 +273,7 @@ function installRoutes(page) {
     }
 
     if (path === "/api/cards/export" && method === "POST") {
+      exportRequests.push(request.postDataJSON());
       return route.fulfill({
         status: 200,
         contentType: "application/pdf",
@@ -264,7 +284,7 @@ function installRoutes(page) {
 
     return json(route, { message: `Browser smoke route not mocked: ${method} ${path}` }, 404);
   });
-  return { projectRequests };
+  return { projectRequests, exportRequests, displayRequests };
 }
 
 async function addCards(page) {
@@ -350,16 +370,70 @@ async function desktopSmoke(browser) {
   await page.getByText("Bleed & Cantos", { exact: true }).waitFor();
   await page.getByText("Guias", { exact: true }).waitFor();
   assert.equal(await page.getByRole("combobox", { name: "Modo de exportação" }).count(), 0, "output mode must not live in settings");
+  await page.getByRole("combobox", { name: "Verso padrão do Project" }).selectOption(defaultBackAsset.assetId);
+
+  const compositorFace = page.getByRole("group", { name: "Face do compositor" });
+  await compositorFace.getByRole("button", { name: "Verso" }).click();
+  await page.getByLabel("Verso padrão do Project").first().waitFor();
+  await compositorFace.getByRole("button", { name: "Frente" }).click();
 
   await page.getByRole("tab", { name: "Exportar" }).click();
-  await page.getByRole("combobox", { name: "Modo de exportação" }).waitFor();
+  const outputMode = page.getByRole("combobox", { name: "Modo de exportação" });
+  await outputMode.waitFor();
+
+  await outputMode.selectOption("front-only");
   await page.getByRole("button", { name: "Gerar PDF final" }).click();
   await page.getByRole("link", { name: "Baixar tcgprint-browser-smoke.pdf" }).waitFor();
+  assert.equal(apiState.exportRequests.at(-1)?.options?.exportContentMode, "front-only", "front-only browser export must reach the API");
+
+  await outputMode.selectOption("back-only");
+  await page.getByRole("button", { name: "Gerar PDF final" }).click();
+  await page.waitForFunction(() => document.body.textContent?.includes("tcgprint-browser-smoke.pdf pronto"));
+  assert.equal(apiState.exportRequests.at(-1)?.options?.exportContentMode, "back-only", "back-only browser export must reach the API");
+  assert.equal(apiState.exportRequests.at(-1)?.options?.projectDefaultBack?.assetId, defaultBackAsset.assetId, "back-only export must carry the configured Project default back");
+
+  await outputMode.selectOption("duplex");
+  await page.getByRole("button", { name: "Gerar PDF final" }).click();
+  await page.waitForFunction(() => document.body.textContent?.includes("tcgprint-browser-smoke.pdf pronto"));
+  assert.equal(apiState.exportRequests.at(-1)?.options?.exportContentMode, "duplex", "duplex browser export must reach the API");
+  assert.equal(apiState.exportRequests.at(-1)?.options?.projectDefaultBack?.sha256, defaultBackAsset.sha256, "duplex export must carry the immutable Back Library reference");
+
   await page.getByRole("button", { name: "Conferir PDF final" }).click();
   await page.getByRole("dialog", { name: "Conferir PDF final" }).waitFor();
 
   await page.screenshot({ path: `${artifactDir}/desktop-final.png`, fullPage: true });
   assert.deepEqual(errors, [], `desktop page errors: ${errors.join(" | ")}`);
+  await context.close();
+}
+
+async function highDprCompositorSmoke(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 3 });
+  const page = await context.newPage();
+  const apiState = installRoutes(page);
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(baseURL, { waitUntil: "networkidle" });
+
+  await addCards(page);
+  await chooseFrontArtworkForVisibleCard(page);
+
+  const display = page.locator("image[data-compositor-display-url]").first();
+  await display.waitFor();
+  const displayUrl = await display.getAttribute("data-compositor-display-url");
+  assert(displayUrl, "high-DPR compositor must expose a display derivative URL");
+  const width = Number(new URL(displayUrl, baseURL).searchParams.get("width"));
+  assert(width >= 768, `high-DPR compositor must request a high-fidelity bucket, got ${width}`);
+  await page.waitForFunction(() => {
+    const node = document.querySelector("image[data-compositor-display-url]");
+    return node?.getAttribute("data-compositor-source") === "display-high-fidelity";
+  });
+  assert(apiState.displayRequests.some((url) => {
+    const parsed = new URL(url);
+    return parsed.pathname.includes("/api/cards/artworks/") && Number(parsed.searchParams.get("width")) >= 768;
+  }), "high-DPR compositor must request a bucketed /display asset from the browser");
+
+  await page.screenshot({ path: `${artifactDir}/desktop-high-dpr.png`, fullPage: true });
+  assert.deepEqual(errors, [], `high-DPR page errors: ${errors.join(" | ")}`);
   await context.close();
 }
 
@@ -409,8 +483,9 @@ async function mobileSmoke(browser) {
 const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL ?? "chrome" });
 try {
   await desktopSmoke(browser);
+  await highDprCompositorSmoke(browser);
   await mobileSmoke(browser);
-  console.log("Browser smoke passed: desktop + mobile + picker + reorder + Project reopen + export/proof.");
+  console.log("Browser smoke passed: desktop + high-DPR compositor + mobile + picker + reorder + Project reopen + Front/Back/Duplex export/proof.");
 } finally {
   await browser.close();
 }
