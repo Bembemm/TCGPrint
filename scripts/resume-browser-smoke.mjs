@@ -390,7 +390,16 @@ async function mobileSmoke(browser) {
 
   await mobileNav.getByRole("button", { name: "Ajustes" }).click();
   await page.locator("[data-compositor-card-body='true']").first().click();
-  await page.getByRole("dialog").waitFor();
+  const picker = page.getByRole("dialog");
+  await picker.waitFor();
+  const layers = await page.evaluate(() => ({
+    dialog: Number.parseInt(getComputedStyle(document.querySelector(".artwork-picker-dialog")).zIndex || "0", 10),
+    backdrop: Number.parseInt(getComputedStyle(document.querySelector(".artwork-picker-backdrop")).zIndex || "0", 10),
+    nav: Number.parseInt(getComputedStyle(document.querySelector(".workspace-mobile-nav")).zIndex || "0", 10),
+    sidebar: Number.parseInt(getComputedStyle(document.querySelector(".workspace-sidebar")).zIndex || "0", 10),
+  }));
+  assert(layers.backdrop > layers.nav && layers.backdrop > layers.sidebar, `picker backdrop must cover mobile workspace chrome: ${JSON.stringify(layers)}`);
+  assert(layers.dialog > layers.backdrop, `picker dialog must remain above its backdrop: ${JSON.stringify(layers)}`);
   await page.screenshot({ path: `${artifactDir}/mobile-picker.png`, fullPage: true });
 
   assert.deepEqual(errors, [], `mobile page errors: ${errors.join(" | ")}`);
