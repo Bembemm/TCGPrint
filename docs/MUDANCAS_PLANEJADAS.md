@@ -2481,6 +2481,13 @@ Implementar display asset de alta resolução:
 
 **Gate:** testes de endpoint/cache + smoke visual DPR alto.
 
+**Status Slice 4: IMPLEMENTADO E APROVADO.**
+- display derivative permanece separado do thumbnail e do original canônico de export;
+- buckets/cache/fallback continuam cobertos pelos testes de endpoint, store e compositor;
+- o browser smoke final roda um contexto Chromium desktop com `deviceScaleFactor: 3`, seleciona artwork real do fixture e exige uma URL `/display` bucketed com largura mínima de 768 px;
+- o smoke também espera a promoção do SVG para `data-compositor-source="display-high-fidelity"`, comprovando que o derivative HQ foi efetivamente carregado no browser;
+- evidência final: commit `a9196a04115f5b9c8901f63ea4938b4ed602f914`, GitHub Actions run `37693135296`, verde em suíte completa, typecheck, build, production smoke e browser smoke.
+
 ### Slice 5 — Artwork Picker
 Implementar:
 - Scryfall + MPC Autofill no Front;
@@ -2493,6 +2500,16 @@ Implementar:
 
 **Gate:** provider/cache/offline/prepare/selection tests.
 
+**Status Slice 5: IMPLEMENTADO E APROVADO.**
+- Front oferece Scryfall e MPC Autofill com carregamento progressivo/automático e filtros compactos;
+- aplicação ocorre por clique na artwork, sem botões técnicos manuais de revalidação/prepare no fluxo normal;
+- último provider Front é lembrado durante a sessão e Back não sobrescreve essa preferência;
+- requests obsoletos são abortados e o cache não reutiliza Promise abortada em uma execução seguinte;
+- seleção MPC mantém validação do original antes de aplicar, mas não congela o picker; Cancelar/Fechar abortam a preparação pendente;
+- uploads continuam restritos aos contextos de produto compatíveis;
+- provider/cache/offline/prepare/selection permanecem cobertos pela suíte completa;
+- evidência final: commit `5d8efeba23745df530ef6afdf54fd1fb96edbac9` validou o hotfix do picker, e o gate agregado em `a9196a04115f5b9c8901f63ea4938b4ed602f914` / run `37693135296` permaneceu verde.
+
 ### Slice 6 — Configurações consolidadas
 Reorganizar somente os settings reais existentes:
 - accordions/grupos;
@@ -2501,6 +2518,14 @@ Reorganizar somente os settings reais existentes:
 - nenhuma feature inventada.
 
 **Gate:** Project round-trip + settings/export equivalence.
+
+**Status Slice 6: IMPLEMENTADO E APROVADO.**
+- settings reais foram agrupados em accordions sem criar estado paralelo;
+- `Guias` permanece separado de `Bleed & Cantos`;
+- modo de saída foi removido de Configurações e consolidado em Exportar, reutilizando o mesmo `ProjectSettings`;
+- Back Library, verso padrão, duplex, layout, bleed, guias, registro e calibração continuam persistidos pelo Project;
+- round-trip/save/reopen e equivalência settings/export seguem cobertos por testes e pelo browser smoke;
+- evidência final: run `37693135296` verde após Project reopen e uso posterior das mesmas configurações no compositor/export.
 
 ### Slice 7 — Exportar + acabamento
 Consolidar:
@@ -2512,6 +2537,40 @@ Consolidar:
 - smoke visual final.
 
 **Gate final:** typecheck + testes completos relevantes + build + smoke manual Front/Back/duplex/reorder/picker/project reopen.
+
+**Status Slice 7: IMPLEMENTADO E APROVADO.**
+- modos Front-only, Back-only, separados e Duplex permanecem no painel Exportar;
+- PDF, proof final, SVG/DXF e mensagens de bloqueio/preflight continuam no pipeline existente, sem alterar engines canônicas;
+- browser smoke final cobre picker Scryfall/MPC, aplicação direta, reorder por pointer, multi-selection, Project save/reopen, Settings, compositor Front/Back com Back Library, export Front-only, Back-only e Duplex e proof final;
+- os requests de Back-only/Duplex são verificados no browser quanto a `exportContentMode` e à referência imutável `assetId + sha256` do Project Default Back;
+- desktop, high-DPR e mobile geram screenshots como artifact `resume-browser-smoke`;
+- gate final: commit `a9196a04115f5b9c8901f63ea4938b4ed602f914`, GitHub Actions run `37693135296`;
+- resultado: suíte completa verde, typecheck verde, build verde, production HTTP smoke verde, browser smoke verde e upload dos screenshots verde.
+
+
+### Fechamento formal dos Slices 0–7 — 2026-10-07
+
+Com o gate agregado do commit `a9196a04115f5b9c8901f63ea4938b4ed602f914` (GitHub Actions run `37693135296`), todos os Slices 0–7 possuem implementação e evidência de validação compatíveis com seus gates.
+
+O browser smoke de fechamento acrescenta explicitamente as lacunas que ainda restavam:
+- Slice 4: Chromium desktop em DPR 3, requisição bucketed `/display` e promoção para high-fidelity;
+- Slice 7: Front, Back com Project Default Back, Duplex, reorder, picker, Project reopen e proof final.
+
+O hotfix do Artwork Picker/MPC que remove a corrida de cache/AbortController e mantém o picker responsivo durante preparação de original está incluído no mesmo histórico validado.
+
+Estado deste branch de fechamento:
+
+```text
+SLICES 0–7: IMPLEMENTADOS E APROVADOS
+SUÍTE COMPLETA: VERDE
+TYPECHECK: VERDE
+BUILD: VERDE
+PRODUCTION HTTP SMOKE: VERDE
+BROWSER SMOKE DESKTOP / DPR ALTO / MOBILE: VERDE
+FRONT / BACK / DUPLEX / REORDER / PICKER / PROJECT REOPEN / PDF PROOF: VERDES
+```
+
+A promoção deste fechamento para `main` continua sendo uma operação separada e deve preservar o histórico por fast-forward quando a branch não tiver divergido.
 
 ---
 
