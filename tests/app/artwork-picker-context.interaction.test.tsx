@@ -202,7 +202,7 @@ describe("M6 Artwork Picker face context", () => {
       if (url === "/api/templates") return Response.json({ templates: [] });
       if (url === "/api/printer-profiles") return Response.json({ profiles: [] });
       if (url === "/api/cards/artworks/mpc-catalogs") return Response.json({ catalogs: { sources: [], dpi: [], layouts: [], languages: [] } });
-      if (url === `/api/cards/${encodeURIComponent(simple.identity!.id)}`) return Response.json({ identity: simple.identity });
+      if (url === `/api/cards/${encodeURIComponent(simple.identity!.id)}`) return Response.json({ identity: { ...simple.identity, relatedCards: [] } });
       if (url.endsWith("/artworks")) {
         const body = JSON.parse(String(init?.body)) as { source?: string };
         return Response.json({ candidates: body.source === "mpc" ? [mpcCandidate] : [], catalogTotal: body.source === "mpc" ? 1 : 0, catalogTotalComplete: true, providerHealth });
