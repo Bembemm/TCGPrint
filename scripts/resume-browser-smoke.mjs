@@ -33,8 +33,11 @@ function card(id, name, order) {
 }
 
 function candidate(cardValue, source = "scryfall") {
+  const candidateId = source === "mpc"
+    ? `mpc:${(cardValue.id === "island-card" ? "a" : "b").repeat(64)}`
+    : `scryfall:${cardValue.id}-front`;
   return {
-    id: `${source}:${cardValue.id}-front`,
+    id: candidateId,
     source,
     identityId: cardValue.identity.id,
     faceId: "front",
@@ -141,8 +144,11 @@ function installRoutes(page) {
     const prepareMatch = /^\/api\/cards\/artworks\/(.+)\/prepare$/.exec(path);
     if (prepareMatch && method === "POST") {
       const id = decodeURIComponent(prepareMatch[1]);
-      const target = cards.find((item) => id.includes(item.id)) ?? cards[0];
-      return json(route, { candidate: candidate(target, id.startsWith("mpc:") ? "mpc" : "scryfall") });
+      const source = id.startsWith("mpc:") ? "mpc" : "scryfall";
+      const target = source === "mpc"
+        ? cards.find((item) => candidate(item, "mpc").id === id) ?? cards[0]
+        : cards.find((item) => id.includes(item.id)) ?? cards[0];
+      return json(route, { candidate: candidate(target, source) });
     }
 
     if (/^\/api\/cards\/artworks\/.+\/(?:preview|display)$/.test(path)) {
@@ -205,7 +211,41 @@ function installRoutes(page) {
     }
 
     if (path === "/api/cut/preview" && method === "POST") {
-      return json(route, { projectRevision: 1, source: "trim", paths: [], warnings: [] });
+      const body = request.postDataJSON();
+      const layout = {
+        pageSizeMm: { widthMm: 210, heightMm: 297 },
+        cardSizeMm: { widthMm: 63.5, heightMm: 88.9 },
+        rows: 3,
+        columns: 3,
+        capacity: 9,
+      };
+      const geometry = {
+        source: { kind: "project-layout" },
+        boundsMm: { minX: 0, minY: 0, maxX: 210, maxY: 297 },
+        paths: [],
+      };
+      const pageDto = {
+        pageNumber: 1,
+        firstCardNumber: 1,
+        lastCardNumber: cards.length,
+        geometry,
+        activeGeometry: geometry,
+        slotPaths: [],
+        layout,
+      };
+      return json(route, {
+        projectId: body.projectId,
+        projectRevision: body.expectedRevision,
+        templateIdentity: null,
+        parserVersion: "browser-smoke",
+        geometry,
+        activeGeometry: geometry,
+        slotPaths: [],
+        pageCount: 1,
+        pages: [pageDto],
+        alternateSources: [],
+        layout,
+      });
     }
 
     if (path === "/api/cards/export" && method === "POST") {
