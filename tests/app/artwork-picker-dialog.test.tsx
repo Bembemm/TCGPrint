@@ -173,4 +173,32 @@ describe("M6 Artwork Picker dialog", () => {
 
     expect(screen.getByText(/450 DPI efetivo · verificado.*820 DPI informado pelo MPC/)).toBeInTheDocument();
   });
+
+  it("keeps MPC metadata/original validation out of the normal picker actions", () => {
+    const mpcCandidate: ArtworkCandidateView = {
+      ...candidates[0]!,
+      id: `mpc:${"2".repeat(64)}`,
+      source: "mpc",
+      effectiveDpi: undefined,
+      originalAvailable: true,
+      metadata: { dpi: 820, metadataFreshness: "stale", originalFormat: "png" },
+    };
+    render(<ArtworkCandidateGrid
+      candidates={[mpcCandidate]}
+      windowLimit={60}
+      catalogTotal={1}
+      filterTotal={1}
+      catalogLabel="MPC"
+      cardName="Island"
+      selectedCandidateId={mpcCandidate.id}
+      onSelect={vi.fn()}
+      onLoadMore={vi.fn()}
+    />);
+
+    expect(screen.queryByRole("button", { name: "Revalidar metadata" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Validar original e calcular DPI" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Selecionada" })).toBeInTheDocument();
+    expect(screen.getByText("820 DPI*")).toBeInTheDocument();
+  });
+
 });
