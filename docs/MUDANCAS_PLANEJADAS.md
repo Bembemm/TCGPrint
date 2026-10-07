@@ -2636,3 +2636,38 @@ NÃO INTEGRADO À MAIN
 ```
 
 Ainda permanece como validação não automatizada o smoke visual manual de desktop/mobile e dos fluxos finais de Front/Back/duplex/reorder/picker/Project reopen. A integração em `main` continua exigindo autorização explícita do usuário.
+
+
+### Continuação da revisão de retomada — Slices 5–7
+
+A revisão do snapshot pré-native continuou após o gate inicial e corrigiu resíduos objetivos entre a implementação preservada e a especificação final de UX, sem alterar a geometria canônica, `physicalOrder`, bleed engine ou pipeline de export.
+
+Correções adicionais:
+
+- Artwork Picker deixou de expor `Revalidar metadata` e `Validar original e calcular DPI` no fluxo normal;
+- seleção de artwork passou a ocorrer diretamente pela preview/card, sem botão redundante `Selecionar arte`;
+- botão manual `Atualizar catálogo MPC` foi removido; o catálogo continua carregando automaticamente pelo pipeline/cache existente;
+- o último provider usado no Front (`Scryfall` ou `MPC Autofill`) passa a ser lembrado durante a sessão, sem uma escolha do Back sobrescrever esse estado;
+- orientação da Back Library vazia foi corrigida para `Configurações → Versos e Back Library`;
+- o modo de saída (`Front only / Back only / separados / Duplex`) foi movido para `Exportar`, mantendo o mesmo estado persistido do Project;
+- `Guias` foi separado de `Bleed & Cantos`, preservando os mesmos controles e valores canônicos.
+
+Gate verificado no commit `996285bc76b97e4af7638c6b8f72fa559d994095`, GitHub Actions run `37648027587`:
+
+- 122 arquivos de teste passando;
+- 1 arquivo ignorado;
+- 1.403 testes passando;
+- 1 teste ignorado;
+- `npm run typecheck` verde;
+- `npm run build` verde;
+- Next.js compilado com sucesso;
+- production HTTP smoke verde.
+
+Branches após a revisão:
+
+```text
+main:                           6dd9b22c823d83d1dedda456bf94b75483a9506a
+chatgpt/resume-web-pre-native:  996285bc76b97e4af7638c6b8f72fa559d994095
+```
+
+`main` permanece intocada. A integração continua bloqueada até autorização explícita e até o smoke visual/manual final.
