@@ -192,7 +192,7 @@ describe("shared Project, template, and cut session in the workspace", () => {
     await waitFor(() => expect(screen.getByLabelText("Estado do salvamento")).toHaveTextContent("Salvo"));
 
     await user.click(screen.getByRole("tab", { name: "Exportar" }));
-    expect(screen.getByRole("heading", { name: "SVG/DXF Cut Export" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Arquivos de corte" })).toBeInTheDocument();
     const cutExport = screen.getByRole("region", { name: "SVG e DXF Cut" });
     await within(cutExport).findByText(/Project project-m4 · revisão 2/);
     const cutPreviewCalls = requests.filter(({ url }) => url === "/api/cut/preview").length;
