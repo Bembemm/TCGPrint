@@ -154,7 +154,7 @@ export class ScryfallArtworkProvider implements ArtworkProvider {
       while (pageUrl) {
         if (seenPages.has(pageUrl)) throw new Error("Scryfall returned a cyclic printing pagination link.");
         seenPages.add(pageUrl);
-        const page = await pagedClient.listPrintingsPage!(oracleId, pageUrl);
+        const page: ScryfallPrintingPage = await pagedClient.listPrintingsPage!(oracleId, pageUrl);
         cards.push(...page.cards);
         pageUrl = page.hasMore ? page.nextPage : undefined;
       }
