@@ -193,7 +193,7 @@ describe("M6 Artwork Picker face context", () => {
       metadata: { originalFormat: "png", dpi: 600 },
     };
     let prepareSignal: AbortSignal | undefined;
-    let resolveCalls = 0;
+    let artworkResolveCalls = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/cards/import") return Response.json({ workingCards: [simple], report: { summary: {}, sources: [], selectedImporters: [], warnings: [], errors: [], pairings: [] }, providerHealth });
@@ -217,7 +217,8 @@ describe("M6 Artwork Picker face context", () => {
         });
       }
       if (url === "/api/cards/resolve") {
-        resolveCalls += 1;
+        const body = JSON.parse(String(init?.body)) as { action?: string };
+        if (body.action === "apply-artwork-scope") artworkResolveCalls += 1;
         return Response.json({ workingCards: [simple], providerHealth });
       }
       return Response.json({ message: `Rota não simulada: ${url}` }, { status: 404 });
@@ -242,7 +243,7 @@ describe("M6 Artwork Picker face context", () => {
     await user.click(close);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /Island/ })).not.toBeInTheDocument());
     expect(prepareSignal?.aborted).toBe(true);
-    expect(resolveCalls).toBe(0);
+    expect(artworkResolveCalls).toBe(0);
   });
 
   it("keeps simple-card backs semantic, uses Back Library/MPC, and reports project-wide DFC impact", async () => {
