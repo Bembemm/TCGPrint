@@ -63,7 +63,9 @@ describe("ProjectSettingsControls", () => {
     expect(markup).toContain("Guia externa de corte");
     expect(markup).toContain("Orientação da página");
     expect(markup).toContain("Orientação do registration");
-    expect(markup).toContain("Modo de exportação");
+    expect(markup).not.toContain("Modo de exportação");
+    expect(markup).toContain("Bleed &amp; Cantos");
+    expect(markup).toContain("Guias");
     expect(markup).toContain("Política para cartas sem verso");
     expect(markup).toContain("Short edge");
   });
