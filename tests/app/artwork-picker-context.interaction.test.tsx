@@ -144,6 +144,9 @@ describe("M6 Artwork Picker face context", () => {
     await waitFor(() => expect(within(dialog).getByText(/Atual · Scryfall/i)).toBeInTheDocument());
     expect(within(dialog).getByRole("img", { name: /Artwork atual de Delver of Secrets/ })).toBeInTheDocument();
 
+    await user.click(within(dialog).getByRole("button", { name: "MPC Autofill" }));
+    await within(dialog).findByText("Delver of Secrets · mpc");
+
     const backTab = within(dialog).getByRole("tab", { name: "Verso · Insectile Aberration" });
     await user.click(backTab);
     expect(backTab).toHaveAttribute("aria-selected", "true");
@@ -168,6 +171,13 @@ describe("M6 Artwork Picker face context", () => {
     await waitFor(() => expect(resolveRequests.at(-1)).toMatchObject({ action: "apply-artwork-scope", faceId: "back", scope: "entry" }));
     expect(artworkRequests.some((request) => request.faceId === "back" && request.source === "mpc" && request.physicalBackArtwork === false)).toBe(true);
     expect(within(dialog).queryByRole("button", { name: "Meus uploads" })).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("tab", { name: "Frente · Delver of Secrets" }));
+    expect(within(dialog).getByRole("button", { name: "MPC Autofill" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(dialog).getByRole("button", { name: "Fechar seletor de arte" }));
+    const reopened = await openPicker();
+    expect(within(reopened).getByRole("button", { name: "MPC Autofill" })).toHaveAttribute("aria-pressed", "true");
+    expect(await within(reopened).findByText("Delver of Secrets · mpc")).toBeInTheDocument();
   }, 15_000);
 
   it("keeps simple-card backs semantic, uses Back Library/MPC, and reports project-wide DFC impact", async () => {
