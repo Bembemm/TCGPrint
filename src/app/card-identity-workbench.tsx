@@ -599,6 +599,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const [qualityChecking, setQualityChecking] = useState<{ requestKey: string; candidateIds: ReadonlySet<string> }>({ requestKey: "", candidateIds: new Set() });
   const [artworkCatalogRevision, setArtworkCatalogRevision] = useState(0);
   const [artworkFilter, setArtworkFilter] = useState<ArtworkFilter>("all");
+  const lastFrontArtworkProviderRef = useRef<"scryfall" | "mpc">("scryfall");
   const [mpcFilters, setMpcFilters] = useState<MpcArtworkFilterInput>({});
   const [mpcCatalogs, setMpcCatalogs] = useState<MpcFilterCatalogs | null>(null);
   const [mpcCatalogProblem, setMpcCatalogProblem] = useState("");
@@ -815,7 +816,11 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     if (selectedCardId !== target.id) dispatchEditor({ type: "select-card", cardId: target.id });
     if (isDoubleFacedIdentity(target.identity) && target.faces.some((item) => item.side === side)) dispatchEditor({ type: "set-face", side });
     setPickerSide(side);
-    setArtworkFilter(side === "back" && !isDoubleFacedIdentity(target.identity) ? "mpc" : target.identity ? "scryfall" : "all");
+    setArtworkFilter(side === "back" && !isDoubleFacedIdentity(target.identity)
+      ? "mpc"
+      : target.identity
+        ? side === "front" ? lastFrontArtworkProviderRef.current : "scryfall"
+        : "all");
     setArtworkPageIndex(0);
     setArtworkSearch("");
     setArtworkSort("recommended");
@@ -836,7 +841,11 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       dispatchEditor({ type: "set-face", side });
     }
     setPickerSide(side);
-    setArtworkFilter(side === "back" && !isDoubleFacedIdentity(artworkTargetCard.identity) ? "mpc" : artworkTargetCard.identity ? "scryfall" : "all");
+    setArtworkFilter(side === "back" && !isDoubleFacedIdentity(artworkTargetCard.identity)
+      ? "mpc"
+      : artworkTargetCard.identity
+        ? side === "front" ? lastFrontArtworkProviderRef.current : "scryfall"
+        : "all");
     setArtworkPageIndex(0);
     setPendingArtwork(null);
     setPendingBackChoice(null);
@@ -2071,7 +2080,12 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       {(pickerCard.identity
         ? ([["scryfall", "Scryfall"], ["mpc", "MPC Autofill"]] as const)
         : ([["all", "Todas"], ["upload", "Meus uploads"], ["scryfall", "Scryfall"], ["mpc", "MPC Autofill"]] as const)
-      ).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} aria-pressed={artworkFilter === value} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => { setArtworkFilter(value); setArtworkPageIndex(0); setPendingArtwork(null); }}>{label}</button>)}
+      ).map(([value, label]) => <button key={value} type="button" disabled={interactionBusy} aria-pressed={artworkFilter === value} className={`button ${artworkFilter === value ? "primary" : "secondary"}`} onClick={() => {
+        if (pickerCard.identity && effectivePickerSide === "front" && (value === "scryfall" || value === "mpc")) lastFrontArtworkProviderRef.current = value;
+        setArtworkFilter(value);
+        setArtworkPageIndex(0);
+        setPendingArtwork(null);
+      }}>{label}</button>)}
     </div>}
 
     {!manualPhysicalBackPicker && pickerCard.identity && <label className="artwork-picker-bulk-toggle">
