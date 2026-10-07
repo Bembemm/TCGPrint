@@ -180,6 +180,68 @@ describe("M6 Artwork Picker face context", () => {
     expect(await within(reopened).findByText("Delver of Secrets · mpc")).toBeInTheDocument();
   }, 15_000);
 
+  it("keeps the picker responsive and aborts a pending MPC original prepare when closed", async () => {
+    const user = userEvent.setup();
+    const mpcCandidate: ArtworkCandidate = {
+      id: `mpc:${"9".repeat(64)}`,
+      source: "mpc",
+      identityId: simple.identity!.id,
+      faceId: "front",
+      faceName: "Island · mpc",
+      originalAvailable: true,
+      originalCached: false,
+      metadata: { originalFormat: "png", dpi: 600 },
+    };
+    let prepareSignal: AbortSignal | undefined;
+    let resolveCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/cards/import") return Response.json({ workingCards: [simple], report: { summary: {}, sources: [], selectedImporters: [], warnings: [], errors: [], pairings: [] }, providerHealth });
+      if (url === "/api/back-library") return Response.json({ assets: [] });
+      if (url === "/api/projects") return Response.json({ projects: [] });
+      if (url === "/api/templates") return Response.json({ templates: [] });
+      if (url === "/api/printer-profiles") return Response.json({ profiles: [] });
+      if (url === "/api/cards/artworks/mpc-catalogs") return Response.json({ catalogs: { sources: [], dpi: [], layouts: [], languages: [] } });
+      if (url === `/api/cards/${encodeURIComponent(simple.identity!.id)}`) return Response.json({ identity: simple.identity });
+      if (url.endsWith("/artworks")) {
+        const body = JSON.parse(String(init?.body)) as { source?: string };
+        return Response.json({ candidates: body.source === "mpc" ? [mpcCandidate] : [], catalogTotal: body.source === "mpc" ? 1 : 0, catalogTotalComplete: true, providerHealth });
+      }
+      if (url.includes("/prepare")) {
+        prepareSignal = init?.signal ?? undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+        });
+      }
+      if (url === "/api/cards/resolve") {
+        resolveCalls += 1;
+        return Response.json({ workingCards: [simple], providerHealth });
+      }
+      return Response.json({ message: `Rota não simulada: ${url}` }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<HomePage />);
+    await user.type(screen.getByRole("textbox", { name: "Cole uma decklist ou URL" }), "1 Island");
+    await user.click(screen.getByRole("button", { name: "Adicionar cartas" }));
+    await user.click(screen.getByRole("tab", { name: "Cartas" }));
+    await user.click(await screen.findByRole("button", { name: "Trocar artwork" }));
+    const dialog = await screen.findByRole("dialog", { name: /Island/ });
+    await user.click(within(dialog).getByRole("button", { name: "MPC Autofill" }));
+    const candidateLabel = await within(dialog).findByText("Island · mpc");
+    await user.click(within(candidateLabel.closest<HTMLElement>(".artwork-candidate")!).getByRole("button", { name: /Escolher visualmente/ }));
+
+    expect(await within(dialog).findByRole("status")).toHaveTextContent("Baixando e validando o original selecionado");
+    const close = within(dialog).getByRole("button", { name: "Fechar seletor de arte" });
+    expect(close).not.toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Cancelar download e seleção da arte" })).not.toBeDisabled();
+
+    await user.click(close);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Island/ })).not.toBeInTheDocument());
+    expect(prepareSignal?.aborted).toBe(true);
+    expect(resolveCalls).toBe(0);
+  });
+
   it("keeps simple-card backs semantic, uses Back Library/MPC, and reports project-wide DFC impact", async () => {
     const user = userEvent.setup();
     const hash = "e".repeat(64);
