@@ -100,7 +100,6 @@ export default function ProjectSettingsControls({
   onLayoutRowsChange,
   onLayoutColumnsChange,
   onDeactivateActiveSlot,
-  onExportContentModeChange,
   onMissingBackPolicyChange,
   onDuplexFlipModeChange,
 }: ProjectSettingsControlsProps) {
@@ -150,9 +149,6 @@ export default function ProjectSettingsControls({
       <details className="settings-subsection settings-accordion pdf-settings" open hidden={section !== "all" && section !== "pdf"}>
       <summary>Verso & Duplex</summary>
       <div className="settings-accordion-body">
-      <label>Conteúdo do PDF<select aria-label="Modo de exportação" value={exportContentMode} disabled={disabled} onChange={(event) => onExportContentModeChange(event.currentTarget.value as ExportContentMode)}>
-        <option value="front-only">Somente frente</option><option value="back-only">Somente verso</option><option value="front-back-separated">Frente e verso separados (2 PDFs)</option><option value="duplex">Duplex intercalado</option>
-      </select></label>
       {exportContentMode !== "front-only" && <>
         <label>Virada da folha<select aria-label="Modo de virada duplex" value={duplexFlipMode} disabled={disabled} onChange={(event) => onDuplexFlipModeChange(event.currentTarget.value as DuplexFlipMode)}>
           <option value="long-edge">Long edge</option><option value="short-edge">Short edge</option>
@@ -229,7 +225,7 @@ export default function ProjectSettingsControls({
     </div>
     <section className="settings-subsection pdf-settings-advanced" hidden={section !== "all" && section !== "pdf"}>
     <details className="settings-accordion bleed-settings" open>
-    <summary>Bleed, cantos e guias</summary>
+    <summary>Bleed & Cantos</summary>
     <div className="settings-accordion-body">
     <label className="narrow-field">Bleed externo (mm)
       <input type="number" min="0" max="3" step="0.125" value={bleedMm} disabled={disabled} onChange={(event) => onBleedMmChange(event.currentTarget.value)} />
@@ -238,6 +234,11 @@ export default function ProjectSettingsControls({
       <input type="checkbox" checked={roundedCorners} disabled={disabled} onChange={(event) => onRoundedCornersChange(event.currentTarget.checked)} />
       Cantos arredondados (opcional; desligado por padrão)
     </label>
+    </div>
+    </details>
+    <details className="settings-accordion guide-settings">
+    <summary>Guias</summary>
+    <div className="settings-accordion-body">
     <CutGuideControls
       trimEnabled={trimGuideEnabled}
       trimExtentMm={trimGuideExtentMm}
