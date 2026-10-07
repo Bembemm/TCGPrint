@@ -103,7 +103,7 @@ describe("artwork catalog count through MPC service, API, and UI", () => {
     }));
     expect(markup).toContain("60 de 1200 exibidas");
     expect(markup).toContain("247 de 1200 correspondem ao filtro");
-    expect([...markup.matchAll(/class="artwork-candidate/g)]).toHaveLength(60);
+    expect([...markup.matchAll(/data-candidate-rank="/g)]).toHaveLength(60);
 
     const cachedResponse = await handleArtworkList(request(), "scryfall:oracle:test", workbench);
     const cached = await cachedResponse.json() as { candidates: ArtworkCandidateView[]; catalogTotal: number };
