@@ -12,6 +12,16 @@ export function clearRequestCache<T>(requests: RequestCache<T>): void {
   requests.inflight.clear();
 }
 
+export function discardInflightCachedRequest<T>(
+  requests: RequestCache<T>,
+  key: string,
+  request: Promise<T> | null | undefined,
+): boolean {
+  if (!request || requests.inflight.get(key) !== request) return false;
+  requests.inflight.delete(key);
+  return true;
+}
+
 export function getOrCreateCachedRequest<T>(
   requests: RequestCache<T>,
   key: string,
