@@ -39,7 +39,7 @@ import {
 } from "../../core/cards/editor-history";
 import { MAX_PHYSICAL_CARDS_PER_EXPORT } from "../../core/cards/limits";
 import { createPhysicalOrder, type PhysicalOrder } from "../../core/cards/physical-instance-order";
-import { clearRequestCache, createRequestCache, getOrCreateCachedRequest, updateResolvedRequestCache } from "./request-cache";
+import { clearRequestCache, createRequestCache, discardInflightCachedRequest, getOrCreateCachedRequest, updateResolvedRequestCache } from "./request-cache";
 import { buildBleedExportOptions, buildCutGuideConfig, decodeBleedDiagnostics, type BleedDiagnosticsReport } from "./bleed-export-options";
 import ProjectSettingsControls from "./project-settings-controls";
 import { runIfProjectInteractionUnlocked } from "./project-interaction-lock";
@@ -971,8 +971,9 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
     const references = artworkTargetCard.mpcReferences;
     const cacheKey = JSON.stringify([identityId, faceId, false, "mpc", references, mpcFilters, artworkCatalogRevision]);
     const controller = new AbortController();
+    let cachedRequest: Promise<ArtworkCatalogResponse> | null = null;
     const idleId = window.requestIdleCallback(() => {
-      void getOrCreateCachedRequest(artworkCatalogRequests.current, cacheKey, async () => {
+      cachedRequest = getOrCreateCachedRequest(artworkCatalogRequests.current, cacheKey, async () => {
         const response = await fetch(`/api/cards/${encodeURIComponent(identityId)}/artworks`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -987,11 +988,13 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           }),
         });
         return jsonResponse<ArtworkCatalogResponse>(response);
-      }).catch(() => undefined);
+      });
+      void cachedRequest.catch(() => undefined);
     }, { timeout: 1200 });
 
     return () => {
       window.cancelIdleCallback(idleId);
+      discardInflightCachedRequest(artworkCatalogRequests.current, cacheKey, cachedRequest);
       controller.abort();
     };
   }, [pickerIsOpen, manualPhysicalBackPicker, artworkFilter, artworkTargetCard?.id, effectivePickerSide, mpcFilters, artworkCatalogRevision]);
@@ -1016,6 +1019,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   useEffect(() => {
     let current = true;
     const controller = new AbortController();
+    let cachedRequest: Promise<ArtworkCatalogResponse> | null = null;
     const requestKey = currentArtworkRequestKey;
     const progressiveMpc = artworkRequest?.source === "mpc" && !manualPhysicalBackPicker;
     const progressiveScryfall = artworkRequest?.source === "scryfall" && !manualPhysicalBackPicker;
@@ -1052,7 +1056,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       "artwork",
       async () => {
         if (!artworkRequest || !artworkTargetCard) return null;
-        return getOrCreateCachedRequest(artworkCatalogRequests.current, artworkRequest.cacheKey, async () => {
+        cachedRequest = getOrCreateCachedRequest(artworkCatalogRequests.current, artworkRequest.cacheKey, async () => {
           const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1065,6 +1069,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
           });
           return jsonResponse<ArtworkCatalogResponse>(response);
         });
+        return cachedRequest;
       });
     void request
       .then((outcome) => {
@@ -1187,6 +1192,9 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       });
     return () => {
       current = false;
+      if (artworkRequest) {
+        discardInflightCachedRequest(artworkCatalogRequests.current, artworkRequest.cacheKey, cachedRequest);
+      }
       controller.abort();
     };
   }, [artworkRequest?.cacheKey, artworkTargetCard?.id, projectRestoreVersion]);
