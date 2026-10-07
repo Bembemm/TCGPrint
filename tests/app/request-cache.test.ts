@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearRequestCache, createRequestCache, getOrCreateCachedRequest, updateResolvedRequestCache } from "../../src/app/request-cache";
+import { clearRequestCache, createRequestCache, discardInflightCachedRequest, getOrCreateCachedRequest, updateResolvedRequestCache } from "../../src/app/request-cache";
 
 describe("getOrCreateCachedRequest", () => {
   it("reuses an in-flight request and its settled value for the same key", async () => {
@@ -61,6 +61,35 @@ describe("getOrCreateCachedRequest", () => {
       return Promise.resolve("catalog after abort");
     })).resolves.toBe("catalog after abort");
     expect(attempts).toBe(2);
+  });
+
+  it("lets an aborting owner discard its in-flight request before an immediate retry", async () => {
+    const cache = createRequestCache<string>();
+    let rejectFirst: ((error: Error) => void) | undefined;
+    let resolveSecond: ((value: string) => void) | undefined;
+
+    const first = getOrCreateCachedRequest(cache, "identity/strict-mode/front", () => new Promise<string>((_resolve, reject) => {
+      rejectFirst = reject;
+    }));
+    await Promise.resolve();
+    expect(cache.inflight.get("identity/strict-mode/front")).toBe(first);
+
+    expect(discardInflightCachedRequest(cache, "identity/strict-mode/front", first)).toBe(true);
+
+    const second = getOrCreateCachedRequest(cache, "identity/strict-mode/front", () => new Promise<string>((resolve) => {
+      resolveSecond = resolve;
+    }));
+    await Promise.resolve();
+    expect(second).not.toBe(first);
+    expect(cache.inflight.get("identity/strict-mode/front")).toBe(second);
+
+    rejectFirst?.(new DOMException("signal is aborted without reason", "AbortError"));
+    await expect(first).rejects.toMatchObject({ name: "AbortError" });
+    expect(cache.inflight.get("identity/strict-mode/front")).toBe(second);
+
+    resolveSecond?.("fresh catalog");
+    await expect(second).resolves.toBe("fresh catalog");
+    expect(cache.resolved.get("identity/strict-mode/front")).toBe("fresh catalog");
   });
 
   it("does not let an older rejection remove a newer request for the same key", async () => {
