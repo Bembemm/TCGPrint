@@ -598,7 +598,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
   const pickerOpenerRef = useRef<FocusableElement | null>(null);
   const [qualityChecking, setQualityChecking] = useState<{ requestKey: string; candidateIds: ReadonlySet<string> }>({ requestKey: "", candidateIds: new Set() });
   const [artworkCatalogRevision, setArtworkCatalogRevision] = useState(0);
-  const [forcedMpcRefreshRevision, setForcedMpcRefreshRevision] = useState<number | null>(null);
   const [artworkFilter, setArtworkFilter] = useState<ArtworkFilter>("all");
   const [mpcFilters, setMpcFilters] = useState<MpcArtworkFilterInput>({});
   const [mpcCatalogs, setMpcCatalogs] = useState<MpcFilterCatalogs | null>(null);
@@ -883,7 +882,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       source: manualPhysicalBackPicker ? "mpc" : artworkFilter,
       mpcReferences: artworkTargetCard.mpcReferences,
       mpcFilters: manualPhysicalBackPicker || artworkFilter === "mpc" ? mpcFilters : undefined,
-      forceMpcRefresh: (manualPhysicalBackPicker || artworkFilter === "mpc") && forcedMpcRefreshRevision === artworkCatalogRevision,
       cacheKey: JSON.stringify([activeIdentityId, manualPhysicalBackPicker ? "physical-back" : effectivePickerSide, manualPhysicalBackPicker, manualPhysicalBackPicker ? "mpc-cardbacks" : artworkFilter, artworkTargetCard.mpcReferences, manualPhysicalBackPicker || artworkFilter === "mpc" ? mpcFilters : undefined, artworkCatalogRevision]),
     }
     : null;
@@ -1019,7 +1017,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       physicalBackArtwork: manualPhysicalBackPicker,
       mpcReferences: artworkRequest?.mpcReferences,
       ...(artworkRequest?.mpcFilters ? { mpcFilters: artworkRequest.mpcFilters } : {}),
-      ...(artworkRequest?.forceMpcRefresh ? { forceMpcRefresh: true } : {}),
       ...(progressive ? { progressive: true } : {}),
       ...(offset !== undefined ? { offset } : {}),
       ...(limit !== undefined ? { limit } : {}),
@@ -1046,8 +1043,6 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
       "artwork",
       async () => {
         if (!artworkRequest || !artworkTargetCard) return null;
-        const forceMpcRefresh = artworkRequest.forceMpcRefresh;
-        if (forceMpcRefresh) setForcedMpcRefreshRevision(null);
         return getOrCreateCachedRequest(artworkCatalogRequests.current, artworkRequest.cacheKey, async () => {
           const response = await fetch(`/api/cards/${encodeURIComponent(artworkRequest.identityId)}/artworks`, {
             method: "POST",
@@ -1987,14 +1982,9 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
 
   const mpcAdvancedFilters = <details className="mpc-advanced-filters">
     <summary>Avançado</summary>
-    <button className="button secondary mpc-refresh-action" type="button" disabled={interactionBusy} onClick={() => {
-      const revision = artworkCatalogRevision + 1;
-      setForcedMpcRefreshRevision(revision);
-      setArtworkCatalogRevision(revision);
-    }}>Atualizar catálogo MPC</button>
     {mpcCatalogProblem && <p className="muted" role="status">Catálogos de filtros indisponíveis; a busca básica MPC continua disponível. {mpcCatalogProblem} <button className="button secondary" type="button" disabled={interactionBusy} onClick={() => { setMpcCatalogs(null); setMpcCatalogRetry((revision) => revision + 1); }}>Tentar novamente</button></p>}
     {!mpcCatalogs && !mpcCatalogProblem && <p className="muted">Carregando catálogos MPC…</p>}
-    {(!mpcDiagnostic?.capabilities.filters.dpi) && <p className="muted" role="status">Os filtros MPC aparecem quando o suporte do provider for confirmado. Atualize os resultados para consultar o protocolo atual.</p>}
+    {(!mpcDiagnostic?.capabilities.filters.dpi) && <p className="muted" role="status">Os filtros MPC aparecem quando o suporte do provider for confirmado automaticamente.</p>}
     <div className="mpc-filter-controls">
       {mpcDiagnostic?.capabilities.filters.dpi && <>
         <label>DPI mínimo<input type="number" min={0} max={10000} step={1} value={mpcFilters.minimumDpi ?? ""} onChange={(event) => setMpcFilters((current) => ({ ...current, minimumDpi: event.target.value === "" ? undefined : Number(event.target.value) }))} /></label>
