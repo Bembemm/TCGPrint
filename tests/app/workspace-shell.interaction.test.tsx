@@ -283,6 +283,7 @@ describe("workspace shell interactions", () => {
   });
 
   it("opens the mobile bottom sheet, closes with Escape, and restores focus", async () => {
+    stubMobileViewport();
     const user = userEvent.setup();
     render(workspace());
     const trigger = screen.getByTestId("workspace-mobile-open");
@@ -302,6 +303,7 @@ describe("workspace shell interactions", () => {
   });
 
   it("opens the mobile drawer after a desktop collapse and clears the collapsed state", async () => {
+    stubMobileViewport();
     const user = userEvent.setup();
     render(workspace());
     await user.click(screen.getByRole("button", { name: "Recolher painel" }));
