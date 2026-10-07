@@ -371,12 +371,12 @@ async function mobileSmoke(browser) {
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(baseURL, { waitUntil: "networkidle" });
 
-  await page.getByTestId("workspace-mobile-open").waitFor();
-  await page.getByTestId("workspace-mobile-open").click();
-  await page.getByRole("button", { name: "Fechar painel" }).waitFor();
-  await page.getByRole("button", { name: "Fechar painel" }).click();
+  const mobileNav = page.getByRole("navigation", { name: "Navegação do workspace" });
+  await mobileNav.waitFor();
+  await mobileNav.getByRole("button", { name: "Cartas" }).waitFor();
+  assert.equal(await page.getByTestId("workspace-mobile-open").isVisible(), false, "legacy mobile panel trigger must stay hidden in the bottom-nav layout");
 
-  await page.getByRole("button", { name: "Cartas" }).click();
+  await mobileNav.getByRole("button", { name: "Cartas" }).click();
   await addCards(page);
   await page.getByRole("button", { name: "Ajustes" }).click();
   await page.getByText("Bleed & Cantos", { exact: true }).waitFor();
@@ -388,8 +388,7 @@ async function mobileSmoke(browser) {
   }));
   assert(viewportMetrics.scrollWidth <= viewportMetrics.width + 2, `mobile horizontal overflow: ${JSON.stringify(viewportMetrics)}`);
 
-  await page.getByRole("button", { name: "Ajustes" }).click();
-  await page.getByRole("button", { name: "Cartas" }).click();
+  await mobileNav.getByRole("button", { name: "Ajustes" }).click();
   await page.locator("[data-compositor-card-body='true']").first().click();
   await page.getByRole("dialog").waitFor();
   await page.screenshot({ path: `${artifactDir}/mobile-picker.png`, fullPage: true });
