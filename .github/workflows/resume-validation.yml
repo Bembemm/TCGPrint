@@ -6,6 +6,10 @@ on:
       - chatgpt/resume-web-pre-native
   workflow_dispatch:
 
+concurrency:
+  group: resume-web-validation-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -23,6 +27,8 @@ jobs:
       - name: Test
         run: npm test
       - name: Typecheck
+        if: always()
         run: npm run typecheck
       - name: Build
+        if: always()
         run: npm run build
