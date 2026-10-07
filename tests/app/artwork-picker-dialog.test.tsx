@@ -147,7 +147,8 @@ describe("M6 Artwork Picker dialog", () => {
     expect(firstCandidate).toHaveTextContent("DPI efetivo · verificado");
     expect(firstCandidate).toHaveTextContent("Validação da imagem no provider: verified");
     expect(firstCandidate).toHaveTextContent("Tags: watercolor");
-    expect(firstCandidate?.querySelector("img")).toHaveAttribute("loading", "lazy");
+    expect(firstCandidate?.querySelector("img")).toHaveAttribute("loading", "eager");
+    expect(document.querySelector('.artwork-candidate[data-candidate-rank="9"] img')).toHaveAttribute("loading", "lazy");
     const jump = screen.getByRole("spinbutton", { name: "Ir para resultado do catálogo" });
     await user.type(jump, "1100");
     await user.click(screen.getByRole("button", { name: "Ir" }));
