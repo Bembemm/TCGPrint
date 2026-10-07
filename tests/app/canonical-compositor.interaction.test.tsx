@@ -1218,11 +1218,11 @@ describe("canonical live compositor interactions", () => {
     fireEvent.click(checkboxForPhysicalIndex(0));
 
     expect(fireEvent.contextMenu(bodyButtonForPhysicalIndex(0), { clientX: 20, clientY: 30 })).toBe(false);
-    expect(screen.getByRole("menu")).toHaveTextContent("Cópia 1/3");
+    expect(screen.getByRole("menu")).toHaveTextContent("Cópia 1 de 3");
     expect(fireEvent.contextMenu(bodyButtonForPhysicalIndex(1), { clientX: 40, clientY: 50 })).toBe(false);
 
     expect(screen.getAllByRole("menu")).toHaveLength(1);
-    expect(screen.getByRole("menu")).toHaveTextContent("Cópia 2/3");
+    expect(screen.getByRole("menu")).toHaveTextContent("Cópia 2 de 3");
     expect(screen.getByTestId("active-physical-instance-id")).toHaveTextContent("instance-2");
     expect(checkboxForPhysicalIndex(0)).toHaveAttribute("aria-checked", "true");
     expect(checkboxForPhysicalIndex(1)).toHaveAttribute("aria-checked", "false");
@@ -1237,7 +1237,7 @@ describe("canonical live compositor interactions", () => {
     fireEvent.click(flipButtonForPhysicalIndex(1));
     await user.click(bodyButtonForPhysicalIndex(1));
     await user.click(screen.getByRole("button", { name: /mais ações para Island, cópia 2/i }));
-    expect(screen.getByRole("menu")).toHaveTextContent("Cópia 2/2");
+    expect(screen.getByRole("menu")).toHaveTextContent("Cópia 2 de 2");
     await user.click(screen.getByRole("menuitem", { name: "Remover uma cópia" }));
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
@@ -1611,7 +1611,7 @@ describe("canonical live compositor interactions", () => {
     expect(within(pageControls).getByRole("button", { name: "Página anterior" })).toBeInTheDocument();
     expect(within(pageControls).getByRole("button", { name: "Próxima página" })).toBeInTheDocument();
     expect(within(pageControls).getByLabelText("Página do compositor")).toBeInTheDocument();
-    expect(within(pageControls).getByText("Página 1 de 2")).toBeInTheDocument();
+    expect(within(pageControls).getByText("1 / 2")).toBeInTheDocument();
     expect(within(toolbar).queryByRole("button", { name: /Fit Page|Fit Width|100%|Reduzir zoom|Aumentar zoom/i })).not.toBeInTheDocument();
     expect(within(toolbar).queryByText("Layers")).not.toBeInTheDocument();
 
