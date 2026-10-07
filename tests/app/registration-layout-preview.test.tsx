@@ -146,7 +146,7 @@ describe("registration layout preview", () => {
       onToggleSkippedSlot: vi.fn(),
     }));
 
-    expect(markup).toContain("Página 2 de 2");
+    expect(markup).toContain("2 / 2");
     expect(markup).toContain('aria-label="Compositor live frente A4 portrait, página 2 de 2"');
     expect(markup).toContain("Página 2 · cartas 10–10");
     expect(markup).toContain('aria-label="Slot 1 · carta física 10 · Page card · cópia 10 de 10"');
