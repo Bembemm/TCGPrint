@@ -345,7 +345,7 @@ describe("M6 Artwork Picker face context", () => {
 
     await waitFor(() => expect(frontCompletionAborted).toBe(true));
     expect(await within(dialog).findByText("Insectile Aberration · scryfall")).toBeInTheDocument();
-    expect(within(dialog).queryByRole("alert")).not.toHaveTextContent("O restante do catálogo Scryfall não pôde ser carregado.");
+    expect(within(dialog).queryByText("O restante do catálogo Scryfall não pôde ser carregado.")).not.toBeInTheDocument();
   }, 15_000);
 
 });
