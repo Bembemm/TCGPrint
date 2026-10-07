@@ -321,6 +321,7 @@ async function mobileSmoke(browser) {
   await page.getByRole("button", { name: "Fechar painel" }).waitFor();
   await page.getByRole("button", { name: "Fechar painel" }).click();
 
+  await page.getByRole("button", { name: "Cartas" }).click();
   await addCards(page);
   await page.getByRole("button", { name: "Ajustes" }).click();
   await page.getByText("Bleed & Cantos", { exact: true }).waitFor();
