@@ -33,9 +33,12 @@ function card(id, name, order) {
 }
 
 function candidate(cardValue, source = "scryfall") {
+  const scryfallId = cardValue.id === "island-card"
+    ? "11111111-1111-4111-8111-111111111111"
+    : "22222222-2222-4222-8222-222222222222";
   const candidateId = source === "mpc"
     ? `mpc:${(cardValue.id === "island-card" ? "a" : "b").repeat(64)}`
-    : `scryfall:${cardValue.id}-front`;
+    : `scryfall:${scryfallId}:front`;
   return {
     id: candidateId,
     source,
@@ -145,9 +148,7 @@ function installRoutes(page) {
     if (prepareMatch && method === "POST") {
       const id = decodeURIComponent(prepareMatch[1]);
       const source = id.startsWith("mpc:") ? "mpc" : "scryfall";
-      const target = source === "mpc"
-        ? cards.find((item) => candidate(item, "mpc").id === id) ?? cards[0]
-        : cards.find((item) => id.includes(item.id)) ?? cards[0];
+      const target = cards.find((item) => candidate(item, source).id === id) ?? cards[0];
       return json(route, { candidate: candidate(target, source) });
     }
 
