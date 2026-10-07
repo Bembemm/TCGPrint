@@ -134,7 +134,7 @@ describe("M6 Artwork Picker face context", () => {
     expect(providerGroup).toHaveTextContent("Scryfall");
     expect(providerGroup).toHaveTextContent("MPC Autofill");
     expect(providerGroup).not.toHaveTextContent("Meus uploads");
-    expect(within(dialog).getByRole("img", { name: /Artwork atual de Delver of Secrets/ })).toBeInTheDocument();
+    expect(within(dialog).getByText("Nenhuma artwork aplicada")).toBeInTheDocument();
 
     const frontCandidate = await within(dialog).findByText("Delver of Secrets · scryfall");
     const frontCard = frontCandidate.closest<HTMLElement>(".artwork-candidate")!;
@@ -142,6 +142,7 @@ describe("M6 Artwork Picker face context", () => {
     await waitFor(() => expect(resolveRequests.at(-1)).toMatchObject({ action: "apply-artwork-scope", faceId: "front", scope: "entry" }));
     expect(screen.getByRole("dialog", { name: /Delver of Secrets/ })).toBe(dialog);
     await waitFor(() => expect(within(dialog).getByText(/Atual · Scryfall/i)).toBeInTheDocument());
+    expect(within(dialog).getByRole("img", { name: /Artwork atual de Delver of Secrets/ })).toBeInTheDocument();
 
     const backTab = within(dialog).getByRole("tab", { name: "Verso · Insectile Aberration" });
     await user.click(backTab);
@@ -248,7 +249,7 @@ describe("M6 Artwork Picker face context", () => {
     await user.selectOptions(scopeSelect, "all-simple-project");
     await user.click(within(dialog).getByRole("button", { name: /Project Default Back · Blue cardback/ }));
     await waitFor(() => expect(requests.filter((request) => request.action === "apply-generic-back-scope").at(-1)).toMatchObject({ choiceMode: "project-default", scope: "all-simple-project" }));
-    await waitFor(() => expect(screen.getByText(/Verso aplicado a 2 carta\(s\) simples; 1 cartas dupla-face preservadas\./)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/Verso aplicado a 2 carta\(s\) simples; 1 cartas dupla-face preservadas\./).length).toBeGreaterThan(0));
     await waitFor(() => expect(within(dialog).getByRole("status", { name: "Estado atual do verso" })).toHaveTextContent("Project Default Back"));
 
     await user.selectOptions(scopeSelect, "entry");
