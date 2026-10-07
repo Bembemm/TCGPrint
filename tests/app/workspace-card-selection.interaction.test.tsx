@@ -303,7 +303,7 @@ describe("Cartas workspace navigation", () => {
 
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     const openPicker = async () => {
-      await user.click(await screen.findByRole("button", { name: "Selecionar arte" }));
+      await user.click(await screen.findByRole("button", { name: "Trocar artwork" }));
       return screen.findByRole("dialog");
     };
     let picker = await openPicker();
