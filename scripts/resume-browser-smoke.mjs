@@ -221,8 +221,12 @@ function installRoutes(page) {
         capacity: 9,
       };
       const geometry = {
-        source: { kind: "project-layout" },
-        boundsMm: { minX: 0, minY: 0, maxX: 210, maxY: 297 },
+        modelVersion: 1,
+        units: "mm",
+        coordinateFrame: "page-top-left-y-down",
+        pageSizeMm: { widthMm: 210, heightMm: 297 },
+        source: { kind: "project-layout", projectId: body.projectId, projectRevision: body.expectedRevision },
+        boundsMm: { xMm: 0, yMm: 0, widthMm: 210, heightMm: 297 },
         paths: [],
       };
       const pageDto = {
