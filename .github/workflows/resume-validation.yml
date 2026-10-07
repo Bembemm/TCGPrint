@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - chatgpt/resume-web-pre-native
+      - fix/artwork-picker-abort-cache-race
   workflow_dispatch:
 
 concurrency:
