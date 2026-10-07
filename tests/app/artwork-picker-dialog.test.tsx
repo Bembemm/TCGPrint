@@ -197,7 +197,9 @@ describe("M6 Artwork Picker dialog", () => {
 
     expect(screen.queryByRole("button", { name: "Revalidar metadata" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Validar original e calcular DPI" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Selecionada" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Selecionada" })).not.toBeInTheDocument();
+    expect(screen.getByText("Selecionada")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Escolher visualmente/ })).toBeInTheDocument();
     expect(screen.getByText("820 DPI*")).toBeInTheDocument();
   });
 
