@@ -307,7 +307,7 @@ describe("Cartas workspace navigation", () => {
       return screen.findByRole("dialog");
     };
     let picker = await openPicker();
-    await user.click(within(await picker).getByRole("button", { name: "Selecionar arte" }));
+    await user.click(within(await picker).getByRole("button", { name: /Escolher visualmente/ }));
     expect(screen.getByRole("dialog", { name: /Mountain/ })).toBe(picker);
     await waitFor(() => expect(within(picker).getByText(/Atual · Scryfall/)).toBeInTheDocument());
     expect(within(picker).getByRole("img", { name: /Artwork atual de Mountain/ })).toBeInTheDocument();
@@ -320,7 +320,7 @@ describe("Cartas workspace navigation", () => {
     await user.click(screen.getByRole("button", { name: /1\/2 · Island/ }));
     await user.click(screen.getByRole("tab", { name: "Cartas" }));
     picker = await openPicker();
-    await user.click(within(picker).getByRole("button", { name: "Selecionar arte" }));
+    await user.click(within(picker).getByRole("button", { name: /Escolher visualmente/ }));
     expect(screen.getByRole("dialog", { name: /Island/ })).toBe(picker);
     await waitFor(() => expect(within(picker).getByText(/Atual · Scryfall/)).toBeInTheDocument());
     await user.click(within(picker).getByRole("button", { name: "Fechar seletor de arte" }));
