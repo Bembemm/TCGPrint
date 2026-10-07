@@ -52,8 +52,9 @@ describe("working card editor list UI", () => {
     }));
 
     const initial = renderGrid(60);
-    expect([...initial.matchAll(/class="artwork-candidate/g)]).toHaveLength(60);
-    expect([...initial.matchAll(/loading="lazy"/g)]).toHaveLength(60);
+    expect([...initial.matchAll(/data-candidate-rank="/g)]).toHaveLength(60);
+    expect([...initial.matchAll(/loading="eager"/g)]).toHaveLength(8);
+    expect([...initial.matchAll(/loading="lazy"/g)]).toHaveLength(52);
     expect(initial).toContain("60 de 1200 exibidas");
     expect(initial).toContain("247 de 1200 correspondem ao filtro");
     expect(initial).toContain("Carregar mais artes (1140 restantes)");
@@ -61,7 +62,7 @@ describe("working card editor list UI", () => {
 
     const laterWindow = renderGrid(840);
     expect(laterWindow).toContain("Printing 800");
-    expect([...laterWindow.matchAll(/class="artwork-candidate/g)]).toHaveLength(840);
+    expect([...laterWindow.matchAll(/data-candidate-rank="/g)]).toHaveLength(840);
   });
 
   it("labels source=all counts partial when a provider could not report its full catalog", () => {
