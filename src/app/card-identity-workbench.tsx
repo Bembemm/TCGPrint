@@ -1034,7 +1034,7 @@ export default function CardIdentityWorkbench({ files, text, choices, inputConte
         : merged;
       return {
         requestKey,
-        candidates: ranked,
+        candidates: [...ranked],
         catalogTotal: Math.max(existing.catalogTotal, page.catalogTotal),
         catalogTotalComplete: existing.catalogTotalComplete !== false && page.catalogTotalComplete !== false,
       };
